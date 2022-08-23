@@ -9,21 +9,18 @@ Code example reproducing Educational Example described in Appendix A of the pape
 from qiskit import QuantumCircuit
 from qiskit.providers.aer import QasmSimulator
 from tensorflow.python.keras.optimizer_v2.adam import Adam
+from tensorflow.python.keras.optimizer_v2.gradient_descent import SGD
 import tensorflow as tf
 import tensorflow.python.ops.math_ops as math
 import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 
-qc = QuantumCircuit(1, 1, name="qc")  # Two-level system of interest, 1 qubit
-qasm = QasmSimulator()  # Simulation backend (mock quantum computer)
-# aer_sim = AerSimulator(method="automatic")
-
 """
 This code sets the simplest RL algorithm (Policy Gradient) for solving a quantum control problem.
 The goal is the following: We have access to a quantum computer (here a simulator provided by IBMQ) containing one 
 qubit. The qubit originally starts in the state |0>, and we would like to apply a quantum gate (operation) to bring it
-to the |1> state. Yo do so, we have access to a gate parametrized with an angle, and the RL agent must find the optimal
+to the |1> state. To do so, we have access to a gate parametrized with an angle, and the RL agent must find the optimal
 angle that maximizes the probability of measuring the qubit in the |1> state. Optimal value for amplitude a (angle/2π) is
 0.5. 
 The RL agent chooses its actions (that is picks a random value for a) by drawing a number from a Gaussian distribution,
@@ -41,9 +38,8 @@ def perform_action(a: tf.Tensor, shots=1):
     :param shots: number of evaluations to be done on the quantum computer (for simplicity stays to 1)
     :return: Reward table (reward for each run in the batch)
     """
-    global qc
-    # print(a)
-    angles = a.numpy()
+    global qc, qasm
+    angles = np.array(a)
     assert len(np.shape(angles)) == 1, f'What happens : {np.shape(angles)}'
 
     reward_table = np.zeros(np.shape(angles))
@@ -66,61 +62,72 @@ def perform_action(a: tf.Tensor, shots=1):
     return reward_table  # Shape [batchsize]
 
 
-n_epochs = 30
-batchsize = 10
-eta = 1
-optimizer = Adam(learning_rate=eta)
-mu = tf.Variable(initial_value=0., trainable=True, name="mean")
-sigma = tf.Variable(initial_value=1., trainable=True, name="variance")
-losses = np.zeros(n_epochs)
-means = np.zeros(n_epochs)
-std = np.zeros(n_epochs)
+# Variables to define environment
+qc = QuantumCircuit(1, 1, name="qc")  # Two-level system of interest, 1 qubit
+qasm = QasmSimulator()  # Simulation backend (mock quantum computer)
+
+# Hyperparameters for the agent
+n_epochs = 100
+batchsize = 50
+eta = 0.01
+# optimizer = Adam(learning_rate=eta)
+optimizer = SGD(learning_rate=eta)
+mu = tf.Variable(initial_value=0.45, trainable=True, name="mean")
+sigma = tf.Variable(initial_value=0.1, trainable=True, name="variance")
+losses, means, std, amps, rewards = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(
+    n_epochs), np.zeros(n_epochs)
+grad_list = [None] * n_epochs
 
 
-# @tf.function
-def normal_distrib(a, mu, sigma_2):
-    return tf.divide(tf.exp(tf.divide(tf.pow(a - mu, 2), -2 * sigma_2)), tf.sqrt(2 * np.pi * sigma_2))
+def normal_distrib(a, mu, sigma):
+    # return math.divide(math.exp(math.divide(math.pow(a - mu, 2), -2 * math.pow(sigma, 2))),
+    #                    math.sqrt(2 * np.pi * math.pow(sigma, 2)))
+    return math.exp(-(a - mu) ** 2 / (2 * sigma ** 2)) / math.sqrt(2 * np.pi * sigma ** 2)
 
 
 for i in range(n_epochs):
-    # Use normally Gradient Tape here
     with tf.GradientTape() as tape:
         tape.watch(mu)
         tape.watch(sigma)
         a = tf.random.normal([batchsize], mean=mu, stddev=sigma)
-        # print("mu=", mu)
-        # print("sigma_2=", sigma_2)
-        # print("a=", a)
         reward = perform_action(a)
-        # print("reward=", reward)
 
-        # Calculate average return (to be maximized, therefore the minus sign as the function below will try to
-        # minimize), E[R*log(proba(a)] where proba is a gaussian distribution
-        loss = tf.reduce_mean(-reward * math.log(
-            tf.math.divide(math.exp(math.divide(math.pow(a - mu/sigma, 2), -2.)),
-                           math.sqrt(2 * np.pi * math.pow(sigma, 2)))))
-        print("params", mu, sigma)
-        print("loss", loss)
+        # Calculate expected return (to be maximized, therefore the minus sign placed in the function below will be
+        # useful when applying gradients which minimize the loss),
+        # E[R*log(proba(a)] where proba is a gaussian probability density (cf paper of reference, educational example)
 
-        losses[i] = np.array(loss)
-        means[i] = np.array(mu)
-        std[i] = np.array(sigma)
+        # loss = tf.reduce_mean(-reward * math.log(normal_distrib(a, mu, sigma)))
+        loss = tf.reduce_mean(
+            -reward * math.log(math.exp(-(a - mu) ** 2 / (2 * sigma ** 2)) / math.sqrt(2 * np.pi * sigma ** 2)))
 
+    amps[i] = np.array(tf.reduce_mean(a))
+    losses[i] = np.array(loss)
+    rewards[i] = np.array(tf.reduce_mean(reward))
+    means[i] = np.array(mu)
+    std[i] = np.array(sigma)
+
+    # Compute gradients
     grads = tape.gradient(loss, [mu, sigma])
-    print(grads)
-    # score_mu = reward * (a - mu) / sigma_2
-    # score_sigma_2 = reward * (-1 / (2 * sigma_2) + (a - mu) ** 2 / (2 * sigma_2 ** 2))
-    #
-    # mu += eta * R * (a - mu) / sigma_2
-    # sigma_2 += eta * R * (-1 / (2 * sigma_2) + (a - mu) ** 2 / (2 * sigma_2 ** 2))
-    optimizer.apply_gradients(zip(grads, [mu, sigma]))
+    grad_list[i] = grads
+
+    # Apply gradients
+    optimizer.apply_gradients(zip(grads, (mu, sigma)))
 final_mean = np.array(mu)
 final_std = np.array(tf.sqrt(sigma))
+
+print("means: ", means, '\n')
+print("stds: ", std, '\n')
+print("amps: ", amps, '\n')
+print("rewards: ", rewards)
 x = np.linspace(-1., 1., 300)
 fig, (ax1, ax2) = plt.subplots(1, 2)
 ax1.plot(x, norm.pdf(x, loc=final_mean, scale=final_std))
-ax2.plot(range(n_epochs), losses)
+ax2.plot(range(n_epochs), rewards)
+ax1.set_xlabel("Action, a")
+ax1.set_ylabel("Probability density")
+ax2.plot(range(n_epochs), rewards)
+ax2.set_xlabel("Epoch")
+ax2.set_ylabel("Expected reward")
 plt.show()
-# print(losses,"\n")
-# print(means, '\n')
-# print(variances, '\n')
+
+
