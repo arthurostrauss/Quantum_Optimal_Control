@@ -62,12 +62,12 @@ qasm = QasmSimulator()  # Simulation backend (mock quantum computer)
 
 # Hyperparameters for the agent
 n_epochs = 100
-batchsize = 50
-eta = 0.01
+batchsize = 60
+eta = 0.3
 
 # Trainable parameters
 mu = np.random.uniform(0, 1)
-sigma = np.random.uniform(low=0, high=1)
+sigma = 1.6
 means, std, amps, rewards = np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs), np.zeros(n_epochs)
 
 for i in range(n_epochs):
@@ -82,7 +82,8 @@ for i in range(n_epochs):
     # REINFORCE Algorithm, update the parameters with the derived analytical formulas
     mu += eta * np.mean(reward * (a - mu) / sigma ** 2)
     sigma += eta * np.mean(reward * ((a - mu) ** 2 / sigma ** 3 - 1 / sigma))
-
+    if sigma < 0:
+        sigma = 1
 
 final_mean = mu
 final_std = sigma
@@ -92,15 +93,16 @@ print("stds: ", std, '\n')
 print("amplitudes: ", amps, '\n')
 print("average rewards: ", rewards)
 
-number_of_steps = 10
-x = np.linspace(-1., 1., 300)
+number_of_steps = 50
+x = np.linspace(-2., 2., 300)
 fig, (ax1, ax2) = plt.subplots(1, 2)
 for i in range(0, n_epochs, number_of_steps):
-    ax1.plot(x, norm.pdf(x, loc=means[i], scale=std[i]))
+    ax1.plot(x, norm.pdf(x, loc=means[i], scale=std[i]), label=f'{i}')
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
 ax2.plot(range(n_epochs), rewards)
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
+ax1.legend()
 plt.show()
