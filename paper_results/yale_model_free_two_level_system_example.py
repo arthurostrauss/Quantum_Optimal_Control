@@ -15,6 +15,8 @@ import tensorflow.python.ops.math_ops as math
 import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 
 """This code sets the simplest RL algorithm (Policy Gradient) for solving amp quantum control problem. The goal is the 
 following: We have access to amp quantum computer (here amp simulator provided by IBM Q) containing one qubit. The qubit 
@@ -66,50 +68,61 @@ qasm = QasmSimulator()  # Simulation backend (mock quantum computer)
 
 # Hyperparameters for the agent
 n_epochs = 100
-batchsize = 50
-eta = 0.1
-seed = 5
-tf.random.set_seed(seed)
-# optimizer = Adam(learning_rate=eta)
-optimizer = SGD(learning_rate=eta)
-mu = tf.Variable(initial_value=np.random.uniform(0, 1), trainable=True, name="mean")
-sigma = tf.Variable(initial_value=np.random.uniform(1, 2), trainable=True, name="variance")
+batchsize = 60
+eta = 0.5
+eta_2 = 0.5
+# seed = 100
+# tf.random.set_seed(seed)
+optimizer_actor = Adam(learning_rate=eta)
+optimizer_critic = Adam(learning_rate=eta_2)
+# optimizer = SGD(learning_rate=eta)
+# Policy parameters
+mu = tf.Variable(initial_value=np.random.uniform(0, 1), trainable=True, name="µ")
+sigma = tf.Variable(initial_value=np.random.uniform(1, 2), trainable=True, name="sigma")
+# Critic parameter (single state-independent baseline)
+b = tf.Variable(initial_value=np.random.uniform(0, 1), trainable=True, name="baseline")
+
 losses, means, std, amps, rewards = np.zeros(n_epochs), np.zeros(n_epochs + 1), np.zeros(n_epochs + 1), np.zeros(
-    n_epochs), np.zeros(n_epochs)
+    n_epochs), np.zeros([n_epochs, batchsize])
 grad_list = [None] * n_epochs
 
 
-
-def normal_distrib(amp, mu, sigma):
+def normal_distrib(amp, µ, sigma):
     # return math.divide(math.exp(math.divide(math.pow(amp - mu, 2), -2 * math.pow(sigma, 2))),
     #                    math.sqrt(2 * np.pi * math.pow(sigma, 2)))
-    return math.exp(-(amp - mu) ** 2 / (2 * sigma ** 2)) / math.sqrt(2 * np.pi * sigma ** 2)
+    return math.exp(-(amp - µ) ** 2 / (2 * sigma ** 2)) / math.sqrt(2 * np.pi * sigma ** 2)
 
 
 for i in range(n_epochs):
     a = tf.random.normal([batchsize], mean=mu, stddev=sigma)
     reward = perform_action(a)
-    with tf.GradientTape() as tape:
+    advantage = reward - b
+    with tf.GradientTape(persistent=True) as tape:
         # Calculate expected return (to be maximized, therefore the minus sign placed in the function below will be
         # useful when applying gradients which minimize the loss), E[R*log(proba(amp)] where proba is amp gaussian
         # probability density (cf paper of reference, educational example)
 
         # loss = tf.reduce_mean(-reward * math.log(normal_distrib(amp, mu, sigma)))
-        loss = tf.reduce_mean(
-            -reward * math.log(math.exp(-(a - mu) ** 2 / (2 * sigma ** 2)) / math.sqrt(2 * np.pi * sigma ** 2)))
+        # loss = tf.reduce_mean(
+        #     -reward * math.log(math.exp(-(a - mu) ** 2 / (2 * sigma ** 2)) / math.sqrt(2 * np.pi * sigma ** 2)))
+        loss = -tf.reduce_mean(
+            advantage * math.log(math.exp(-(a - mu) ** 2 / (2 * sigma ** 2)) / math.sqrt(2 * np.pi * sigma ** 2)))
+        loss2 = -tf.reduce_mean(advantage * b)  # Loss for the critic (no need for gradient as derivative is always 1)
 
     amps[i] = np.array(tf.reduce_mean(a))
     losses[i] = np.array(loss)
-    rewards[i] = np.array(tf.reduce_mean(reward))
+    rewards[i] = reward
     means[i] = np.array(mu)
     std[i] = np.array(sigma)
 
     # Compute gradients
     grads = tape.gradient(loss, [mu, sigma])
-    grad_list[i] = grads
+    grads2 = tape.gradient(loss2, b)
+    grad_list[i] = grads+grads2
 
     # Apply gradients
-    optimizer.apply_gradients(zip(grads, (mu, sigma)))
+    optimizer_actor.apply_gradients(zip(grads, (mu, sigma)))
+    optimizer_critic.apply_gradients(zip([grads2], [b]))
 final_mean = np.array(mu)
 final_std = np.array(tf.sqrt(sigma))
 
@@ -119,18 +132,35 @@ std[-1] = final_std
 print("means: ", means, '\n')
 print("stds: ", std, '\n')
 print("amplitudes: ", amps, '\n')
-print("average rewards: ", rewards)
+print("average rewards: ", np.mean(rewards, axis=1))
 
-number_of_steps = 20
-x = np.linspace(-2., 2., 300)
+
+def plot_examples(colormaps, reward):
+    """
+    Helper function to plot data with associated colormap.
+    """
+
+    n = len(colormaps)
+    fig2, axs = plt.subplots(1, n, figsize=(n * 2 + 2, 3),
+                             constrained_layout=True, squeeze=False)
+    for [ax, cmap] in zip(axs.flat, colormaps):
+        psm = ax.pcolormesh(reward.transpose(), cmap=cmap, rasterized=True, vmin=-1, vmax=1)
+        fig2.colorbar(psm, ax=ax)
+    plt.show()
+
+
+number_of_steps = 30
+x = np.linspace(-2., 2., 600)
 fig, (ax1, ax2) = plt.subplots(1, 2)
 for i in range(0, n_epochs + 1, number_of_steps):
     ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(std[i])), label=f'{i}')
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
-ax2.plot(range(n_epochs), rewards)
+ax2.plot(range(n_epochs), np.mean(rewards, axis=1))
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
 ax1.legend()
-plt.show()
+
+cmap = ListedColormap(["red" "blue", "black", "green"])
+plot_examples([cmap], rewards)

@@ -11,6 +11,8 @@ from qiskit.providers.aer import QasmSimulator
 import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 
 """This code sets the simplest RL algorithm (Policy Gradient) for solving a quantum control problem. The goal is the 
 following: We have access to a quantum computer (here a simulator provided by IBM Q) containing one qubit. The qubit 
@@ -62,35 +64,34 @@ qasm = QasmSimulator()  # Simulation backend (mock quantum computer)
 # Hyperparameters for the agent
 n_epochs = 100
 batchsize = 80
-eta = 0.3  # Learning rate for policy gradient
-
-eta_2 = 1.  # Learning rate for state-value function
+eta = 0.05  # Learning rate for policy gradient
+eta_2 = 0.05  # Learning rate for state-value function
 b = np.random.uniform(0, 1)  # Learnable parameter for the value function (baseline/critic)
 # Trainable parameters of the policy (mean and standard deviation of the univariate Gaussian policy)
 # mu = np.random.uniform(0, 1)
 # sigma = 2.
-seed = 5
-np.random.seed(seed)
+# seed = 5
+# np.random.seed(seed)
 mu = np.random.uniform(0, 1)
 sigma = np.random.uniform(1, 2)
 
-means, std, amps, rewards = np.zeros(n_epochs+1), np.zeros(n_epochs+1), np.zeros(n_epochs), np.zeros(n_epochs)
+means, std, amps, rewards = np.zeros(n_epochs + 1), np.zeros(n_epochs + 1), \
+                            np.zeros(n_epochs), np.zeros([n_epochs, batchsize])
 
 for i in range(n_epochs):
     a = np.random.normal(loc=mu, scale=np.abs(sigma), size=batchsize)
     reward = perform_action(a)
 
     amps[i] = np.mean(a)
-    rewards[i] = np.mean(reward)
+    rewards[i] = reward
     means[i] = mu
     std[i] = sigma
 
-    # REINFORCE Algorithm, update the parameters with the derived analytical formulas for gradients
-    b += eta_2 * np.mean(reward)
-    mu += eta * np.mean(reward * (a - mu) / sigma ** 2)
-    sigma += eta * np.mean(reward * ((a - mu) ** 2 / sigma ** 3 - 1 / sigma))
-    # if sigma < 0:
-    #     sigma = 1.
+    # REINFORCE Algorithm with Actor-Critic, update the parameters with the derived analytical formulas for gradients
+    advantage = reward - b
+    mu += eta * np.mean(advantage * (a - mu) / sigma ** 2)
+    sigma += eta * np.mean(advantage * ((a - mu) ** 2 / sigma ** 3 - 1 / sigma))
+    b += eta_2 * np.mean(advantage)
 
 final_mean = mu
 final_std = sigma
@@ -100,19 +101,35 @@ std[-1] = final_std
 print("means: ", means, '\n')
 print("stds: ", std, '\n')
 print("amplitudes: ", amps, '\n')
-print("average rewards: ", rewards)
+print("average rewards: ", np.mean(rewards, axis=1))
 
-number_of_steps = 20
+
+def plot_examples(colormaps, reward):
+    """
+    Helper function to plot data with associated colormap.
+    """
+
+    n = len(colormaps)
+    fig2, axs = plt.subplots(1, n, figsize=(n * 2 + 2, 3),
+                             constrained_layout=True, squeeze=False)
+    for [ax, cmap] in zip(axs.flat, colormaps):
+        psm = ax.pcolormesh(reward.transpose(), cmap=cmap, rasterized=True, vmin=-1, vmax=1)
+        fig2.colorbar(psm, ax=ax)
+    plt.show()
+
+
+number_of_steps = 30
 x = np.linspace(-2., 2., 600)
 fig, (ax1, ax2) = plt.subplots(1, 2)
-for i in range(0, n_epochs+1, number_of_steps):
+for i in range(0, n_epochs + 1, number_of_steps):
     ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(std[i])), label=f'{i}')
-print(i)
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
-ax2.plot(range(n_epochs), rewards)
+ax2.plot(range(n_epochs), np.mean(rewards, axis=1))
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
 ax1.legend()
-plt.show()
+
+cmap = ListedColormap(["red", "green"])
+plot_examples([cmap], rewards)
