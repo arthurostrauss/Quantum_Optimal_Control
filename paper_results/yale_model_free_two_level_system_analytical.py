@@ -11,6 +11,7 @@ from qiskit.providers.aer import QasmSimulator
 import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 
@@ -60,25 +61,32 @@ def perform_action(amp, shots=1):
 # Variables to define environment
 qc = QuantumCircuit(1, 1, name="qc")  # Two-level system of interest, 1 qubit
 qasm = QasmSimulator()  # Simulation backend (mock quantum computer)
+seed = 2024
+np.random.seed(seed)
 
 # Hyperparameters for the agent
 n_epochs = 100
 batchsize = 80
-eta = 0.05  # Learning rate for policy gradient
-eta_2 = 0.05  # Learning rate for state-value function
-b = np.random.uniform(0, 1)  # Learnable parameter for the value function (baseline/critic)
+eta = 0.5  # Learning rate for policy gradient
+eta_2 = 0.5  # Learning rate for state-value function
+
+# Learnable parameter for the value function (baseline/critic)
+insert_baseline = True
+if insert_baseline:
+    b = np.random.uniform(0, 1)
+else:
+    b = 0.
+
 # Trainable parameters of the policy (mean and standard deviation of the univariate Gaussian policy)
-# mu = np.random.uniform(0, 1)
-# sigma = 2.
-# seed = 5
-# np.random.seed(seed)
+
 mu = np.random.uniform(0, 1)
 sigma = np.random.uniform(1, 2)
 
 means, std, amps, rewards = np.zeros(n_epochs + 1), np.zeros(n_epochs + 1), \
                             np.zeros(n_epochs), np.zeros([n_epochs, batchsize])
+baselines = np.zeros(n_epochs + 1)
 
-for i in range(n_epochs):
+for i in tqdm(range(n_epochs)):
     a = np.random.normal(loc=mu, scale=np.abs(sigma), size=batchsize)
     reward = perform_action(a)
 
@@ -86,12 +94,14 @@ for i in range(n_epochs):
     rewards[i] = reward
     means[i] = mu
     std[i] = sigma
+    baselines[i] = b
 
     # REINFORCE Algorithm with Actor-Critic, update the parameters with the derived analytical formulas for gradients
     advantage = reward - b
     mu += eta * np.mean(advantage * (a - mu) / sigma ** 2)
     sigma += eta * np.mean(advantage * ((a - mu) ** 2 / sigma ** 3 - 1 / sigma))
-    b += eta_2 * np.mean(advantage)
+    if insert_baseline:
+        b -= eta_2 * np.mean(-2 * advantage)
 
 final_mean = mu
 final_std = sigma
@@ -119,17 +129,19 @@ def plot_examples(colormaps, reward):
 
 
 number_of_steps = 30
-x = np.linspace(-2., 2., 600)
+x = np.linspace(-5., 5., 200)
 fig, (ax1, ax2) = plt.subplots(1, 2)
 for i in range(0, n_epochs + 1, number_of_steps):
-    ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(std[i])), label=f'{i}')
+    ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(std[i])), '.-', label=f'{i}')
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
-ax2.plot(range(n_epochs), np.mean(rewards, axis=1))
+ax2.plot(np.mean(rewards, axis=1), '-.', label='Reward')
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
 ax1.legend()
 
 cmap = ListedColormap(["red", "green"])
+ax2.plot(baselines, '.-', label='baseline')
+ax2.legend()
 plot_examples([cmap], rewards)
