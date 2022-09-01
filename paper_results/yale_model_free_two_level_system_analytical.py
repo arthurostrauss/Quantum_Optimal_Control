@@ -82,7 +82,7 @@ else:
 mu = np.random.uniform(0, 1)
 sigma = np.random.uniform(1, 2)
 
-means, std, amps, rewards = np.zeros(n_epochs + 1), np.zeros(n_epochs + 1), \
+means, stds, amps, rewards = np.zeros(n_epochs + 1), np.zeros(n_epochs + 1), \
                             np.zeros(n_epochs), np.zeros([n_epochs, batchsize])
 baselines = np.zeros(n_epochs + 1)
 
@@ -93,7 +93,7 @@ for i in tqdm(range(n_epochs)):
     amps[i] = np.mean(a)
     rewards[i] = reward
     means[i] = mu
-    std[i] = sigma
+    stds[i] = sigma
     baselines[i] = b
 
     # REINFORCE Algorithm with Actor-Critic, update the parameters with the derived analytical formulas for gradients
@@ -106,42 +106,41 @@ for i in tqdm(range(n_epochs)):
 final_mean = mu
 final_std = sigma
 means[-1] = final_mean
-std[-1] = final_std
+stds[-1] = final_std
 
 print("means: ", means, '\n')
-print("stds: ", std, '\n')
+print("stds: ", stds, '\n')
 print("amplitudes: ", amps, '\n')
 print("average rewards: ", np.mean(rewards, axis=1))
 
 
-def plot_examples(colormaps, reward):
+def plot_examples(colormaps, ax, reward_table):
     """
-    Helper function to plot data with associated colormap.
+    Helper function to plot data with associated colormap, used for plotting the reward per each epoch and each episode
     """
 
-    n = len(colormaps)
-    fig2, axs = plt.subplots(1, n, figsize=(n * 2 + 2, 3),
-                             constrained_layout=True, squeeze=False)
-    for [ax, cmap] in zip(axs.flat, colormaps):
-        psm = ax.pcolormesh(reward.transpose(), cmap=cmap, rasterized=True, vmin=-1, vmax=1)
-        fig2.colorbar(psm, ax=ax)
+    ax.pcolormesh(reward_table.transpose(), cmap=colormaps, rasterized=True, vmin=-1, vmax=1)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Episode")
     plt.show()
 
 
-number_of_steps = 30
-x = np.linspace(-5., 5., 200)
-fig, (ax1, ax2) = plt.subplots(1, 2)
+number_of_steps = 10
+x = np.linspace(-2., 2., 200)
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+# Plot probability density associated to updated parameters for a few steps
 for i in range(0, n_epochs + 1, number_of_steps):
-    ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(std[i])), '.-', label=f'{i}')
+    ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(stds[i])), '.-', label=f'{i}')
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
+#  Plot return as a function of epochs
 ax2.plot(np.mean(rewards, axis=1), '-.', label='Reward')
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
-ax1.legend()
-
-cmap = ListedColormap(["red", "green"])
 ax2.plot(baselines, '.-', label='baseline')
 ax2.legend()
-plot_examples([cmap], rewards)
+ax1.legend()
+
+cmap = ListedColormap(["blue", "Orange"])
+plot_examples(cmap, ax3, rewards)
