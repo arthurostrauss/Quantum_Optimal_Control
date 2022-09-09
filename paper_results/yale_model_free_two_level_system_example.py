@@ -180,7 +180,8 @@ for i in tqdm(range(n_epochs)):
             actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
                                                      advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
         else:  # REINFORCE algorithm
-            actor_loss = - tf.reduce_mean(advantage * tf.math.log(normal_distrib(a, mu, sigma)))
+            # actor_loss = - tf.reduce_mean(advantage * tf.math.log(normal_distrib(a, mu, sigma)))
+            actor_loss = - tf.reduce_mean(advantage * log_probs)
 
         if insert_baseline:
             # loss2 = MSE(reward, b)  # Loss for the critic (Mean square error between return and the baseline)

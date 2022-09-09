@@ -25,6 +25,7 @@ from tqdm import tqdm
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 from typing import Union
+import csv
 
 """This code sets the simplest RL algorithm (Policy Gradient) for solving a quantum control problem. The goal is the 
 following: We have access to a quantum computer (here a simulator provided by IBM Q) containing one qubit. The qubit 
@@ -59,7 +60,7 @@ def perform_action(amps: Union[tf.Tensor, np.array], shots=1):
         job = qasm.run(qc, shots=shots, seed_simulator=seed)
         result = job.result()
         counts = result.get_counts(qc)  # Returns dictionary with keys '0' and '1' with number of counts for each key
-        outcome[j][0], outcome[j][0] = counts['0']/shots, counts['1']/shots
+        outcome[j][0], outcome[j][0] = counts['0'] / shots, counts['1'] / shots
         #  Calculate reward
         if '1' in counts and '0' in counts:
             reward_table[j] += np.mean(np.array([1] * counts['1'] + [-1] * counts['0']))
@@ -93,17 +94,22 @@ eta_2 = 0.1  # Learning rate for critic (value function) update step
 
 concurrent_optimization = True  # Fix if optimization of actor and critic should be done by same optimizer or separately
 
-if concurrent_optimization:
+if insert_baseline:
+    if concurrent_optimization:
+        # Choose optimizer of your choice by commenting irrelevant line
+        optimizer = Adam(learning_rate=eta)
+        # optimizer = SGD(learning_rate=eta)
+    else:
+        # Choose optimizer of your choice by commenting irrelevant line
+        optimizer_actor, optimizer_critic = Adam(learning_rate=eta), Adam(learning_rate=eta_2)
+        # optimizer_actor, optimizer_critic = SGD(learning_rate=eta), SGD(learning_rate=eta_2)
+else:
     # Choose optimizer of your choice by commenting irrelevant line
     optimizer = Adam(learning_rate=eta)
     # optimizer = SGD(learning_rate=eta)
-else:
-    # Choose optimizer of your choice by commenting irrelevant line
-    optimizer_actor, optimizer_critic = Adam(learning_rate=eta), Adam(learning_rate=eta_2)
-    # optimizer_actor, optimizer_critic = SGD(learning_rate=eta), SGD(learning_rate=eta_2)
 
 # Policy parameters
-N_in = 2 # One input neuron indicates how many times |0> was measured, the other how many |1>
+N_in = 2  # One input neuron indicates how many times |0> was measured, the other how many |1>
 N_out = 7  # 3 output neurons for the mean, 3 for the diagonal covariance (vector of 3 angles shall be drawn),
 # 1 for critic
 layers = [10, 10]  # List containing the number of neurons in each hidden layer
@@ -127,24 +133,29 @@ if insert_baseline:
 else:
     b = tf.Variable(initial_value=0., trainable=False, name="baseline")
 #  Keep track of variables (when script will be functional, do some saving to external file)
-means, stds, amps, rewards = np.zeros(n_epochs + 1), np.zeros(n_epochs + 1), np.zeros(
-    [n_epochs, batchsize]), np.zeros([n_epochs, batchsize])
-baselines = np.zeros(n_epochs + 1)
-fidelities = np.zeros(n_epochs)
-grad_list = [None] * n_epochs
-grad3_list = [None] * n_epochs
+data = {
+    "means": np.zeros(n_epochs + 1),
+    "stds": np.zeros(n_epochs + 1),
+    "amps": np.zeros([n_epochs, batchsize]),
+    "rewards": np.zeros([n_epochs, batchsize]),
+    "baselines": np.zeros(n_epochs + 1),
+    "fidelity": np.zeros(n_epochs)
+}
+
 measurement_outcome = np.ones([batchsize, N_shots])
+log_probs_old = None
 
 for i in tqdm(range(n_epochs)):
     # Sample action from policy (Gaussian distribution with parameters mu and sigma)
 
     action_vector, log_probs = MultivariateNormalDiag(loc=network(measurement_outcome)[:3],
-                                                      scale_diag=network(measurement_outcome)[4:7]).experimental_sample_and_log_prob(
+                                                      scale_diag=network(measurement_outcome)[
+                                                                 4:7]).experimental_sample_and_log_prob(
         [batchsize], seed=seed)
 
     # Run quantum circuit to retrieve rewards (in this example, only one time step)
     reward, measurement_outcome, dm_observed = perform_action(action_vector, shots=1)
-    fidelities[i] = qi.state_fidelity(target_state, dm_observed)
+
     with tf.GradientTape(persistent=True) as tape:
 
         """
@@ -156,14 +167,15 @@ for i in tqdm(range(n_epochs)):
 
         advantage = reward - b  # If not using the critic (baseline), then b=0, and we are left with the reward
         if use_PPO:
-            ratio = normal_distrib(a, mu, sigma) / (
-                    sigma_eps + normal_distrib(a, mu_old, sigma_old))
+            if i == 0:
+                log_probs_old = log_probs
+            ratio = tf.exp(log_probs - log_probs_old)
             # Avoid division by 0 with small sigma_eps
 
             actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
                                                      advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
         else:  # REINFORCE algorithm
-            actor_loss = - tf.reduce_mean(advantage * tf.math.log(normal_distrib(a, mu, sigma)))
+            actor_loss = - tf.reduce_mean(advantage * log_probs)
 
         if insert_baseline:
             # loss2 = MSE(reward, b)  # Loss for the critic (Mean square error between return and the baseline)
@@ -180,14 +192,14 @@ for i in tqdm(range(n_epochs)):
 
     # For PPO, update old parameters to have access to "old" policy
     if use_PPO:
-        mu_old.assign(mu)
-        sigma_old.assign(sigma)
+        log_probs_old = log_probs
 
-    amps[i] = np.array(a)
-    rewards[i] = reward
-    means[i] = np.array(mu)
-    stds[i] = np.array(sigma)
-    baselines[i] = np.array(b)
+    data["amps"][i] = np.array(action_vector)
+    data["rewards"][i] = reward
+    data["means"][i] = np.array(mu)
+    data["stds"][i] = np.array(sigma)
+    data["baselines"][i] = np.array(b)
+    data["fidelity"][i] = qi.state_fidelity(target_state, dm_observed)
 
     # Apply gradients
     if concurrent_optimization:
@@ -198,13 +210,25 @@ for i in tqdm(range(n_epochs)):
         if insert_baseline:
             optimizer_critic.apply_gradients(zip([value_grads], [b]))
 
-means[-1] = np.array(mu)
-stds[-1] = np.array(sigma)
-baselines[-1] = np.array(b)
-print("means: ", means, '\n', "stds: ", stds, '\n')
-print("drawn amplitudes: ", amps, '\n')
-print("average rewards: ", np.mean(rewards, axis=1), '\n')
-print("fidelities:", fidelities)
+data["means"][-1] = np.array(mu)
+data["stds"][-1] = np.array(sigma)
+data["baselines"][-1] = np.array(b)
+print(data)
+
+# open file for writing, "w" is writing
+w = csv.writer(open("output.csv", "w"))
+
+# loop over dictionary keys and values
+for key, val in data.items():
+    # write every key and value to file
+    w.writerow([key, val])
+
+"""
+-----------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------
+Plotting tools
+"""
 
 
 #  Plotting results
@@ -232,17 +256,17 @@ x = np.linspace(-1., 1., 100)
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
 # Plot probability density associated to updated parameters for a few steps
 for i in range(0, n_epochs + 1, number_of_steps):
-    ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(stds[i])), '-o', label=f'{i}')
+    ax1.plot(x, norm.pdf(x, loc=data["means"][i], scale=np.abs(data["stds"][i])), '-o', label=f'{i}')
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
 ax1.set_ylim(0., 20)
 #  Plot return as a function of epochs
-ax2.plot(np.mean(rewards, axis=1), '-.', label='Reward')
+ax2.plot(np.mean(data["rewards"], axis=1), '-.', label='Reward')
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
-ax2.plot(baselines, '-.', label='baseline')
-ax2.plot(fidelities, '-o', label='Fidelity')
+ax2.plot(data["baselines"], '-.', label='baseline')
+ax2.plot(data["fidelity"], '-o', label='Fidelity')
 ax2.legend()
 ax1.legend()
-plot_examples(ax3, rewards)
+plot_examples(ax3, data["rewards"])
