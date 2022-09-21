@@ -8,6 +8,9 @@ Code example reproducing Educational Example described in Appendix A of the pape
 # Qiskit imports for building RL environment (circuit level)
 import numpy as np
 from qiskit import QuantumCircuit
+from qiskit.circuit.library.standard_gates.h import HGate
+from qiskit.circuit.library.standard_gates.s import SGate
+
 from qiskit.providers.aer import QasmSimulator
 from qiskit.quantum_info import DensityMatrix, Pauli, Statevector, state_fidelity
 
@@ -19,13 +22,14 @@ from tensorflow.python.keras.optimizer_v2.adam import Adam
 from tensorflow.python.keras.optimizer_v2.gradient_descent import SGD
 # from tensorflow.python.keras.losses import MSE
 from tensorflow_probability.python.distributions import MultivariateNormalDiag, Categorical
-
+from tensorflow.python.keras.callbacks import TensorBoard
 # Additional imports
 from tqdm import tqdm
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 from typing import Union, Optional, Tuple
 import csv
+from itertools import product
 
 """This code sets the simplest RL algorithm (Policy Gradient) for solving a quantum control problem. The goal is the 
 following: We have access to a quantum computer (here a simulator provided by IBM Q) containing one qubit. The qubit 
@@ -40,8 +44,8 @@ upon measurement of the circuit produced (only two possible outcomes can be meas
 """
 
 
-def perform_action(amps: Union[tf.Tensor, np.array], tgt_string: str, shots: Optional[int],
-                   dfe_params: Optional[Tuple]):
+def perform_action(amps: Union[tf.Tensor, np.array], tgt_string: str, shots: Optional[int] = None,
+                   dfe_params: Optional[Tuple] = None):
     """
     Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
     :param amps: amplitude parameter, provided as an array of shape [batchsize, 3]
@@ -49,79 +53,94 @@ def perform_action(amps: Union[tf.Tensor, np.array], tgt_string: str, shots: Opt
     to perform direct fidelity estimation (should be a key of the target_state dictionary)
     :param shots: Fixed number of shots to calculate estimation of reward on quantum computer
     :param dfe_params: Parameters (epsilon, delta) for performing direct fidelity estimation (epsilon is the desired
-    additive error, and delta is the failure probability)
+    additive error, delta is the failure probability)
 
-    :return: Reward table (reward for each run in the batch)
+    :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
+    obtained density matrix
     """
-    global qc, qasm, seed
+    global qasm, seed2, d, dim_factor
+
     target = target_state[tgt_string]
     angles = np.array(amps)
-    density_matrix = np.zeros([2, 2], dtype='complex128')
+    density_matrix = np.zeros([d, d], dtype='complex128')
     outcome = np.zeros([batchsize, 2])
-    reward_table = np.zeros(np.shape(angles))
-    for j, angle in enumerate(angles):
-        qc.u(angle[0], angle[1], angle[2], 0)
-        q_state = Statevector.from_instruction(qc)
-        density_matrix += np.array(q_state.to_operator()) / len(angles)
+    reward_table = np.zeros(np.shape(angles)[0])
+
+    for j, angle in enumerate(angles):  # Iterate over batch of actions
+
         # Direct fidelity estimation protocol for one qubit  (https://doi.org/10.1103/PhysRevLett.106.230501)
+        l = int(np.ceil(1 / (dfe_params[0] ** 2 * dfe_params[1])))
         distribution = Categorical(target["Chi"] ** 2)
+        k_samples = distribution.sample(l)
+        # TODO: Redefine this line, does not do what is expected
+        m = np.ceil(2 * np.log(2 / dfe_params[1]) / (d * target["Chi"][k_samples] ** 2 * l * dfe_params[0] ** 2))
+        X = np.zeros(l)
+        for i, k in enumerate(k_samples):  # Iterate over Pauli observables to sample
+            qc.u(angle[0], angle[1], angle[2], 0)
+            q_state = Statevector.from_instruction(qc)
+            density_matrix += np.array(q_state.to_operator()) / len(angles)
 
-        if shots is not None and dfe_params is None:
-            k_samples = distribution.sample(shots)
-            shots_Pauli_X, shots_Pauli_Y = len(tf.where(k_samples == 1)), len(tf.where(k_samples == 2))
+            for op in Pauli_ops[k]["rotation_gates"]:
+                gate, qubit_index = op[0], int(op[-1])
+                if gate == "H":
+                    qc.h(qubit_index)
+                if gate == "S":
+                    qc.s(qubit_index)
+            qc.measure(0, 0)  # Measure the qubit
+            job = qasm.run(qc, shots=m[i], seed_simulator=seed)
+            result = job.result()
+            counts = result.get_counts(qc)
+            qc.clear()
+            if '0' not in counts:
+                outcome[j][0] = 0.
+                outcome[j][1] = 1.
+            elif '1' not in counts:
+                outcome[j][0] = 1.
+                outcome[j][1] = 0.
+            else:
+                outcome[j][0], outcome[j][1] = counts['0'] / m[i], counts['1'] / m[i]
 
-        else:
-            l = np.ceil(1/(dfe_params[0]**2*dfe_params[1]))
-            k_samples = distribution.sample(l)
-            m = np.ceil(2 * np.log(2/dfe_params[1])/(d * target["Chi"][k_samples]**2 * l * dfe_params[0]**2))
-            shots_Pauli_X = np.sum(np.where(k_samples == 1, m, 0))
-            shots_Pauli_Y = np.sum(np.where(k_samples == 2, m, 0))
+            expectation_estimate = outcome[:, -1] - outcome[:, 0]
+            X[i] = expectation_estimate * dim_factor / target["Chi"][k]
 
-        shots_Pauli_Z = shots - (shots_Pauli_X + shots_Pauli_Y)
-        qc_x = qc.copy('qc_x')
-        qc_y = qc.copy('qc_y')
+        Y = np.sum(X)/l  # Fidelity estimator
+        # TODO: this scheme might be too heavy, need to implement reward scheme as depicted in paper (reward per meas.)
 
-        qc_x.ry(np.pi / 2, 0)
-        qc_y.rx(np.pi / 2, 0)
-
-        qc.measure(0, 0)  # Measure the qubit
-        qc_x.measure(0, 0)
-        qc_y.measure(0, 0)
-        job_x = qasm.run(qc, shots=shots_Pauli_X, seed_simulator=seed)
-        job_y = qasm.run(qc, shots=shots_Pauli_Y, seed_simulator=seed)
-        job_z = qasm.run(qc, shots=shots_Pauli_Z, seed_simulator=seed)
-        result_x = job_x.result()
-        result_y = job_y.result()
-        result_z = job_z.result()
-        counts_x, counts_y, counts_z = result_x.get_counts(qc_x), result_y.get_counts(qc_y), result_z.get_counts(qc)
-
-
-        if '0' not in counts:
-            outcome[j][0] = 0.
-            outcome[j][1] = 1.
-        elif '1' not in counts:
-            outcome[j][0] = 1.
-            outcome[j][1] = 0.
-        else:
-            outcome[j][0], outcome[j][1] = counts['0'] / shots, counts['1'] / shots
-
-        expectation_estimate = outcome[:, -1] - outcome[:, 0]
-
-        qc.clear()
     return reward_table, outcome, DensityMatrix(density_matrix)  # Shape [batchsize]
 
 
 # Variables to define environment
 seed = 3590  # Seed for action sampling
 seed2 = 3000  # Seed for QASM simulator
-tf.random.set_seed(seed)
-np.random.seed(seed)
-qc = QuantumCircuit(1, 1, name="qc")  # Two-level system of interest, 1 qubit
 qasm = QasmSimulator(method="statevector")  # Simulation backend (mock quantum computer)
-
-Pauli_ops = [Pauli(s).to_matrix() for s in ["I", "X", "Y", "Z"]]
+qc = QuantumCircuit(0, 0)
 n_qubits = 1
 d = 2 ** n_qubits
+
+
+def rotation_gate(pauli_string: str):
+    Op_list = []
+    for index in range(len(pauli_string)):
+        if pauli_string[index] == "I":
+            pass
+        elif pauli_string[index] == "X":
+            Op_list.append(f"H{index}")
+        elif pauli_string[index] == "Y":
+            Op_list.append(f"H{index}")
+            Op_list.append(f"S{index}")
+        elif pauli_string[index] == "Z":
+            pass
+        else:
+            raise NameError('Letter does not correspond to a Pauli (I, X, Y, Z)')
+    return Op_list
+
+
+Pauli_ops = [
+    {"string": ''.join(s),
+     "matrix": Pauli(''.join(s)).to_matrix(),
+     "rotation_gates": rotation_gate(''.join(s))}
+    for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)
+]
 dim_factor = 1 / np.sqrt(d)  # Factor for computing expectation values of different Pauli ops
 target_state = {
     "|1>": {
@@ -135,10 +154,10 @@ target_state = {
 }
 
 for tgt in target_state.keys():
-    for k in range(d ** 2):
+    for k in range(len(Pauli_ops)):
         target_state[tgt]["Chi"][k] = dim_factor * np.trace(np.array(target_state[tgt]["dm"].to_operator())
-                                                            * Pauli_ops[k]).real
-print(target_state)
+                                                            * Pauli_ops[k]["matrix"]).real
+
 tgt_string = "|->"
 
 # Hyperparameters for the agent
@@ -180,8 +199,8 @@ critic_output = Dense(1, activation=None)(hidden)
 network = Model(inputs=input_layer, outputs=[actor_output, critic_output])
 
 initial_action = np.zeros([batchsize, 3])
-_, measurement_outcome, _ = perform_action(amps=initial_action, shots=N_shots)
-
+_, initial_measurement_outcome, _ = perform_action(amps=initial_action, tgt_string=tgt_string, dfe_params=(0.1, 0.1))
+# TODO: Put one hot encoding of time step in most general setting
 sigma_eps = 1e-6  # for numerical stability
 
 #  Keep track of variables (when script will be functional, do some saving to external file)
@@ -219,14 +238,14 @@ for i in tqdm(range(n_epochs)):
 
         # Sample action from policy (Gaussian distribution with parameters mu and sigma)
 
-        policy_params, b = network(measurement_outcome)
+        policy_params, b = network(initial_measurement_outcome)
         mu, sigma = policy_params[:3], policy_params[3:]
         print(sigma)
         Distribution = MultivariateNormalDiag(loc=mu, scale_diag=sigma + sigma_eps)
         action_vector, log_probs = Distribution.experimental_sample_and_log_prob([batchsize], seed=seed)
 
         # Run quantum circuit to retrieve rewards (in this example, only one time step)
-        reward, measurement_outcome, dm_observed = perform_action(action_vector, shots=1)
+        reward, _, dm_observed = perform_action(action_vector, shots=1)
 
         advantage = reward - b  # If not using the critic (baseline), then b=0, and we are left with the reward
         if use_PPO:
