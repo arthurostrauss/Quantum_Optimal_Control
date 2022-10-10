@@ -75,8 +75,6 @@ def perform_action(amp: Union[tf.Tensor, np.array], shots=1, target_state="|1>")
 
 
 # Variables to define environment
-seed = 2523  # Seed for action sampling (ref 2763)
-seed2 = 3000  # Seed for QASM simulator
 qc = QuantumCircuit(1, 1, name="qc")  # Two-level system of interest, 1 qubit
 qasm = QasmSimulator(method="statevector")  # Simulation backend (mock quantum computer)
 save_data = False  # Decide if data should be saved in a csv file
@@ -88,19 +86,22 @@ target_state = {
 tgt_string = "|1>"
 
 # Hyperparameters for the agent
+seed = 1500  # Seed for action sampling (ref 2763)
+seed2 = 3000  # Seed for QASM simulator
 insert_baseline = True  # Indicate if you want the actor-critic version (True) or simple REINFORCE (False)
 use_PPO = True
-concurrent_optimization = True  # Fix if optimization of actor and critic should be done by same optimizer or separately
-
+concurrent_optimization = True  # Fix if optimization of actor and critic should be done by same optimizer or
+# separately
 optimizer_string = "Adam"
 epsilon = 0.2  # Parameter for clipping value (PPO)
 n_epochs = 50
+number_of_steps = 10  # Choose step for plotting evolution over number_of_steps epoch
 batch_size = 50
-eta = 0.5  # Learning rate for policy update step
+eta = 0.1  # Learning rate for policy update step
 eta_2 = 0.1  # Learning rate for critic (value function) update step
 critic_loss_coeff = 0.5
 log_prob_clip = 5
-grad_clip = 0.1
+grad_clip = 0.001
 if insert_baseline:
     if concurrent_optimization:
         # Choose optimizer of your choice by commenting irrelevant line
@@ -117,9 +118,19 @@ else:
     optimizer = Adam(learning_rate=eta)
     # optimizer = SGD(learning_rate=eta)
 
+
+def constrain_mean_value(mu_var):
+    return tf.clip_by_value(mu_var, -1., 1.)
+
+
+def constrain_std_value(std_var):
+    return tf.clip_by_value(std_var, 0.01, 3.)
+
+
 # Policy parameters
-mu = tf.Variable(initial_value=tf.random.normal([], stddev=0.05, seed=seed), trainable=True, name="µ")
-sigma = tf.Variable(initial_value=1., trainable=True, name="sigma")
+mu = tf.Variable(initial_value=tf.random.normal([], stddev=0.05, seed=seed), trainable=True, name="µ",
+                 constraint=constrain_mean_value)
+sigma = tf.Variable(initial_value=1., trainable=True, name="sigma", constraint=constrain_std_value)
 sigma_eps = np.array(1e-6, dtype='float32')  # for numerical stability
 
 # Old parameters are updated with one-step delay, necessary for PPO implementation
@@ -142,7 +153,7 @@ data = {
         "learning_rate": eta,
         "seed": seed,
         "clipping_PPO": epsilon,
-        "clip_value for log_probs": log_prob_clip,
+        "clip_value_for_log_probs": log_prob_clip,
         "grad_clip_value": grad_clip,
         "n_epochs": n_epochs,
         "batch_size": batch_size,
@@ -155,35 +166,15 @@ data = {
     }
 }
 
-success = 0
-
-
-def normal_distrib(amp: Union[tf.Tensor, np.array], mean: Union[tf.Variable, float], std: Union[tf.Variable, float]):
-    """
-    Compute probability density of Gaussian distribution evaluated at amplitude amp
-    :param amp: amplitude/angle chosen by the random selection
-    :param mean: mean of the Gaussian distribution from which amp was sampled
-    :param std: standard deviation of the Gaussian distribution from which amp was sampled
-    :return: probability density of Gaussian evaluated at amp
-    """
-    # return math.divide(math.exp(math.divide(math.pow(amp - mu, 2), -2 * math.pow(sigma, 2))),
-    #                    math.sqrt(2 * np.pi * math.pow(sigma, 2)))
-    return tf.exp(-(amp - mean) ** 2 / (2 * std ** 2 + sigma_eps)) / tf.sqrt(2 * np.pi * (std ** 2 + sigma_eps))
-
-
-Normal_distrib = Normal(loc=mu, scale=tf.abs(sigma) + sigma_eps, allow_nan_stats=False)
-_, log_probs = Normal_distrib.experimental_sample_and_log_prob(sample_shape=[batch_size], seed=seed)
-log_probs = tf.clip_by_value(log_probs, -log_prob_clip, log_prob_clip)
-log_probs_old = log_probs
+dm_observed = None
+log_probs_old = None
 
 for i in tqdm(range(n_epochs)):
     # Sample action from policy (Gaussian distribution with parameters mu and sigma)
-    a = tf.random.normal([batch_size], mean=mu, stddev=tf.abs(sigma) + sigma_eps, seed=seed)
     Normal_distrib = Normal(loc=mu, scale=sigma, allow_nan_stats=False)
-    a2 = Normal_distrib.sample([batch_size], seed=seed)
+    a = Normal_distrib.sample([batch_size], seed=seed)
     # Run quantum circuit to retrieve rewards (in this example, only one time step)
     reward, dm_observed = perform_action(a, shots=1, target_state=tgt_string)
-    reward2, dm_observed2 = perform_action(a2, shots=1, target_state=tgt_string)
 
     with tf.GradientTape(persistent=True) as tape:
 
@@ -193,30 +184,24 @@ for i in tqdm(range(n_epochs)):
         probability density (cf paper of reference, educational example).
         In case of the PPO, loss function is slightly changed.
         """
-        log_probs = Normal_distrib.log_prob(a2)
-        # log_probs = tf.clip_by_value(log_probs, -log_prob_clip, log_prob_clip)
+        log_probs = Normal_distrib.log_prob(a)
+        log_probs = tf.clip_by_value(log_probs, -log_prob_clip, log_prob_clip)
+        if i == 0:
+            log_probs_old = log_probs
         advantage = reward - b  # If not using the critic (baseline), then b=0, and we are left with the reward
-        advantage2 = reward2 - b  # If not using the critic (baseline), then b=0, and we are left with the reward
         if use_PPO:
-            ratio = normal_distrib(a, mu, sigma) / (sigma_eps + normal_distrib(a, mu_old, sigma_old))
-            ratio2 = tf.exp(log_probs - log_probs_old)
+            ratio = tf.exp(log_probs - log_probs_old)
             # Avoid division by 0 with small sigma_eps
 
             actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
                                                      advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
-            actor_loss2 = - tf.reduce_mean(tf.minimum(advantage2 * ratio2,
-                                                      advantage2 * tf.clip_by_value(ratio2, 1 - epsilon, 1 + epsilon)))
         else:  # REINFORCE algorithm
-            # actor_loss = - tf.reduce_mean(advantage * tf.math.log(normal_distrib(a, mu, sigma)))
             actor_loss = - tf.reduce_mean(advantage * log_probs)
 
         if insert_baseline:
-            # loss2 = MSE(reward, b)  # Loss for the critic (Mean square error between return and the baseline)
             critic_loss = tf.reduce_mean(advantage ** 2)
-            critic_loss2 = tf.reduce_mean(advantage2 ** 2)
             if concurrent_optimization:
                 combined_loss = actor_loss + critic_loss_coeff * critic_loss
-                combined_loss2 = actor_loss2 + critic_loss_coeff * critic_loss2
 
     # Compute gradients
     policy_grads = tape.gradient(actor_loss, [mu, sigma])
@@ -225,8 +210,7 @@ for i in tqdm(range(n_epochs)):
         if concurrent_optimization:
             combined_grads = tape.gradient(combined_loss, [mu, sigma, b])
             combined_grads = tf.clip_by_value(combined_grads, -grad_clip, grad_clip)
-            combined_grads2 = tape.gradient(combined_loss2, [mu, sigma, b])
-            combined_grads2 = tf.clip_by_value(combined_grads2, -grad_clip, grad_clip)
+
     # For PPO, update old parameters to have access to "old" policy
     if use_PPO:
         mu_old.assign(mu)
@@ -291,7 +275,6 @@ def plot_examples(ax, reward_table):
     plt.show()
 
 
-number_of_steps = 10
 x = np.linspace(-1., 1., 100)
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
 # Plot probability density associated to updated parameters for a few steps

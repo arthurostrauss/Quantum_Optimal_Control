@@ -8,19 +8,15 @@ Code example reproducing Educational Example described in Appendix A of the pape
 # Qiskit imports for building RL environment (circuit level)
 import numpy as np
 from qiskit import QuantumCircuit
-from qiskit.circuit.library.standard_gates.h import HGate
-from qiskit.circuit.library.standard_gates.s import SGate
-
-from qiskit.providers.aer import QasmSimulator
+from qiskit_aer.backends.qasm_simulator import QasmSimulator
 from qiskit.quantum_info import DensityMatrix, Pauli, Statevector, state_fidelity
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
-from tensorflow.python.keras.layers import Dense, RNN, Input
+from tensorflow.python.keras.layers import Dense, Input
 from tensorflow.python.keras import Sequential, Model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
 from tensorflow.python.keras.optimizer_v2.gradient_descent import SGD
-# from tensorflow.python.keras.losses import MSE
 from tensorflow_probability.python.distributions import MultivariateNormalDiag, Categorical
 from tensorflow.python.keras.callbacks import TensorBoard
 # Additional imports
