@@ -80,19 +80,19 @@ target_states_list = {
 tgt_string = "|1>"
 
 # Hyperparameters for the agent
-seed = 3405  # Seed for action sampling (ref 2763)
+seed = 3421  # Seed for action sampling (ref 2763)
 
-optimizer_string = "SGD"
+optimizer_string = "Adam"
 
 n_epochs = 200
-batch_size = 30
-eta = 0.2  # Learning rate for policy update step
+batch_size = 100
+eta = 0.1  # Learning rate for policy update step
 
 critic_loss_coeff = 0.5
 
 use_PPO = True
 epsilon = 0.2  # Parameter for ratio clipping value (PPO)
-grad_clip = 0.3
+grad_clip = 0.5
 sigma_eps = 1e-6
 
 optimizer = None
@@ -107,7 +107,7 @@ def constrain_mean_value(mu_var):
 
 
 def constrain_std_value(std_var):
-    return tf.clip_by_value(std_var, 1e-7, 3)
+    return tf.clip_by_value(std_var, 1e-3, 3)
 
 
 # Policy parameters
@@ -158,7 +158,7 @@ for i in tqdm(range(n_epochs)):
     # Sample action from policy (Gaussian distribution with parameters mu and sigma)
     Normal_distrib = Normal(loc=mu, scale=sigma, validate_args=True, allow_nan_stats=False)
     Normal_distrib_old = Normal(loc=mu_old, scale=sigma_old, validate_args=True, allow_nan_stats=False)
-    a = Normal_distrib.sample(batch_size)
+    a = Normal_distrib.sample(batch_size, seed=seed)
     # Run quantum circuit to retrieve rewards (in this example, only one time step)
     reward, dm_observed = perform_action(a, shots=1, target_state=tgt_string, epoch=i)
     print("Average Return:", np.array(tf.reduce_mean(reward)))
@@ -245,10 +245,10 @@ def plot_examples(ax, reward_table):
     plt.show()
 
 
-x = np.linspace(-1., 1., 100)
+x = np.linspace(-1., 1., 300)
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
 # Plot probability density associated to updated parameters for a few steps
-for i in np.linspace(0, n_epochs, 10, dtype=int):
+for i in np.linspace(0, n_epochs-1, 10, dtype=int):
     ax1.plot(x, norm.pdf(x, loc=data["means"][i], scale=np.abs(data["stds"][i])), '-o', label=f'{i}')
 
 ax1.set_xlabel("Action, a")

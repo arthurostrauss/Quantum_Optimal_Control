@@ -1,13 +1,14 @@
 """
-Code example reproducing Educational Example described in Appendix A of the paper PhysRevX.12.011059
+Code for arbitrary state preparation based on scheme described in Appendix D.2b  of paper PhysRevX.12.011059
  (https://doi.org/10.1103/PhysRevX.12.011059) using Qiskit modules
 
  Author: Arthur Strauss
- Created on 05/08/2022
+ Created on 11/11/2022
 """
 # Qiskit imports for building RL environment (circuit level)
 import numpy as np
 from qiskit import QuantumCircuit
+from qiskit.providers.backend import BackendV1
 from qiskit_aer.backends.qasm_simulator import QasmSimulator
 from qiskit.quantum_info import DensityMatrix, Pauli, Statevector, state_fidelity
 
@@ -23,95 +24,15 @@ from tensorflow.python.keras.callbacks import TensorBoard
 from tqdm import tqdm
 from scipy.stats import norm
 import matplotlib.pyplot as plt
-from typing import Union, Optional, Tuple
+from typing import Union, Optional, Tuple, Dict
 import csv
 from itertools import product
+from copy import deepcopy
 
-"""This code sets the simplest RL algorithm (Policy Gradient) for solving a quantum control problem. The goal is the 
-following: We have access to a quantum computer (here a simulator provided by IBM Q) containing one qubit. The qubit 
-originally starts in the state |0>, and we would like to apply a quantum gate (operation) to bring it to the |1> 
-state. To do so, we have access to a gate parametrized with an angle, and the RL agent must find the optimal angle 
-that maximizes the probability of measuring the qubit in the |1> state. Optimal value for amplitude amp (angle/2π) is 
-0.5. The RL agent chooses its actions (that is picks a random value for amp) by drawing a number from a Gaussian 
-distribution, of mean mu and standard deviation sigma. The trainable parameters are therefore those two latter 
-variables (we expect the mean to be close to 0.5 and the variance very low). The reward is a binary number obtained 
-upon measurement of the circuit produced (only two possible outcomes can be measured). 
-
+""" Here we set a RL agent based on PPO and an actor critic network to perform arbitrary state preparation based on
+scheme proposed in the appendix of Vladimir Sivak paper. 
+In there, we design classes for the environment (Quantum Circuit simulated on IBM Q simulator) and the agent 
 """
-
-
-def perform_action(amps: Union[tf.Tensor, np.array], tgt_string: str, shots: Optional[int] = None,
-                   dfe_params: Optional[Tuple] = None):
-    """
-    Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
-    :param amps: amplitude parameter, provided as an array of shape [batchsize, 3]
-    :param tgt_string: String indicator of desired target state: will look for corresponding probability distribution
-    to perform direct fidelity estimation (should be a key of the target_state dictionary)
-    :param shots: Fixed number of shots to calculate estimation of reward on quantum computer
-    :param dfe_params: Parameters (epsilon, delta) for performing direct fidelity estimation (epsilon is the desired
-    additive error, delta is the failure probability)
-
-    :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
-    obtained density matrix
-    """
-    global qasm, seed2, d, dim_factor
-
-    target = target_state[tgt_string]
-    angles = np.array(amps)
-    density_matrix = np.zeros([d, d], dtype='complex128')
-    outcome = np.zeros([batchsize, 2])
-    reward_table = np.zeros(np.shape(angles)[0])
-
-    for j, angle in enumerate(angles):  # Iterate over batch of actions
-
-        # Direct fidelity estimation protocol for one qubit  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        l = int(np.ceil(1 / (dfe_params[0] ** 2 * dfe_params[1])))
-        distribution = Categorical(target["Chi"] ** 2)
-        k_samples = distribution.sample(l)
-        # TODO: Redefine this line, does not do what is expected
-        m = np.ceil(2 * np.log(2 / dfe_params[1]) / (d * target["Chi"][k_samples] ** 2 * l * dfe_params[0] ** 2))
-        X = np.zeros(l)
-        for i, k in enumerate(k_samples):  # Iterate over Pauli observables to sample
-            qc.u(angle[0], angle[1], angle[2], 0)
-            q_state = Statevector.from_instruction(qc)
-            density_matrix += np.array(q_state.to_operator()) / len(angles)
-
-            for op in Pauli_ops[k]["rotation_gates"]:
-                gate, qubit_index = op[0], int(op[-1])
-                if gate == "H":
-                    qc.h(qubit_index)
-                if gate == "S":
-                    qc.s(qubit_index)
-            qc.measure(0, 0)  # Measure the qubit
-            job = qasm.run(qc, shots=m[i], seed_simulator=seed)
-            result = job.result()
-            counts = result.get_counts(qc)
-            qc.clear()
-            if '0' not in counts:
-                outcome[j][0] = 0.
-                outcome[j][1] = 1.
-            elif '1' not in counts:
-                outcome[j][0] = 1.
-                outcome[j][1] = 0.
-            else:
-                outcome[j][0], outcome[j][1] = counts['0'] / m[i], counts['1'] / m[i]
-
-            expectation_estimate = outcome[:, -1] - outcome[:, 0]
-            X[i] = expectation_estimate * dim_factor / target["Chi"][k]
-
-        Y = np.sum(X)/l  # Fidelity estimator
-        # TODO: this scheme might be too heavy, need to implement reward scheme as depicted in paper (reward per meas.)
-
-    return reward_table, outcome, DensityMatrix(density_matrix)  # Shape [batchsize]
-
-
-# Variables to define environment
-seed = 3590  # Seed for action sampling
-seed2 = 3000  # Seed for QASM simulator
-qasm = QasmSimulator(method="statevector")  # Simulation backend (mock quantum computer)
-qc = QuantumCircuit(0, 0)
-n_qubits = 1
-d = 2 ** n_qubits
 
 
 def rotation_gate(pauli_string: str):
@@ -131,12 +52,142 @@ def rotation_gate(pauli_string: str):
     return Op_list
 
 
-Pauli_ops = [
-    {"string": ''.join(s),
-     "matrix": Pauli(''.join(s)).to_matrix(),
-     "rotation_gates": rotation_gate(''.join(s))}
-    for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)
-]
+def generate_pauli_ops(n_qubits: int):
+    Pauli_ops = [
+        {"string": ''.join(s),
+         "matrix": Pauli(''.join(s)).to_matrix(),
+         "rotation_gates": rotation_gate(''.join(s))}
+        for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)
+    ]
+    return Pauli_ops
+
+
+def apply_parametrized_circuit(qc, angle):
+    pass
+
+
+class QuantumEnvironment:
+    def __init__(self, n_qubits: int,
+                 target_state: Dict[str, Union[str, DensityMatrix]],
+                 abstraction_level: str,
+                 backend: BackendV1 = QasmSimulator(method="statevector"),
+                 projector_reward_scheme: bool = False,
+                 sampling_Pauli_space: int = 10,
+                 n_shots: int = 1,
+                 c_factor: float = 0.5):
+        """
+
+        :param n_qubits: Number of qubits in quantum system
+        :param abstraction_level: Circuit or pulse level parametrization of action space
+        :param backend: Quantum backend, QASM simulator by default
+        :param target_state: control target of interest
+        :param projector_reward_scheme: Indicate which kind of reward circuit to execute
+        :param sampling_Pauli_space: Number of samples to build a fidelity estimator for one action
+        :param n_shots: Number of shots to sample for one specific computation (action/Pauli expectation sampling)
+        """
+
+        self.c_factor = c_factor
+        assert abstraction_level == 'circuit' or abstraction_level == 'pulse', 'Abstraction layer parameter can be' \
+                                                                               'only pulse or circuit'
+        self.abstraction_level = abstraction_level
+        if abstraction_level == 'circuit':
+            self.qc = QuantumCircuit(n_qubits, n_qubits)
+            self.backend = backend
+        else:
+            # TODO: Define pulse level (Schedule most likely, cf Qiskit Pulse doc)
+            pass
+        self.time_step = 0
+        self.Pauli_ops = generate_pauli_ops(n_qubits)
+        self.rotation_ops = [rotation_gate(pauli['name']) for pauli in self.Pauli_ops]
+        self.d = 2 ** n_qubits  # Dimension of Hilbert space
+        self.density_matrix = np.zeros([d, d], dtype='complex128')
+        self.sampling_Pauli_space = sampling_Pauli_space
+        self.n_shots = n_shots
+        self.target_state = self.calculate_chi_target_state(target_state)
+
+    def calculate_chi_target_state(self, target_state: Dict):
+        """
+        Calculatte for all P
+        :param target_state: Dictionary containing info on target state (name, density matrix)
+        :return: target state, initializes self.target_state argument
+        """
+        target_state["Chi"] = np.zeros(self.d ** 2)
+        for k in range(self.d ** 2):
+            target_state["Chi"][k] = 1 / np.sqrt(self.d) * np.trace(np.array(target_state["dm"].to_operator())
+                                                                    @ self.Pauli_ops[k]["matrix"])
+        return target_state
+
+    def perform_action(self, amps: Union[tf.Tensor, np.array],
+                       dfe_params: Optional[Tuple] = None):
+        """
+        Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
+        :param amps: amplitude parameter, provided as an array of shape [batchsize, 3]
+        :param dfe_params: Parameters (epsilon, delta) for performing direct fidelity estimation (epsilon is the desired
+        additive error, delta is the failure probability)
+
+        :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
+        obtained density matrix
+        """
+
+        angles, batchsize = np.array(amps), len(np.array(amps))
+        outcome = np.zeros([batchsize, 2])
+        reward_table = np.zeros(batchsize)
+        expected_value = np.zeros(self.d ** 2)
+        reward_factor = np.zeros(self.d ** 2)
+        for j, angle in enumerate(angles):  # Iterate over batch of actions
+
+            # Direct fidelity estimation protocol for one qubit  (https://doi.org/10.1103/PhysRevLett.106.230501)
+            distribution = Categorical(probs=self.target_state["Chi"] ** 2)
+            k_samples = distribution.sample(self.sampling_Pauli_space)
+            pauli_index, idx, pauli_shots = tf.unique_with_counts(k_samples)
+
+            if self.abstraction_level == 'circuit':
+                # Perform actions, followed by relevant expectation value sampling for reward calculation
+                for k in range(len(pauli_index)):  # Iterate over Pauli observables to sample expectation values
+
+                    # Apply parametrized quantum circuit (action)
+                    apply_parametrized_circuit(self.qc, angle)
+
+                    # Keep track of state for benchmarking purpose only
+                    q_state = Statevector.from_instruction(self.qc)
+                    self.density_matrix += np.array(q_state.to_operator()) / len(angles)
+
+                    # Apply relevant qubit rotations to measure in corresponding Pauli eigenbasis
+                    for op in self.Pauli_ops[int(pauli_index[k])]["rotation_gates"]:
+                        gate, qubit_index = op[0], int(op[-1])
+                        if gate == "H":
+                            self.qc.h(qubit_index)
+                        if gate == "S":
+                            self.qc.s(qubit_index)
+                    self.qc.measure(0, 0)  # Measure the qubit
+                    total_shots = self.n_shots * int(pauli_shots[k])
+                    job = self.backend.run(self.qc, shots=total_shots)
+                    result = job.result()
+                    counts = result.get_counts(self.qc)
+                    self.qc.clear()
+
+                    # As we rotated the states and measure in sigma_z basis, we calculate the full sigma_z exp value
+                    expected_value[k] = np.sum([(-1) ** c.count("1") * counts[c] / self.n_shots for c in counts.keys()])
+                    reward_factor[k] = self.c_factor * self.target_state["Chi"][int(pauli_index[k])] * \
+                                       expected_value[k] / (self.d * float(distribution.prob(pauli_index[k])))
+                reward_table[j] = tf.reduce_sum(reward_factor)
+
+                # TODO: Convert everything to Tensors
+
+        return reward_table, outcome  # Shape [batchsize]
+
+
+class Agent:
+    def __init__(self):
+        pass
+
+
+# Variables to define environment
+seed = 3590  # Seed for action sampling
+qasm = QasmSimulator(method="statevector")  # Simulation backend (mock quantum computer)
+n_qubits = 1
+d = 2 ** n_qubits
+
 dim_factor = 1 / np.sqrt(d)  # Factor for computing expectation values of different Pauli ops
 target_state = {
     "|1>": {
@@ -149,13 +200,8 @@ target_state = {
     }
 }
 
-for tgt in target_state.keys():
-    for k in range(len(Pauli_ops)):
-        target_state[tgt]["Chi"][k] = dim_factor * np.trace(np.array(target_state[tgt]["dm"].to_operator())
-                                                            * Pauli_ops[k]["matrix"]).real
-
 tgt_string = "|->"
-
+print(target_state)
 # Hyperparameters for the agent
 insert_baseline = True  # Indicate if you want the actor-critic version (True) or simple REINFORCE (False)
 use_PPO = True
@@ -193,7 +239,6 @@ hidden = Sequential([Dense(layer, activation='relu') for layer in layers])(input
 actor_output = Dense(N_out - 1, activation=None)(hidden)
 critic_output = Dense(1, activation=None)(hidden)
 network = Model(inputs=input_layer, outputs=[actor_output, critic_output])
-
 initial_action = np.zeros([batchsize, 3])
 _, initial_measurement_outcome, _ = perform_action(amps=initial_action, tgt_string=tgt_string, dfe_params=(0.1, 0.1))
 # TODO: Put one hot encoding of time step in most general setting
