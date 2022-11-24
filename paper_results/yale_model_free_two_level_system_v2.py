@@ -46,14 +46,16 @@ def perform_action(amp: Union[tf.Tensor, np.array], shots=1, target_state="|1>",
     for j, angle in enumerate(angles):
         if tgt_string == "|1>":
             qc.rx(2 * np.pi * angle, 0)  # Add parametrized gate for each amplitude in the batch
-        elif tgt_string == "|->":
+            q_state = qi.Statevector.from_instruction(qc)
+            density_matrix += np.array(
+                q_state.to_operator()) / batch  # Build density matrix as a statistical mixture of
+            # states created by the different actions
+        elif tgt_string == "|+>":
             qc.ry(2 * np.pi * angle, 0)  # Add parametrized gate for each amplitude in the batch
+            q_state = qi.Statevector.from_instruction(qc)
+            density_matrix += np.array(q_state.to_operator()) / batch  # Build density matrix as a statistical mixture
+            # of states created by the different actions
             qc.h(0)  # Rotate qubit for measurement in Hadamard basis
-
-        # Store quantum state for fidelity estimation (not used for training the agent)
-        q_state = qi.Statevector.from_instruction(qc)
-        density_matrix += np.array(q_state.to_operator()) / batch  # Build density matrix as a statistical mixture of
-        # states created by the different actions
 
         qc.measure(0, 0)  # Measure the qubit
 
@@ -62,7 +64,10 @@ def perform_action(amp: Union[tf.Tensor, np.array], shots=1, target_state="|1>",
         counts = result.get_counts(qc)  # Returns dictionary with keys '0' and '1' with number of counts for each key
 
         #  Calculate reward (Generalized to include any number of shots for each action)
-        reward_table[j] += np.mean(np.array([1] * counts.get('1', 0) + [-1] * counts.get('0', 0)))
+        if tgt_string == "|1>":
+            reward_table[j] += np.mean(np.array([1] * counts.get('1', 0) + [-1] * counts.get('0', 0)))
+        elif tgt_string == "|+>":
+            reward_table[j] += np.mean(np.array([1] * counts.get('0', 0) + [-1] * counts.get('1', 0)))
         qc.clear()  # Reset the Quantum Circuit for next iteration
 
     return reward_table, qi.DensityMatrix(density_matrix)  # reward_table is of Shape [batchsize]
@@ -75,24 +80,24 @@ qasm = QasmSimulator(method="statevector")  # Simulation backend (mock quantum c
 # TODO:: Define a reward function/circuit for each target state in the dictionary
 target_states_list = {
     "|1>": qi.DensityMatrix(np.array([[0.], [1.]]) @ np.array([[0., 1.]])),
-    "|->": qi.DensityMatrix(0.5 * np.array([[1.], [-1.]]) @ np.array([[1., -1.]]))
+    "|+>": qi.DensityMatrix(0.5 * np.array([[1.], [1.]]) @ np.array([[1., 1.]]))
 }
-tgt_string = "|1>"
+tgt_string = "|+>"
 
 # Hyperparameters for the agent
-seed = 3421  # Seed for action sampling (ref 2763)
+seed = 2364  # Seed for action sampling (ref 2763)
 
 optimizer_string = "Adam"
 
-n_epochs = 200
-batch_size = 100
+n_epochs = 60
+batch_size = 50
 eta = 0.1  # Learning rate for policy update step
 
 critic_loss_coeff = 0.5
 
 use_PPO = True
 epsilon = 0.2  # Parameter for ratio clipping value (PPO)
-grad_clip = 0.5
+grad_clip = 0.3
 sigma_eps = 1e-6
 
 optimizer = None
@@ -158,7 +163,7 @@ for i in tqdm(range(n_epochs)):
     # Sample action from policy (Gaussian distribution with parameters mu and sigma)
     Normal_distrib = Normal(loc=mu, scale=sigma, validate_args=True, allow_nan_stats=False)
     Normal_distrib_old = Normal(loc=mu_old, scale=sigma_old, validate_args=True, allow_nan_stats=False)
-    a = Normal_distrib.sample(batch_size, seed=seed)
+    a = Normal_distrib.sample(batch_size)
     # Run quantum circuit to retrieve rewards (in this example, only one time step)
     reward, dm_observed = perform_action(a, shots=1, target_state=tgt_string, epoch=i)
     print("Average Return:", np.array(tf.reduce_mean(reward)))
@@ -248,14 +253,14 @@ def plot_examples(ax, reward_table):
 x = np.linspace(-1., 1., 300)
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
 # Plot probability density associated to updated parameters for a few steps
-for i in np.linspace(0, n_epochs-1, 10, dtype=int):
+for i in np.linspace(0, n_epochs-1, 6, dtype=int):
     ax1.plot(x, norm.pdf(x, loc=data["means"][i], scale=np.abs(data["stds"][i])), '-o', label=f'{i}')
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
 ax1.set_ylim(0., 20)
 #  Plot return as a function of epochs
-ax2.plot(np.mean(data["rewards"], axis=1), '-.', label='Return')
+ax2.plot(np.mean(data["rewards"], axis=1), '-o', label='Return')
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected return")
 # ax2.plot(data["critic_loss"], '-.', label='Critic Loss')
