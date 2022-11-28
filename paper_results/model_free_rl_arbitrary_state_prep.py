@@ -21,7 +21,7 @@ import tensorflow as tf
 from tensorflow.python.keras.layers import Dense, Input
 from tensorflow.python.keras import Sequential, Model
 from tensorflow_probability.python.distributions import MultivariateNormalDiag
-
+from tf_agents.specs import array_spec, tensor_spec
 # from tensorflow.python.keras.callbacks import TensorBoard
 # from tensorboard.plugins.hparams import api as hp
 # from tensorflow.python.keras.callbacks import TensorBoard
@@ -62,6 +62,9 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     # qc.ecr(0, 1)
 
 
+# action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
+action_spec = tensor_spec.BoundedTensorSpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
+
 """
 -----------------------------------------------------------------------------------------------------
 Variables to define environment
@@ -85,9 +88,15 @@ bell_tgt = {"dm": DensityMatrix(bell_dm)}
 print(bell_tgt)
 target_state = bell_tgt
 
+Qiskit_setup = {
+    "backend": backend,
+    "service": service,
+    "parametrized_circuit": apply_parametrized_circuit,
+    "options": options
+}
 q_env = QuantumEnvironment(n_qubits=n_qubits, target_state=bell_tgt, abstraction_level="circuit",
-                           backend=backend, service=service,
-                           parametrized_circuit=apply_parametrized_circuit,
+                           action_spec=action_spec,
+                           Qiskit_setup=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
 # q_env.perform_action(np.array([[0.25], [0.25]]))
 
@@ -98,8 +107,8 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 400  # Number of epochs
-batchsize = 300  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+n_epochs = 100  # Number of epochs
+batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.1  # Learning rate for policy update step
 eta_2 = 0.1  # Learning rate for critic (value function) update step
@@ -136,7 +145,6 @@ critic_output = Dense(1, activation=None)(hidden)
 network = Model(inputs=input_layer, outputs=[actor_output, critic_output])
 init_msmt = np.zeros([1, N_in])
 
-
 #  Keep track of variables
 data = {
     "means": np.zeros(n_epochs + 1),
@@ -155,7 +163,6 @@ data = {
         "PPO?": use_PPO,
     }
 }
-
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -191,7 +198,7 @@ for i in tqdm(range(n_epochs)):
     # Run quantum circuit to retrieve rewards (in this example, only one time step)
 
     e = Policy_distrib.trainable_variables
-    print(e)
+    print("trainable variables", e)
     # print("reward", reward)
     with tf.GradientTape(persistent=True) as tape:
 
@@ -226,7 +233,6 @@ for i in tqdm(range(n_epochs)):
 
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
-
 
 """
 -----------------------------------------------------------------------------------------
