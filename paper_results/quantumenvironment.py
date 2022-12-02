@@ -71,6 +71,10 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         self.n_shots = n_shots
         self.target_state = self.calculate_chi_target_state(target_state)
 
+        self.action_history = []
+        self.density_matrix_history = []
+        self.reward_history = []
+
         self.time_step = 0
         self._action_spec = action_spec
         self.episode_ended = False
@@ -163,7 +167,6 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         obtained density matrix
         """
         angles, batch_size = np.array(actions), len(np.array(actions))
-
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         distribution = Categorical(probs=self.target_state["Chi"] ** 2)
         k_samples = distribution.sample(self.sampling_Pauli_space)
@@ -190,11 +193,14 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
             q_state = Statevector.from_instruction(qc_2)
             self.density_matrix += np.array(q_state.to_operator())
         self.density_matrix /= batch_size
+        self.density_matrix_history.append(DensityMatrix(self.density_matrix))
+        self.action_history.append(angles)
 
         total_shots = self.n_shots * pauli_shots
         job_list = []
         result_list = []
         exp_values = np.zeros((len(pauli_index), batch_size))
+        # print("angles", angles)
         with Session(service=self.service, backend=self.backend):
             estimator = Estimator(options=self.options)
             for p in range(len(pauli_index)):
@@ -204,9 +210,10 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
                 job_list.append(job)
                 result_list.append(job.result())
                 exp_values[p] = result_list[p].values
-
+            # print(exp_values)
         self.qc.clear()
 
         reward_table = np.mean(reward_factor[:, np.newaxis] * exp_values, axis=0)
+        self.reward_history.append(reward_table)
         assert len(reward_table) == batch_size
-        return reward_table, DensityMatrix(self.density_matrix)  # Shape [batchsize]
+        return reward_table  # Shape [batchsize]

@@ -8,7 +8,7 @@ Code for arbitrary state preparation based on scheme described in Appendix D.2b 
 
 import numpy as np
 from quantumenvironment import QuantumEnvironment
-from helper_functions import constrain_std_value, constrain_mean_value, select_optimizer
+from helper_functions import select_optimizer
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import IBMQ
@@ -18,9 +18,11 @@ from qiskit_ibm_runtime import QiskitRuntimeService
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
-from tensorflow.python.keras.layers import Dense, Input
-from tensorflow.python.keras import Sequential, Model
-from tensorflow_probability.python.distributions import MultivariateNormalDiag
+from tensorflow.python.keras import Input
+from tensorflow.python.keras.layers import Dense
+from tensorflow.python.keras import Model
+import tensorflow_probability as tfp
+
 from tf_agents.specs import array_spec, tensor_spec
 # from tensorflow.python.keras.callbacks import TensorBoard
 # from tensorboard.plugins.hparams import api as hp
@@ -30,8 +32,10 @@ from tf_agents.specs import array_spec, tensor_spec
 from tqdm import tqdm
 from scipy.stats import norm
 import matplotlib.pyplot as plt
-
 # import csv
+
+tfpl = tfp.layers
+tfd = tfp.distributions
 
 
 """ 
@@ -74,10 +78,10 @@ Variables to define environment
 service = QiskitRuntimeService(channel='ibm_quantum')
 seed = 3590  # Seed for action sampling
 backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
-options = {"seed_simulator": seed, 'resilience_level': 0}
+options = {"seed_simulator": None, 'resilience_level': 0}
 n_qubits = 2
-sampling_Paulis = 10
-N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
+sampling_Paulis = 100
+N_shots = 100  # Number of shots for sampling the quantum computer for each action vector
 
 # Target state: Bell state
 ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
@@ -97,7 +101,7 @@ Qiskit_setup = {
 q_env = QuantumEnvironment(n_qubits=n_qubits, target_state=bell_tgt, abstraction_level="circuit",
                            action_spec=action_spec,
                            Qiskit_setup=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
+                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=2)
 # q_env.perform_action(np.array([[0.25], [0.25]]))
 
 
@@ -107,17 +111,17 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 100  # Number of epochs
+n_epochs = 200  # Number of epochs
 batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.1  # Learning rate for policy update step
+eta = 0.05  # Learning rate for policy update step
 eta_2 = 0.1  # Learning rate for critic (value function) update step
 
 use_PPO = True
 epsilon = 0.2  # Parameter for clipping value (PPO)
 grad_clip = 0.3
 critic_loss_coeff = 0.5
-optimizer = select_optimizer(lr=eta, optimizer=opti)
+optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip)
 sigma_eps = 1e-6  # for numerical stability
 
 # class Agent:
@@ -133,17 +137,25 @@ Policy parameters
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
 n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
-N_out = 2 * n_actions  # One mean/variance for each action
-layers = [2]  # List containing the number of neurons in each hidden layer
+hidden_units = [5, 7]  # List containing number of units in each hidden layer
 
-input_layer = Input(shape=N_in)
-hidden = Sequential([Dense(layer, activation='relu', kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-                           bias_initializer=tf.initializers.RandomNormal(stddev=0.5))
-                     for layer in layers])(input_layer)
-actor_output = Dense(N_out, activation=None)(hidden)
-critic_output = Dense(1, activation=None)(hidden)
-network = Model(inputs=input_layer, outputs=[actor_output, critic_output])
-init_msmt = np.zeros([1, N_in])
+input_layer = Input(shape=(N_in,))
+
+Net = Dense(hidden_units[0], activation='relu', input_shape=(N_in,),
+            kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
+            bias_initializer=tf.initializers.RandomNormal(stddev=0.5), name=f"hidden_{0}")(input_layer)
+for i in range(1, len(hidden_units)):
+    Net = Dense(hidden_units[i], activation='relu', kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
+                bias_initializer=tf.initializers.RandomNormal(stddev=0.5), name=f"hidden_{i}")(Net)
+
+# actor_output = tfpl.IndependentNormal(N_out)(Net)
+mean_param = Dense(n_actions, activation=None, name='mean_vec')(Net)
+sigma_param = Dense(n_actions, activation="relu", name="sigma_vec")(Net)
+critic_output = Dense(1, activation=None, name="critic_output")(Net)
+
+network = Model(inputs=input_layer, outputs=[mean_param, sigma_param, critic_output])
+network.summary()
+init_msmt = np.zeros((1, N_in))
 
 #  Keep track of variables
 data = {
@@ -170,41 +182,41 @@ Training loop
 -----------------------------------------------------------------------------------------------------
 """
 # TODO: Use TF-Agents PPO Agent
-mu_old = tf.Variable(initial_value=constrain_mean_value(network(init_msmt)[0][0][:N_out // 2]), trainable=False)
-sigma_old = tf.Variable(initial_value=constrain_std_value(network(init_msmt)[0][0][N_out // 2:]), trainable=False)
+mu_old = tf.Variable(initial_value=network(init_msmt)[0][0], trainable=False)
+sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0] + sigma_eps, trainable=False)
 
 policy_params_str = 'Policy params:'
-print('Neural net output', network(init_msmt))
+print('Neural net output', network(init_msmt), type(network(init_msmt)))
 print("mu_old", mu_old)
 print("sigma_old", sigma_old)
 
 for i in tqdm(range(n_epochs)):
-    policy_params, b = network(init_msmt)
-    mu = constrain_mean_value(policy_params[0][:N_out // 2])
-    sigma = constrain_std_value(policy_params[0][N_out // 2:])
 
-    print('Epoch', i)
-    print(f"{policy_params_str:#<100}")
-    print('mu_vec', policy_params[0][:N_out // 2])
-    print('sigma_vec', policy_params[0][N_out // 2:])
-    print('baseline', b)
-
-    Old_distrib = MultivariateNormalDiag(loc=mu_old, scale_diag=sigma_old, validate_args=True, allow_nan_stats=False)
-    Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma, validate_args=True, allow_nan_stats=False)
-
-    action_vector = Policy_distrib.sample(batchsize, seed=seed)
-    reward, dm_observed = q_env.perform_action(action_vector)
-    # print('action_vec', action_vector)
-    # Run quantum circuit to retrieve rewards (in this example, only one time step)
-
-    e = Policy_distrib.trainable_variables
-    print("trainable variables", e)
-    # print("reward", reward)
     with tf.GradientTape(persistent=True) as tape:
 
-        advantage = reward - network(init_msmt)[1]
+        mu, sigma, b = network(init_msmt)
+        print(mu, sigma, b)
+        mu = tf.clip_by_value(tf.squeeze(mu, axis=0), -1., 1.)
+        sigma = tf.squeeze(sigma, axis=0) + sigma_eps
+        b = tf.squeeze(b, axis=0)
+        print('\n Epoch', i)
+        print(f"{policy_params_str:#<100}")
+        print('mu_vec', mu)
+        print('sigma_vec', sigma)
+        print('baseline', b)
+        Old_distrib = tfd.MultivariateNormalDiag(loc=mu_old, scale_diag=sigma_old,
+                                                 validate_args=True, allow_nan_stats=False)
+        Policy_distrib = tfd.MultivariateNormalDiag(loc=mu, scale_diag=sigma,
+                                                    validate_args=True, allow_nan_stats=False)
+
+        action_vector = Policy_distrib.sample(batchsize, seed=seed)
+        # print('action_vec', action_vector)
+        reward = q_env.perform_action(action_vector)
+        advantage = reward - b
 
         if use_PPO:
+            print('prob', Policy_distrib.prob(action_vector))
+            print('old prob', Old_distrib.prob(action_vector))
             ratio = Policy_distrib.prob(action_vector) / (Old_distrib.prob(action_vector) + sigma_eps)
             actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
                                                      advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
@@ -223,13 +235,12 @@ for i in tqdm(range(n_epochs)):
         mu_old.assign(mu)
         sigma_old.assign(sigma)
 
-    data["amps"][i] = np.array(action_vector)
     data["rewards"][i] = reward
     data["means"][i] = np.array(mu)
     data["stds"][i] = np.array(sigma)
     data["baselines"][i] = np.array(b)
     # print('dm', q_env.density_matrix)
-    data["fidelity"][i] = state_fidelity(target_state["dm"], dm_observed)
+    data["fidelity"][i] = state_fidelity(target_state["dm"], q_env.density_matrix_history[i])
 
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
@@ -242,28 +253,22 @@ Plotting tools
 
 
 #  Plotting results
-def plot_examples(ax, reward_table):
+def plot_examples(fig, ax, reward_table):
     """
     Helper function to plot data with associated colormap, used for plotting the reward per each epoch and each episode
     (From original repo associated to the paper https://github.com/v-sivak/quantum-control-rl)
     """
 
-    vals = np.where(reward_table == 1, 0.6, -0.9)
-
-    ax.pcolormesh(np.transpose(vals), cmap='RdYlGn', vmin=-1, vmax=1)
-
-    ax.set_xticks(np.arange(0, vals.shape[0], 1), minor=True)
-    ax.set_yticks(np.arange(0, vals.shape[1], 1), minor=True)
-    ax.grid(which='both', color='w', linestyle='-')
-    ax.set_aspect('equal')
+    im = ax.imshow(np.transpose(reward_table))
     ax.set_ylabel('Episode')
     ax.set_xlabel('Epoch')
+    fig.colorbar(im, ax=ax, label='Reward')
     plt.show()
 
 
 number_of_steps = 10
 x = np.linspace(-1., 1., 100)
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+figure, (ax1, ax2, ax3) = plt.subplots(1, 3)
 # Plot probability density associated to updated parameters for a few steps
 for i in range(0, n_epochs + 1, number_of_steps):
     ax1.plot(x, norm.pdf(x, loc=data["means"][i], scale=np.abs(data["stds"][i])), '-o', label=f'{i}')
@@ -275,8 +280,8 @@ ax1.set_ylim(0., 20)
 ax2.plot(np.mean(data["rewards"], axis=1), '-.', label='Reward')
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
-ax2.plot(data["baselines"], '-.', label='baseline')
+# ax2.plot(data["baselines"], '-.', label='baseline')
 ax2.plot(data["fidelity"], '-o', label='Fidelity')
 ax2.legend()
 ax1.legend()
-plot_examples(ax3, data["rewards"])
+plot_examples(figure, ax3, data["rewards"])
