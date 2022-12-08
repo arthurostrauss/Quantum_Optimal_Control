@@ -13,34 +13,24 @@ from helper_functions import select_optimizer
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import IBMQ
 from qiskit.circuit import ParameterVector, QuantumCircuit
-from qiskit.quantum_info import state_fidelity, DensityMatrix
+from qiskit.quantum_info import DensityMatrix
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
-from tensorflow.python.keras import Input
+from tensorflow.python.keras import Input, Model
 from tensorflow.python.keras.layers import Dense
-from tensorflow.python.keras import Model
-import tensorflow_probability as tfp
+from tensorflow_probability.python.distributions import MultivariateNormalDiag
 
 from tf_agents.specs import array_spec, tensor_spec
-# from tensorflow.python.keras.callbacks import TensorBoard
-# from tensorboard.plugins.hparams import api as hp
-# from tensorflow.python.keras.callbacks import TensorBoard
 
 # Additional imports
 from tqdm import tqdm
-from scipy.stats import norm
 import matplotlib.pyplot as plt
-# import csv
-
-tfpl = tfp.layers
-tfd = tfp.distributions
-
 
 """ 
 -----------------------------------------------------------------------------------------------------
-Here we set a RL agent based on PPO and an actor critic network to perform arbitrary state preparation based on
+We set a RL agent based on PPO and an actor critic network to perform arbitrary state preparation based on
 scheme proposed in the appendix of Vladimir Sivak paper. 
 In there, we design classes for the environment (Quantum Circuit simulated on IBM Q simulator) and the agent 
 -----------------------------------------------------------------------------------------------------
@@ -58,8 +48,10 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     :return:
     """
     # qc.num_qubits
-    params = ParameterVector('theta', 1)
+    global n_actions
+    params = ParameterVector('theta', n_actions)
     qc.ry(2 * np.pi * params[0], 0)
+    qc.rx(2 * np.pi * params[1], 1)
     qc.cx(0, 1)
     # qc.u(angle[0][0], angle[0][1], angle[0, 2], 0)
     # qc.u(angle[1][0], angle[1][1], angle[1, 2], 1)
@@ -81,7 +73,7 @@ backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantu
 options = {"seed_simulator": None, 'resilience_level': 0}
 n_qubits = 2
 sampling_Paulis = 100
-N_shots = 100  # Number of shots for sampling the quantum computer for each action vector
+N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 
 # Target state: Bell state
 ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
@@ -89,8 +81,11 @@ ket00, ket11 = np.kron(ket0, ket0), np.kron(ket1, ket1)
 bell_state = (ket00 + ket11) / np.sqrt(2)
 bell_dm = bell_state @ bell_state.conj().T
 bell_tgt = {"dm": DensityMatrix(bell_dm)}
-print(bell_tgt)
 target_state = bell_tgt
+
+# Target state: |1>
+# excited_dm = ket1@ket1.T
+# excited_target = {"dm": DensityMatrix(excited_dm)}
 
 Qiskit_setup = {
     "backend": backend,
@@ -111,19 +106,19 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 200  # Number of epochs
+n_epochs = 100  # Number of epochs
 batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.05  # Learning rate for policy update step
+eta = 0.15  # Learning rate for policy update step
 eta_2 = 0.1  # Learning rate for critic (value function) update step
 
 use_PPO = True
 epsilon = 0.2  # Parameter for clipping value (PPO)
-grad_clip = 0.3
+grad_clip = None
 critic_loss_coeff = 0.5
 optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip)
-sigma_eps = 1e-6  # for numerical stability
-
+sigma_eps = 1e-3  # for numerical stability
+grad_update_number = 20
 # class Agent:
 #     def __init__(self, epochs:int, batchsize:int, optimizer, lr: float, lr2: Optional[float], grad_clip:):
 #         pass
@@ -136,8 +131,8 @@ Policy parameters
 """
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
-n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
-hidden_units = [5, 7]  # List containing number of units in each hidden layer
+n_actions = 2  # Choose how many control parameters in pulse/circuit parametrization
+hidden_units = [32, 32]  # List containing number of units in each hidden layer
 
 input_layer = Input(shape=(N_in,))
 
@@ -148,33 +143,13 @@ for i in range(1, len(hidden_units)):
     Net = Dense(hidden_units[i], activation='relu', kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
                 bias_initializer=tf.initializers.RandomNormal(stddev=0.5), name=f"hidden_{i}")(Net)
 
-# actor_output = tfpl.IndependentNormal(N_out)(Net)
-mean_param = Dense(n_actions, activation=None, name='mean_vec')(Net)
-sigma_param = Dense(n_actions, activation="relu", name="sigma_vec")(Net)
-critic_output = Dense(1, activation=None, name="critic_output")(Net)
+mean_param = Dense(n_actions, activation='tanh', name='mean_vec')(Net)  # Mean vector output
+sigma_param = Dense(n_actions, activation="softplus", name="sigma_vec")(Net)  # Diagonal elements of cov matrix output
+critic_output = Dense(1, activation=None, name="critic_output")(Net)  # Critic is in same network as the actor part
 
 network = Model(inputs=input_layer, outputs=[mean_param, sigma_param, critic_output])
 network.summary()
-init_msmt = np.zeros((1, N_in))
-
-#  Keep track of variables
-data = {
-    "means": np.zeros(n_epochs + 1),
-    "stds": np.zeros(n_epochs + 1),
-    "amps": np.zeros([n_epochs, batchsize, 1]),
-    "rewards": np.zeros([n_epochs, batchsize]),
-    "baselines": np.zeros(n_epochs + 1),
-    "fidelity": np.zeros(n_epochs),
-    "params": {
-        "learning_rate": eta,
-        "seed": seed,
-        "clipping_PPO": epsilon,
-        "n_epochs": n_epochs,
-        "batchsize": batchsize,
-        "target_state": target_state,
-        "PPO?": use_PPO,
-    }
-}
+init_msmt = np.zeros((1, N_in))  # Here no feedback involved, so measurement sequence is always the same
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -183,7 +158,7 @@ Training loop
 """
 # TODO: Use TF-Agents PPO Agent
 mu_old = tf.Variable(initial_value=network(init_msmt)[0][0], trainable=False)
-sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0] + sigma_eps, trainable=False)
+sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0], trainable=False)
 
 policy_params_str = 'Policy params:'
 print('Neural net output', network(init_msmt), type(network(init_msmt)))
@@ -192,32 +167,34 @@ print("sigma_old", sigma_old)
 
 for i in tqdm(range(n_epochs)):
 
+    Old_distrib = MultivariateNormalDiag(loc=mu_old, scale_diag=sigma_old,
+                                         validate_args=True, allow_nan_stats=False)
+
     with tf.GradientTape(persistent=True) as tape:
 
-        mu, sigma, b = network(init_msmt)
-        print(mu, sigma, b)
-        mu = tf.clip_by_value(tf.squeeze(mu, axis=0), -1., 1.)
-        sigma = tf.squeeze(sigma, axis=0) + sigma_eps
+        mu, sigma, b = network(init_msmt, training=True)
+        mu = tf.squeeze(mu, axis=0)
+        sigma = tf.squeeze(sigma, axis=0)
         b = tf.squeeze(b, axis=0)
         print('\n Epoch', i)
         print(f"{policy_params_str:#<100}")
-        print('mu_vec', mu)
-        print('sigma_vec', sigma)
-        print('baseline', b)
-        Old_distrib = tfd.MultivariateNormalDiag(loc=mu_old, scale_diag=sigma_old,
-                                                 validate_args=True, allow_nan_stats=False)
-        Policy_distrib = tfd.MultivariateNormalDiag(loc=mu, scale_diag=sigma,
-                                                    validate_args=True, allow_nan_stats=False)
+        print('mu_vec:', np.array(mu))
+        print('sigma_vec:', np.abs(np.array(sigma)))
+        print('baseline:', np.array(b))
 
-        action_vector = Policy_distrib.sample(batchsize, seed=seed)
-        # print('action_vec', action_vector)
+        Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma,
+                                                validate_args=True, allow_nan_stats=False)
+
+        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -1., 1.))
+
         reward = q_env.perform_action(action_vector)
         advantage = reward - b
 
         if use_PPO:
-            print('prob', Policy_distrib.prob(action_vector))
-            print('old prob', Old_distrib.prob(action_vector))
-            ratio = Policy_distrib.prob(action_vector) / (Old_distrib.prob(action_vector) + sigma_eps)
+            # print('action_vec', action_vector)
+            # print('prob', Policy_distrib.prob(action_vector))
+            # print('old prob', Old_distrib.prob(action_vector))
+            ratio = Policy_distrib.prob(action_vector) / (tf.stop_gradient(Old_distrib.prob(action_vector)) + 1e-6)
             actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
                                                      advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
         else:  # REINFORCE algorithm
@@ -234,13 +211,6 @@ for i in tqdm(range(n_epochs)):
     if use_PPO:
         mu_old.assign(mu)
         sigma_old.assign(sigma)
-
-    data["rewards"][i] = reward
-    data["means"][i] = np.array(mu)
-    data["stds"][i] = np.array(sigma)
-    data["baselines"][i] = np.array(b)
-    # print('dm', q_env.density_matrix)
-    data["fidelity"][i] = state_fidelity(target_state["dm"], q_env.density_matrix_history[i])
 
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
@@ -266,22 +236,12 @@ def plot_examples(fig, ax, reward_table):
     plt.show()
 
 
-number_of_steps = 10
-x = np.linspace(-1., 1., 100)
-figure, (ax1, ax2, ax3) = plt.subplots(1, 3)
-# Plot probability density associated to updated parameters for a few steps
-for i in range(0, n_epochs + 1, number_of_steps):
-    ax1.plot(x, norm.pdf(x, loc=data["means"][i], scale=np.abs(data["stds"][i])), '-o', label=f'{i}')
-
-ax1.set_xlabel("Action, a")
-ax1.set_ylabel("Probability density")
-ax1.set_ylim(0., 20)
+figure, (ax1, ax2) = plt.subplots(1, 2)
 #  Plot return as a function of epochs
-ax2.plot(np.mean(data["rewards"], axis=1), '-.', label='Reward')
-ax2.set_xlabel("Epoch")
-ax2.set_ylabel("Expected reward")
-# ax2.plot(data["baselines"], '-.', label='baseline')
-ax2.plot(data["fidelity"], '-o', label='Fidelity')
-ax2.legend()
+ax1.plot(np.mean(q_env.reward_history, axis=1), '-.', label='Reward')
+ax1.set_xlabel("Epoch")
+ax1.set_ylabel("Expected reward")
+# ax1.plot(data["baselines"], '-.', label='baseline')
+ax1.plot(q_env.fidelity_history, '-o', label='Fidelity')
 ax1.legend()
-plot_examples(figure, ax3, data["rewards"])
+plot_examples(figure, ax2, q_env.reward_history)
