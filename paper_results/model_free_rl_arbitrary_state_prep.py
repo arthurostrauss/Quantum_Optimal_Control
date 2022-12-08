@@ -52,14 +52,14 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     params = ParameterVector('theta', n_actions)
     qc.ry(2 * np.pi * params[0], 0)
     qc.rx(2 * np.pi * params[1], 1)
-    qc.cx(0, 1)
+    # qc.cx(0, 1)
     # qc.u(angle[0][0], angle[0][1], angle[0, 2], 0)
     # qc.u(angle[1][0], angle[1][1], angle[1, 2], 1)
     # qc.ecr(0, 1)
 
 
 # action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
-action_spec = tensor_spec.BoundedTensorSpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
+
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -93,8 +93,14 @@ Qiskit_setup = {
     "parametrized_circuit": apply_parametrized_circuit,
     "options": options
 }
+
+n_actions = 2  # Choose how many control parameters in pulse/circuit parametrization
+time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
+action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
+observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
+
 q_env = QuantumEnvironment(n_qubits=n_qubits, target_state=bell_tgt, abstraction_level="circuit",
-                           action_spec=action_spec,
+                           action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_setup=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=2)
 # q_env.perform_action(np.array([[0.25], [0.25]]))
@@ -109,12 +115,12 @@ Hyperparameters for RL agent
 n_epochs = 100  # Number of epochs
 batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.15  # Learning rate for policy update step
+eta = 0.1  # Learning rate for policy update step
 eta_2 = 0.1  # Learning rate for critic (value function) update step
 
 use_PPO = True
 epsilon = 0.2  # Parameter for clipping value (PPO)
-grad_clip = None
+grad_clip = 0.001
 critic_loss_coeff = 0.5
 optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip)
 sigma_eps = 1e-3  # for numerical stability
@@ -131,7 +137,6 @@ Policy parameters
 """
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
-n_actions = 2  # Choose how many control parameters in pulse/circuit parametrization
 hidden_units = [32, 32]  # List containing number of units in each hidden layer
 
 input_layer = Input(shape=(N_in,))

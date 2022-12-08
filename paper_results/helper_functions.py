@@ -1,5 +1,5 @@
 import tensorflow as tf
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def constrain_mean_value(mu_var):
@@ -22,3 +22,7 @@ def select_optimizer(lr: float, optimizer: str = "Adam", concurrent_optimization
             return tf.optimizers.Adam(learning_rate=lr), tf.optimizers.Adam(learning_rate=lr2, clipvalue=grad_clip)
         elif optimizer == 'SGD':
             return tf.optimizers.SGD(learning_rate=lr), tf.optimizers.SGD(learning_rate=lr2, clipvalue=grad_clip)
+
+
+def generate_model(input_shape: Tuple, hidden_units, n_actions: int, actor_critic_together: bool=True):
+    pass

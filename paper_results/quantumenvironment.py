@@ -12,7 +12,7 @@ from qiskit_ibm_runtime import Session
 from qiskit.primitives import Estimator
 import numpy as np
 from itertools import product
-from typing import Dict, Union, Callable, Optional, Any
+from typing import Dict, Union, Optional, Any
 import tensorflow as tf
 from tensorflow_probability.python.distributions import Categorical
 
@@ -28,6 +28,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
 
     def __init__(self, n_qubits: int, target_state: Dict[str, Union[str, DensityMatrix]], abstraction_level: str,
                  action_spec: Union[array_spec.ArraySpec, tensor_spec.TensorSpec],
+                 observation_spec: Union[array_spec.ArraySpec, tensor_spec.TensorSpec],
                  Qiskit_setup: Optional[Dict] = None,
                  QUA_setup: Optional[Dict] = None,
                  sampling_Pauli_space: int = 10, n_shots: int = 1, c_factor: float = 0.5):
@@ -60,8 +61,8 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
             self.backend = Qiskit_setup["backend"]
             self.parametrized_circuit_func = Qiskit_setup["parametrized_circuit"]
         else:
-            #  TODO: Define pulse level (Schedule most likely, cf Qiskit Pulse doc)
-            #  TODO: Add a QUA program
+            # TODO: Define pulse level (Schedule most likely, cf Qiskit Pulse doc)
+            # TODO: Add a QUA program
             self.qua_setup = QUA_setup
         self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
                           for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
@@ -78,10 +79,11 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         self.fidelity_history = []
         self.time_step = 0
         self._action_spec = action_spec
+        self._observation_spec = observation_spec
         self.episode_ended = False
 
     def observation_spec(self) -> types.NestedArraySpec:
-        pass
+        return self._observation_spec
 
     def action_spec(self) -> types.NestedArraySpec:
         return self._action_spec
