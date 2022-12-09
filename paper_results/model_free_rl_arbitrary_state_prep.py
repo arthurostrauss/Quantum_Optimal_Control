@@ -8,7 +8,7 @@ Code for arbitrary state preparation based on scheme described in Appendix D.2b 
 
 import numpy as np
 from quantumenvironment import QuantumEnvironment
-from helper_functions import select_optimizer
+from helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import IBMQ
@@ -52,7 +52,7 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     params = ParameterVector('theta', n_actions)
     qc.ry(2 * np.pi * params[0], 0)
     qc.rx(2 * np.pi * params[1], 1)
-    # qc.cx(0, 1)
+    qc.cx(0, 1)
     # qc.u(angle[0][0], angle[0][1], angle[0, 2], 0)
     # qc.u(angle[1][0], angle[1][1], angle[1, 2], 1)
     # qc.ecr(0, 1)
@@ -115,7 +115,7 @@ Hyperparameters for RL agent
 n_epochs = 100  # Number of epochs
 batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.1  # Learning rate for policy update step
+eta = 0.005  # Learning rate for policy update step
 eta_2 = 0.1  # Learning rate for critic (value function) update step
 
 use_PPO = True
@@ -139,20 +139,7 @@ Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
 hidden_units = [32, 32]  # List containing number of units in each hidden layer
 
-input_layer = Input(shape=(N_in,))
-
-Net = Dense(hidden_units[0], activation='relu', input_shape=(N_in,),
-            kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-            bias_initializer=tf.initializers.RandomNormal(stddev=0.5), name=f"hidden_{0}")(input_layer)
-for i in range(1, len(hidden_units)):
-    Net = Dense(hidden_units[i], activation='relu', kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-                bias_initializer=tf.initializers.RandomNormal(stddev=0.5), name=f"hidden_{i}")(Net)
-
-mean_param = Dense(n_actions, activation='tanh', name='mean_vec')(Net)  # Mean vector output
-sigma_param = Dense(n_actions, activation="softplus", name="sigma_vec")(Net)  # Diagonal elements of cov matrix output
-critic_output = Dense(1, activation=None, name="critic_output")(Net)  # Critic is in same network as the actor part
-
-network = Model(inputs=input_layer, outputs=[mean_param, sigma_param, critic_output])
+network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)
 network.summary()
 init_msmt = np.zeros((1, N_in))  # Here no feedback involved, so measurement sequence is always the same
 
