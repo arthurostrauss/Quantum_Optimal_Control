@@ -50,12 +50,9 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     # qc.num_qubits
     global n_actions
     params = ParameterVector('theta', n_actions)
-    qc.ry(2 * np.pi * params[0], 0)
-    qc.rx(2 * np.pi * params[1], 1)
-    qc.cx(0, 1)
-    # qc.u(angle[0][0], angle[0][1], angle[0, 2], 0)
-    # qc.u(angle[1][0], angle[1][1], angle[1, 2], 1)
-    # qc.ecr(0, 1)
+    qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
+    qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
+    qc.rzx(params[6], 0, 1)
 
 
 # action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
@@ -83,10 +80,6 @@ bell_dm = bell_state @ bell_state.conj().T
 bell_tgt = {"dm": DensityMatrix(bell_dm)}
 target_state = bell_tgt
 
-# Target state: |1>
-# excited_dm = ket1@ket1.T
-# excited_target = {"dm": DensityMatrix(excited_dm)}
-
 Qiskit_setup = {
     "backend": backend,
     "service": service,
@@ -94,7 +87,7 @@ Qiskit_setup = {
     "options": options
 }
 
-n_actions = 2  # Choose how many control parameters in pulse/circuit parametrization
+n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
 time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
 action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
 observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
@@ -102,8 +95,7 @@ observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
 q_env = QuantumEnvironment(n_qubits=n_qubits, target_state=bell_tgt, abstraction_level="circuit",
                            action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_setup=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=2)
-# q_env.perform_action(np.array([[0.25], [0.25]]))
+                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=1.)
 
 
 """
@@ -112,17 +104,17 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 100  # Number of epochs
+n_epochs = 1500  # Number of epochs
 batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.005  # Learning rate for policy update step
-eta_2 = 0.1  # Learning rate for critic (value function) update step
+eta = 0.001  # Learning rate for policy update step
+eta_2 = None  # Learning rate for critic (value function) update step
 
 use_PPO = True
-epsilon = 0.2  # Parameter for clipping value (PPO)
-grad_clip = 0.001
+epsilon = 0.1  # Parameter for clipping value (PPO)
+grad_clip = 0.01
 critic_loss_coeff = 0.5
-optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip)
+optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip, concurrent_optimization=True, lr2=eta_2)
 sigma_eps = 1e-3  # for numerical stability
 grad_update_number = 20
 # class Agent:
@@ -137,7 +129,7 @@ Policy parameters
 """
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
-hidden_units = [32, 32]  # List containing number of units in each hidden layer
+hidden_units = [82, 82]  # List containing number of units in each hidden layer
 
 network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)
 network.summary()
@@ -168,11 +160,6 @@ for i in tqdm(range(n_epochs)):
         mu = tf.squeeze(mu, axis=0)
         sigma = tf.squeeze(sigma, axis=0)
         b = tf.squeeze(b, axis=0)
-        print('\n Epoch', i)
-        print(f"{policy_params_str:#<100}")
-        print('mu_vec:', np.array(mu))
-        print('sigma_vec:', np.abs(np.array(sigma)))
-        print('baseline:', np.array(b))
 
         Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma,
                                                 validate_args=True, allow_nan_stats=False)
@@ -183,9 +170,6 @@ for i in tqdm(range(n_epochs)):
         advantage = reward - b
 
         if use_PPO:
-            # print('action_vec', action_vector)
-            # print('prob', Policy_distrib.prob(action_vector))
-            # print('old prob', Old_distrib.prob(action_vector))
             ratio = Policy_distrib.prob(action_vector) / (tf.stop_gradient(Old_distrib.prob(action_vector)) + 1e-6)
             actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
                                                      advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
@@ -196,13 +180,18 @@ for i in tqdm(range(n_epochs)):
         combined_loss = actor_loss + critic_loss_coeff * critic_loss
 
     grads = tape.gradient(combined_loss, network.trainable_variables)
-    # print('grads', grads)
-    # grads = tf.clip_by_value(combined_grads, -grad_clip, grad_clip)
 
     # For PPO, update old parameters to have access to "old" policy
     if use_PPO:
         mu_old.assign(mu)
         sigma_old.assign(sigma)
+
+    print('\n Epoch', i)
+    print(f"{policy_params_str:#<100}")
+    print('mu_vec:', np.array(mu))
+    print('sigma_vec:', np.array(sigma))
+    print('baseline:', np.array(b))
+    print("Fidelity:", q_env.fidelity_history[i])
 
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))

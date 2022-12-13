@@ -12,8 +12,8 @@ def constrain_std_value(std_var):
     return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
 
 
-def select_optimizer(lr: float, optimizer: str = "Adam", concurrent_optimization: bool = True,
-                     grad_clip: Optional[float] = None, lr2: Optional[float] = None):
+def select_optimizer(lr: float, optimizer: str = "Adam", grad_clip: Optional[float] = None,
+                     concurrent_optimization: bool = True,  lr2: Optional[float] = None):
     if concurrent_optimization:
         if optimizer == 'Adam':
             return tf.optimizers.Adam(learning_rate=lr, clipvalue=grad_clip)
