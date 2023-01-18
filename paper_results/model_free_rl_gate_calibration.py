@@ -12,8 +12,11 @@ from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import IBMQ
-from qiskit.circuit import ParameterVector, QuantumCircuit
-from qiskit.quantum_info import DensityMatrix
+from qiskit.circuit import ParameterVector, QuantumCircuit, Gate
+from qiskit.extensions import CXGate, XGate, YGate, HGate, RXGate, RYGate, RZGate, CZGate
+from qiskit.quantum_info import DensityMatrix, Operator
+from qiskit.opflow import StateFn, Zero, One, Plus, Minus, H, I, X, CX, S, VectorStateFn, CircuitStateFn, \
+    OperatorStateFn
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 # Tensorflow imports for building RL agent and framework
@@ -50,7 +53,7 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     params = ParameterVector('theta', n_actions)
     qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
     qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    qc.rzx(2 * np.pi * params[6], 0, 1)
+    qc.rzx(2 * np.pi * params[6], 1, 0)
 
 
 # action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
@@ -66,7 +69,6 @@ service = QiskitRuntimeService(channel='ibm_quantum')
 seed = 3590  # Seed for action sampling
 backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 options = {"seed_simulator": None, 'resilience_level': 0}
-options = {'resilience_level': 0}
 n_qubits = 2
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
@@ -74,10 +76,44 @@ N_shots = 1  # Number of shots for sampling the quantum computer for each action
 # Target state: Bell state
 ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
 ket00, ket11 = np.kron(ket0, ket0), np.kron(ket1, ket1)
+ket01, ket10 = np.kron(ket0, ket1), np.kron(ket1, ket0)
 bell_state = (ket00 + ket11) / np.sqrt(2)
 bell_dm = bell_state @ bell_state.conj().T
-bell_tgt = {"dm": DensityMatrix(bell_dm)}
+bell_tgt = {"target_type": "state",
+            "dm": DensityMatrix(bell_dm)}
 target_state = bell_tgt
+
+# Target gate: CNOT
+
+cnot_gate = CXGate("CNOT")
+target = {
+    "target_type": "gate",
+    "gate": cnot_gate,
+    "input_states": [{"name": "|00>",
+                      "dm": DensityMatrix(ket00 @ ket00.conj().T),
+                      "state_fn": Zero ^ 2,
+                      "circuit": (I ^ 2).to_instruction(),
+                      "register": [0, 1]
+                      },
+                     {"name": "|01>",
+                      "dm": DensityMatrix(ket01 @ ket01.conj().T),
+                      "state_fn": Zero ^ One,
+                      "circuit": (X ^ I).to_instruction(),
+                      "register": [0, 1]
+                      },
+                     {"name": "|10>",
+                      "dm": DensityMatrix(ket10 @ ket10.conj().T),
+                      "state_fn": One ^ Zero,
+                      "circuit": (I ^ X).to_instruction(),
+                      "register": [0, 1]
+                      },
+                     {"name": "|11>",
+                      "dm": DensityMatrix(ket11 @ ket11.conj().T),
+                      "state_fn": One ^ 2,
+                      "circuit": (X ^ X).to_instruction(),
+                      "register": [0, 1]
+                      }]
+}
 
 Qiskit_setup = {
     "backend": backend,
@@ -91,11 +127,10 @@ time_steps = 1  # Number of time steps within an episode (1 means you do one rea
 action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
 observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
 
-q_env = QuantumEnvironment(n_qubits=n_qubits, target=bell_tgt, abstraction_level="circuit",
+q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="circuit",
                            action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=1.)
-
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -103,8 +138,8 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 1500  # Number of epochs
-batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+n_epochs = 10000  # Number of epochs
+batchsize = 300  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
@@ -165,7 +200,7 @@ for i in tqdm(range(n_epochs)):
 
         action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -1., 1.))
 
-        reward = q_env.perform_action(action_vector)
+        reward = q_env.perform_action_gate_cal(action_vector)
         advantage = reward - b
 
         if use_PPO:
@@ -190,7 +225,8 @@ for i in tqdm(range(n_epochs)):
     print('mu_vec:', np.array(mu))
     print('sigma_vec:', np.array(sigma))
     print('baseline:', np.array(b))
-    print("Fidelity:", q_env.state_fidelity_history[i])
+    print("Process Fidelity:", q_env.process_fidelity_history[i])
+    print("Average Gate Fidelity:", q_env.avg_fidelity_history[i])
 
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
@@ -222,6 +258,7 @@ ax1.plot(np.mean(q_env.reward_history, axis=1), '-.', label='Reward')
 ax1.set_xlabel("Epoch")
 ax1.set_ylabel("Expected reward")
 # ax1.plot(data["baselines"], '-.', label='baseline')
-ax1.plot(q_env.state_fidelity_history, '-o', label='Fidelity')
+ax1.plot(q_env.process_fidelity_history, '-o', label='Process Fidelity')
+ax1.plot(q_env.avg_fidelity_history, '-.', label='Average Gate Fidelity')
 ax1.legend()
 plot_examples(figure, ax2, q_env.reward_history)
