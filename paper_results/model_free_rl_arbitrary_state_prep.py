@@ -15,6 +15,7 @@ from qiskit import IBMQ
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.quantum_info import DensityMatrix
 from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -72,11 +73,8 @@ sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 
 # Target state: Bell state
-ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
-ket00, ket11 = np.kron(ket0, ket0), np.kron(ket1, ket1)
-bell_state = (ket00 + ket11) / np.sqrt(2)
-bell_dm = bell_state @ bell_state.conj().T
-bell_tgt = {"dm": DensityMatrix(bell_dm)}
+bell_state = CX @ (I ^ H) @ (Zero ^ Zero)
+bell_tgt = {"state_fn": bell_state}
 target_state = bell_tgt
 
 Qiskit_setup = {
@@ -95,7 +93,6 @@ q_env = QuantumEnvironment(n_qubits=n_qubits, target=bell_tgt, abstraction_level
                            action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=1.)
-
 
 """
 -----------------------------------------------------------------------------------------------------

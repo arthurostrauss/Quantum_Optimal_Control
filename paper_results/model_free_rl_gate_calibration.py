@@ -12,11 +12,10 @@ from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import IBMQ
-from qiskit.circuit import ParameterVector, QuantumCircuit, Gate
-from qiskit.extensions import CXGate, XGate, YGate, HGate, RXGate, RYGate, RZGate, CZGate
+from qiskit.circuit import ParameterVector, QuantumCircuit
+from qiskit.extensions import CXGate, XGate
 from qiskit.quantum_info import DensityMatrix, Operator
-from qiskit.opflow import StateFn, Zero, One, Plus, Minus, H, I, X, CX, S, VectorStateFn, CircuitStateFn, \
-    OperatorStateFn
+from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 # Tensorflow imports for building RL agent and framework
@@ -56,9 +55,6 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     qc.rzx(2 * np.pi * params[6], 1, 0)
 
 
-# action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
-
-
 """
 -----------------------------------------------------------------------------------------------------
 Variables to define environment
@@ -73,48 +69,144 @@ n_qubits = 2
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 
-# Target state: Bell state
-ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
-ket00, ket11 = np.kron(ket0, ket0), np.kron(ket1, ket1)
-ket01, ket10 = np.kron(ket0, ket1), np.kron(ket1, ket0)
-bell_state = (ket00 + ket11) / np.sqrt(2)
-bell_dm = bell_state @ bell_state.conj().T
-bell_tgt = {"target_type": "state",
-            "dm": DensityMatrix(bell_dm)}
-target_state = bell_tgt
-
 # Target gate: CNOT
-
-cnot_gate = CXGate("CNOT")
-target = {
+Plus_i = S @ Plus
+Minus_i = S @ Minus
+circuit_Plus_i = S @ H
+circuit_Minus_i = S @ H @ X
+cnot_target = {
     "target_type": "gate",
-    "gate": cnot_gate,
-    "input_states": [{"name": "|00>",
-                      "dm": DensityMatrix(ket00 @ ket00.conj().T),
+    "gate": CXGate("CNOT"),
+    "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
+                      "dm": DensityMatrix(Zero ^ 2),
                       "state_fn": Zero ^ 2,
-                      "circuit": (I ^ 2).to_instruction(),
+                      "circuit": I ^ 2,
                       "register": [0, 1]
                       },
                      {"name": "|01>",
-                      "dm": DensityMatrix(ket01 @ ket01.conj().T),
+                      "dm": DensityMatrix(Zero ^ One),
                       "state_fn": Zero ^ One,
-                      "circuit": (X ^ I).to_instruction(),
+                      "circuit": X ^ I,
                       "register": [0, 1]
                       },
                      {"name": "|10>",
-                      "dm": DensityMatrix(ket10 @ ket10.conj().T),
+                      "dm": DensityMatrix(One ^ Zero),
                       "state_fn": One ^ Zero,
-                      "circuit": (I ^ X).to_instruction(),
+                      "circuit": I ^ X,
                       "register": [0, 1]
                       },
                      {"name": "|11>",
-                      "dm": DensityMatrix(ket11 @ ket11.conj().T),
+                      "dm": DensityMatrix(One ^ 2),
                       "state_fn": One ^ 2,
-                      "circuit": (X ^ X).to_instruction(),
+                      "circuit": X ^ X,
                       "register": [0, 1]
-                      }]
+                      },
+                     {"name": "|+_1>",
+                      "dm": DensityMatrix(Plus ^ One),
+                      "state_fn": Plus ^ One,
+                      "circuit": X ^ H,
+                      "register": [0, 1]
+                      },
+                     {"name": "|0_->",
+                      "dm": DensityMatrix(Zero ^ Minus),
+                      "state_fn": Zero ^ Minus,
+                      "circuit": (H @ X) ^ I,
+                      "register": [0, 1]
+                      },
+                     {"name": "|+_->",
+                      "dm": DensityMatrix(Plus ^ Minus),
+                      "state_fn": Plus ^ Minus,
+                      "circuit": (H @ X) ^ H,
+                      "register": [0, 1]
+                      },
+                     {"name": "|1_->",
+                      "dm": DensityMatrix(One ^ Minus),
+                      "state_fn": Zero ^ Minus,
+                      "circuit": (H @ X) ^ X,
+                      "register": [0, 1]
+                      },
+                     {"name": "|+_0>",
+                      "dm": DensityMatrix(Plus ^ Zero),
+                      "state_fn": Plus ^ Zero,
+                      "circuit": I ^ H,
+                      "register": [0, 1]
+                      },
+                     {"name": "|0_->",
+                      "dm": DensityMatrix(Zero ^ Minus),
+                      "state_fn": Zero ^ Minus,
+                      "circuit": (H @ X) ^ I,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_0>",
+                      "dm": DensityMatrix(Plus_i ^ Zero),
+                      "state_fn": Plus_i ^ Zero,
+                      "circuit": I ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_1>",
+                      "dm": DensityMatrix(Plus_i ^ One),
+                      "state_fn": Plus_i ^ One,
+                      "circuit": X ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|0_i>",
+                      "dm": DensityMatrix(Zero ^ Plus_i),
+                      "state_fn": Zero ^ Plus_i,
+                      "circuit": circuit_Plus_i ^ I,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_i>",
+                      "dm": DensityMatrix(Plus_i ^ Plus_i),
+                      "state_fn": Plus_i ^ Plus_i,
+                      "circuit": circuit_Plus_i ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_->",
+                      "dm": DensityMatrix(Plus_i ^ Minus),
+                      "state_fn": Plus_i ^ Minus,
+                      "circuit": (H @ X) ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|+_i->",
+                      "dm": DensityMatrix(Plus ^ Minus_i),
+                      "state_fn": Plus ^ Minus_i,
+                      "circuit": circuit_Minus_i ^ H,
+                      "register": [0, 1]
+                      },
+
+                     ]
 }
 
+# n_qubits = 1
+single_qubit_tgt = {
+    "target_type": 'gate',
+    "gate": XGate("X"),
+    "input_states": [
+        {"name": '|0>',
+         "dm": DensityMatrix(Zero),
+         "state_fn": Zero,
+         "circuit": I.to_instruction(),
+         "register": [0]},
+
+        {"name": '|1>',
+         "dm": DensityMatrix(One),
+         "state_fn": One,
+         "circuit": X.to_instruction(),
+         "register": [0]},
+
+        {"name": '|+>',
+         "dm": DensityMatrix(Plus),
+         "state_fn": Plus,
+         "circuit": H.to_instruction(),
+         "register": [0]},
+        {"name": '|->',
+         "dm": DensityMatrix(Minus),
+         "state_fn": Minus,
+         "circuit": (H @ X).to_instruction(),
+         "register": [0]},
+    ]
+
+}
 Qiskit_setup = {
     "backend": backend,
     "service": service,
@@ -127,7 +219,7 @@ time_steps = 1  # Number of time steps within an episode (1 means you do one rea
 action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
 observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
 
-q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="circuit",
+q_env = QuantumEnvironment(n_qubits=n_qubits, target=cnot_target, abstraction_level="circuit",
                            action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=1.)
@@ -139,7 +231,7 @@ Hyperparameters for RL agent
 """
 # Hyperparameters for the agent
 n_epochs = 10000  # Number of epochs
-batchsize = 300  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+batchsize = 200  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step

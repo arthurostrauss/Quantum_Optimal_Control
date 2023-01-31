@@ -17,7 +17,7 @@ from qiskit.opflow import (StateFn, Zero, One, Plus, Minus, H,
 
 import numpy as np
 from itertools import product
-from typing import Dict, Union, Optional, Any, List
+from typing import Dict, Union, Optional, Any
 
 # QUA imports
 # from QUA_config_two_sc_qubits import IBMconfig
@@ -132,64 +132,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
 
     def _step(self, action: types.NestedArray) -> ts.TimeStep:
 
-        """
-                Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards
-                accordingly
-                :param action: action vector to execute on quantum system
-                :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
-                obtained density matrix
-                """
-        angles, batch_size = np.array(action), len(np.array(action))
-        # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        distribution = Categorical(probs=self.target["Chi"] ** 2)
-        k_samples = distribution.sample(self.sampling_Pauli_space)
-        pauli_index, _, pauli_shots = tf.unique_with_counts(k_samples)
-
-        reward_factor = np.round([self.c_factor * self.target["Chi"][p] / (self.d * distribution.prob(p))
-                                  for p in pauli_index], 5)
-        observables = [SparsePauliOp(self.Pauli_ops[p]["name"]) for p in pauli_index]
-
-        # print(type(self.target["Chi"]))
-        # print("drawn Pauli operators to sample", k_samples)
-        # print(pauli_index, pauli_shots)
-        # print([distribution.prob(p) for p in pauli_index])
-        # print(observables)
-        # Perform actions, followed by relevant expectation value sampling for reward calculation
-
-        # Apply parametrized quantum circuit (action)
-        self.parametrized_circuit_func(self.qc)
-
-        # Keep track of state for benchmarking purposes only
-        self.density_matrix = np.zeros([self.d, self.d], dtype='complex128')
-        for angle_set in angles:
-            qc_2 = self.qc.bind_parameters(angle_set)
-            q_state = Statevector.from_instruction(qc_2)
-            self.density_matrix += np.array(q_state.to_operator())
-        self.density_matrix /= batch_size
-        self.density_matrix_history.append(DensityMatrix(self.density_matrix))
-        self.action_history.append(angles)
-
-        total_shots = self.n_shots * pauli_shots
-        job_list = []
-        result_list = []
-        exp_values = np.zeros((len(pauli_index), batch_size))
-        # print("angles", angles)
-        with Session(service=self.service, backend=self.backend):
-            estimator = Estimator(options=self.options)
-            for p in range(len(pauli_index)):
-                job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables[p]] * batch_size,
-                                    parameter_values=angles,
-                                    shots=int(total_shots[p]))
-                job_list.append(job)
-                result_list.append(job.result())
-                exp_values[p] = result_list[p].values
-            # print(exp_values)
-        self.qc.clear()
-
-        reward_table = np.mean(reward_factor[:, np.newaxis] * exp_values, axis=0)
-        self.reward_history.append(reward_table)
-        assert len(reward_table) == batch_size
-        return reward_table  # Shape [batchsize]
+        pass
 
     def _reset(self) -> ts.TimeStep:
         if self.abstraction_level == 'circuit':
@@ -202,6 +145,9 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         :param target_state: Dictionary containing info on target state (name, density matrix)
         :return: target state
         """
+
+        if target_state.get("dm", None) is None:
+            target_state["dm"] = DensityMatrix(target_state["state_fn"])
         assert np.imag([np.array(target_state["dm"].to_operator())
                         @ self.Pauli_ops[k]["matrix"] for k in
                         range(self.d ** 2)]).all() == 0.
@@ -215,7 +161,6 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         """
         Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
         :param actions: action vector to execute on quantum system
-        :param target_state: Dictionary containing target state density matrix
         :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
         obtained density matrix
         """
@@ -279,11 +224,12 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         assert self.target_type == 'gate'
 
         # Pick a random input state from the possible provided input states (forming a tomographically complete set)
-        input_state = self.target["input_states"][np.random.randint(len(self.target["input_states"]))]
+        index = np.random.randint(len(self.target["input_states"]))
+        input_state = self.target["input_states"][index]
         # Deduce target state to aim for by applying target operation on it
         target_state_fn = Operator(self.target['gate']) @ input_state["state_fn"]
         target_state = {"target_type": "state",
-                        "dm": DensityMatrix(target_state_fn)}
+                        "state_fn": target_state_fn}
         target_state = self.calculate_chi_target_state(target_state)
 
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
@@ -297,7 +243,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         observables = [SparsePauliOp(self.Pauli_ops[p]["name"]) for p in pauli_index]
 
         # Apply circuit to prepare input state
-        self.qc.append(input_state["circuit"], input_state["register"])
+        self.qc.append(input_state["circuit"].to_instruction(), input_state["register"])
 
         # Apply parametrized quantum circuit (action)
         parametrized_circ = QuantumCircuit(self._n_qubits, self._n_qubits)
@@ -330,7 +276,6 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
                 job_list.append(job)
                 result_list.append(job.result())
                 exp_values[p] = result_list[p].values
-            # print(exp_values)
         self.qc.clear()
 
         reward_table = np.mean(reward_factor[:, np.newaxis] * exp_values, axis=0)
