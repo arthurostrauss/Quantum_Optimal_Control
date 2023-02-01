@@ -15,7 +15,7 @@ from qiskit import IBMQ
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
 from qiskit.quantum_info import DensityMatrix, Operator
-from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S
+from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S, Z
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 # Tensorflow imports for building RL agent and framework
@@ -74,109 +74,98 @@ Plus_i = S @ Plus
 Minus_i = S @ Minus
 circuit_Plus_i = S @ H
 circuit_Minus_i = S @ H @ X
+# cnot_target = {
+#     "target_type": "gate",
+#     "gate": CXGate("CNOT"),
+#     "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
+#                       "circuit": I ^ 2,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|01>",
+#                       "circuit": X ^ I,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|10>",
+#                       "circuit": I ^ X,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|11>",
+#                       "circuit": X ^ X,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|+_1>",
+#                       "circuit": X ^ H,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|0_->",
+#                       "circuit": (H @ X) ^ I,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|+_->",
+#                       "circuit": (H @ X) ^ H,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|1_->",
+#                       "circuit": (H @ X) ^ X,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|+_0>",
+#                       "circuit": I ^ H,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|0_->",
+#                       "circuit": (H @ X) ^ I,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|i_0>",
+#                       "circuit": I ^ circuit_Plus_i,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|i_1>",
+#                       "circuit": X ^ circuit_Plus_i,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|0_i>",
+#                       "circuit": circuit_Plus_i ^ I,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|i_i>",
+#                       "circuit": circuit_Plus_i ^ circuit_Plus_i,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|i_->",
+#                       "circuit": (H @ X) ^ circuit_Plus_i,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|+_i->",
+#                       "circuit": circuit_Minus_i ^ H,
+#                       "register": [0, 1]
+#                       },
+#
+#                      ]
+# }
+
 cnot_target = {
     "target_type": "gate",
     "gate": CXGate("CNOT"),
-    "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
-                      "dm": DensityMatrix(Zero ^ 2),
-                      "state_fn": Zero ^ 2,
-                      "circuit": I ^ 2,
+    "input_states": [{"name": "|phi1>",  # Drawn from New Journal of Physics 16 (2014) 055012
+                      "circuit": H ^ H,
                       "register": [0, 1]
                       },
-                     {"name": "|01>",
-                      "dm": DensityMatrix(Zero ^ One),
-                      "state_fn": Zero ^ One,
-                      "circuit": X ^ I,
+                     {"name": "|phi2>",
+                      "circuit": (Z ^ I) @ (H ^ H),
                       "register": [0, 1]
                       },
-                     {"name": "|10>",
-                      "dm": DensityMatrix(One ^ Zero),
-                      "state_fn": One ^ Zero,
-                      "circuit": I ^ X,
+                     {"name": "|phi3>",
+                      "circuit": (I ^ Z) @ (H ^ H),
                       "register": [0, 1]
                       },
-                     {"name": "|11>",
-                      "dm": DensityMatrix(One ^ 2),
-                      "state_fn": One ^ 2,
-                      "circuit": X ^ X,
+                     {"name": "|phi4>",
+                      "circuit": (Z ^ Z) @ (H ^ H),
                       "register": [0, 1]
-                      },
-                     {"name": "|+_1>",
-                      "dm": DensityMatrix(Plus ^ One),
-                      "state_fn": Plus ^ One,
-                      "circuit": X ^ H,
-                      "register": [0, 1]
-                      },
-                     {"name": "|0_->",
-                      "dm": DensityMatrix(Zero ^ Minus),
-                      "state_fn": Zero ^ Minus,
-                      "circuit": (H @ X) ^ I,
-                      "register": [0, 1]
-                      },
-                     {"name": "|+_->",
-                      "dm": DensityMatrix(Plus ^ Minus),
-                      "state_fn": Plus ^ Minus,
-                      "circuit": (H @ X) ^ H,
-                      "register": [0, 1]
-                      },
-                     {"name": "|1_->",
-                      "dm": DensityMatrix(One ^ Minus),
-                      "state_fn": Zero ^ Minus,
-                      "circuit": (H @ X) ^ X,
-                      "register": [0, 1]
-                      },
-                     {"name": "|+_0>",
-                      "dm": DensityMatrix(Plus ^ Zero),
-                      "state_fn": Plus ^ Zero,
-                      "circuit": I ^ H,
-                      "register": [0, 1]
-                      },
-                     {"name": "|0_->",
-                      "dm": DensityMatrix(Zero ^ Minus),
-                      "state_fn": Zero ^ Minus,
-                      "circuit": (H @ X) ^ I,
-                      "register": [0, 1]
-                      },
-                     {"name": "|i_0>",
-                      "dm": DensityMatrix(Plus_i ^ Zero),
-                      "state_fn": Plus_i ^ Zero,
-                      "circuit": I ^ circuit_Plus_i,
-                      "register": [0, 1]
-                      },
-                     {"name": "|i_1>",
-                      "dm": DensityMatrix(Plus_i ^ One),
-                      "state_fn": Plus_i ^ One,
-                      "circuit": X ^ circuit_Plus_i,
-                      "register": [0, 1]
-                      },
-                     {"name": "|0_i>",
-                      "dm": DensityMatrix(Zero ^ Plus_i),
-                      "state_fn": Zero ^ Plus_i,
-                      "circuit": circuit_Plus_i ^ I,
-                      "register": [0, 1]
-                      },
-                     {"name": "|i_i>",
-                      "dm": DensityMatrix(Plus_i ^ Plus_i),
-                      "state_fn": Plus_i ^ Plus_i,
-                      "circuit": circuit_Plus_i ^ circuit_Plus_i,
-                      "register": [0, 1]
-                      },
-                     {"name": "|i_->",
-                      "dm": DensityMatrix(Plus_i ^ Minus),
-                      "state_fn": Plus_i ^ Minus,
-                      "circuit": (H @ X) ^ circuit_Plus_i,
-                      "register": [0, 1]
-                      },
-                     {"name": "|+_i->",
-                      "dm": DensityMatrix(Plus ^ Minus_i),
-                      "state_fn": Plus ^ Minus_i,
-                      "circuit": circuit_Minus_i ^ H,
-                      "register": [0, 1]
-                      },
-
+                      }
                      ]
 }
-
 # n_qubits = 1
 single_qubit_tgt = {
     "target_type": 'gate',
@@ -230,8 +219,8 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 10000  # Number of epochs
-batchsize = 200  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+n_epochs = 1000  # Number of epochs
+batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
