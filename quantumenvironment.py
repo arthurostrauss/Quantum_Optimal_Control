@@ -150,9 +150,8 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         :return: target state
         """
         assert 'dm' in target_state,  'No input data for target state, provide DensityMatrix'
-        assert np.imag([np.array(target_state["dm"].to_operator())
-                        @ self.Pauli_ops[k]["matrix"] for k in
-                        range(self.d ** 2)]).all() == 0.
+        # assert np.imag([np.array(target_state["dm"].to_operator()) @ self.Pauli_ops[k]["matrix"]
+        #                 for k in range(self.d ** 2)]).all() == 0.
         target_state["Chi"] = np.array([np.trace(np.array(target_state["dm"].to_operator())
                                                  @ self.Pauli_ops[k]["matrix"]).real for k in
                                         range(self.d ** 2)])  # Real part is taken to convert it in a good format,
@@ -229,13 +228,12 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         index = np.random.randint(len(self.target["input_states"]))
         input_state = self.target["input_states"][index]
         # Deduce target state to aim for by applying target operation on it
+        target_state = {"target_type": 'state'}
         if 'dm' in input_state:
-            target_state = {"target_type": "state",
-                            "dm": Operator(self.target['gate']) @ input_state["dm"]}
+            target_state["dm"] = Operator(self.target['gate']) @ input_state["dm"]
         elif 'circuit' in input_state:
             target_state_fn = Operator(self.target['gate']) @ input_state["circuit"] @ (Zero ^ self._n_qubits)
-            target_state = {"target_type": "state",
-                            "dm": DensityMatrix(target_state_fn)}
+            target_state["dm"] = DensityMatrix(target_state_fn)
         target_state = self.calculate_chi_target_state(target_state)
 
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)

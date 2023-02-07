@@ -51,8 +51,9 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     global n_actions
     params = ParameterVector('theta', n_actions)
     qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
+    # qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 0)
     qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    qc.rzx(2 * np.pi * params[6], 1, 0)
+    qc.rzx(2 * np.pi * params[6], 0, 1)
 
 
 """
@@ -70,128 +71,118 @@ sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 
 # Target gate: CNOT
-Plus_i = S @ Plus
-Minus_i = S @ Minus
 circuit_Plus_i = S @ H
 circuit_Minus_i = S @ H @ X
-# cnot_target = {
-#     "target_type": "gate",
-#     "gate": CXGate("CNOT"),
-#     "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
-#                       "circuit": I ^ 2,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|01>",
-#                       "circuit": X ^ I,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|10>",
-#                       "circuit": I ^ X,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|11>",
-#                       "circuit": X ^ X,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|+_1>",
-#                       "circuit": X ^ H,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|0_->",
-#                       "circuit": (H @ X) ^ I,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|+_->",
-#                       "circuit": (H @ X) ^ H,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|1_->",
-#                       "circuit": (H @ X) ^ X,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|+_0>",
-#                       "circuit": I ^ H,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|0_->",
-#                       "circuit": (H @ X) ^ I,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|i_0>",
-#                       "circuit": I ^ circuit_Plus_i,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|i_1>",
-#                       "circuit": X ^ circuit_Plus_i,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|0_i>",
-#                       "circuit": circuit_Plus_i ^ I,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|i_i>",
-#                       "circuit": circuit_Plus_i ^ circuit_Plus_i,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|i_->",
-#                       "circuit": (H @ X) ^ circuit_Plus_i,
-#                       "register": [0, 1]
-#                       },
-#                      {"name": "|+_i->",
-#                       "circuit": circuit_Minus_i ^ H,
-#                       "register": [0, 1]
-#                       },
-#
-#                      ]
-# }
-
 cnot_target = {
     "target_type": "gate",
     "gate": CXGate("CNOT"),
-    "input_states": [{"name": "|phi1>",  # Drawn from New Journal of Physics 16 (2014) 055012
-                      "circuit": H ^ H,
+    "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
+                      "circuit": I ^ 2,
                       "register": [0, 1]
                       },
-                     {"name": "|phi2>",
-                      "circuit": (Z ^ I) @ (H ^ H),
+                     {"name": "|01>",
+                      "circuit": X ^ I,
                       "register": [0, 1]
                       },
-                     {"name": "|phi3>",
-                      "circuit": (I ^ Z) @ (H ^ H),
+                     {"name": "|10>",
+                      "circuit": I ^ X,
                       "register": [0, 1]
                       },
-                     {"name": "|phi4>",
-                      "circuit": (Z ^ Z) @ (H ^ H),
+                     {"name": "|11>",
+                      "circuit": X ^ X,
+                      "register": [0, 1]
+                      },
+                     {"name": "|+_1>",
+                      "circuit": X ^ H,
+                      "register": [0, 1]
+                      },
+                     {"name": "|0_->",
+                      "circuit": (H @ X) ^ I,
+                      "register": [0, 1]
+                      },
+                     {"name": "|+_->",
+                      "circuit": (H @ X) ^ H,
+                      "register": [0, 1]
+                      },
+                     {"name": "|1_->",
+                      "circuit": (H @ X) ^ X,
+                      "register": [0, 1]
+                      },
+                     {"name": "|+_0>",
+                      "circuit": I ^ H,
+                      "register": [0, 1]
+                      },
+                     {"name": "|0_->",
+                      "circuit": (H @ X) ^ I,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_0>",
+                      "circuit": I ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_1>",
+                      "circuit": X ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|0_i>",
+                      "circuit": circuit_Plus_i ^ I,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_i>",
+                      "circuit": circuit_Plus_i ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|i_->",
+                      "circuit": (H @ X) ^ circuit_Plus_i,
+                      "register": [0, 1]
+                      },
+                     {"name": "|+_i->",
+                      "circuit": circuit_Minus_i ^ H,
                       "register": [0, 1]
                       }
+
                      ]
 }
+
+# cnot_target = {
+#     "target_type": "gate",
+#     "gate": CXGate("CNOT"),
+#     "input_states": [{"name": "|phi1>",  # Drawn from New Journal of Physics 16 (2014) 055012
+#                       "circuit": H ^ H,
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|phi2>",
+#                       "circuit": (Z ^ I) @ (H ^ H),
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|phi3>",
+#                       "circuit": (I ^ Z) @ (H ^ H),
+#                       "register": [0, 1]
+#                       },
+#                      {"name": "|phi4>",
+#                       "circuit": (Z ^ Z) @ (H ^ H),
+#                       "register": [0, 1]
+#                       }
+#                      ]
+# }
 # n_qubits = 1
 single_qubit_tgt = {
     "target_type": 'gate',
     "gate": XGate("X"),
     "input_states": [
         {"name": '|0>',
-         "dm": DensityMatrix(Zero),
-         "state_fn": Zero,
-         "circuit": I.to_instruction(),
+         "circuit": I,
          "register": [0]},
 
         {"name": '|1>',
-         "dm": DensityMatrix(One),
-         "state_fn": One,
-         "circuit": X.to_instruction(),
+         "circuit": X,
          "register": [0]},
 
         {"name": '|+>',
-         "dm": DensityMatrix(Plus),
-         "state_fn": Plus,
-         "circuit": H.to_instruction(),
+         "circuit": H,
          "register": [0]},
         {"name": '|->',
-         "dm": DensityMatrix(Minus),
-         "state_fn": Minus,
-         "circuit": (H @ X).to_instruction(),
+         "circuit": H @ X,
          "register": [0]},
     ]
 
@@ -219,10 +210,10 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 1000  # Number of epochs
+n_epochs = 2000  # Number of epochs
 batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.001  # Learning rate for policy update step
+eta = 0.002  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
 
 use_PPO = True
@@ -244,7 +235,7 @@ Policy parameters
 """
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
-hidden_units = [82, 82]  # List containing number of units in each hidden layer
+hidden_units = [90, 70, 70, 80]  # List containing number of units in each hidden layer
 
 network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)
 network.summary()
@@ -302,10 +293,11 @@ for i in tqdm(range(n_epochs)):
         sigma_old.assign(sigma)
 
     print('\n Epoch', i)
-    print(f"{policy_params_str:#<100}")
-    print('mu_vec:', np.array(mu))
-    print('sigma_vec:', np.array(sigma))
-    print('baseline:', np.array(b))
+    # print(f"{policy_params_str:#<100}")
+    # print('mu_vec:', np.array(mu))
+    # print('sigma_vec:', np.array(sigma))
+    # print('baseline:', np.array(b))
+    print("Average reward", np.mean(q_env.reward_history[i]))
     print("Process Fidelity:", q_env.process_fidelity_history[i])
     print("Average Gate Fidelity:", q_env.avg_fidelity_history[i])
 
@@ -330,16 +322,48 @@ def plot_examples(fig, ax, reward_table):
     ax.set_ylabel('Episode')
     ax.set_xlabel('Epoch')
     fig.colorbar(im, ax=ax, label='Reward')
-    plt.show()
 
 
+window_size = 10
+
+i = 0
+# Initialize an empty list to store moving averages
+moving_average_reward = []
+moving_average_gate_fidelity = []
+moving_average_process_fidelity = []
+# Loop through the array t o
+# consider every window of size 3
+while i < n_epochs - window_size + 1:
+    # Calculate the average of current window
+    window_average_reward = round(np.sum(np.mean(q_env.reward_history, axis=1)[
+                                  i:i + window_size]) / window_size, 2)
+    window_average_gate_fidelity = round(np.sum(q_env.avg_fidelity_history[
+                                  i:i + window_size]) / window_size, 2)
+    window_average_process_fidelity = round(np.sum(q_env.process_fidelity_history[
+                                  i:i + window_size]) / window_size, 2)
+
+    # Store the average of current
+    # window in moving average list
+    moving_average_reward.append(window_average_reward)
+    moving_average_gate_fidelity.append(window_average_gate_fidelity)
+    moving_average_process_fidelity.append(window_average_process_fidelity)
+    # Shift window to right by one position
+    i += 1
 figure, (ax1, ax2) = plt.subplots(1, 2)
 #  Plot return as a function of epochs
 ax1.plot(np.mean(q_env.reward_history, axis=1), '-.', label='Reward')
-ax1.set_xlabel("Epoch")
-ax1.set_ylabel("Expected reward")
 # ax1.plot(data["baselines"], '-.', label='baseline')
 ax1.plot(q_env.process_fidelity_history, '-o', label='Process Fidelity')
 ax1.plot(q_env.avg_fidelity_history, '-.', label='Average Gate Fidelity')
+
+# adapted_epoch = np.arange(0, n_epochs, window_size)
+# ax1.plot(adapted_epoch, moving_average_reward, '-.', label='Reward')
+# # ax1.plot(data["baselines"], '-.', label='baseline')
+# ax1.plot(adapted_epoch, moving_average_process_fidelity, '-o', label='Process Fidelity')
+# ax1.plot(adapted_epoch, moving_average_gate_fidelity, '-.', label='Average Gate Fidelity')
+
+ax1.set_xlabel("Epoch")
+ax1.set_ylabel("Expected reward")
 ax1.legend()
-plot_examples(figure, ax2, q_env.reward_history)
+# plot_examples(figure, ax2, q_env.reward_history)
+plt.show()
