@@ -138,7 +138,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
 
         pass
 
-    def _reset(self) -> ts.TimeStep:
+    def _reset(self) -> ts.TimeStep:  # TODO:
         if self.abstraction_level == 'circuit':
             self.qc.reset(self.q_register)
             return ts.restart()
@@ -149,7 +149,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         :param target_state: Dictionary containing info on target state (name, density matrix)
         :return: target state
         """
-        assert 'dm' in target_state,  'No input data for target state, provide DensityMatrix'
+        assert 'dm' in target_state, 'No input data for target state, provide DensityMatrix'
         # assert np.imag([np.array(target_state["dm"].to_operator()) @ self.Pauli_ops[k]["matrix"]
         #                 for k in range(self.d ** 2)]).all() == 0.
         target_state["Chi"] = np.array([np.trace(np.array(target_state["dm"].to_operator())
@@ -244,9 +244,10 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self.d * distribution.prob(p))
                                   for p in pauli_index], 5)
 
+        # Figure out which observables to sample
         observables = [SparsePauliOp(self.Pauli_ops[p]["name"]) for p in pauli_index]
 
-        # Apply circuit to prepare input state
+        # Prepare input state
         self.qc.append(input_state["circuit"].to_instruction(), input_state["register"])
 
         # Apply parametrized quantum circuit (action)
@@ -262,25 +263,26 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
             prc_fidelity += process_fidelity(q_process, Operator(self.target["gate"]))
             avg_fidelity += average_gate_fidelity(q_process, Operator(self.target["gate"]))
         self.action_history.append(angles)
-        self.process_fidelity_history.append(prc_fidelity / batch_size)  # Average process fidelity over the action
-        # batch
-        self.avg_fidelity_history.append(avg_fidelity / batch_size)
+        self.process_fidelity_history.append(prc_fidelity / batch_size)  # Avg process fidelity over the action batch
+        self.avg_fidelity_history.append(avg_fidelity / batch_size)  # Avg gate fidelity over the action batch
 
+        # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.qc.append(parametrized_circ.to_instruction(), self.q_register)
         total_shots = self.n_shots * pauli_shots
         job_list, result_list = [], []
         exp_values = np.zeros((len(pauli_index), batch_size))
-        # print("angles", angles)
+
         with Session(service=self.service, backend=self.backend):
             estimator = Estimator(options=self.options)
-            for p in range(len(pauli_index)):
+            for p in range(len(pauli_index)):  # For each observable to sample, estimate expectation value of
+                # all parametrized circuits of the batch
                 job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables[p]] * batch_size,
                                     parameter_values=angles,
                                     shots=int(total_shots[p]))
                 job_list.append(job)
                 result_list.append(job.result())
                 exp_values[p] = result_list[p].values
-        self.qc.clear()
+        self.qc.clear()  # Reset the QuantumCircuit instance for next iteration
 
         reward_table = np.mean(reward_factor[:, np.newaxis] * exp_values, axis=0)
         self.reward_history.append(reward_table)

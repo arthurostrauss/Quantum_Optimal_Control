@@ -1,6 +1,5 @@
 """
-Code for arbitrary state preparation based on scheme described in Appendix D.2b  of paper PhysRevX.12.011059
- (https://doi.org/10.1103/PhysRevX.12.011059) using Qiskit modules
+Code for arbitrary gate calibration using model-free reinforcement learning
 
  Author: Arthur Strauss
  Created on 11/11/2022
@@ -14,7 +13,6 @@ from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_
 from qiskit import IBMQ
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
-from qiskit.quantum_info import DensityMatrix, Operator
 from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S, Z
 from qiskit_ibm_runtime import QiskitRuntimeService
 
@@ -213,7 +211,7 @@ Hyperparameters for RL agent
 n_epochs = 2000  # Number of epochs
 batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.002  # Learning rate for policy update step
+eta = 0.0015  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
 
 use_PPO = True
@@ -235,7 +233,7 @@ Policy parameters
 """
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
-hidden_units = [90, 70, 70, 80]  # List containing number of units in each hidden layer
+hidden_units = [100, 70, 70, 80]  # List containing number of units in each hidden layer
 
 network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)
 network.summary()
@@ -353,7 +351,7 @@ figure, (ax1, ax2) = plt.subplots(1, 2)
 #  Plot return as a function of epochs
 ax1.plot(np.mean(q_env.reward_history, axis=1), '-.', label='Reward')
 # ax1.plot(data["baselines"], '-.', label='baseline')
-ax1.plot(q_env.process_fidelity_history, '-o', label='Process Fidelity')
+# ax1.plot(q_env.process_fidelity_history, '-o', label='Process Fidelity')
 ax1.plot(q_env.avg_fidelity_history, '-.', label='Average Gate Fidelity')
 
 # adapted_epoch = np.arange(0, n_epochs, window_size)
