@@ -10,7 +10,7 @@ from Quantum_Optimal_Control.quantumenvironment import QuantumEnvironment
 from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit import IBMQ
+from qiskit_ibm_provider import IBMProvider
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
 from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S, Z
@@ -35,8 +35,7 @@ In there, we design classes for the environment (Quantum Circuit simulated on IB
 """
 
 # IBMQ.save_account(TOKEN)
-IBMQ.load_account()  # Load account from disk
-provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
+provider = IBMProvider()
 
 
 def apply_parametrized_circuit(qc: QuantumCircuit):
@@ -64,6 +63,7 @@ service = QiskitRuntimeService(channel='ibm_quantum')
 seed = 3590  # Seed for action sampling
 backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 options = {"seed_simulator": None, 'resilience_level': 0}
+options = {'resilience_level': 0}
 n_qubits = 2
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
@@ -334,11 +334,11 @@ moving_average_process_fidelity = []
 while i < n_epochs - window_size + 1:
     # Calculate the average of current window
     window_average_reward = round(np.sum(np.mean(q_env.reward_history, axis=1)[
-                                  i:i + window_size]) / window_size, 2)
+                                         i:i + window_size]) / window_size, 2)
     window_average_gate_fidelity = round(np.sum(q_env.avg_fidelity_history[
-                                  i:i + window_size]) / window_size, 2)
+                                                i:i + window_size]) / window_size, 2)
     window_average_process_fidelity = round(np.sum(q_env.process_fidelity_history[
-                                  i:i + window_size]) / window_size, 2)
+                                                   i:i + window_size]) / window_size, 2)
 
     # Store the average of current
     # window in moving average list
