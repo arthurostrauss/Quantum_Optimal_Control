@@ -7,16 +7,15 @@ Created on 28/11/2022
 """
 
 # Qiskit imports
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
 from qiskit.quantum_info import DensityMatrix, Statevector, Pauli, SparsePauliOp, state_fidelity, Operator, \
     process_fidelity, average_gate_fidelity
 from qiskit_ibm_runtime import Session  # , Estimator
 from qiskit.primitives import Estimator
 # from qiskit_aer.primitives import Estimator
 from qiskit.opflow import Zero
-
 import numpy as np
-from itertools import product, chain
+from itertools import product
 from typing import Dict, Union, Optional, Any
 
 # QUA imports
@@ -70,17 +69,27 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
             self.q_register = QuantumRegister(n_qubits)
             self.c_register = ClassicalRegister(n_qubits)
             self.qc = QuantumCircuit(self.q_register)
-            self.service = Qiskit_config["service"]
-            self.options = Qiskit_config.get("options", None)
-            self.backend = Qiskit_config["backend"]
-            self.parametrized_circuit_func = Qiskit_config["parametrized_circuit"]
-        else:
+            try:
+                self.service = Qiskit_config["service"]
+                self.options = Qiskit_config.get("options", None)
+                self.backend = Qiskit_config["backend"]
+                self.parametrized_circuit_func = Qiskit_config["parametrized_circuit"]
+            except KeyError:
+                print("Circuit abstraction on Qiskit uses Runtime, need to provide"
+                      "service, backend (Runtime), and options for the Estimator primitive")
+        elif abstraction_level == 'pulse':
             # TODO: Define pulse level (Schedule most likely, cf Qiskit Pulse doc)
             # TODO: Add a QUA program
             if QUA_setup is not None:
                 self.qua_setup = QUA_setup
             elif Qiskit_config is not None:
-                pass
+                self.q_register = QuantumRegister(n_qubits)
+                self.c_register = ClassicalRegister(n_qubits)
+                self.qc = QuantumCircuit(self.q_register)
+                self.backend = Qiskit_config['backend']
+                self.parametrized_circuit_func = Qiskit_config['parametrized_circuit']
+                self.options = Qiskit_config['options']
+
         self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
                           for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
         self.c_factor = c_factor

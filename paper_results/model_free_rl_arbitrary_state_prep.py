@@ -11,10 +11,10 @@ from Quantum_Optimal_Control.quantumenvironment import QuantumEnvironment
 from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit import IBMQ
+from qiskit_ibm_provider import IBMProvider
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.quantum_info import DensityMatrix
-from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit_ibm_runtime import QiskitRuntimeService, Session
 from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S
 
 # Tensorflow imports for building RL agent and framework
@@ -35,9 +35,8 @@ In there, we design classes for the environment (Quantum Circuit simulated on IB
 -----------------------------------------------------------------------------------------------------
 """
 
-# IBMQ.save_account(TOKEN)
-IBMQ.load_account()  # Load account from disk
-provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
+# IBMProvider.save_account("b4c22f9da67ce0063a7cf1b2666f87fcb3641addb701a8cb1d9f9acd86a9ebfc3e988ab715fa2371432551b983934805a5dbe0c54b249d1f3047e00f304b8663")
+provider = IBMProvider()
 
 
 def apply_parametrized_circuit(qc: QuantumCircuit):
@@ -65,6 +64,7 @@ Variables to define environment
 
 service = QiskitRuntimeService(channel='ibm_quantum')
 seed = 3590  # Seed for action sampling
+print(service.backends())
 backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 options = {"seed_simulator": None, 'resilience_level': 0}
 options = {'resilience_level': 0}
@@ -108,8 +108,8 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 1500  # Number of epochs
-batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+n_epochs = 700  # Number of epochs : default 1500
+batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
@@ -153,52 +153,53 @@ print('Neural net output', network(init_msmt), type(network(init_msmt)))
 print("mu_old", mu_old)
 print("sigma_old", sigma_old)
 
-for i in tqdm(range(n_epochs)):
+with Session(service=service, backend=backend) as state_prep_training:
+    for i in tqdm(range(n_epochs)):
 
-    Old_distrib = MultivariateNormalDiag(loc=mu_old, scale_diag=sigma_old,
-                                         validate_args=True, allow_nan_stats=False)
+        Old_distrib = MultivariateNormalDiag(loc=mu_old, scale_diag=sigma_old,
+                                             validate_args=True, allow_nan_stats=False)
 
-    with tf.GradientTape(persistent=True) as tape:
+        with tf.GradientTape(persistent=True) as tape:
 
-        mu, sigma, b = network(init_msmt, training=True)
-        mu = tf.squeeze(mu, axis=0)
-        sigma = tf.squeeze(sigma, axis=0)
-        b = tf.squeeze(b, axis=0)
+            mu, sigma, b = network(init_msmt, training=True)
+            mu = tf.squeeze(mu, axis=0)
+            sigma = tf.squeeze(sigma, axis=0)
+            b = tf.squeeze(b, axis=0)
 
-        Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma,
-                                                validate_args=True, allow_nan_stats=False)
+            Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma,
+                                                    validate_args=True, allow_nan_stats=False)
 
-        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -1., 1.))
+            action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -1., 1.))
 
-        reward = q_env.perform_action(action_vector)
-        advantage = reward - b
+            reward = q_env.perform_action(action_vector)
+            advantage = reward - b
 
+            if use_PPO:
+                ratio = Policy_distrib.prob(action_vector) / (tf.stop_gradient(Old_distrib.prob(action_vector)) + 1e-6)
+                actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
+                                                         advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
+            else:  # REINFORCE algorithm
+                actor_loss = - tf.reduce_mean(advantage * Policy_distrib.log_prob(action_vector))
+
+            critic_loss = tf.reduce_mean(advantage ** 2)
+            combined_loss = actor_loss + critic_loss_coeff * critic_loss
+
+        grads = tape.gradient(combined_loss, network.trainable_variables)
+
+        # For PPO, update old parameters to have access to "old" policy
         if use_PPO:
-            ratio = Policy_distrib.prob(action_vector) / (tf.stop_gradient(Old_distrib.prob(action_vector)) + 1e-6)
-            actor_loss = - tf.reduce_mean(tf.minimum(advantage * ratio,
-                                                     advantage * tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)))
-        else:  # REINFORCE algorithm
-            actor_loss = - tf.reduce_mean(advantage * Policy_distrib.log_prob(action_vector))
+            mu_old.assign(mu)
+            sigma_old.assign(sigma)
 
-        critic_loss = tf.reduce_mean(advantage ** 2)
-        combined_loss = actor_loss + critic_loss_coeff * critic_loss
+        print('\n Epoch', i)
+        print(f"{policy_params_str:#<100}")
+        print('mu_vec:', np.array(mu))
+        print('sigma_vec:', np.array(sigma))
+        print('baseline:', np.array(b))
+        print("Fidelity:", q_env.state_fidelity_history[i])
 
-    grads = tape.gradient(combined_loss, network.trainable_variables)
-
-    # For PPO, update old parameters to have access to "old" policy
-    if use_PPO:
-        mu_old.assign(mu)
-        sigma_old.assign(sigma)
-
-    print('\n Epoch', i)
-    print(f"{policy_params_str:#<100}")
-    print('mu_vec:', np.array(mu))
-    print('sigma_vec:', np.array(sigma))
-    print('baseline:', np.array(b))
-    print("Fidelity:", q_env.state_fidelity_history[i])
-
-    # Apply gradients
-    optimizer.apply_gradients(zip(grads, network.trainable_variables))
+        # Apply gradients
+        optimizer.apply_gradients(zip(grads, network.trainable_variables))
 
 """
 -----------------------------------------------------------------------------------------
