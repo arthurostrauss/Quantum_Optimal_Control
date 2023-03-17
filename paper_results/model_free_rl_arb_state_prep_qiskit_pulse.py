@@ -11,12 +11,12 @@ from Quantum_Optimal_Control.quantumenvironment import QuantumEnvironment
 from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit import pulse
-from qiskit_ibm_provider import IBMProvider
+from qiskit import pulse, transpile
 from qiskit.providers.fake_provider import FakeManila
-from qiskit.circuit import ParameterVector, QuantumCircuit, Gate
+from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit.circuit import ParameterVector, Parameter, QuantumCircuit, Gate
 from qiskit.extensions import CXGate, XGate
-from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S, Z
+from qiskit.opflow import H, I, X, S
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -44,17 +44,18 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     :return:
     """
     # qc.num_qubits
-    global n_actions, backend
+    global n_actions, backend, qubit_tgt_register, target
+
     params = ParameterVector('theta', n_actions)
 
-    my_gate = Gate("two_qb_gate", 1, params=params)
+    # original_calibration = backend.defaults().instruction_schedule_map.get(target["name"])
+    my_gate = Gate("x", 1, params=[params[0]])
     with pulse.build(backend=backend, name="X_gate") as my_pulse_schedule:
-        # pulse.set_frequency(params[4]*1e9, pulse.drive_channel(0))
         pulse.play(pulse.Gaussian(duration=128, amp=params[0], sigma=16, angle=0),
                    channel=pulse.drive_channel(0))
 
-    qc.add_calibration(my_gate, [0], my_pulse_schedule, params)
-    qc.append(my_gate, [0])
+    qc.add_calibration(my_gate, [0], my_pulse_schedule)
+    qc.append(my_gate, (0,))
     # qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
     # qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
     # qc.rzx(2 * np.pi * params[6], 0, 1)
@@ -72,11 +73,11 @@ Variables to define environment
 # service = QiskitRuntimeService(channel='ibm_quantum')
 # seed = 3590  # Seed for action sampling
 # backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
-options = {"seed_simulator": None, 'resilience_level': 0}
+options = {'resilience_level': 0}
 
 # Fake backend
 backend = FakeManila()
-
+qubit_tgt_register = [0]
 n_qubits = 1
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
@@ -103,10 +104,13 @@ X_tgt = {
 
 }
 
+target = X_tgt
 Qiskit_setup = {
     "backend": backend,
     "parametrized_circuit": apply_parametrized_circuit,
-    "options": options
+    "options": options,
+    "service": QiskitRuntimeService(channel='ibm_quantum'),
+    "target_register": [0, 1]
 }
 
 n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
@@ -114,7 +118,7 @@ time_steps = 1  # Number of time steps within an episode (1 means you do one rea
 action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
 observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
 
-q_env = QuantumEnvironment(n_qubits=n_qubits, target=X_tgt, abstraction_level="pulse",
+q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="pulse",
                            action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=1.)
@@ -188,7 +192,6 @@ for i in tqdm(range(n_epochs)):
         action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), 0, 1.))
 
         # Adjust the action vector according to params physical significance
-
 
         reward = q_env.perform_action_gate_cal(action_vector)
         advantage = reward - b
@@ -282,4 +285,3 @@ ax1.set_ylabel("Expected reward")
 ax1.legend()
 # plot_examples(figure, ax2, q_env.reward_history)
 plt.show()
-

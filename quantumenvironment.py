@@ -10,9 +10,11 @@ Created on 28/11/2022
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
 from qiskit.quantum_info import DensityMatrix, Statevector, Pauli, SparsePauliOp, state_fidelity, Operator, \
     process_fidelity, average_gate_fidelity
-from qiskit_ibm_runtime import Session  # , Estimator
-from qiskit.primitives import Estimator
-# from qiskit_aer.primitives import Estimator
+from qiskit_ibm_runtime import Session, Estimator as runtime_Estimator
+from qiskit_dynamics import DynamicsBackend
+from qiskit_dynamics.array import Array
+# from qiskit.primitives import Estimator
+from qiskit_aer.primitives import Estimator as aer_Estimator
 from qiskit.opflow import Zero
 import numpy as np
 from itertools import product
@@ -34,6 +36,15 @@ from tf_agents.environments.py_environment import PyEnvironment
 from tf_agents.specs import array_spec, tensor_spec
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
+
+# configure jax to use 64 bit mode
+import jax
+jax.config.update("jax_enable_x64", True)
+# tell JAX we are using CPU
+jax.config.update("jax_platform_name", "cpu")
+# import Array and set default backend
+
+Array.set_default_backend('jax')
 
 
 class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of it
@@ -70,13 +81,13 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
             self.c_register = ClassicalRegister(n_qubits)
             self.qc = QuantumCircuit(self.q_register)
             try:
-                self.service = Qiskit_config["service"]
+                self.service = Qiskit_config.get("service", None)
                 self.options = Qiskit_config.get("options", None)
                 self.backend = Qiskit_config["backend"]
                 self.parametrized_circuit_func = Qiskit_config["parametrized_circuit"]
             except KeyError:
                 print("Circuit abstraction on Qiskit uses Runtime, need to provide"
-                      "service, backend (Runtime), and options for the Estimator primitive")
+                      "backend (Runtime) and ansatz circuit")
         elif abstraction_level == 'pulse':
             # TODO: Define pulse level (Schedule most likely, cf Qiskit Pulse doc)
             # TODO: Add a QUA program
@@ -86,9 +97,12 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
                 self.q_register = QuantumRegister(n_qubits)
                 self.c_register = ClassicalRegister(n_qubits)
                 self.qc = QuantumCircuit(self.q_register)
+                self.service = Qiskit_config["service"]
                 self.backend = Qiskit_config['backend']
                 self.parametrized_circuit_func = Qiskit_config['parametrized_circuit']
                 self.options = Qiskit_config['options']
+                self.dynamics_backend = DynamicsBackend.from_backend(self.backend,
+                                                                     subsystem_list=Qiskit_config["target_register"])
 
         self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
                           for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
@@ -192,31 +206,30 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         self.parametrized_circuit_func(self.qc)
 
         # Keep track of state for benchmarking purposes only
-        self.density_matrix = np.zeros([self.d, self.d], dtype='complex128')
-        for angle_set in angles:
-            qc_2 = self.qc.bind_parameters(angle_set)
-            q_state = Statevector.from_instruction(qc_2)
-            self.density_matrix += np.array(q_state.to_operator())
-        self.density_matrix /= batch_size
-        self.density_matrix = DensityMatrix(self.density_matrix)
-        self.density_matrix_history.append(self.density_matrix)
-        self.action_history.append(angles)
-        self.state_fidelity_history.append(state_fidelity(self.target["dm"], self.density_matrix))
-
+        if self.abstraction_level == 'circuit':
+            self.density_matrix = np.zeros([self.d, self.d], dtype='complex128')
+            qc_list = [self.qc.bind_parameters(angle_set) for angle_set in angles]
+            q_state_list = [Statevector.from_instruction(qc) for qc in qc_list]
+            self.density_matrix = DensityMatrix(np.mean([np.array(q_state.to_operator()) for q_state in q_state_list],
+                                                        axis=0))
+            self.density_matrix_history.append(self.density_matrix)
+            self.action_history.append(angles)
+            self.state_fidelity_history.append(state_fidelity(self.target["dm"], self.density_matrix))
+        else:
+            pass
         # total_shots = self.n_shots * pauli_shots
         # job_list, result_list = [], []
         # exp_values = np.zeros((len(pauli_index), batch_size))
 
-        with Session(service=self.service, backend=self.backend):
-            # for p in range(len(pauli_index)):
-            #     estimator = Estimator(options=self.options)
-            #     job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables[p]] * batch_size,
-            #                         parameter_values=angles,
-            #                         shots=int(total_shots[p]))
-            #     job_list.append(job)
-            #     result_list.append(job.result())
-            #     exp_values[p] = result_list[p].values
-            estimator = Estimator(options=self.options)
+        if self.service is not None:
+            with Session(service=self.service, backend=self.backend):
+                estimator = runtime_Estimator(options=self.options)
+                job = estimator.run(circuits=[self.qc] * batch_size,
+                                    observables=[observables] * batch_size,
+                                    parameter_values=angles,
+                                    shots=self.sampling_Pauli_space)
+        else:
+            estimator = aer_Estimator()
             job = estimator.run(circuits=[self.qc] * batch_size,
                                 observables=[observables] * batch_size,
                                 parameter_values=angles,
@@ -273,23 +286,34 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         self.parametrized_circuit_func(parametrized_circ)
 
         # Keep track of process for benchmarking purposes only
-        prc_fidelity = 0.
-        avg_fidelity = 0.
-        for angle_set in angles:
-            qc_2 = parametrized_circ.bind_parameters(angle_set)
-            q_process = Operator(qc_2)
-            prc_fidelity += process_fidelity(q_process, Operator(self.target["gate"]))
-            avg_fidelity += average_gate_fidelity(q_process, Operator(self.target["gate"]))
-        self.action_history.append(angles)
-        self.process_fidelity_history.append(prc_fidelity / batch_size)  # Avg process fidelity over the action batch
-        self.avg_fidelity_history.append(avg_fidelity / batch_size)  # Avg gate fidelity over the action batch
+        if self.abstraction_level == 'circuit':
+            qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
+            q_process_list = [Operator(qc) for qc in qc_list]
+            prc_fidelity = np.mean([process_fidelity(q_process, Operator(self.target["gate"]))
+                                    for q_process in q_process_list])
+            avg_fidelity = np.mean([average_gate_fidelity(q_process, Operator(self.target["gate"]))
+                                    for q_process in q_process_list])
 
+            self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
+            self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
+        else:  # TODO: Qiskit Dynamics
+            job = self.dynamics_backend.run([parametrized_circ.bind_parameters(angle_set) for angle_set in angles])
+            result = job.result()
+            print(result)
+        self.action_history.append(angles)
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.qc.append(parametrized_circ.to_instruction(), input_state["register"])
         # total_shots = self.n_shots * pauli_shots
-
-        with Session(service=self.service, backend=self.backend):
-            estimator = Estimator(options=self.options)
+        # self.qc = transpile(self.qc, self.backend)
+        if self.service is not None:
+            with Session(service=self.service, backend=self.backend):
+                estimator = runtime_Estimator(options=self.options)
+                job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
+                                    parameter_values=angles,
+                                    shots=self.sampling_Pauli_space)
+        else:
+            # estimator = Estimator(options=self.options)
+            estimator = aer_Estimator()
             job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
                                 parameter_values=angles,
                                 shots=self.sampling_Pauli_space)
@@ -297,6 +321,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         self.qc.clear()  # Reset the QuantumCircuit instance for next iteration
 
         reward_table = job.result().values
+        print(reward_table)
         self.reward_history.append(reward_table)
         assert len(reward_table) == batch_size
         return reward_table  # Shape [batchsize]

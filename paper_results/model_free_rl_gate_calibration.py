@@ -13,7 +13,7 @@ from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_
 from qiskit_ibm_provider import IBMProvider
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
-from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S, Z
+from qiskit.opflow import H, I, X, S
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 # Tensorflow imports for building RL agent and framework
