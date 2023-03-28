@@ -10,15 +10,24 @@ Created on 28/11/2022
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
 from qiskit.quantum_info import DensityMatrix, Statevector, Pauli, SparsePauliOp, state_fidelity, Operator, \
     process_fidelity, average_gate_fidelity
-from qiskit_ibm_runtime import Session, Estimator as runtime_Estimator
-from qiskit_dynamics import DynamicsBackend
+from qiskit.exceptions import QiskitError
+
+# Qiskit dynamics for pulse simulation (benchmarking)
+from qiskit_dynamics import DynamicsBackend, Solver, Signal, RotatingFrame
 from qiskit_dynamics.array import Array
-# from qiskit.primitives import Estimator
+from qiskit_dynamics.pulse import InstructionToSignals
+from qiskit_ibm_provider import IBMBackend
+from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
+from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs
+
+# Qiskit Primitive: for computing Pauli expectation value sampling easily
+from qiskit.primitives import Estimator, BackendEstimator
+from qiskit_ibm_runtime import Session, Estimator as runtime_Estimator
 from qiskit_aer.primitives import Estimator as aer_Estimator
 from qiskit.opflow import Zero
 import numpy as np
 from itertools import product
-from typing import Dict, Union, Optional, Any
+from typing import Dict, Union, Optional, Any, List, Tuple
 
 # QUA imports
 # from QUA_config_two_sc_qubits import IBMconfig
@@ -30,7 +39,6 @@ from typing import Dict, Union, Optional, Any
 # Tensorflow modules
 import tensorflow as tf
 from tensorflow_probability.python.distributions import Categorical
-
 from tf_agents.environments.py_environment import PyEnvironment
 # from tf_agents.environments.tf_environment import TFEnvironment
 from tf_agents.specs import array_spec, tensor_spec
@@ -39,12 +47,118 @@ from tf_agents.typing import types
 
 # configure jax to use 64 bit mode
 import jax
+
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
 jax.config.update("jax_platform_name", "cpu")
 # import Array and set default backend
 
 Array.set_default_backend('jax')
+
+
+def get_solver_and_freq_from_backend(backend: IBMBackend, subsystem_list: Optional[List[int]] = None,
+                                     rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
+                                     evaluation_mode: str = "dense",
+                                     rwa_cutoff_freq: Optional[float] = None,
+                                     static_dissipators: Optional[Array] = None,
+                                     dissipator_operators: Optional[Array] = None,
+                                     dissipator_channels: Optional[List[str]] = None, ) \
+        -> Tuple[Dict[str, float], Solver]:
+    """
+    Method to retrieve solver instance and relevant freq channels information from an IBM
+    backend added with potential dissipation operators, inspired from DynamicsBackend.from_backend() method
+    :param subsystem_list: The list of qubits in the backend to include in the model.
+    :param rwa_cutoff_freq: Rotating wave approximation argument for the internal :class:`.Solver`
+    :param evaluation_mode: Evaluation mode argument for the internal :class:`.Solver`.
+    :param rotating_frame: Rotating frame argument for the internal :class:`.Solver`. Defaults to
+            ``"auto"``, allowing this method to pick a rotating frame.
+    :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
+    :param static_dissipators: static_dissipators: Constant dissipation operators.
+    :param dissipator_operators: Dissipation operators with time-dependent coefficients.
+    :param dissipator_channels: List of channel names in pulse schedules corresponding to dissipator operators.
+
+    :return: Solver instance carrying Hamiltonian information extracted from the IBMBackend instance
+    """
+    # get available target, config, and defaults objects
+    backend_target = getattr(backend, "target", None)
+
+    if not hasattr(backend, "configuration"):
+        raise QiskitError(
+            "DynamicsBackend.from_backend requires that the backend argument has a "
+            "configuration method."
+        )
+    backend_config = backend.configuration()
+
+    backend_defaults = None
+    if hasattr(backend, "defaults"):
+        backend_defaults = backend.defaults()
+
+    # get and parse Hamiltonian string dictionary
+    if backend_target is not None:
+        backend_num_qubits = backend_target.num_qubits
+    else:
+        backend_num_qubits = backend_config.n_qubits
+
+    if subsystem_list is not None:
+        subsystem_list = sorted(subsystem_list)
+        if subsystem_list[-1] >= backend_num_qubits:
+            raise QiskitError(
+                f"subsystem_list contained {subsystem_list[-1]}, which is out of bounds for "
+                f"backend with {backend_num_qubits} qubits."
+            )
+    else:
+        subsystem_list = list(range(backend_num_qubits))
+
+    if backend_config.hamiltonian is None:
+        raise QiskitError(
+            "get_solver_from_backend requires that backend.configuration() has a "
+            "hamiltonian."
+        )
+
+    (
+        static_hamiltonian,
+        hamiltonian_operators,
+        hamiltonian_channels,
+        subsystem_dims,
+    ) = parse_backend_hamiltonian_dict(backend_config.hamiltonian, subsystem_list)
+
+    # construct model frequencies dictionary from backend
+    channel_freqs = _get_backend_channel_freqs(
+        backend_target=backend_target,
+        backend_config=backend_config,
+        backend_defaults=backend_defaults,
+        channels=hamiltonian_channels,
+    )
+
+    # build the solver
+    if rotating_frame == "auto":
+        if "dense" in evaluation_mode:
+            rotating_frame = static_hamiltonian
+        else:
+            rotating_frame = np.diag(static_hamiltonian)
+
+    # get time step size
+    if backend_target is not None and backend_target.dt is not None:
+        dt = backend_target.dt
+    else:
+        # config is guaranteed to have a dt
+        dt = backend_config.dt
+
+    solver = Solver(
+        static_hamiltonian=static_hamiltonian,
+        hamiltonian_operators=hamiltonian_operators,
+        hamiltonian_channels=hamiltonian_channels,
+        channel_carrier_freqs=channel_freqs,
+        dt=dt,
+        rotating_frame=rotating_frame,
+        evaluation_mode=evaluation_mode,
+        rwa_cutoff_freq=rwa_cutoff_freq,
+        static_dissipators=static_dissipators,
+        dissipator_operators=dissipator_operators,
+        dissipator_channels=dissipator_channels
+    )
+
+    return channel_freqs, solver
 
 
 class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of it
@@ -60,11 +174,10 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
 
         :param n_qubits: Number of qubits in quantum system
         :param target: control target of interest (can be either a gate to be calibrated or a state to be prepared)
-        The target should be a dictionary containing the target type ('gate' or 'state') as well as necessary fields to
-        initiate the calibration (cf. example)
+            Target should be a Dict containing target type ('gate' or 'state') as well as necessary fields to initiate the calibration (cf. example)
         :param abstraction_level: Circuit or pulse level parametrization of action space
-        :param Qiskit_config: Dictionary containing all info for running a Qiskit program (i.e. service, backend,
-        options, parametrized_circuit)
+        :param Qiskit_config: Dictionary containing all info for running Qiskit program (i.e. service, backend,
+            options, parametrized_circuit)
         :param QUA_setup: Dictionary containing all infor for running a QUA program
         :param sampling_Pauli_space: Number of samples to build fidelity estimator for one action
         :param n_shots: Number of shots to sample for one specific computation (action/Pauli expectation sampling)
@@ -82,7 +195,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
             self.qc = QuantumCircuit(self.q_register)
             try:
                 self.service = Qiskit_config.get("service", None)
-                self.options = Qiskit_config.get("options", None)
+                self.estimator_options = Qiskit_config.get("estimator_options", None)
                 self.backend = Qiskit_config["backend"]
                 self.parametrized_circuit_func = Qiskit_config["parametrized_circuit"]
             except KeyError:
@@ -99,10 +212,17 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
                 self.qc = QuantumCircuit(self.q_register)
                 self.service = Qiskit_config["service"]
                 self.backend = Qiskit_config['backend']
+
+                # For benchmarking the gate at each epoch, set the tools for Pulse level simulator
+                self.solver = Qiskit_config['solver']
+                self.channel_freq = Qiskit_config['channel_freq']
+
+                if type(self.backend) == IBMBackend:  # Prepare to run the simulation according to dynamics backend
+                    # Does not include noise models
+                    self.pulse_backend = DynamicsBackend.from_backend(self.backend,
+                                                                      subsystem_list=Qiskit_config["target_register"])
                 self.parametrized_circuit_func = Qiskit_config['parametrized_circuit']
-                self.options = Qiskit_config['options']
-                self.dynamics_backend = DynamicsBackend.from_backend(self.backend,
-                                                                     subsystem_list=Qiskit_config["target_register"])
+                self.estimator_options = Qiskit_config['estimator_options']
 
         self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
                           for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
@@ -223,7 +343,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
 
         if self.service is not None:
             with Session(service=self.service, backend=self.backend):
-                estimator = runtime_Estimator(options=self.options)
+                estimator = runtime_Estimator(options=self.estimator_options)
                 job = estimator.run(circuits=[self.qc] * batch_size,
                                     observables=[observables] * batch_size,
                                     parameter_values=angles,
@@ -297,27 +417,37 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
             self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
             self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
         else:  # TODO: Qiskit Dynamics
-            job = self.dynamics_backend.run([parametrized_circ.bind_parameters(angle_set) for angle_set in angles])
-            result = job.result()
-            print(result)
+            # job = self.dynamics_backend.run([parametrized_circ.bind_parameters(angle_set) for angle_set in angles])
+            # result = job.result()
+            # print(result)
+            dt = self.backend.configuration().dt
+            converter = InstructionToSignals(dt, carriers=self.channel_freq)
+
         self.action_history.append(angles)
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.qc.append(parametrized_circ.to_instruction(), input_state["register"])
         # total_shots = self.n_shots * pauli_shots
         # self.qc = transpile(self.qc, self.backend)
+        estimator = Estimator()
         if self.service is not None:
             with Session(service=self.service, backend=self.backend):
-                estimator = runtime_Estimator(options=self.options)
+                estimator = runtime_Estimator(options=self.estimator_options)
                 job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
                                     parameter_values=angles,
                                     shots=self.sampling_Pauli_space)
-        else:
+        elif self.abstraction_level == 'circuit':
             # estimator = Estimator(options=self.options)
-            estimator = aer_Estimator()
-            job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
-                                parameter_values=angles,
-                                shots=self.sampling_Pauli_space)
+            estimator = Estimator()
+            if self.noise_model is not None:
+                estimator = aer_Estimator()
+            # TODO: Add noise model here with Aer estimator
 
+        elif type(self.backend) == DynamicsBackend:
+            estimator = BackendEstimator(self.backend, skip_transpilation=True)
+
+        job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
+                            parameter_values=angles,
+                            shots=self.sampling_Pauli_space)
         self.qc.clear()  # Reset the QuantumCircuit instance for next iteration
 
         reward_table = job.result().values

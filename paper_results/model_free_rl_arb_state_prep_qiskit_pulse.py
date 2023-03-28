@@ -7,16 +7,19 @@ Code for arbitrary state preparation based on scheme described in Appendix D.2b 
 """
 
 import numpy as np
-from Quantum_Optimal_Control.quantumenvironment import QuantumEnvironment
+from Quantum_Optimal_Control.quantumenvironment import QuantumEnvironment, get_solver_and_freq_from_backend
 from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import pulse, transpile
-from qiskit.providers.fake_provider import FakeManila
+from qiskit.providers.options import Options
+from qiskit.providers.fake_provider import FakeJakartaV2
 from qiskit_ibm_runtime import QiskitRuntimeService
-from qiskit.circuit import ParameterVector, Parameter, QuantumCircuit, Gate
+from qiskit_dynamics import DynamicsBackend
+from qiskit.circuit import ParameterVector, Parameter, ParameterExpression, QuantumCircuit, Gate
 from qiskit.extensions import CXGate, XGate
 from qiskit.opflow import H, I, X, S
+from qiskit_ibm_provider import IBMBackend, IBMProvider
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -27,6 +30,7 @@ from tf_agents.specs import array_spec, tensor_spec
 # Additional imports
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from typing import Optional
 
 """ 
 -----------------------------------------------------------------------------------------------------
@@ -37,25 +41,57 @@ In there, we design classes for the environment (Quantum Circuit simulated on IB
 """
 
 
+def custom_pulse_schedule(params: ParameterVector, use_calibrated_baseline: Optional[bool] = True):
+    """
+    Define parametrization of the pulse schedule characterizing the target gate
+    :param params: Parameters of the Schedule
+    :param use_calibrated_baseline: Bool to decide if one should aim to start from original calibration or from scratch
+    (QOC)
+    :return: Parametrized Schedule
+    """
+
+    global backend, target, qubit_tgt_register
+    if not use_calibrated_baseline:  # No baseline pulse, full waveform builder
+        pass
+    else:
+        print(backend.instruction_schedule_map)
+        default_schedule = backend.instruction_schedule_map.get(target["gate"].name, qubit_tgt_register)
+
+        # Look here for the pulse features to specifically optimize upon, for the x gate here, simply retrieve relevant
+        # parameters for the Drag pulse
+        pulse_ref = default_schedule.instructions[0][1].pulse
+
+        with pulse.build(backend=backend, name='parametrized_schedule') as parametrized_schedule:
+
+            pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
+                                  beta=pulse_ref.beta, angle=pulse_ref.angle), channel=pulse.DriveChannel(0))
+
+            # if dynamics_backend:  # Has to go in class, and add expectation value computation
+            #     pulse.acquire(duration=1, qubit_or_channel=pulse.AcquireChannel(qubit_tgt_register[0]),
+            #                   register=pulse.MemorySlot(qubit_tgt_register[0]))
+        return parametrized_schedule
+
+
 def apply_parametrized_circuit(qc: QuantumCircuit):
     """
     Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
-    :param qc: Quantum Circuit instance to add the gates on
+    This function is used to run the QuantumCircuit instance on a Runtime backend
+    :param qc: Quantum Circuit instance to add the gate on
     :return:
     """
     # qc.num_qubits
     global n_actions, backend, qubit_tgt_register, target
 
+    # x_pulse = backend.defaults().instruction_schedule_map.get('x', (qubit_tgt_register,)).instructions[0][1].pulse
     params = ParameterVector('theta', n_actions)
 
-    # original_calibration = backend.defaults().instruction_schedule_map.get(target["name"])
-    my_gate = Gate("x", 1, params=[params[0]])
-    with pulse.build(backend=backend, name="X_gate") as my_pulse_schedule:
-        pulse.play(pulse.Gaussian(duration=128, amp=params[0], sigma=16, angle=0),
-                   channel=pulse.drive_channel(0))
+    # original_calibration = backend.instruction_schedule_map.get(target["name"])
 
-    qc.add_calibration(my_gate, [0], my_pulse_schedule)
-    qc.append(my_gate, (0,))
+    parametrized_gate = Gate(target["gate"].name, 1, params=[params[0]])
+
+    parametrized_schedule = custom_pulse_schedule(params, use_calibrated_baseline=True)
+    qc.add_calibration(parametrized_gate, qubit_tgt_register, parametrized_schedule, [params[0]])
+    qc.append(parametrized_gate, qubit_tgt_register)
     # qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
     # qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
     # qc.rzx(2 * np.pi * params[6], 0, 1)
@@ -69,19 +105,37 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
 Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
-"""Runtime backend; for running with primitives on real QC, not ready at the moment"""
-# service = QiskitRuntimeService(channel='ibm_quantum')
-# seed = 3590  # Seed for action sampling
-# backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
-options = {'resilience_level': 0}
-
-# Fake backend
-backend = FakeManila()
 qubit_tgt_register = [0]
 n_qubits = 1
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
+n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
+time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
 
+"""
+Choose your backend: Here we deal with pulse level implementation. In Qiskit, there are only way two ways
+to try this. If simulation, use DynamicsBackend and see if BackendEstimator does the job for implementing the 
+primitive. If Runtime backend, 
+"""
+estimator_options = {'resilience_level': 0}
+fake_backend = FakeJakartaV2()
+
+"""Real backend initialization"""
+provider = IBMProvider()
+# service = QiskitRuntimeService(channel='ibm_quantum')
+# runtime_backend = service.get_backend('ibm_perth')
+real_backend = provider.get_backend('ibm_perth')
+
+
+dynamics_options = {'seed_simulator': 5000, "configuration": real_backend.configuration()
+                    }
+dynamics_backend = DynamicsBackend.from_backend(real_backend, subsystem_list=qubit_tgt_register, **dynamics_options)
+
+# Choose here among the above backends, if simulator or dynamics_backend, set service to None
+backend = dynamics_backend
+service = None
+
+# Define target gate
 X_tgt = {
     "target_type": 'gate',
     "gate": XGate("X"),
@@ -105,16 +159,27 @@ X_tgt = {
 }
 
 target = X_tgt
+
+channel_freq, solver = get_solver_and_freq_from_backend(
+    backend=real_backend,
+    subsystem_list=qubit_tgt_register,
+    rotating_frame="auto",
+    evaluation_mode="dense",
+    rwa_cutoff_freq=None,
+    static_dissipators=None,
+    dissipator_channels=None,
+    dissipator_operators=None
+)
 Qiskit_setup = {
     "backend": backend,
     "parametrized_circuit": apply_parametrized_circuit,
-    "options": options,
-    "service": QiskitRuntimeService(channel='ibm_quantum'),
-    "target_register": [0, 1]
+    "estimator_options": estimator_options,
+    "service": service,
+    "target_register": [0],
+    "channel_freq": channel_freq,
+    "solver": solver
 }
 
-n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
-time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
 action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
 observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
 
@@ -129,8 +194,8 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 1500  # Number of epochs
-batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+n_epochs = 200  # Number of epochs
+batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
