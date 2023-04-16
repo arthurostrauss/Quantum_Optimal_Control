@@ -7,17 +7,20 @@ Code for arbitrary state preparation based on scheme described in Appendix D.2b 
 """
 
 import numpy as np
-from Quantum_Optimal_Control.quantumenvironment import QuantumEnvironment, get_solver_and_freq_from_backend
-from Quantum_Optimal_Control.helper_functions import select_optimizer, generate_model
+
+
+from quantumenvironment import QuantumEnvironment, get_solver_and_freq_from_backend
+from helper_functions import select_optimizer, generate_model, custom_pulse_schedule
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import pulse, transpile
 from qiskit.providers.options import Options
-from qiskit.providers.fake_provider import FakeJakartaV2
+from qiskit.providers.fake_provider import FakeJakarta
+from qiskit.providers import QubitProperties
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_dynamics import DynamicsBackend
 from qiskit.circuit import ParameterVector, Parameter, ParameterExpression, QuantumCircuit, Gate
-from qiskit.extensions import CXGate, XGate
+from qiskit.extensions import CXGate, XGate, SXGate, RZGate
 from qiskit.opflow import H, I, X, S
 from qiskit_ibm_provider import IBMBackend, IBMProvider
 
@@ -41,37 +44,6 @@ In there, we design classes for the environment (Quantum Circuit simulated on IB
 """
 
 
-def custom_pulse_schedule(params: ParameterVector, use_calibrated_baseline: Optional[bool] = True):
-    """
-    Define parametrization of the pulse schedule characterizing the target gate
-    :param params: Parameters of the Schedule
-    :param use_calibrated_baseline: Bool to decide if one should aim to start from original calibration or from scratch
-    (QOC)
-    :return: Parametrized Schedule
-    """
-
-    global backend, target, qubit_tgt_register
-    if not use_calibrated_baseline:  # No baseline pulse, full waveform builder
-        pass
-    else:
-        print(backend.instruction_schedule_map)
-        default_schedule = backend.instruction_schedule_map.get(target["gate"].name, qubit_tgt_register)
-
-        # Look here for the pulse features to specifically optimize upon, for the x gate here, simply retrieve relevant
-        # parameters for the Drag pulse
-        pulse_ref = default_schedule.instructions[0][1].pulse
-
-        with pulse.build(backend=backend, name='parametrized_schedule') as parametrized_schedule:
-
-            pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
-                                  beta=pulse_ref.beta, angle=pulse_ref.angle), channel=pulse.DriveChannel(0))
-
-            # if dynamics_backend:  # Has to go in class, and add expectation value computation
-            #     pulse.acquire(duration=1, qubit_or_channel=pulse.AcquireChannel(qubit_tgt_register[0]),
-            #                   register=pulse.MemorySlot(qubit_tgt_register[0]))
-        return parametrized_schedule
-
-
 def apply_parametrized_circuit(qc: QuantumCircuit):
     """
     Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
@@ -80,22 +52,19 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     :return:
     """
     # qc.num_qubits
-    global n_actions, backend, qubit_tgt_register, target
+    global n_actions, fake_backend, backend, qubit_tgt_register, target
 
     # x_pulse = backend.defaults().instruction_schedule_map.get('x', (qubit_tgt_register,)).instructions[0][1].pulse
     params = ParameterVector('theta', n_actions)
 
     # original_calibration = backend.instruction_schedule_map.get(target["name"])
 
-    parametrized_gate = Gate(target["gate"].name, 1, params=[params[0]])
-
-    parametrized_schedule = custom_pulse_schedule(params, use_calibrated_baseline=True)
-    qc.add_calibration(parametrized_gate, qubit_tgt_register, parametrized_schedule, [params[0]])
+    parametrized_gate = Gate(f"custom_{target['gate'].name}", 1, params=[params[0]])
+    default_schedule = fake_backend.defaults().instruction_schedule_map.get(target["gate"].name, qubit_tgt_register)
+    parametrized_schedule = custom_pulse_schedule(backend=backend, target=target, qubit_tgt_register=qubit_tgt_register,
+                                                  params=params, default_schedule=default_schedule)
+    qc.add_calibration(parametrized_gate, qubit_tgt_register, parametrized_schedule)
     qc.append(parametrized_gate, qubit_tgt_register)
-    # qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
-    # qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    # qc.rzx(2 * np.pi * params[6], 0, 1)
-
 
 # action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
 
@@ -107,7 +76,7 @@ Variables to define environment
 """
 qubit_tgt_register = [0]
 n_qubits = 1
-sampling_Paulis = 100
+sampling_Paulis = 10
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
 time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
@@ -118,42 +87,52 @@ to try this. If simulation, use DynamicsBackend and see if BackendEstimator does
 primitive. If Runtime backend, 
 """
 estimator_options = {'resilience_level': 0}
-fake_backend = FakeJakartaV2()
+fake_backend = FakeJakarta()
 
 """Real backend initialization"""
-provider = IBMProvider()
+# provider = IBMProvider()
 # service = QiskitRuntimeService(channel='ibm_quantum')
 # runtime_backend = service.get_backend('ibm_perth')
-real_backend = provider.get_backend('ibm_perth')
+# real_backend = provider.get_backend('ibm_perth')
+# control_channel_map = {**{ tuple(i):real_backend.control_channel(i)[0].index for i in real_backend.coupling_map} }
+control_channel_map = {**{ key : fake_backend._configuration.control_channels[key][0].index for key in fake_backend._configuration.control_channels} }
+control_channel_map2 = dict(filter(lambda x: x is not None, control_channel_map))
+print(control_channel_map)
+dynamics_options = {'seed_simulator': 5000, "configuration": fake_backend.configuration(),
+                    'control_channel_map': control_channel_map # Control channels to play CR tones, should match connectivity of device
 
-
-dynamics_options = {'seed_simulator': 5000, "configuration": real_backend.configuration()
                     }
-dynamics_backend = DynamicsBackend.from_backend(real_backend, subsystem_list=qubit_tgt_register, **dynamics_options)
+dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=qubit_tgt_register, **dynamics_options)
 
 # Choose here among the above backends, if simulator or dynamics_backend, set service to None
 backend = dynamics_backend
+target = backend.target
+v0 = 4.86e9
+anharm0 = -0.32e9
+r0 = 0.22e9
+
+v1 = 4.97e9
+anharm1 = -0.32e9
+r1 = 0.26e9
+target.qubit_properties = [QubitProperties(frequency=v0), QubitProperties(frequency=v1)]
 service = None
 
 # Define target gate
 X_tgt = {
     "target_type": 'gate',
     "gate": XGate("X"),
+    "register": qubit_tgt_register,
     "input_states": [
         {"name": '|0>',
-         "circuit": I,
-         "register": [0]},
+         "circuit": I},
 
         {"name": '|1>',
-         "circuit": X,
-         "register": [0]},
+         "circuit": X},
 
         {"name": '|+>',
-         "circuit": H,
-         "register": [0]},
+         "circuit": H},
         {"name": '|->',
-         "circuit": H @ X,
-         "register": [0]},
+         "circuit": H @ X},
     ]
 
 }
@@ -161,7 +140,7 @@ X_tgt = {
 target = X_tgt
 
 channel_freq, solver = get_solver_and_freq_from_backend(
-    backend=real_backend,
+    backend=fake_backend,
     subsystem_list=qubit_tgt_register,
     rotating_frame="auto",
     evaluation_mode="dense",
@@ -186,7 +165,7 @@ observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
 q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="pulse",
                            action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=1.)
+                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -195,7 +174,7 @@ Hyperparameters for RL agent
 """
 # Hyperparameters for the agent
 n_epochs = 200  # Number of epochs
-batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+batchsize = 1  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
@@ -258,7 +237,7 @@ for i in tqdm(range(n_epochs)):
 
         # Adjust the action vector according to params physical significance
 
-        reward = q_env.perform_action_gate_cal(action_vector)
+        reward = q_env.perform_action(action_vector)
         advantage = reward - b
 
         if use_PPO:
@@ -279,11 +258,8 @@ for i in tqdm(range(n_epochs)):
         sigma_old.assign(sigma)
 
     print('\n Epoch', i)
-    print(f"{policy_params_str:#<100}")
-    print('mu_vec:', np.array(mu))
-    print('sigma_vec:', np.array(sigma))
-    print('baseline:', np.array(b))
-    print("Fidelity:", q_env.state_fidelity_history[i])
+    print("Average reward", np.mean(q_env.reward_history[i]))
+    # print("Average Gate Fidelity:", q_env.avg_fidelity_history[i])
 
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
@@ -306,38 +282,12 @@ def plot_examples(fig, ax, reward_table):
     ax.set_xlabel('Epoch')
     fig.colorbar(im, ax=ax, label='Reward')
 
-
-window_size = 10
-
-i = 0
-# Initialize an empty list to store moving averages
-moving_average_reward = []
-moving_average_gate_fidelity = []
-moving_average_process_fidelity = []
-# Loop through the array t o
-# consider every window of size 3
-while i < n_epochs - window_size + 1:
-    # Calculate the average of current window
-    window_average_reward = round(np.sum(np.mean(q_env.reward_history, axis=1)[
-                                         i:i + window_size]) / window_size, 2)
-    window_average_gate_fidelity = round(np.sum(q_env.avg_fidelity_history[
-                                                i:i + window_size]) / window_size, 2)
-    window_average_process_fidelity = round(np.sum(q_env.process_fidelity_history[
-                                                   i:i + window_size]) / window_size, 2)
-
-    # Store the average of current
-    # window in moving average list
-    moving_average_reward.append(window_average_reward)
-    moving_average_gate_fidelity.append(window_average_gate_fidelity)
-    moving_average_process_fidelity.append(window_average_process_fidelity)
-    # Shift window to right by one position
-    i += 1
 figure, (ax1, ax2) = plt.subplots(1, 2)
 #  Plot return as a function of epochs
 ax1.plot(np.mean(q_env.reward_history, axis=1), '-.', label='Reward')
 # ax1.plot(data["baselines"], '-.', label='baseline')
 # ax1.plot(q_env.process_fidelity_history, '-o', label='Process Fidelity')
-ax1.plot(q_env.avg_fidelity_history, '-.', label='Average Gate Fidelity')
+# ax1.plot(q_env.avg_fidelity_history, '-.', label='Average Gate Fidelity')
 
 # adapted_epoch = np.arange(0, n_epochs, window_size)
 # ax1.plot(adapted_epoch, moving_average_reward, '-.', label='Reward')

@@ -1,7 +1,13 @@
 import tensorflow as tf
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, Dict
 from tensorflow.python.keras.layers import Input, Dense
 from tensorflow.python.keras import Model
+
+from qiskit.circuit import ParameterVector, QuantumRegister
+from qiskit import pulse
+from qiskit.pulse import ScheduleBlock
+from qiskit_ibm_provider import IBMBackend
+from qiskit_dynamics import DynamicsBackend
 
 
 def constrain_mean_value(mu_var):
@@ -12,8 +18,43 @@ def constrain_std_value(std_var):
     return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
 
 
+def custom_pulse_schedule(backend: Union[IBMBackend, DynamicsBackend], target: Dict,
+                          qubit_tgt_register: Union[List[int],
+                          QuantumRegister], params: ParameterVector,
+                          default_schedule: Optional[ScheduleBlock]=None):
+    """
+    Define parametrization of the pulse schedule characterizing the target gate
+    :param qubit_tgt_register: Qubit register on which
+    :param target: Dictionary containing information about the target (gate or state)
+    :param backend: IBM Backend on which schedule shall be added
+    :param params: Parameters of the Schedule
+    :param default_schedule: Schedule baseline from which one can customize the pulse parameters
+    (QOC)
+    :return: Parametrized Schedule
+    """
+
+    if default_schedule is None:  # No baseline pulse, full waveform builder
+        pass
+    else:
+
+        # Look here for the pulse features to specifically optimize upon, for the x gate here, simply retrieve relevant
+        # parameters for the Drag pulse
+        pulse_ref = default_schedule.instructions[0][1].pulse
+
+        with pulse.build(backend=backend, name='parametrized_schedule') as parametrized_schedule:
+
+            pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
+                                  beta=pulse_ref.beta, angle=pulse_ref.angle),
+                       channel=pulse.DriveChannel(qubit_tgt_register[0]))
+
+            # if dynamics_backend:  # Has to go in class, and add expectation value computation
+            #     pulse.acquire(duration=1, qubit_or_channel=pulse.AcquireChannel(qubit_tgt_register[0]),
+            #                   register=pulse.MemorySlot(qubit_tgt_register[0]))
+        return parametrized_schedule
+
+
 def select_optimizer(lr: float, optimizer: str = "Adam", grad_clip: Optional[float] = None,
-                     concurrent_optimization: bool = True,  lr2: Optional[float] = None):
+                     concurrent_optimization: bool = True, lr2: Optional[float] = None):
     if concurrent_optimization:
         if optimizer == 'Adam':
             return tf.optimizers.Adam(learning_rate=lr, clipvalue=grad_clip)
@@ -46,9 +87,11 @@ def generate_model(input_shape: Tuple, hidden_units: Union[List, Tuple], n_actio
     for i in range(1, len(hidden_units)):
         Net = Dense(hidden_units[i], activation='relu', kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
                     bias_initializer=tf.initializers.RandomNormal(stddev=0.5), name=f"hidden_{i}")(Net)
+
     mean_param = Dense(n_actions, activation='tanh', name='mean_vec')(Net)  # Mean vector output
     sigma_param = Dense(n_actions, activation="softplus", name="sigma_vec")(Net)  # Diagonal elements of cov matrix
     # output
+
     if actor_critic_together:
         critic_output = Dense(1, activation='linear', name="critic_output")(Net)
         return Model(inputs=input_layer, outputs=[mean_param, sigma_param, critic_output])

@@ -7,7 +7,10 @@ Created on 28/11/2022
 """
 
 # Qiskit imports
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, pulse, schedule
+from qiskit.transpiler import InstructionProperties
+from qiskit.circuit import Parameter, ParameterVector
+from qiskit.circuit.library import XGate, SXGate, RZGate, CXGate
 from qiskit.quantum_info import DensityMatrix, Statevector, Pauli, SparsePauliOp, state_fidelity, Operator, \
     process_fidelity, average_gate_fidelity
 from qiskit.exceptions import QiskitError
@@ -16,19 +19,24 @@ from qiskit.exceptions import QiskitError
 from qiskit_dynamics import DynamicsBackend, Solver, Signal, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.pulse import InstructionToSignals
-from qiskit_ibm_provider import IBMBackend
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
 from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs
 
+# Qiskit Experiments for generating reliable baseline for more complex gate calibrations / state preparations
+from qiskit_experiments.calibration_management.calibrations import Calibrations
+from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
+# from qiskit_experiments.calibration_management.parameter_value import ParameterValue
+from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon
+
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
-from qiskit_ibm_runtime import Session, Estimator as runtime_Estimator
+from qiskit_ibm_runtime import Session, QiskitRuntimeService, Estimator as runtime_Estimator
+from qiskit_ibm_provider import IBMBackend, Backend
 from qiskit_aer.primitives import Estimator as aer_Estimator
 from qiskit.opflow import Zero
 import numpy as np
 from itertools import product
-from typing import Dict, Union, Optional, Any, List, Tuple
-
+from typing import Dict, Union, Optional, List, Tuple
 # QUA imports
 # from QUA_config_two_sc_qubits import IBMconfig
 # from qualang_tools.bakery.bakery import baking
@@ -39,21 +47,18 @@ from typing import Dict, Union, Optional, Any, List, Tuple
 # Tensorflow modules
 import tensorflow as tf
 from tensorflow_probability.python.distributions import Categorical
-from tf_agents.environments.py_environment import PyEnvironment
-# from tf_agents.environments.tf_environment import TFEnvironment
 from tf_agents.specs import array_spec, tensor_spec
-from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
 
 # configure jax to use 64 bit mode
 import jax
 
-jax.config.update("jax_enable_x64", True)
-# tell JAX we are using CPU
-jax.config.update("jax_platform_name", "cpu")
-# import Array and set default backend
-
-Array.set_default_backend('jax')
+# jax.config.update("jax_enable_x64", True)
+# # tell JAX we are using CPU
+# jax.config.update("jax_platform_name", "cpu")
+# # import Array and set default backend
+#
+# Array.set_default_backend('jax')
 
 
 def get_solver_and_freq_from_backend(backend: IBMBackend, subsystem_list: Optional[List[int]] = None,
@@ -161,7 +166,52 @@ def get_solver_and_freq_from_backend(backend: IBMBackend, subsystem_list: Option
     return channel_freqs, solver
 
 
-class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of it
+def perform_standard_calibrations(backend: DynamicsBackend):
+    """
+    Generate reliable baseline single qubit gates (X, SX, RZ) for doing Pauli rotations
+    :param backend: Dynamics Backend on which calibrations should be run
+    :return:
+    """
+
+    target, num_qubits = backend.target, backend.num_qubits
+    print('Number of qubits', num_qubits)
+    print("Starting initial single qubit gates calibrations...")
+    cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"])])
+    phi = Parameter("phi")
+    for qubit in range(num_qubits):
+        control_channels = list(filter(lambda x: x is not None,
+                                       [backend.options.control_channel_map.get((i, qubit), None)
+                                        for i in range(num_qubits)]))
+        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
+            pulse.shift_phase(-1.0*phi, pulse.DriveChannel(qubit))
+            for q in control_channels:
+                pulse.shift_phase(-phi, pulse.ControlChannel(q))
+
+        target.add_instruction(RZGate(phi), {(qubit,): InstructionProperties(calibration=rz_cal, error=0.0)})
+
+    with pulse.build(backend=backend, name="sx_schedule") as sx_schedule:
+        pulse.play(pulse.Drag(duration=70, amp=0.3, sigma=20,
+                              beta=-0.5, angle=0.), channel=pulse.DriveChannel(0))
+    backend.target.add_instruction(XGate(), properties={**{(qubit,): None for qubit in range(num_qubits)}})
+    backend.target.add_instruction(SXGate(), properties={**{(qubit,): None for qubit in range(num_qubits)}})
+    print("Starting Rabi experiments...")
+    rabi_experiments = [RoughXSXAmplitudeCal(qubit, cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 27))
+                for qubit in range(num_qubits)]
+    rabi_results = [rabi_exp.run().block_for_results() for rabi_exp in rabi_experiments]
+
+    print("Rabi experiments done")
+    print("Starting Drag experiments...")
+    drag_experiments = [RoughDragCal(qubit, cals, backend=backend, betas=np.linspace(-20, 20, 15))
+                        for qubit in range(num_qubits)]
+    for q in range(num_qubits):
+        drag_experiments[q].set_experiment_options(reps=[3, 5, 7])
+    drag_results = [drag_exp.run().block_for_results() for drag_exp in drag_experiments]
+    print("Drag experiments done")
+    # backend.target.add_instruction(XGate(), properties={(0,): InstructionProperties(calibration=sx_schedule, error=0.05)})
+    # backend.target.add_instruction(SXGate(), properties={(0,): InstructionProperties(calibration=sx_schedule, error=0.05)})
+    print("All calibrations are done")
+
+class QuantumEnvironment:
 
     def __init__(self, n_qubits: int, target: Dict, abstraction_level: str,
                  action_spec: Union[array_spec.ArraySpec, tensor_spec.TensorSpec],
@@ -181,38 +231,27 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         :param QUA_setup: Dictionary containing all infor for running a QUA program
         :param sampling_Pauli_space: Number of samples to build fidelity estimator for one action
         :param n_shots: Number of shots to sample for one specific computation (action/Pauli expectation sampling)
-        :param c_factor: Scaling factor for reward definition
+        :param c_factor: Scaling factor for reward normalization
         """
 
         assert abstraction_level == 'circuit' or abstraction_level == 'pulse', 'Abstraction layer parameter can be' \
                                                                                'only pulse or circuit'
-        self.abstraction_level = abstraction_level
-        if abstraction_level == 'circuit':
-            assert isinstance(Qiskit_config, Dict), "Qiskit setup argument not provided whereas circuit abstraction " \
-                                                    "was provided"
+        self.abstraction_level: str = abstraction_level
+        if Qiskit_config is not None and QUA_setup is not None:
+            raise AttributeError("Cannot provide simultaneously a QUA setup and a Qiskit config ")
+        elif Qiskit_config is not None:
+
             self.q_register = QuantumRegister(n_qubits)
             self.c_register = ClassicalRegister(n_qubits)
             self.qc = QuantumCircuit(self.q_register)
-            try:
-                self.service = Qiskit_config.get("service", None)
-                self.estimator_options = Qiskit_config.get("estimator_options", None)
-                self.backend = Qiskit_config["backend"]
-                self.parametrized_circuit_func = Qiskit_config["parametrized_circuit"]
-            except KeyError:
-                print("Circuit abstraction on Qiskit uses Runtime, need to provide"
-                      "backend (Runtime) and ansatz circuit")
-        elif abstraction_level == 'pulse':
-            # TODO: Define pulse level (Schedule most likely, cf Qiskit Pulse doc)
-            # TODO: Add a QUA program
-            if QUA_setup is not None:
-                self.qua_setup = QUA_setup
-            elif Qiskit_config is not None:
-                self.q_register = QuantumRegister(n_qubits)
-                self.c_register = ClassicalRegister(n_qubits)
-                self.qc = QuantumCircuit(self.q_register)
-                self.service = Qiskit_config["service"]
-                self.backend = Qiskit_config['backend']
 
+            self.service: QiskitRuntimeService = Qiskit_config.get("service", None)
+            self.estimator_options: Dict = Qiskit_config.get("estimator_options", None)
+            self.backend: Union[IBMBackend, DynamicsBackend, Backend] = Qiskit_config["backend"]
+            self.noise_model = Qiskit_config.get("noise_model", None)
+            self.parametrized_circuit_func = Qiskit_config["parametrized_circuit"]
+
+            if abstraction_level == 'pulse':
                 # For benchmarking the gate at each epoch, set the tools for Pulse level simulator
                 self.solver = Qiskit_config['solver']
                 self.channel_freq = Qiskit_config['channel_freq']
@@ -221,8 +260,12 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
                     # Does not include noise models
                     self.pulse_backend = DynamicsBackend.from_backend(self.backend,
                                                                       subsystem_list=Qiskit_config["target_register"])
-                self.parametrized_circuit_func = Qiskit_config['parametrized_circuit']
-                self.estimator_options = Qiskit_config['estimator_options']
+                elif type(self.backend) == DynamicsBackend:
+                    perform_standard_calibrations(self.backend)
+
+        elif QUA_setup is not None:
+            self.qua_setup = QUA_setup
+            # TODO: Add a QUA program
 
         self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
                           for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
@@ -233,21 +276,7 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         self.sampling_Pauli_space = sampling_Pauli_space
         self.n_shots = n_shots
 
-        if target.get("target_type", None) == "state" or target.get("target_type", None) is None:  # Default mode is
-            # State preparation if no argument target_type is found
-            if 'circuit' in target:
-                target["dm"] = DensityMatrix(target["circuit"] @ (Zero ^ self._n_qubits))
-            assert 'dm' in target, 'no DensityMatrix or circuit argument provided to target dictionary'
-            assert type(target["dm"]) == DensityMatrix, 'Provided dm is not a DensityMatrix object'
-            self.target = self.calculate_chi_target_state(target)
-            self.target_type = "state"
-        elif target.get("target_type", None) == "gate":
-            # input_states = [self.calculate_chi_target_state(input_state) for input_state in target["input_states"]]
-            self.target = target
-            # self.target["input_states"] = input_states
-            self.target_type = "gate"
-        else:
-            raise KeyError('target type not identified, must be either gate or state')
+        self.target, self.target_type, self.tgt_register = self._define_target(target)
 
         # Data storage for TF-Agents or plotting
         self.action_history = []
@@ -255,36 +284,48 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         self.density_matrix_history = []
         self.reward_history = []
         self.state_fidelity_history = []
-        self.process_fidelity_history = []
-        self.avg_fidelity_history = []
+        if self.target_type == 'gate':
+            self.input_output_state_fidelity_history = [[] for _ in range(len(self.target.get("input_states", 1)))]
+            self.process_fidelity_history = []
+            self.avg_fidelity_history = []
+            self.built_unitaries = []
         self.time_step = 0
         self._action_spec = action_spec
         self._observation_spec = observation_spec
         self.episode_ended = False
 
-    def observation_spec(self) -> types.NestedArraySpec:
-        return self._observation_spec
+    def _define_target(self, target: Dict):
+        if target.get("target_type", None) == "state" or target.get("target_type", None) is None:  # Default mode is
+            # State preparation if no argument target_type is found
+            if 'circuit' in target:
+                target["dm"] = DensityMatrix(target["circuit"] @ (Zero ^ self._n_qubits))
+            assert 'dm' in target, 'no DensityMatrix or circuit argument provided to target dictionary'
+            assert type(target["dm"]) == DensityMatrix, 'Provided dm is not a DensityMatrix object'
+            if target.get("register", None) is None:
+                target["register"] = QuantumRegister(self._n_qubits)
+            return self.calculate_chi_target_state(target), "state", target["register"]
+        elif target.get("target_type", None) == "gate":
+            # input_states = [self.calculate_chi_target_state(input_state) for input_state in target["input_states"]]
+            assert 'register' in target, 'input state shall be specified over a QuantumRegister'
+            assert type(target['register']) == QuantumRegister or type(target['register'] == List[int])
+            assert 'input_states' in target, 'Gate calibration requires a set of input states (dict)'
+            for i, input_state in enumerate(target["input_states"]):
+                assert 'circuit' in input_state or 'dm' in input_state, f'input_state {i} does not have a ' \
+                                                                        f'DensityMatrix or circuit description'
 
-    def action_spec(self) -> types.NestedArraySpec:
-        return self._action_spec
-
-    def get_info(self) -> types.NestedArray:
-        pass
-
-    def get_state(self) -> Any:
-        pass
-
-    def set_state(self, state: Any) -> None:
-        pass
-
-    def _step(self, action: types.NestedArray) -> ts.TimeStep:
-
-        pass
-
-    def _reset(self) -> ts.TimeStep:  # TODO:
-        if self.abstraction_level == 'circuit':
-            self.qc.reset(self.q_register)
-            return ts.restart()
+                gate_op = Operator(target['gate'])
+                target['input_states'][i]['target_state'] = {'target_type': 'state'}
+                if 'circuit' in input_state:
+                    target['input_states'][i]['dm'] = DensityMatrix(input_state['circuit'] @ (Zero^self._n_qubits))
+                    target['input_states'][i]['target_state']["dm"] = DensityMatrix(gate_op @ input_state["circuit"]
+                                                                                    @ (Zero^self._n_qubits))
+                elif 'dm' in input_state:
+                    target['input_states'][i]['target_state']["dm"] = gate_op @ input_state["dm"]
+                target['input_states'][i]['target_state'] = self.calculate_chi_target_state(
+                    target['input_states'][i]['target_state'])
+            return target, "gate", target["register"]
+        else:
+            raise KeyError('target type not identified, must be either gate or state')
 
     def calculate_chi_target_state(self, target_state: Dict):
         """
@@ -293,12 +334,10 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         :return: target state
         """
         assert 'dm' in target_state, 'No input data for target state, provide DensityMatrix'
-        # assert np.imag([np.array(target_state["dm"].to_operator()) @ self.Pauli_ops[k]["matrix"]
-        #                 for k in range(self.d ** 2)]).all() == 0.
         target_state["Chi"] = np.array([np.trace(np.array(target_state["dm"].to_operator())
-                                                 @ self.Pauli_ops[k]["matrix"]).real for k in
-                                        range(self.d ** 2)])  # Real part is taken to convert it in a good format,
-        # but im is 0 systematically as dm is hermitian and Pauli is traceless
+                                                 @ self.Pauli_ops[k]["matrix"]).real for k in range(self.d ** 2)])
+        # Real part is taken to convert it in good format,
+        # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
         return target_state
 
     def perform_action(self, actions: types.NestedTensorOrArray):
@@ -308,83 +347,19 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
         obtained density matrix
         """
+        self.qc.clear()  # Reset the QuantumCircuit instance for next iteration
         angles, batch_size = np.array(actions), len(np.array(actions))
-        # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
 
-        assert self.target_type == 'state'
-        distribution = Categorical(probs=self.target["Chi"] ** 2)
-        k_samples = distribution.sample(self.sampling_Pauli_space)
-        pauli_index, _, pauli_shots = tf.unique_with_counts(k_samples)
+        if self.target_type == 'gate':
+            # Pick a random input state from the possible provided input states (forming a tomographically complete set)
+            index = np.random.randint(len(self.target["input_states"]))
+            input_state = self.target["input_states"][index]
+            # Append input state circuit to full quantum circuit for gate calibration
+            self.qc.append(input_state["circuit"].to_instruction(), self.tgt_register)
 
-        reward_factor = np.round([self.c_factor * self.target["Chi"][p] / (self.d * distribution.prob(p))
-                                  for p in pauli_index], 5)
-
-        # observables = [SparsePauliOp(self.Pauli_ops[p]["name"]) for p in pauli_index]
-        observables = SparsePauliOp.from_list([(self.Pauli_ops[p]["name"], reward_factor[i])
-                                               for i, p in enumerate(pauli_index)])
-        # Apply parametrized quantum circuit (action)
-        self.parametrized_circuit_func(self.qc)
-
-        # Keep track of state for benchmarking purposes only
-        if self.abstraction_level == 'circuit':
-            self.density_matrix = np.zeros([self.d, self.d], dtype='complex128')
-            qc_list = [self.qc.bind_parameters(angle_set) for angle_set in angles]
-            q_state_list = [Statevector.from_instruction(qc) for qc in qc_list]
-            self.density_matrix = DensityMatrix(np.mean([np.array(q_state.to_operator()) for q_state in q_state_list],
-                                                        axis=0))
-            self.density_matrix_history.append(self.density_matrix)
-            self.action_history.append(angles)
-            self.state_fidelity_history.append(state_fidelity(self.target["dm"], self.density_matrix))
-        else:
-            pass
-        # total_shots = self.n_shots * pauli_shots
-        # job_list, result_list = [], []
-        # exp_values = np.zeros((len(pauli_index), batch_size))
-
-        if self.service is not None:
-            with Session(service=self.service, backend=self.backend):
-                estimator = runtime_Estimator(options=self.estimator_options)
-                job = estimator.run(circuits=[self.qc] * batch_size,
-                                    observables=[observables] * batch_size,
-                                    parameter_values=angles,
-                                    shots=self.sampling_Pauli_space)
-        else:
-            estimator = aer_Estimator()
-            job = estimator.run(circuits=[self.qc] * batch_size,
-                                observables=[observables] * batch_size,
-                                parameter_values=angles,
-                                shots=self.sampling_Pauli_space)
-        result = job.result()
-        reward_table = result.values
-        self.qc.clear()
-
-        # reward_table = np.mean(reward_factor[:, np.newaxis] * exp_values, axis=0)
-        self.reward_history.append(reward_table)
-        assert len(reward_table) == batch_size
-        return reward_table  # Shape [batchsize]
-
-    def perform_action_gate_cal(self, actions: types.NestedTensorOrArray):
-        """
-        Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
-        :param actions: action vector to execute on quantum system
-        :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
-        obtained density matrix
-        """
-        angles, batch_size = np.array(actions), len(np.array(actions))
-        assert self.target_type == 'gate'
-
-        # Pick a random input state from the possible provided input states (forming a tomographically complete set)
-        index = np.random.randint(len(self.target["input_states"]))
-        input_state = self.target["input_states"][index]
-        # Deduce target state to aim for by applying target operation on it
-        target_state = {"target_type": 'state'}
-        if 'dm' in input_state:
-            target_state["dm"] = Operator(self.target['gate']) @ input_state["dm"]
-        elif 'circuit' in input_state:
-            target_state_fn = Operator(self.target['gate']) @ input_state["circuit"] @ (Zero ^ self._n_qubits)
-            target_state["dm"] = DensityMatrix(target_state_fn)
-        target_state = self.calculate_chi_target_state(target_state)
-
+            target_state = self.target["input_states"][index]["target_state"]
+        else: # State preparation task
+            target_state = self.target
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         distribution = Categorical(probs=target_state["Chi"] ** 2)
         k_samples = distribution.sample(self.sampling_Pauli_space)
@@ -398,60 +373,76 @@ class QuantumEnvironment(PyEnvironment):  # TODO: Build a PyEnvironment out of i
         observables = SparsePauliOp.from_list([(self.Pauli_ops[p]["name"], reward_factor[i])
                                                for i, p in enumerate(pauli_index)])
 
-        # Prepare input state
-        self.qc.append(input_state["circuit"].to_instruction(), input_state["register"])
-
-        # Apply parametrized quantum circuit (action)
+        print('observables', observables)
+        # Apply parametrized quantum circuit (action), for benchmarking only
         parametrized_circ = QuantumCircuit(self._n_qubits)
         self.parametrized_circuit_func(parametrized_circ)
 
         # Keep track of process for benchmarking purposes only
-        if self.abstraction_level == 'circuit':
-            qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
-            q_process_list = [Operator(qc) for qc in qc_list]
-            prc_fidelity = np.mean([process_fidelity(q_process, Operator(self.target["gate"]))
-                                    for q_process in q_process_list])
-            avg_fidelity = np.mean([average_gate_fidelity(q_process, Operator(self.target["gate"]))
-                                    for q_process in q_process_list])
-
-            self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
-            self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
-        else:  # TODO: Qiskit Dynamics
-            # job = self.dynamics_backend.run([parametrized_circ.bind_parameters(angle_set) for angle_set in angles])
-            # result = job.result()
-            # print(result)
-            dt = self.backend.configuration().dt
-            converter = InstructionToSignals(dt, carriers=self.channel_freq)
-
-        self.action_history.append(angles)
+        self._store_benchmarks(parametrized_circ, angles)
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
-        self.qc.append(parametrized_circ.to_instruction(), input_state["register"])
-        # total_shots = self.n_shots * pauli_shots
-        # self.qc = transpile(self.qc, self.backend)
+        self.parametrized_circuit_func(self.qc)
+        print("Calibrations of quantum circuit", self.qc.calibrations)
+
         estimator = Estimator()
+
         if self.service is not None:
             with Session(service=self.service, backend=self.backend):
                 estimator = runtime_Estimator(options=self.estimator_options)
                 job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
                                     parameter_values=angles,
                                     shots=self.sampling_Pauli_space)
-        elif self.abstraction_level == 'circuit':
-            # estimator = Estimator(options=self.options)
-            estimator = Estimator()
-            if self.noise_model is not None:
-                estimator = aer_Estimator()
-            # TODO: Add noise model here with Aer estimator
+            reward_table = job.result().values
+            self.reward_history.append(reward_table)
+            return reward_table
+        else:
+            if self.abstraction_level == 'circuit':
+                if self.noise_model is not None:
+                    estimator = aer_Estimator()
+                # TODO: Add noise model here with Aer estimator
 
-        elif type(self.backend) == DynamicsBackend:
-            estimator = BackendEstimator(self.backend, skip_transpilation=True)
+            elif self.abstraction_level == 'pulse' and type(self.backend) == DynamicsBackend:
+                estimator = BackendEstimator(self.backend)
 
-        job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
+            print("Sending job to Estimator...")
+            job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
                             parameter_values=angles,
                             shots=self.sampling_Pauli_space)
-        self.qc.clear()  # Reset the QuantumCircuit instance for next iteration
 
-        reward_table = job.result().values
-        print(reward_table)
-        self.reward_history.append(reward_table)
-        assert len(reward_table) == batch_size
-        return reward_table  # Shape [batchsize]
+            print("Job done")
+            reward_table = job.result().values
+            self.reward_history.append(reward_table)
+            assert len(reward_table) == batch_size
+            return reward_table  # Shape [batchsize]
+
+    def _store_benchmarks(self, parametrized_circ:QuantumCircuit, angles: np.array):
+        self.action_history.append(angles)
+        if self.abstraction_level == 'circuit':
+            qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
+            q_state_list = [Statevector.from_instruction(qc) for qc in qc_list]
+            self.density_matrix = DensityMatrix(np.mean([np.array(q_state.to_operator()) for q_state in q_state_list],
+                                                        axis=0))
+            self.density_matrix_history.append(self.density_matrix)
+
+            if self.target_type == 'state':
+                self.state_fidelity_history.append(state_fidelity(self.target["dm"], self.density_matrix))
+            else:  # Gate calibration task
+
+                q_process_list = [Operator(qc) for qc in qc_list]
+                self.built_unitaries.append(q_process_list)
+                for i, input_state in enumerate(self.target["input_states"]):
+                    output_states = [DensityMatrix(Operator(qc) @ input_state["dm"]@ Operator(qc).adjoint())
+                                     for qc in qc_list]
+                    self.input_output_state_fidelity_history[i].append(
+                        np.mean([state_fidelity(input_state["target_state"]["dm"],
+                                                output_state) for output_state in output_states]))
+                prc_fidelity = np.mean([process_fidelity(q_process, Operator(self.target["gate"]))
+                                        for q_process in q_process_list])
+                avg_fidelity = np.mean([average_gate_fidelity(q_process, Operator(self.target["gate"]))
+                                        for q_process in q_process_list])
+
+                self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
+                self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
+        else:  # TODO: Qiskit Dynamics based simulation to retrieve fidelities
+            dt = self.backend.configuration().dt
+            converter = InstructionToSignals(dt, carriers=self.channel_freq)
