@@ -41,7 +41,7 @@ from typing import Dict, Union, Optional, List, Tuple
 # from QUA_config_two_sc_qubits import IBMconfig
 # from qualang_tools.bakery.bakery import baking
 # from qm.qua import *
-# import time
+import time
 # from qm.QuantumMachinesManager import QuantumMachinesManager
 
 # Tensorflow modules
@@ -53,12 +53,12 @@ from tf_agents.typing import types
 # configure jax to use 64 bit mode
 import jax
 
-# jax.config.update("jax_enable_x64", True)
-# # tell JAX we are using CPU
-# jax.config.update("jax_platform_name", "cpu")
-# # import Array and set default backend
-#
-# Array.set_default_backend('jax')
+jax.config.update("jax_enable_x64", True)
+# tell JAX we are using CPU
+jax.config.update("jax_platform_name", "cpu")
+# import Array and set default backend
+
+Array.set_default_backend('jax')
 
 
 def get_solver_and_freq_from_backend(backend: IBMBackend, subsystem_list: Optional[List[int]] = None,
@@ -183,7 +183,7 @@ def perform_standard_calibrations(backend: DynamicsBackend):
                                        [backend.options.control_channel_map.get((i, qubit), None)
                                         for i in range(num_qubits)]))
         with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
-            pulse.shift_phase(-1.0*phi, pulse.DriveChannel(qubit))
+            pulse.shift_phase(-1.0 * phi, pulse.DriveChannel(qubit))
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
 
@@ -195,8 +195,9 @@ def perform_standard_calibrations(backend: DynamicsBackend):
     backend.target.add_instruction(XGate(), properties={**{(qubit,): None for qubit in range(num_qubits)}})
     backend.target.add_instruction(SXGate(), properties={**{(qubit,): None for qubit in range(num_qubits)}})
     print("Starting Rabi experiments...")
+
     rabi_experiments = [RoughXSXAmplitudeCal(qubit, cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 27))
-                for qubit in range(num_qubits)]
+                        for qubit in range(num_qubits)]
     rabi_results = [rabi_exp.run().block_for_results() for rabi_exp in rabi_experiments]
 
     print("Rabi experiments done")
@@ -210,6 +211,7 @@ def perform_standard_calibrations(backend: DynamicsBackend):
     # backend.target.add_instruction(XGate(), properties={(0,): InstructionProperties(calibration=sx_schedule, error=0.05)})
     # backend.target.add_instruction(SXGate(), properties={(0,): InstructionProperties(calibration=sx_schedule, error=0.05)})
     print("All calibrations are done")
+
 
 class QuantumEnvironment:
 
@@ -316,9 +318,9 @@ class QuantumEnvironment:
                 gate_op = Operator(target['gate'])
                 target['input_states'][i]['target_state'] = {'target_type': 'state'}
                 if 'circuit' in input_state:
-                    target['input_states'][i]['dm'] = DensityMatrix(input_state['circuit'] @ (Zero^self._n_qubits))
+                    target['input_states'][i]['dm'] = DensityMatrix(input_state['circuit'] @ (Zero ^ self._n_qubits))
                     target['input_states'][i]['target_state']["dm"] = DensityMatrix(gate_op @ input_state["circuit"]
-                                                                                    @ (Zero^self._n_qubits))
+                                                                                    @ (Zero ^ self._n_qubits))
                 elif 'dm' in input_state:
                     target['input_states'][i]['target_state']["dm"] = gate_op @ input_state["dm"]
                 target['input_states'][i]['target_state'] = self.calculate_chi_target_state(
@@ -358,7 +360,7 @@ class QuantumEnvironment:
             self.qc.append(input_state["circuit"].to_instruction(), self.tgt_register)
 
             target_state = self.target["input_states"][index]["target_state"]
-        else: # State preparation task
+        else:  # State preparation task
             target_state = self.target
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         distribution = Categorical(probs=target_state["Chi"] ** 2)
@@ -369,11 +371,9 @@ class QuantumEnvironment:
                                   for p in pauli_index], 5)
 
         # Figure out which observables to sample
-        # observables = [SparsePauliOp(self.Pauli_ops[p]["name"]) for p in pauli_index]
         observables = SparsePauliOp.from_list([(self.Pauli_ops[p]["name"], reward_factor[i])
                                                for i, p in enumerate(pauli_index)])
 
-        print('observables', observables)
         # Apply parametrized quantum circuit (action), for benchmarking only
         parametrized_circ = QuantumCircuit(self._n_qubits)
         self.parametrized_circuit_func(parametrized_circ)
@@ -387,11 +387,12 @@ class QuantumEnvironment:
         estimator = Estimator()
 
         if self.service is not None:
+            print("Sending job to Estimator...")
             with Session(service=self.service, backend=self.backend):
                 estimator = runtime_Estimator(options=self.estimator_options)
                 job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
-                                    parameter_values=angles,
-                                    shots=self.sampling_Pauli_space)
+                                    parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
+            print("Job done")
             reward_table = job.result().values
             self.reward_history.append(reward_table)
             return reward_table
@@ -406,8 +407,7 @@ class QuantumEnvironment:
 
             print("Sending job to Estimator...")
             job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
-                            parameter_values=angles,
-                            shots=self.sampling_Pauli_space)
+                                parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
 
             print("Job done")
             reward_table = job.result().values
@@ -415,23 +415,25 @@ class QuantumEnvironment:
             assert len(reward_table) == batch_size
             return reward_table  # Shape [batchsize]
 
-    def _store_benchmarks(self, parametrized_circ:QuantumCircuit, angles: np.array):
+    def _store_benchmarks(self, parametrized_circ: QuantumCircuit, angles: np.array):
+        """
+        Method to store in lists all relevant data to assess performance of training (fidelity information)
+        """
         self.action_history.append(angles)
+        # Circuit list for each action of the batch
+        qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
         if self.abstraction_level == 'circuit':
-            qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
-            q_state_list = [Statevector.from_instruction(qc) for qc in qc_list]
-            self.density_matrix = DensityMatrix(np.mean([np.array(q_state.to_operator()) for q_state in q_state_list],
-                                                        axis=0))
+            q_state_list = [Statevector.from_instruction(qc).to_operator() for qc in qc_list]
+            self.density_matrix = DensityMatrix(np.mean([np.array(q_state) for q_state in q_state_list], axis=0))
             self.density_matrix_history.append(self.density_matrix)
 
             if self.target_type == 'state':
                 self.state_fidelity_history.append(state_fidelity(self.target["dm"], self.density_matrix))
             else:  # Gate calibration task
-
                 q_process_list = [Operator(qc) for qc in qc_list]
                 self.built_unitaries.append(q_process_list)
                 for i, input_state in enumerate(self.target["input_states"]):
-                    output_states = [DensityMatrix(Operator(qc) @ input_state["dm"]@ Operator(qc).adjoint())
+                    output_states = [DensityMatrix(Operator(qc) @ input_state["dm"] @ Operator(qc).adjoint())
                                      for qc in qc_list]
                     self.input_output_state_fidelity_history[i].append(
                         np.mean([state_fidelity(input_state["target_state"]["dm"],

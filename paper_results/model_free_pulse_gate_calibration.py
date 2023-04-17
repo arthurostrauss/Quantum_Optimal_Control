@@ -1,6 +1,5 @@
 """
-Code for arbitrary state preparation based on scheme described in Appendix D.2b  of paper PhysRevX.12.011059
- (https://doi.org/10.1103/PhysRevX.12.011059) using Qiskit modules and a Pulse level description
+Code for model-free gate calibration in IBM device using Reinforcement Learning tools to manipulate the pulse level
 
  Author: Arthur Strauss
  Created on 16/12/2022
@@ -8,14 +7,13 @@ Code for arbitrary state preparation based on scheme described in Appendix D.2b 
 
 import numpy as np
 
-
 from quantumenvironment import QuantumEnvironment, get_solver_and_freq_from_backend
 from helper_functions import select_optimizer, generate_model, custom_pulse_schedule
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import pulse, transpile
 from qiskit.providers.options import Options
-from qiskit.providers.fake_provider import FakeJakarta
+from qiskit.providers.fake_provider import FakeHanoi
 from qiskit.providers import QubitProperties
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_dynamics import DynamicsBackend
@@ -66,8 +64,6 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     qc.add_calibration(parametrized_gate, qubit_tgt_register, parametrized_schedule)
     qc.append(parametrized_gate, qubit_tgt_register)
 
-# action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
-
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -83,24 +79,30 @@ time_steps = 1  # Number of time steps within an episode (1 means you do one rea
 
 """
 Choose your backend: Here we deal with pulse level implementation. In Qiskit, there are only way two ways
-to try this. If simulation, use DynamicsBackend and see if BackendEstimator does the job for implementing the 
-primitive. If Runtime backend, 
+to run this code. If simulation, use DynamicsBackend and use BackendEstimator for implementing the 
+primitive enabling Pauli expectation value sampling. If real device, use Qiskit Runtime backend and set a 
+Runtime Service 
 """
 estimator_options = {'resilience_level': 0}
-fake_backend = FakeJakarta()
 
 """Real backend initialization"""
+backend_name = 'ibm_perth'
 # provider = IBMProvider()
 # service = QiskitRuntimeService(channel='ibm_quantum')
-# runtime_backend = service.get_backend('ibm_perth')
-# real_backend = provider.get_backend('ibm_perth')
-# control_channel_map = {**{ tuple(i):real_backend.control_channel(i)[0].index for i in real_backend.coupling_map} }
-control_channel_map = {**{ key : fake_backend._configuration.control_channels[key][0].index for key in fake_backend._configuration.control_channels} }
+# runtime_backend = service.get_backend(backend_name)
+# real_backend = provider.get_backend(backend_name)
+# control_channel_map = {**{ qubits:real_backend.control_channel(qubits)[0].index for qubits in real_backend.coupling_map} }
+
+service = None
+fake_backend = FakeHanoi()
+
+control_channel_map = {
+    **{qubits: fake_backend.configuration().control_channels[qubits][0].index for qubits in fake_backend.configuration().control_channels}}
 control_channel_map2 = dict(filter(lambda x: x is not None, control_channel_map))
 print(control_channel_map)
 dynamics_options = {'seed_simulator': 5000, "configuration": fake_backend.configuration(),
-                    'control_channel_map': control_channel_map # Control channels to play CR tones, should match connectivity of device
-
+                    'control_channel_map': control_channel_map
+                    # Control channels to play CR tones, should match connectivity of device
                     }
 dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=qubit_tgt_register, **dynamics_options)
 
@@ -108,14 +110,8 @@ dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=qub
 backend = dynamics_backend
 target = backend.target
 v0 = 4.86e9
-anharm0 = -0.32e9
-r0 = 0.22e9
-
 v1 = 4.97e9
-anharm1 = -0.32e9
-r1 = 0.26e9
 target.qubit_properties = [QubitProperties(frequency=v0), QubitProperties(frequency=v1)]
-service = None
 
 # Define target gate
 X_tgt = {
@@ -281,6 +277,7 @@ def plot_examples(fig, ax, reward_table):
     ax.set_ylabel('Episode')
     ax.set_xlabel('Epoch')
     fig.colorbar(im, ax=ax, label='Reward')
+
 
 figure, (ax1, ax2) = plt.subplots(1, 2)
 #  Plot return as a function of epochs
