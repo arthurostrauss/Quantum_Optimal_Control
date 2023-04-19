@@ -5,12 +5,11 @@ quantum system (could also include QUA code in the future)
 Author: Arthur Strauss
 Created on 28/11/2022
 """
-
 # Qiskit imports
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, pulse, schedule
 from qiskit.transpiler import InstructionProperties
-from qiskit.circuit import Parameter, ParameterVector
-from qiskit.circuit.library import XGate, SXGate, RZGate, CXGate
+from qiskit.circuit import Parameter
+from qiskit.circuit.library import XGate, SXGate, RZGate, HGate, IGate, CXGate
 from qiskit.quantum_info import DensityMatrix, Statevector, Pauli, SparsePauliOp, state_fidelity, Operator, \
     process_fidelity, average_gate_fidelity
 from qiskit.exceptions import QiskitError
@@ -41,7 +40,6 @@ from typing import Dict, Union, Optional, List, Tuple
 # from QUA_config_two_sc_qubits import IBMconfig
 # from qualang_tools.bakery.bakery import baking
 # from qm.qua import *
-import time
 # from qm.QuantumMachinesManager import QuantumMachinesManager
 
 # Tensorflow modules
@@ -49,16 +47,6 @@ import tensorflow as tf
 from tensorflow_probability.python.distributions import Categorical
 from tf_agents.specs import array_spec, tensor_spec
 from tf_agents.typing import types
-
-# configure jax to use 64 bit mode
-import jax
-
-jax.config.update("jax_enable_x64", True)
-# tell JAX we are using CPU
-jax.config.update("jax_platform_name", "cpu")
-# import Array and set default backend
-
-Array.set_default_backend('jax')
 
 
 def get_solver_and_freq_from_backend(backend: IBMBackend, subsystem_list: Optional[List[int]] = None,
@@ -174,7 +162,7 @@ def perform_standard_calibrations(backend: DynamicsBackend):
     """
 
     target, num_qubits = backend.target, backend.num_qubits
-    print('Number of qubits', num_qubits)
+    qubits = list(range(backend.num_qubits))
     print("Starting initial single qubit gates calibrations...")
     cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"])])
     phi = Parameter("phi")
@@ -187,30 +175,52 @@ def perform_standard_calibrations(backend: DynamicsBackend):
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
 
-        target.add_instruction(RZGate(phi), {(qubit,): InstructionProperties(calibration=rz_cal, error=0.0)})
+        with pulse.build(backend, name=f'id{qubit}') as id_cal:
+            pulse.play(pulse.Waveform([0.+0.*1j] * 160), pulse.DriveChannel(qubit))
 
+        target.add_instruction(RZGate(phi), {(qubit,): InstructionProperties(calibration=rz_cal, error=0.0)})
+        target.add_instruction(IGate(), {(qubit,): InstructionProperties(calibration=id_cal, error=0.0)})
     with pulse.build(backend=backend, name="sx_schedule") as sx_schedule:
         pulse.play(pulse.Drag(duration=70, amp=0.3, sigma=20,
                               beta=-0.5, angle=0.), channel=pulse.DriveChannel(0))
     backend.target.add_instruction(XGate(), properties={**{(qubit,): None for qubit in range(num_qubits)}})
     backend.target.add_instruction(SXGate(), properties={**{(qubit,): None for qubit in range(num_qubits)}})
+
+    print('Backend Initial', backend.target)
     print("Starting Rabi experiments...")
 
-    rabi_experiments = [RoughXSXAmplitudeCal(qubit, cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 27))
-                        for qubit in range(num_qubits)]
-    rabi_results = [rabi_exp.run().block_for_results() for rabi_exp in rabi_experiments]
+    rabi_experiments = [RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 27))
+                        for qubit in qubits]
+    drag_experiments = [RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15))
+                        for qubit in qubits]
 
-    print("Rabi experiments done")
-    print("Starting Drag experiments...")
-    drag_experiments = [RoughDragCal(qubit, cals, backend=backend, betas=np.linspace(-20, 20, 15))
-                        for qubit in range(num_qubits)]
     for q in range(num_qubits):
         drag_experiments[q].set_experiment_options(reps=[3, 5, 7])
-    drag_results = [drag_exp.run().block_for_results() for drag_exp in drag_experiments]
-    print("Drag experiments done")
-    # backend.target.add_instruction(XGate(), properties={(0,): InstructionProperties(calibration=sx_schedule, error=0.05)})
-    # backend.target.add_instruction(SXGate(), properties={(0,): InstructionProperties(calibration=sx_schedule, error=0.05)})
+        print(f"Starting Rabi experiment for qubit {q}...")
+        rabi_result = rabi_experiments[q].run().block_for_results()
+        print(f"Rabi experiment for qubit {q} done.")
+        print(f"Starting Drag experiment for qubit {q}...")
+        drag_result = drag_experiments[q].run().block_for_results()
+        print(f"Drag experiments done for qubit {q} done.")
+
     print("All calibrations are done")
+    print("Calibration", cals)
+    error_dict = {'x': {**{(qubit,): 0.01 for qubit in qubits}},
+                  'sx': {**{(qubit,): 0.01 for qubit in qubits}},
+                  'h': {**{(qubit,): 0.01 for qubit in qubits}}
+                  }
+    for qubit in range(num_qubits):
+        sx_schedule = cals.get_inst_map().get('sx', (qubit,))
+        rz_schedule = target.instruction_schedule_map().get('rz', (qubit,)).assign_parameters({phi: np.pi/2})
+        h_schedule = pulse.ScheduleBlock()
+
+        h_schedule.append(rz_schedule)
+        h_schedule.append(sx_schedule)
+        h_schedule.append(rz_schedule)
+
+        target.add_instruction(HGate(), properties={(qubit,): InstructionProperties(calibration=h_schedule)})
+    target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
+    print("Updated", target)
 
 
 class QuantumEnvironment:
@@ -263,8 +273,9 @@ class QuantumEnvironment:
                     self.pulse_backend = DynamicsBackend.from_backend(self.backend,
                                                                       subsystem_list=Qiskit_config["target_register"])
                 elif type(self.backend) == DynamicsBackend:
-                    perform_standard_calibrations(self.backend)
 
+                    perform_standard_calibrations(self.backend)
+                print('Provided backend is', type(self.backend))
         elif QUA_setup is not None:
             self.qua_setup = QUA_setup
             # TODO: Add a QUA program
@@ -403,7 +414,7 @@ class QuantumEnvironment:
                 # TODO: Add noise model here with Aer estimator
 
             elif self.abstraction_level == 'pulse' and type(self.backend) == DynamicsBackend:
-                estimator = BackendEstimator(self.backend)
+                estimator = BackendEstimator(self.backend, skip_transpilation=True)
 
             print("Sending job to Estimator...")
             job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
@@ -446,5 +457,5 @@ class QuantumEnvironment:
                 self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
                 self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
         else:  # TODO: Qiskit Dynamics based simulation to retrieve fidelities
-            dt = self.backend.configuration().dt
+            dt = self.backend.target.dt
             converter = InstructionToSignals(dt, carriers=self.channel_freq)

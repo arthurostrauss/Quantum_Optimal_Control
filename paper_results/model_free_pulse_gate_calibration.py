@@ -2,7 +2,7 @@
 Code for model-free gate calibration in IBM device using Reinforcement Learning tools to manipulate the pulse level
 
  Author: Arthur Strauss
- Created on 16/12/2022
+ Created on 18/04/2023
 """
 
 import numpy as np
@@ -13,10 +13,11 @@ from helper_functions import select_optimizer, generate_model, custom_pulse_sche
 # Qiskit imports for building RL environment (circuit level)
 from qiskit import pulse, transpile
 from qiskit.providers.options import Options
-from qiskit.providers.fake_provider import FakeHanoi
+from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 from qiskit.providers import QubitProperties
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_dynamics import DynamicsBackend
+from qiskit_dynamics.array import Array
 from qiskit.circuit import ParameterVector, Parameter, ParameterExpression, QuantumCircuit, Gate
 from qiskit.extensions import CXGate, XGate, SXGate, RZGate
 from qiskit.opflow import H, I, X, S
@@ -32,6 +33,15 @@ from tf_agents.specs import array_spec, tensor_spec
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from typing import Optional
+# configure jax to use 64 bit mode
+import jax
+
+jax.config.update("jax_enable_x64", True)
+# tell JAX we are using CPU
+jax.config.update("jax_platform_name", "cpu")
+# import Array and set default backend
+
+Array.set_default_backend('jax')
 
 """ 
 -----------------------------------------------------------------------------------------------------
@@ -94,25 +104,38 @@ backend_name = 'ibm_perth'
 # control_channel_map = {**{ qubits:real_backend.control_channel(qubits)[0].index for qubits in real_backend.coupling_map} }
 
 service = None
-fake_backend = FakeHanoi()
-
-control_channel_map = {
+fake_backend = FakeJakarta()
+fake_backend_v2 = FakeJakartaV2()
+control_channel_map = {}
+control_channel_map_backend = {
     **{qubits: fake_backend.configuration().control_channels[qubits][0].index for qubits in fake_backend.configuration().control_channels}}
-control_channel_map2 = dict(filter(lambda x: x is not None, control_channel_map))
+for qubits in control_channel_map_backend:
+    if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
+        control_channel_map[qubits] = control_channel_map_backend[qubits]
+
 print(control_channel_map)
-dynamics_options = {'seed_simulator': 5000, "configuration": fake_backend.configuration(),
+dynamics_options = {'seed_simulator': 5000, #"configuration": fake_backend.configuration(),
                     'control_channel_map': control_channel_map
                     # Control channels to play CR tones, should match connectivity of device
                     }
 dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=qubit_tgt_register, **dynamics_options)
-
+target = dynamics_backend.target
+target.qubit_properties = fake_backend_v2.qubit_properties(qubit_tgt_register)
 # Choose here among the above backends, if simulator or dynamics_backend, set service to None
 backend = dynamics_backend
-target = backend.target
-v0 = 4.86e9
-v1 = 4.97e9
-target.qubit_properties = [QubitProperties(frequency=v0), QubitProperties(frequency=v1)]
 
+# Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
+# fidelity benchmarking
+channel_freq, solver = get_solver_and_freq_from_backend(
+    backend=fake_backend,
+    subsystem_list=qubit_tgt_register,
+    rotating_frame="auto",
+    evaluation_mode="dense",
+    rwa_cutoff_freq=None,
+    static_dissipators=None,
+    dissipator_channels=None,
+    dissipator_operators=None
+)
 # Define target gate
 X_tgt = {
     "target_type": 'gate',
@@ -135,22 +158,13 @@ X_tgt = {
 
 target = X_tgt
 
-channel_freq, solver = get_solver_and_freq_from_backend(
-    backend=fake_backend,
-    subsystem_list=qubit_tgt_register,
-    rotating_frame="auto",
-    evaluation_mode="dense",
-    rwa_cutoff_freq=None,
-    static_dissipators=None,
-    dissipator_channels=None,
-    dissipator_operators=None
-)
+
 Qiskit_setup = {
     "backend": backend,
     "parametrized_circuit": apply_parametrized_circuit,
     "estimator_options": estimator_options,
     "service": service,
-    "target_register": [0],
+    "target_register": qubit_tgt_register,
     "channel_freq": channel_freq,
     "solver": solver
 }
@@ -205,7 +219,7 @@ init_msmt = np.zeros((1, N_in))  # Here no feedback involved, so measurement seq
 Training loop
 -----------------------------------------------------------------------------------------------------
 """
-# TODO: Use TF-Agents PPO Agent
+
 mu_old = tf.Variable(initial_value=network(init_msmt)[0][0], trainable=False)
 sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0], trainable=False)
 

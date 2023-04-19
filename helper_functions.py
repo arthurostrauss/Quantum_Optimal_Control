@@ -21,15 +21,15 @@ def constrain_std_value(std_var):
 def custom_pulse_schedule(backend: Union[IBMBackend, DynamicsBackend], target: Dict,
                           qubit_tgt_register: Union[List[int],
                           QuantumRegister], params: ParameterVector,
-                          default_schedule: Optional[ScheduleBlock]=None):
+                          default_schedule: Optional[ScheduleBlock] = None):
     """
     Define parametrization of the pulse schedule characterizing the target gate
     :param qubit_tgt_register: Qubit register on which
     :param target: Dictionary containing information about the target (gate or state)
     :param backend: IBM Backend on which schedule shall be added
     :param params: Parameters of the Schedule
-    :param default_schedule: Schedule baseline from which one can customize the pulse parameters
-    (QOC)
+    :param default_schedule:  baseline from which one can customize the pulse parameters
+
     :return: Parametrized Schedule
     """
 
@@ -41,15 +41,12 @@ def custom_pulse_schedule(backend: Union[IBMBackend, DynamicsBackend], target: D
         # parameters for the Drag pulse
         pulse_ref = default_schedule.instructions[0][1].pulse
 
-        with pulse.build(backend=backend, name='parametrized_schedule') as parametrized_schedule:
+        with pulse.build(backend=backend, name='param_schedule') as parametrized_schedule:
 
             pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
                                   beta=pulse_ref.beta, angle=pulse_ref.angle),
                        channel=pulse.DriveChannel(qubit_tgt_register[0]))
 
-            # if dynamics_backend:  # Has to go in class, and add expectation value computation
-            #     pulse.acquire(duration=1, qubit_or_channel=pulse.AcquireChannel(qubit_tgt_register[0]),
-            #                   register=pulse.MemorySlot(qubit_tgt_register[0]))
         return parametrized_schedule
 
 
