@@ -49,7 +49,7 @@ from tf_agents.specs import array_spec, tensor_spec
 from tf_agents.typing import types
 
 
-def get_solver_and_freq_from_backend(backend: IBMBackend, subsystem_list: Optional[List[int]] = None,
+def get_solver_and_freq_from_backend(backend: Backend, subsystem_list: Optional[List[int]] = None,
                                      rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
                                      evaluation_mode: str = "dense",
                                      rwa_cutoff_freq: Optional[float] = None,
@@ -207,7 +207,6 @@ def perform_standard_calibrations(backend: DynamicsBackend):
     print("Calibration", cals)
     error_dict = {'x': {**{(qubit,): 0.01 for qubit in qubits}},
                   'sx': {**{(qubit,): 0.01 for qubit in qubits}},
-                  'h': {**{(qubit,): 0.01 for qubit in qubits}}
                   }
     for qubit in range(num_qubits):
         sx_schedule = cals.get_inst_map().get('sx', (qubit,))
@@ -218,7 +217,9 @@ def perform_standard_calibrations(backend: DynamicsBackend):
         h_schedule.append(sx_schedule)
         h_schedule.append(rz_schedule)
 
-        target.add_instruction(HGate(), properties={(qubit,): InstructionProperties(calibration=h_schedule)})
+        target.add_instruction(HGate(), properties={(qubit,): InstructionProperties(calibration=h_schedule,
+                                                                                    error=0.01)})
+
     target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
     print("Updated", target)
 
@@ -253,10 +254,6 @@ class QuantumEnvironment:
             raise AttributeError("Cannot provide simultaneously a QUA setup and a Qiskit config ")
         elif Qiskit_config is not None:
 
-            self.q_register = QuantumRegister(n_qubits)
-            self.c_register = ClassicalRegister(n_qubits)
-            self.qc = QuantumCircuit(self.q_register)
-
             self.service: QiskitRuntimeService = Qiskit_config.get("service", None)
             self.estimator_options: Dict = Qiskit_config.get("estimator_options", None)
             self.backend: Union[IBMBackend, DynamicsBackend, Backend] = Qiskit_config["backend"]
@@ -273,7 +270,6 @@ class QuantumEnvironment:
                     self.pulse_backend = DynamicsBackend.from_backend(self.backend,
                                                                       subsystem_list=Qiskit_config["target_register"])
                 elif type(self.backend) == DynamicsBackend:
-
                     perform_standard_calibrations(self.backend)
                 print('Provided backend is', type(self.backend))
         elif QUA_setup is not None:
@@ -285,15 +281,14 @@ class QuantumEnvironment:
         self.c_factor = c_factor
         self._n_qubits = n_qubits
         self.d = 2 ** n_qubits  # Dimension of Hilbert space
-        self.density_matrix = np.zeros([self.d, self.d], dtype='complex128')
         self.sampling_Pauli_space = sampling_Pauli_space
         self.n_shots = n_shots
 
         self.target, self.target_type, self.tgt_register = self._define_target(target)
+        self.q_register = QuantumRegister(n_qubits)
 
         # Data storage for TF-Agents or plotting
         self.action_history = []
-        self._state = np.zeros([self.d, self.d], dtype='complex128')
         self.density_matrix_history = []
         self.reward_history = []
         self.state_fidelity_history = []
@@ -323,7 +318,7 @@ class QuantumEnvironment:
             assert type(target['register']) == QuantumRegister or type(target['register'] == List[int])
             assert 'input_states' in target, 'Gate calibration requires a set of input states (dict)'
             for i, input_state in enumerate(target["input_states"]):
-                assert 'circuit' in input_state or 'dm' in input_state, f'input_state {i} does not have a ' \
+                assert ('circuit' or 'dm') in input_state, f'input_state {i} does not have a ' \
                                                                         f'DensityMatrix or circuit description'
 
                 gate_op = Operator(target['gate'])
@@ -360,7 +355,7 @@ class QuantumEnvironment:
         :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
         obtained density matrix
         """
-        self.qc.clear()  # Reset the QuantumCircuit instance for next iteration
+        qc = QuantumCircuit(self.q_register)  # Reset the QuantumCircuit instance for next iteration
         angles, batch_size = np.array(actions), len(np.array(actions))
 
         if self.target_type == 'gate':
@@ -368,7 +363,7 @@ class QuantumEnvironment:
             index = np.random.randint(len(self.target["input_states"]))
             input_state = self.target["input_states"][index]
             # Append input state circuit to full quantum circuit for gate calibration
-            self.qc.append(input_state["circuit"].to_instruction(), self.tgt_register)
+            qc.append(input_state["circuit"].to_instruction(), self.tgt_register)
 
             target_state = self.target["input_states"][index]["target_state"]
         else:  # State preparation task
@@ -392,8 +387,7 @@ class QuantumEnvironment:
         # Keep track of process for benchmarking purposes only
         self._store_benchmarks(parametrized_circ, angles)
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
-        self.parametrized_circuit_func(self.qc)
-        print("Calibrations of quantum circuit", self.qc.calibrations)
+        self.parametrized_circuit_func(qc)
 
         estimator = Estimator()
 
@@ -401,7 +395,7 @@ class QuantumEnvironment:
             print("Sending job to Estimator...")
             with Session(service=self.service, backend=self.backend):
                 estimator = runtime_Estimator(options=self.estimator_options)
-                job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
+                job = estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
                                     parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
             print("Job done")
             reward_table = job.result().values
@@ -414,10 +408,10 @@ class QuantumEnvironment:
                 # TODO: Add noise model here with Aer estimator
 
             elif self.abstraction_level == 'pulse' and type(self.backend) == DynamicsBackend:
-                estimator = BackendEstimator(self.backend, skip_transpilation=True)
+                estimator = BackendEstimator(self.backend)
 
             print("Sending job to Estimator...")
-            job = estimator.run(circuits=[self.qc] * batch_size, observables=[observables] * batch_size,
+            job = estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
                                 parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
 
             print("Job done")
@@ -435,11 +429,11 @@ class QuantumEnvironment:
         qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
         if self.abstraction_level == 'circuit':
             q_state_list = [Statevector.from_instruction(qc).to_operator() for qc in qc_list]
-            self.density_matrix = DensityMatrix(np.mean([np.array(q_state) for q_state in q_state_list], axis=0))
-            self.density_matrix_history.append(self.density_matrix)
+            density_matrix = DensityMatrix(np.mean([np.array(q_state) for q_state in q_state_list], axis=0))
+            self.density_matrix_history.append(density_matrix)
 
             if self.target_type == 'state':
-                self.state_fidelity_history.append(state_fidelity(self.target["dm"], self.density_matrix))
+                self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
             else:  # Gate calibration task
                 q_process_list = [Operator(qc) for qc in qc_list]
                 self.built_unitaries.append(q_process_list)
@@ -456,6 +450,20 @@ class QuantumEnvironment:
 
                 self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
                 self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
-        else:  # TODO: Qiskit Dynamics based simulation to retrieve fidelities
+        else:  # TODO: Qiskit Dynamics based simulation to retrieve fidelity
             dt = self.backend.target.dt
-            converter = InstructionToSignals(dt, carriers=self.channel_freq)
+            if type(self.backend) == DynamicsBackend:
+                solver: Solver = self.backend.options.get("solver")
+                solver_options = self.backend.options.get("solver_options")
+            else:
+                solver: Solver = self.pulse_backend.options.get("solver"),
+                solver_options = self.backend.options.get("solver_options")
+
+            schedule_list = [schedule(qc, backend=self.backend, dt=dt) for qc in qc_list]
+            converter = InstructionToSignals(dt, self.channel_freq, channels=None)
+            signals = [converter.get_signals(sched) for sched in schedule_list]
+            y0 = Statevector(Zero ^ self._n_qubits)
+           # sol = solver.solve(t_span=Array([0., schedule_list[0].duration]), y0=y0, signals=schedule_list)
+
+
+

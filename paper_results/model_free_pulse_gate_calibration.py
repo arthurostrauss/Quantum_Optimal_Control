@@ -101,20 +101,22 @@ backend_name = 'ibm_perth'
 # service = QiskitRuntimeService(channel='ibm_quantum')
 # runtime_backend = service.get_backend(backend_name)
 # real_backend = provider.get_backend(backend_name)
-# control_channel_map = {**{ qubits:real_backend.control_channel(qubits)[0].index for qubits in real_backend.coupling_map} }
+# control_channel_map = {**{qubits: real_backend.control_channel(qubits)[0].index
+#                           for qubits in real_backend.coupling_map}}
 
 service = None
 fake_backend = FakeJakarta()
 fake_backend_v2 = FakeJakartaV2()
 control_channel_map = {}
 control_channel_map_backend = {
-    **{qubits: fake_backend.configuration().control_channels[qubits][0].index for qubits in fake_backend.configuration().control_channels}}
+    **{qubits: fake_backend.configuration().control_channels[qubits][0].index for qubits in
+       fake_backend.configuration().control_channels}}
 for qubits in control_channel_map_backend:
     if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
         control_channel_map[qubits] = control_channel_map_backend[qubits]
 
 print(control_channel_map)
-dynamics_options = {'seed_simulator': 5000, #"configuration": fake_backend.configuration(),
+dynamics_options = {'seed_simulator': 5000,  # "configuration": fake_backend.configuration(),
                     'control_channel_map': control_channel_map
                     # Control channels to play CR tones, should match connectivity of device
                     }
@@ -127,7 +129,7 @@ backend = dynamics_backend
 # Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
 # fidelity benchmarking
 channel_freq, solver = get_solver_and_freq_from_backend(
-    backend=fake_backend,
+    backend=backend,
     subsystem_list=qubit_tgt_register,
     rotating_frame="auto",
     evaluation_mode="dense",
@@ -157,7 +159,6 @@ X_tgt = {
 }
 
 target = X_tgt
-
 
 Qiskit_setup = {
     "backend": backend,
