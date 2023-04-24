@@ -170,7 +170,7 @@ for i in tqdm(range(n_epochs)):
 
         action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -1., 1.))
 
-        reward = q_env.perform_action_gate_cal(action_vector)
+        reward = q_env.perform_action(action_vector)
         advantage = reward - b
 
         if use_PPO:
