@@ -67,7 +67,7 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
 
     # original_calibration = backend.instruction_schedule_map.get(target["name"])
 
-    parametrized_gate = Gate(f"custom_{target['gate'].name}", 1, params=[params[0]])
+    parametrized_gate = Gate(f"custom_{target['gate'].name}", len(qubit_tgt_register), params=[params[0]])
     default_schedule = fake_backend.defaults().instruction_schedule_map.get(target["gate"].name, qubit_tgt_register)
     parametrized_schedule = custom_pulse_schedule(backend=backend, target=target, qubit_tgt_register=qubit_tgt_register,
                                                   params=params, default_schedule=default_schedule)
@@ -138,6 +138,7 @@ channel_freq, solver = get_solver_and_freq_from_backend(
     dissipator_channels=None,
     dissipator_operators=None
 )
+
 # Define target gate
 X_tgt = {
     "target_type": 'gate',
