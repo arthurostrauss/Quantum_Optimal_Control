@@ -117,8 +117,11 @@ for qubits in control_channel_map_backend:
 
 print(control_channel_map)
 dynamics_options = {'seed_simulator': 5000,  # "configuration": fake_backend.configuration(),
-                    'control_channel_map': control_channel_map
+                    'control_channel_map': control_channel_map,
                     # Control channels to play CR tones, should match connectivity of device
+                    'solver_options': {"method": "jax_odeint",
+                                       "atol": 1e-6,
+                                       "rtol": 1e-8}
                     }
 dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=qubit_tgt_register, **dynamics_options)
 target = dynamics_backend.target
