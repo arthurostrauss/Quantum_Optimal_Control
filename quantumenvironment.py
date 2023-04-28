@@ -175,13 +175,11 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
 
     """
 
-    target, num_qubits = backend.target, backend.num_qubits
-    qubits = list(range(backend.num_qubits))
-    print("Starting initial single qubit gates calibrations...")
-
+    target, num_qubits, qubits = backend.target, backend.num_qubits, list(range(backend.num_qubits))
     phi = Parameter("phi")
     single_qubit_properties = {**{(qubit,): None for qubit in range(num_qubits)}}
     two_qubit_properties = {**{qubits: None for qubits in backend.options.control_channel_map}}
+    print(two_qubit_properties)
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         target.add_instruction(XGate(), properties=single_qubit_properties)
         target.add_instruction(SXGate(), properties=single_qubit_properties)
@@ -193,7 +191,7 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         target.add_instruction(TGate(), properties=single_qubit_properties)
         target.add_instruction(TdgGate(), properties=single_qubit_properties)
         target.add_instruction(HGate(), properties=single_qubit_properties)
-        target.add_instruction(Reset(), properties=single_qubit_properties)
+        target.add_instruction(Reset(), properties={**{(qubit,): pulse.Schedule() for qubit in range(num_qubits)}})
         target.add_instruction(CXGate(), properties=two_qubit_properties)
 
     for qubit in range(num_qubits):
@@ -201,43 +199,27 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
                                        [backend.options.control_channel_map.get((i, qubit), None)
                                         for i in range(num_qubits)]))
         with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
-            pulse.shift_phase(-1.0 * phi, pulse.DriveChannel(qubit))
+            pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
 
         with pulse.build(backend, name=f'id{qubit}') as id_cal:
-            pulse.play(pulse.Waveform([0. + 0. * 1j] * 160), pulse.DriveChannel(qubit))
+            pulse.play(pulse.Waveform([0. + 0. * 1j] * 20), pulse.DriveChannel(qubit))
 
         target.update_instruction_properties('rz', (qubit,), properties=InstructionProperties(calibration=rz_cal,
                                                                                               error=0.0))
         target.update_instruction_properties('id', (qubit,), properties=InstructionProperties(calibration=id_cal,
                                                                                               error=0.0))
         target.update_instruction_properties('z', (qubit,), properties=InstructionProperties(
-            calibration=rz_cal.assign_parameters({phi: np.pi},
-                                                 inplace=False),
-            error=0.0))
-
-        target.update_instruction_properties('s', (qubit,),
-                                             properties=InstructionProperties(calibration=
-                                             rz_cal.assign_parameters(
-                                                 {phi: np.pi / 2},
-                                                 inplace=False),
-                                                 error=0.0))
-        target.update_instruction_properties('sdg', (qubit,), properties=InstructionProperties(calibration=
-        rz_cal.assign_parameters(
-            {phi: -np.pi / 2},
-            inplace=False),
-            error=0.0))
-        target.update_instruction_properties("t", (qubit,), properties=InstructionProperties(calibration=
-        rz_cal.assign_parameters(
-            {phi: np.pi / 4},
-            inplace=False),
-            error=0.0))
-        target.update_instruction_properties("tdg", (qubit,), properties=InstructionProperties(calibration=
-        rz_cal.assign_parameters(
-            {phi: -np.pi / 4},
-            inplace=False),
-            error=0.0))
+            calibration=rz_cal.assign_parameters({phi: np.pi}, inplace=False), error=0.0))
+        target.update_instruction_properties('s', (qubit,), properties=InstructionProperties(
+            calibration=rz_cal.assign_parameters({phi: np.pi / 2}, inplace=False), error=0.0))
+        target.update_instruction_properties('sdg', (qubit,), properties=InstructionProperties(
+            calibration=rz_cal.assign_parameters({phi: -np.pi / 2}, inplace=False), error=0.0))
+        target.update_instruction_properties("t", (qubit,), properties=InstructionProperties(
+            calibration=rz_cal.assign_parameters({phi: np.pi / 4}, inplace=False), error=0.0))
+        target.update_instruction_properties("tdg", (qubit,), properties=InstructionProperties(
+            calibration=rz_cal.assign_parameters({phi: -np.pi / 4}, inplace=False), error=0.0))
 
     print('Backend Initial', backend.target)
     exp_results = {}
@@ -245,7 +227,9 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         cals = Calibrations.load(files=calibration_files)
     else:
         exp_results = {}
-        cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"])])
+        cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx", "y", "sx"],
+                                                                                    default_values={"duration": 60})
+                                                             for _ in range(num_qubits)])
         print("Starting Rabi experiments...")
         rabi_experiments = [RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 27))
                             for qubit in qubits]
@@ -277,18 +261,15 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         sx_schedule = cals.get_inst_map().get('sx', (qubit,))
         rz_schedule = target.instruction_schedule_map().get('rz', (qubit,)).assign_parameters({phi: np.pi / 2},
                                                                                               inplace=False)
-        reset_schedule = pulse.Schedule()
         h_schedule = pulse.ScheduleBlock(name="h")
         for instruction in rz_schedule.instructions + sx_schedule.instructions + rz_schedule.instructions:
             h_schedule += instruction[1]
 
         target.update_instruction_properties('h', (qubit,), properties=InstructionProperties(calibration=h_schedule,
                                                                                              error=0.0))
-        target.update_instruction_properties('reset', (qubit,),
-                                             properties=InstructionProperties(calibration=reset_schedule,
-                                                                              error=0.0))
-    target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
     print("Updated", target)
+    target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
+
     return cals, exp_results
 
 
