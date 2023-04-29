@@ -38,7 +38,7 @@ from qiskit_ibm_runtime import Session, QiskitRuntimeService, Estimator as Runti
     IBMBackend as Runtime_Backend
 from qiskit_ibm_provider import Backend
 from qiskit_aer.primitives import Estimator as Aer_Estimator
-from qiskit.opflow import Zero
+from qiskit.opflow import Zero, I, CircuitOp
 
 import numpy as np
 from itertools import product
@@ -198,13 +198,14 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         control_channels = list(filter(lambda x: x is not None,
                                        [backend.options.control_channel_map.get((i, qubit), None)
                                         for i in range(num_qubits)]))
-        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
-            pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
-            for q in control_channels:
-                pulse.shift_phase(-phi, pulse.ControlChannel(q))
-
-        with pulse.build(backend, name=f'id{qubit}') as id_cal:
-            pulse.play(pulse.Waveform([0. + 0. * 1j] * 20), pulse.DriveChannel(qubit))
+        # with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
+        #     pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
+        #     for q in control_channels:
+        #         pulse.shift_phase(-phi, pulse.ControlChannel(q))
+        rz_cal = pulse.Schedule(pulse.ShiftPhase(-phi, pulse.DriveChannel(qubit)))
+        for q in control_channels:
+            rz_cal += pulse.ShiftPhase(-phi, pulse.ControlChannel(q))
+        id_cal = pulse.Schedule(pulse.Delay(20, pulse.DriveChannel(qubit)))
 
         target.update_instruction_properties('rz', (qubit,), properties=InstructionProperties(calibration=rz_cal,
                                                                                               error=0.0))
@@ -221,19 +222,18 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         target.update_instruction_properties("tdg", (qubit,), properties=InstructionProperties(
             calibration=rz_cal.assign_parameters({phi: -np.pi / 4}, inplace=False), error=0.0))
 
-    print('Backend Initial', backend.target)
     exp_results = {}
     if calibration_files is not None:
         cals = Calibrations.load(files=calibration_files)
     else:
         exp_results = {}
-        cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx", "y", "sx"],
-                                                                                    default_values={"duration": 60})
+        cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"],
+                                                                                    default_values=None)
                                                              for _ in range(num_qubits)])
         print("Starting Rabi experiments...")
-        rabi_experiments = [RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 27))
+        rabi_experiments = [RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.5, 0.5, 50))
                             for qubit in qubits]
-        drag_experiments = [RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15))
+        drag_experiments = [RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-30, 30, 30))
                             for qubit in qubits]
         for q in range(num_qubits):
             drag_experiments[q].set_experiment_options(reps=[3, 5, 7])
@@ -261,10 +261,9 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         sx_schedule = cals.get_inst_map().get('sx', (qubit,))
         rz_schedule = target.instruction_schedule_map().get('rz', (qubit,)).assign_parameters({phi: np.pi / 2},
                                                                                               inplace=False)
-        h_schedule = pulse.ScheduleBlock(name="h")
+        h_schedule = pulse.Schedule(name="h")
         for instruction in rz_schedule.instructions + sx_schedule.instructions + rz_schedule.instructions:
             h_schedule += instruction[1]
-
         target.update_instruction_properties('h', (qubit,), properties=InstructionProperties(calibration=h_schedule,
                                                                                              error=0.0))
     print("Updated", target)
@@ -377,7 +376,15 @@ class QuantumEnvironment:
         if target.get("target_type", None) == "state" or target.get("target_type", None) is None:  # Default mode is
             # State preparation if no argument target_type is found
             if 'circuit' in target:
-                target["dm"] = DensityMatrix(target["circuit"] @ (Zero ^ self._n_qubits))
+                gate_op = target["circuit"]
+
+                if len(target["register"] > self._n_qubits):
+                    raise ValueError("Target register has bigger size than the total number of qubits in circuit")
+                elif len(target["register"]) < self._n_qubits:
+                    gate_op = target["circuit"].permute(target['register'])
+                    if gate_op.num_qubits < self._n_qubits: # If after permutation numbers still do not match
+                        gate_op ^= I^(self._n_qubits-gate_op.num_qubits)
+                target["dm"] = DensityMatrix(gate_op @ (Zero ^self._n_qubits))
             assert 'dm' in target, 'no DensityMatrix or circuit argument provided to target dictionary'
             assert type(target["dm"]) == DensityMatrix, 'Provided dm is not a DensityMatrix object'
             if target.get("register", None) is None:
@@ -385,21 +392,38 @@ class QuantumEnvironment:
             return self.calculate_chi_target_state(target), "state", target["register"]
         elif target.get("target_type", None) == "gate":
             # input_states = [self.calculate_chi_target_state(input_state) for input_state in target["input_states"]]
-            assert 'register' in target, 'input state shall be specified over a QuantumRegister'
-            assert type(target['register']) == QuantumRegister or type(target['register'] == List[int])
+            assert 'register' in target, 'No target register provided (need to provide key "register": Union[List[int],' \
+                                         'QuantumRegister) '
+            assert type(target['register']) == QuantumRegister or type(target['register'] == List[int]),\
+                'Input state shall be specified over a QuantumRegister or a List'
+            assert len(target['register']) <= self._n_qubits and np.max(target['register']) < self._n_qubits, \
+                f"Target register has bigger size ({np.max([len(target['register']), np.max(target['register'])])}) " \
+                f"than total number of qubits ({self._n_qubits}) in circuit"
             assert 'input_states' in target, 'Gate calibration requires a set of input states (dict)'
+            gate_op = CircuitOp(target['gate'])
+            if len(target['register']) < self._n_qubits:
+                gate_op = gate_op.permute(target['register'])
+                if gate_op.num_qubits < self._n_qubits:
+                    gate_op ^= I ^ (self._n_qubits - gate_op.num_qubits)
             for i, input_state in enumerate(target["input_states"]):
                 assert ('circuit' or 'dm') in input_state, f'input_state {i} does not have a ' \
                                                            f'DensityMatrix or circuit description'
 
-                gate_op = Operator(target['gate'])
+
                 target['input_states'][i]['target_state'] = {'target_type': 'state'}
                 if 'circuit' in input_state:
-                    target['input_states'][i]['dm'] = DensityMatrix(input_state['circuit'] @ (Zero ^ self._n_qubits))
-                    target['input_states'][i]['target_state']["dm"] = DensityMatrix(gate_op @ input_state["circuit"]
+                    input_circuit: CircuitOp = input_state['circuit']
+                    if len(target['register']) < self._n_qubits:
+                        input_circuit = input_circuit.permute(target['register'])
+                        if input_circuit.num_qubits < self._n_qubits:
+                            input_circuit ^= I^(self._n_qubits - input_circuit.num_qubits)
+
+                    target['input_states'][i]['dm'] = DensityMatrix(input_circuit @ (Zero ^ self._n_qubits))
+                    target['input_states'][i]['target_state']["dm"] = DensityMatrix(gate_op @ input_circuit
                                                                                     @ (Zero ^ self._n_qubits))
+
                 elif 'dm' in input_state:
-                    target['input_states'][i]['target_state']["dm"] = gate_op @ input_state["dm"]
+                    target['input_states'][i]['target_state']["dm"] = Operator(gate_op) @ input_state["dm"]
 
                 target['input_states'][i]['target_state'] = self.calculate_chi_target_state(
                     target['input_states'][i]['target_state'])
