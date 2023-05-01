@@ -11,7 +11,6 @@ from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit_ibm_provider import IBMProvider
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.quantum_info import DensityMatrix
 from qiskit_ibm_runtime import QiskitRuntimeService, Session
@@ -20,8 +19,6 @@ from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
 from tensorflow_probability.python.distributions import MultivariateNormalDiag
-
-from tf_agents.specs import array_spec, tensor_spec
 
 # Additional imports
 from tqdm import tqdm
@@ -34,9 +31,6 @@ scheme proposed in the appendix of Vladimir Sivak paper.
 In there, we design classes for the environment (Quantum Circuit simulated on IBM Q simulator) and the agent 
 -----------------------------------------------------------------------------------------------------
 """
-
-# IBMProvider.save_account("b4c22f9da67ce0063a7cf1b2666f87fcb3641addb701a8cb1d9f9acd86a9ebfc3e988ab715fa2371432551b983934805a5dbe0c54b249d1f3047e00f304b8663")
-#provider = IBMProvider()
 
 
 def apply_parametrized_circuit(qc: QuantumCircuit):
@@ -62,12 +56,11 @@ Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
 
-#service = QiskitRuntimeService(channel='ibm_quantum')
+# service = QiskitRuntimeService(channel='ibm_quantum')
 seed = 3590  # Seed for action sampling
-#print(service.backends())
-#backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
-options = {"seed_simulator": None, 'resilience_level': 0}
-options = {'resilience_level': 0}
+# print(service.backends())
+# backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
+estimator_options = {"seed_simulator": seed, 'resilience_level': 0}
 n_qubits = 2
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
@@ -83,24 +76,18 @@ bell_tgt = {"circuit": bell_circuit}
 # bell_dm = bell_state @ bell_state.conj().T
 # bell_tgt = {"dm": DensityMatrix(bell_dm)}
 
-target_state = bell_tgt
-
 Qiskit_setup = {
     "backend": None,
-    # "service": service,
     "parametrized_circuit": apply_parametrized_circuit,
-    "options": options
+    "estimator_options": estimator_options
 }
 
 n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
 time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
-action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
-observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
 
 q_env = QuantumEnvironment(n_qubits=n_qubits, target=bell_tgt, abstraction_level="circuit",
-                           action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.25)
+                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.125)
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -108,10 +95,10 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 700  # Number of epochs : default 1500
-batchsize = 100  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
+n_epochs = 800  # Number of epochs : default 1500
+batchsize = 200  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
 opti = "Adam"
-eta = 0.001  # Learning rate for policy update step
+eta = 0.003  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
 
 use_PPO = True
@@ -120,11 +107,6 @@ grad_clip = 0.01
 critic_loss_coeff = 0.5
 optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip, concurrent_optimization=True, lr2=eta_2)
 sigma_eps = 1e-3  # for numerical stability
-grad_update_number = 20
-# class Agent:
-#     def __init__(self, epochs:int, batchsize:int, optimizer, lr: float, lr2: Optional[float], grad_clip:):
-#         pass
-
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -144,7 +126,6 @@ init_msmt = np.zeros((1, N_in))  # Here no feedback involved, so measurement seq
 Training loop
 -----------------------------------------------------------------------------------------------------
 """
-# TODO: Use TF-Agents PPO Agent
 mu_old = tf.Variable(initial_value=network(init_msmt)[0][0], trainable=False)
 sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0], trainable=False)
 

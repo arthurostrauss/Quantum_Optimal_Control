@@ -5,7 +5,6 @@ Code for arbitrary gate calibration using model-free reinforcement learning
  Created on 11/11/2022
 """
 
-
 import numpy as np
 from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
@@ -16,7 +15,6 @@ from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
 from qiskit.opflow import H, I, X, S
-
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -31,13 +29,11 @@ import matplotlib.cm as cm
 
 """ 
 -----------------------------------------------------------------------------------------------------
-We set a RL agent based on PPO and an actor critic network to perform arbitrary state preparation based on
-scheme proposed in the appendix of Vladimir Sivak paper. 
-In there, we design classes for the environment (Quantum Circuit simulated on IBM Q simulator) and the agent 
+We set a RL agent based on PPO and an actor critic network to perform multi-qubit gate calibration based on
+scheme proposed in the appendix of Vladimir Sivak paper (https://doi.org/10.1103/PhysRevX.12.011059) 
+Here, we use a class object for the QuantumEnvironment (Quantum Circuit simulated on IBM Q simulator) 
 -----------------------------------------------------------------------------------------------------
 """
-
-
 
 
 def apply_parametrized_circuit(qc: QuantumCircuit):
@@ -50,10 +46,8 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     global n_actions
     params = ParameterVector('theta', n_actions)
     qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
-    # qc.rx(2*np.pi*params[0], 0)
-    # qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 0)
-    # qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    # qc.rzx(2 * np.pi * params[6], 0, 1)
+    qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
+    qc.rzx(2 * np.pi * params[6], 0, 1)
 
 
 """
@@ -69,8 +63,7 @@ Variables to define environment
 backend = None
 seed = 3590  # Seed for action sampling
 
-options = {"seed_simulator": None, 'resilience_level': 0}
-options = {'resilience_level': 0}
+estimator_options = {"seed_simulator": None, 'resilience_level': 0}
 n_qubits = 2
 sampling_Paulis = 10
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
@@ -134,42 +127,17 @@ cnot_target = {
 
 }
 
-n_qubits = 1
-single_qubit_tgt = {
-    "target_type": 'gate',
-    "gate": XGate("X"),
-    "register": [0],
-    "input_states": [
-        {"name": '|0>',
-         "circuit": I
-         },
-        #
-        {"name": '|1>',
-         "circuit": X},
-
-        {"name": '|+>',
-         "circuit": H},
-        {"name": '|->',
-         "circuit": H @ X},
-    ]
-
-}
 Qiskit_setup = {
     "backend": backend,
-    "service": None,
     "parametrized_circuit": apply_parametrized_circuit,
-    "options": options
+    "estimator_options": estimator_options
 }
-target = single_qubit_tgt
-n_actions = 3  # Choose how many control parameters in pulse/circuit parametrization
-time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
-action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
-observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
+target = cnot_target
+n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
 
 q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="circuit",
-                           action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
+                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.25)
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -177,7 +145,7 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 600 # Number of epochs
+n_epochs = 600  # Number of epochs
 batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.0015  # Learning rate for policy update step
@@ -189,11 +157,6 @@ grad_clip = 0.01
 critic_loss_coeff = 0.5
 optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip, concurrent_optimization=True, lr2=eta_2)
 sigma_eps = 1e-3  # for numerical stability
-grad_update_number = 20
-# class Agent:
-#     def __init__(self, epochs:int, batchsize:int, optimizer, lr: float, lr2: Optional[float], grad_clip:):
-#         pass
-
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -213,7 +176,6 @@ init_msmt = np.zeros((1, N_in))  # Here no feedback involved, so measurement seq
 Training loop
 -----------------------------------------------------------------------------------------------------
 """
-# TODO: Use TF-Agents PPO Agent
 mu_old = tf.Variable(initial_value=network(init_msmt)[0][0], trainable=False)
 sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0], trainable=False)
 
@@ -285,7 +247,8 @@ def plot_examples(fig, ax, reward_table):
     ax.set_xlabel('Epoch')
     fig.colorbar(im, ax=ax, label='Reward')
 
-figure, (ax1,ax2) = plt.subplots(1, 2)
+
+figure, (ax1, ax2) = plt.subplots(1, 2)
 #  Plot return as a function of epochs
 ax1.plot(np.mean(q_env.reward_history, axis=1), '-.', label='Reward')
 # ax1.plot(data["baselines"], '-.', label='baseline')
@@ -300,6 +263,3 @@ ax1.set_ylabel("Expected reward")
 ax1.legend()
 # plot_examples(figure, ax2, q_env.reward_history)
 # plt.show()
-
-
-

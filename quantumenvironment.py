@@ -7,11 +7,11 @@ Created on 28/11/2022
 """
 # Qiskit imports
 from qiskit import QuantumCircuit, QuantumRegister, pulse, schedule
-from qiskit.providers.fake_provider import FakeBackend, FakeBackendV2
 from qiskit.transpiler import InstructionProperties
 from qiskit.circuit import Parameter
+from qiskit.providers import BackendV1, BackendV2
 from qiskit.circuit.library import XGate, SXGate, RZGate, HGate, IGate, Reset, ZGate, SGate, SdgGate, TGate, TdgGate, \
-    CXGate, ECRGate
+    CXGate
 from qiskit.quantum_info import DensityMatrix, Statevector, Pauli, SparsePauliOp, state_fidelity, Operator, \
     process_fidelity, average_gate_fidelity
 from qiskit.exceptions import QiskitError
@@ -19,7 +19,6 @@ from qiskit.exceptions import QiskitError
 # Qiskit dynamics for pulse simulation (benchmarking)
 from qiskit_dynamics import DynamicsBackend, Solver, RotatingFrame
 from qiskit_dynamics.array import Array
-from qiskit_dynamics.pulse import InstructionToSignals
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
 from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs
 from qiskit_dynamics.array import wrap
@@ -34,15 +33,13 @@ from qiskit_experiments.framework import BatchExperiment, ParallelExperiment
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
-from qiskit_ibm_runtime import Session, QiskitRuntimeService, Estimator as Runtime_Estimator, \
-    IBMBackend as Runtime_Backend
-from qiskit_ibm_provider import Backend
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend
 from qiskit_aer.primitives import Estimator as Aer_Estimator
 from qiskit.opflow import Zero, I, CircuitOp
 
 import numpy as np
 from itertools import product
-from typing import Dict, Union, Optional, List, Tuple
+from typing import Dict, Union, Optional, List, Tuple, Callable
 from copy import deepcopy
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -52,7 +49,6 @@ from copy import deepcopy
 # Tensorflow modules
 import tensorflow as tf
 from tensorflow_probability.python.distributions import Categorical
-from tf_agents.specs import array_spec, tensor_spec
 from tf_agents.typing import types
 
 import jax
@@ -60,7 +56,7 @@ import jax
 jit = wrap(jax.jit, decorator=True)
 
 
-def get_solver_and_freq_from_backend(backend: Union[Backend, FakeBackend, Runtime_Backend],
+def get_solver_and_freq_from_backend(backend: BackendV1,
                                      subsystem_list: Optional[List[int]] = None,
                                      rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
                                      evaluation_mode: str = "dense",
@@ -179,7 +175,7 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     phi = Parameter("phi")
     single_qubit_properties = {**{(qubit,): None for qubit in range(num_qubits)}}
     two_qubit_properties = {**{qubits: None for qubits in backend.options.control_channel_map}}
-    print(two_qubit_properties)
+
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         target.add_instruction(XGate(), properties=single_qubit_properties)
         target.add_instruction(SXGate(), properties=single_qubit_properties)
@@ -275,8 +271,6 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
 class QuantumEnvironment:
 
     def __init__(self, n_qubits: int, target: Dict, abstraction_level: str,
-                 action_spec: Union[array_spec.ArraySpec, tensor_spec.TensorSpec],
-                 observation_spec: Union[array_spec.ArraySpec, tensor_spec.TensorSpec],
                  Qiskit_config: Optional[Dict] = None,
                  QUA_setup: Optional[Dict] = None,
                  sampling_Pauli_space: int = 10, n_shots: int = 1, c_factor: float = 0.5):
@@ -304,9 +298,19 @@ class QuantumEnvironment:
             raise AttributeError("Cannot provide simultaneously a QUA setup and a Qiskit config ")
         elif Qiskit_config is not None:
 
-            self.backend: Union[Backend, FakeBackend, FakeBackendV2,
-            DynamicsBackend, Runtime_Backend] = Qiskit_config["backend"]
-            self.parametrized_circuit_func = Qiskit_config["parametrized_circuit"]
+            self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
+                              for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
+            self.c_factor = c_factor
+            self._n_qubits = n_qubits
+            self.d = 2 ** n_qubits  # Dimension of Hilbert space
+            self.sampling_Pauli_space = sampling_Pauli_space
+            self.n_shots = n_shots
+
+            self.target, self.target_type, self.tgt_register = self._define_target(target)
+            self.q_register = QuantumRegister(n_qubits)
+
+            self.backend: Union[BackendV1, BackendV2, None] = Qiskit_config["backend"]
+            self.parametrized_circuit_func: Callable = Qiskit_config["parametrized_circuit"]
             self.noise_model = Qiskit_config.get("noise_model", None)
             estimator_options: Dict = Qiskit_config.get("estimator_options", None)
 
@@ -322,8 +326,19 @@ class QuantumEnvironment:
                 self.estimator = BackendEstimator(self.backend)
 
                 if not isinstance(self.backend, DynamicsBackend):
-                    self.pulse_backend = DynamicsBackend.from_backend(self.backend,
-                                                                      subsystem_list=Qiskit_config["target_register"])
+                    assert self.backend is not None, "A Backend is required for running algorithm at pulse level," \
+                                                     "Must be either DynamicsBackend or IBMBackend supporting Qiskit" \
+                                                     "Runtime"
+                    qubits = list(range(self._n_qubits))
+                    if "qubits" in Qiskit_config:
+                        assert len(qubits) >= len(self.tgt_register), 'List of qubits must be equal or larger ' \
+                                                                      'than the register' \
+                                                                      'on which the target gate will act'
+                        assert len(qubits) == self._n_qubits, "List of qubits does not match the indicated total number"\
+                                                              "of qubits"
+                        qubits = Qiskit_config['qubits']
+
+                    self.pulse_backend = DynamicsBackend.from_backend(self.backend, subsystem_list=qubits)
                 else:
                     calibration_files = Qiskit_config.get('calibration_files', None)
                     self.calibrations, self.exp_results = perform_standard_calibrations(self.backend, calibration_files)
@@ -343,17 +358,6 @@ class QuantumEnvironment:
             raise AttributeError("QUA compatibility not yet implemented")
             # TODO: Add a QUA program
 
-        self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
-                          for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
-        self.c_factor = c_factor
-        self._n_qubits = n_qubits
-        self.d = 2 ** n_qubits  # Dimension of Hilbert space
-        self.sampling_Pauli_space = sampling_Pauli_space
-        self.n_shots = n_shots
-
-        self.target, self.target_type, self.tgt_register = self._define_target(target)
-        self.q_register = QuantumRegister(n_qubits)
-
         # Data storage for TF-Agents or plotting
         self.action_history = []
         self.density_matrix_history = []
@@ -367,24 +371,27 @@ class QuantumEnvironment:
         else:
             self.state_fidelity_history = []
 
-        self.time_step = 0
-        self._action_spec = action_spec
-        self._observation_spec = observation_spec
-        self.episode_ended = False
-
     def _define_target(self, target: Dict):
+        if 'register' not in target:
+            target["register"] = list(range(self._n_qubits))
+
+        assert type(target['register']) == QuantumRegister or type(target['register'] == List[int]), \
+            'Input state shall be specified over a QuantumRegister or a List'
+        assert len(target['register']) <= self._n_qubits, \
+            f"Target register has bigger size ({np.max([len(target['register']), np.max(target['register'])])}) " \
+            f"than total number of qubits ({self._n_qubits}) characterizing the full system"
         if target.get("target_type", None) == "state" or target.get("target_type", None) is None:  # Default mode is
             # State preparation if no argument target_type is found
             if 'circuit' in target:
                 gate_op = target["circuit"]
 
-                if len(target["register"] > self._n_qubits):
+                if len(target["register"]) > self._n_qubits:
                     raise ValueError("Target register has bigger size than the total number of qubits in circuit")
                 elif len(target["register"]) < self._n_qubits:
                     gate_op = target["circuit"].permute(target['register'])
-                    if gate_op.num_qubits < self._n_qubits: # If after permutation numbers still do not match
-                        gate_op ^= I^(self._n_qubits-gate_op.num_qubits)
-                target["dm"] = DensityMatrix(gate_op @ (Zero ^self._n_qubits))
+                    if gate_op.num_qubits < self._n_qubits:  # If after permutation numbers still do not match
+                        gate_op ^= I ^ (self._n_qubits - gate_op.num_qubits)
+                target["dm"] = DensityMatrix(gate_op @ (Zero ^ self._n_qubits))
             assert 'dm' in target, 'no DensityMatrix or circuit argument provided to target dictionary'
             assert type(target["dm"]) == DensityMatrix, 'Provided dm is not a DensityMatrix object'
             if target.get("register", None) is None:
@@ -392,13 +399,6 @@ class QuantumEnvironment:
             return self.calculate_chi_target_state(target), "state", target["register"]
         elif target.get("target_type", None) == "gate":
             # input_states = [self.calculate_chi_target_state(input_state) for input_state in target["input_states"]]
-            assert 'register' in target, 'No target register provided (need to provide key "register": Union[List[int],' \
-                                         'QuantumRegister) '
-            assert type(target['register']) == QuantumRegister or type(target['register'] == List[int]),\
-                'Input state shall be specified over a QuantumRegister or a List'
-            assert len(target['register']) <= self._n_qubits and np.max(target['register']) < self._n_qubits, \
-                f"Target register has bigger size ({np.max([len(target['register']), np.max(target['register'])])}) " \
-                f"than total number of qubits ({self._n_qubits}) in circuit"
             assert 'input_states' in target, 'Gate calibration requires a set of input states (dict)'
             gate_op = CircuitOp(target['gate'])
             if len(target['register']) < self._n_qubits:
@@ -409,14 +409,13 @@ class QuantumEnvironment:
                 assert ('circuit' or 'dm') in input_state, f'input_state {i} does not have a ' \
                                                            f'DensityMatrix or circuit description'
 
-
                 target['input_states'][i]['target_state'] = {'target_type': 'state'}
                 if 'circuit' in input_state:
                     input_circuit: CircuitOp = input_state['circuit']
                     if len(target['register']) < self._n_qubits:
                         input_circuit = input_circuit.permute(target['register'])
                         if input_circuit.num_qubits < self._n_qubits:
-                            input_circuit ^= I^(self._n_qubits - input_circuit.num_qubits)
+                            input_circuit ^= I ^ (self._n_qubits - input_circuit.num_qubits)
 
                     target['input_states'][i]['dm'] = DensityMatrix(input_circuit @ (Zero ^ self._n_qubits))
                     target['input_states'][i]['target_state']["dm"] = DensityMatrix(gate_op @ input_circuit
@@ -512,19 +511,18 @@ class QuantumEnvironment:
             else:  # Gate calibration task
                 q_process_list = [Operator(qc) for qc in qc_list]
                 self.built_unitaries.append(q_process_list)
-                for i, input_state in enumerate(self.target["input_states"]):
-                    output_states = [DensityMatrix(Operator(qc) @ input_state["dm"] @ Operator(qc).adjoint())
-                                     for qc in qc_list]
-                    self.input_output_state_fidelity_history[i].append(
-                        np.mean([state_fidelity(input_state["target_state"]["dm"],
-                                                output_state) for output_state in output_states]))
                 prc_fidelity = np.mean([process_fidelity(q_process, Operator(self.target["gate"]))
                                         for q_process in q_process_list])
                 avg_fidelity = np.mean([average_gate_fidelity(q_process, Operator(self.target["gate"]))
                                         for q_process in q_process_list])
-
                 self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
                 self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
+                # for i, input_state in enumerate(self.target["input_states"]):
+                #     output_states = [DensityMatrix(Operator(qc) @ input_state["dm"] @ Operator(qc).adjoint())
+                #                      for qc in qc_list]
+                #     self.input_output_state_fidelity_history[i].append(
+                #         np.mean([state_fidelity(input_state["target_state"]["dm"],
+                #                                 output_state) for output_state in output_states]))
         elif self.abstraction_level == 'pulse' and do_pulse_benchmark:
             # Pulse simulation
             schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]

@@ -11,8 +11,6 @@ from quantumenvironment import QuantumEnvironment, get_solver_and_freq_from_back
 from helper_functions import select_optimizer, generate_model, custom_pulse_schedule
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit import pulse, transpile
-from qiskit.providers.options import Options
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 from qiskit.providers import QubitProperties
 from qiskit_ibm_runtime import QiskitRuntimeService
@@ -20,14 +18,11 @@ from qiskit_dynamics import DynamicsBackend
 from qiskit_dynamics.array import Array
 from qiskit.circuit import ParameterVector, Parameter, ParameterExpression, QuantumCircuit, Gate
 from qiskit.extensions import CXGate, XGate, SXGate, RZGate
-from qiskit.opflow import H, I, X, S
-from qiskit_ibm_provider import IBMBackend, IBMProvider
+from qiskit.opflow import H, I, X
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
 from tensorflow_probability.python.distributions import MultivariateNormalDiag
-
-from tf_agents.specs import array_spec, tensor_spec
 
 # Additional imports
 from tqdm import tqdm
@@ -85,7 +80,6 @@ n_qubits = 1
 sampling_Paulis = 10
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
-time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
 
 """
 Choose your backend: Here we deal with pulse level implementation. In Qiskit, there are only way two ways
@@ -97,14 +91,11 @@ estimator_options = {'resilience_level': 0}
 
 """Real backend initialization"""
 backend_name = 'ibm_perth'
-# provider = IBMProvider()
 # service = QiskitRuntimeService(channel='ibm_quantum')
 # runtime_backend = service.get_backend(backend_name)
-# real_backend = provider.get_backend(backend_name)
-# control_channel_map = {**{qubits: real_backend.control_channel(qubits)[0].index
-#                           for qubits in real_backend.coupling_map}}
+# control_channel_map = {**{qubits: runtime_backend.control_channel(qubits)[0].index
+#                           for qubits in runtime_backend.coupling_map}}
 
-service = None
 fake_backend = FakeJakarta()
 fake_backend_v2 = FakeJakartaV2()
 control_channel_map = {}
@@ -132,7 +123,7 @@ backend = dynamics_backend
 # Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
 # fidelity benchmarking
 channel_freq, solver = get_solver_and_freq_from_backend(
-    backend=backend,
+    backend=fake_backend,
     subsystem_list=qubit_tgt_register,
     rotating_frame="auto",
     evaluation_mode="dense",
@@ -141,7 +132,7 @@ channel_freq, solver = get_solver_and_freq_from_backend(
     dissipator_channels=None,
     dissipator_operators=None
 )
-
+calibration_files = None
 # Define target gate
 X_tgt = {
     "target_type": 'gate',
@@ -164,21 +155,20 @@ X_tgt = {
 
 target = X_tgt
 
+# Wrap all info in one dict Qiskit_setup
 Qiskit_setup = {
     "backend": backend,
     "parametrized_circuit": apply_parametrized_circuit,
     "estimator_options": estimator_options,
-    "service": service,
-    "target_register": qubit_tgt_register,
+    # Below are optional keys for pulse simulation
+    # Relevant only if backend is not a DynamicsBackend
+    "qubits": qubit_tgt_register,
     "channel_freq": channel_freq,
-    "solver": solver
+    "solver": solver,
+    "calibration_files": calibration_files
 }
 
-action_spec = tensor_spec.BoundedTensorSpec(shape=(n_actions,), dtype=tf.float32, minimum=-1., maximum=1.)
-observation_spec = array_spec.ArraySpec(shape=(time_steps,), dtype=np.int32)
-
 q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="pulse",
-                           action_spec=action_spec, observation_spec=observation_spec,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
 
@@ -189,7 +179,7 @@ Hyperparameters for RL agent
 """
 # Hyperparameters for the agent
 n_epochs = 200  # Number of epochs
-batchsize = 1  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
@@ -229,9 +219,6 @@ mu_old = tf.Variable(initial_value=network(init_msmt)[0][0], trainable=False)
 sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0], trainable=False)
 
 policy_params_str = 'Policy params:'
-print('Neural net output', network(init_msmt), type(network(init_msmt)))
-print("mu_old", mu_old)
-print("sigma_old", sigma_old)
 
 for i in tqdm(range(n_epochs)):
 
@@ -273,6 +260,10 @@ for i in tqdm(range(n_epochs)):
         sigma_old.assign(sigma)
 
     print('\n Epoch', i)
+    print(f"{policy_params_str:#<100}")
+    print('mu_vec:', np.array(mu))
+    print('sigma_vec:', np.array(sigma))
+    print('baseline:', np.array(b))
     print("Average reward", np.mean(q_env.reward_history[i]))
     # print("Average Gate Fidelity:", q_env.avg_fidelity_history[i])
 
