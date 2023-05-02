@@ -1,13 +1,11 @@
 import tensorflow as tf
-from typing import Optional, Tuple, List, Union, Dict
+import numpy as np
+from typing import Optional, Tuple, List, Union
 from tensorflow.python.keras.layers import Input, Dense
 from tensorflow.python.keras import Model
-
-from qiskit.circuit import ParameterVector, QuantumRegister
-from qiskit import pulse
-from qiskit.pulse import ScheduleBlock
-from qiskit_ibm_provider import IBMBackend
-from qiskit_dynamics import DynamicsBackend
+from qiskit.providers import BackendV1
+from qiskit.quantum_info import Operator
+from qiskit_dynamics import Solver, DynamicsBackend
 
 
 def constrain_mean_value(mu_var):
@@ -18,36 +16,20 @@ def constrain_std_value(std_var):
     return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
 
 
-def custom_pulse_schedule(backend: Union[IBMBackend, DynamicsBackend], target: Dict,
-                          qubit_tgt_register: Union[List[int],
-                          QuantumRegister], params: ParameterVector,
-                          default_schedule: Optional[ScheduleBlock] = None):
+def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     """
-    Define parametrization of the pulse schedule characterizing the target gate
-    :param qubit_tgt_register: Qubit register on which
-    :param target: Dictionary containing information about the target (gate or state)
-    :param backend: IBM Backend on which schedule shall be added
-    :param params: Parameters of the Schedule
-    :param default_schedule:  baseline from which one can customize the pulse parameters
-
-    :return: Parametrized Schedule
+    Get reduced control_channel_map from Backend configuration (needs to be of type BackendV1)
+    :param backend: IBM Backend instance, must carry a configuration method
+    :param qubit_tgt_register: Subsystem of interest from which to build control_channel_map
     """
-
-    if default_schedule is None:  # No baseline pulse, full waveform builder
-        pass
-    else:
-
-        # Look here for the pulse features to specifically optimize upon, for the x gate here, simply retrieve relevant
-        # parameters for the Drag pulse
-        pulse_ref = default_schedule.instructions[0][1].pulse
-
-        with pulse.build(backend=backend, name='param_schedule') as parametrized_schedule:
-
-            pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
-                                  beta=pulse_ref.beta, angle=pulse_ref.angle),
-                       channel=pulse.DriveChannel(qubit_tgt_register[0]))
-
-        return parametrized_schedule
+    control_channel_map = {}
+    control_channel_map_backend = {
+        **{qubits: backend.configuration().control_channels[qubits][0].index for qubits in
+           backend.configuration().control_channels}}
+    for qubits in control_channel_map_backend:
+        if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
+            control_channel_map[qubits] = control_channel_map_backend[qubits]
+    return control_channel_map
 
 
 def select_optimizer(lr: float, optimizer: str = "Adam", grad_clip: Optional[float] = None,

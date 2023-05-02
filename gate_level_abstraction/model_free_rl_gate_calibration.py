@@ -10,7 +10,6 @@ from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit_ibm_provider import IBMProvider
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
@@ -19,8 +18,6 @@ from qiskit.opflow import H, I, X, S
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
 from tensorflow_probability.python.distributions import MultivariateNormalDiag
-
-from tf_agents.specs import array_spec, tensor_spec
 
 # Additional imports
 from tqdm import tqdm
@@ -56,7 +53,6 @@ Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
 
-# provider = IBMProvider()
 # service = QiskitRuntimeService(channel='ibm_quantum')
 # backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 
@@ -199,7 +195,7 @@ for i in tqdm(range(n_epochs)):
         Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma,
                                                 validate_args=True, allow_nan_stats=False)
 
-        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -1., 1.))
+        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize, seed=seed), -1., 1.))
 
         reward = q_env.perform_action(action_vector)
         advantage = reward - b

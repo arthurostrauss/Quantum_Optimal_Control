@@ -149,7 +149,7 @@ for i in tqdm(range(n_epochs)):
         Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma,
                                                 validate_args=True, allow_nan_stats=False)
 
-        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -1., 1.))
+        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize, seed=seed), -1., 1.))
 
         reward = q_env.perform_action(action_vector)
         advantage = reward - b
