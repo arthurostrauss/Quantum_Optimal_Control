@@ -8,15 +8,16 @@ Code for model-free gate calibration in IBM device using Reinforcement Learning 
 import numpy as np
 
 from quantumenvironment import QuantumEnvironment, get_solver_and_freq_from_backend
-from helper_functions import select_optimizer, generate_model, custom_pulse_schedule
+from helper_functions import select_optimizer, generate_model, get_control_channel_map
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
-from qiskit.providers import QubitProperties
+from qiskit.providers import QubitProperties, BackendV1, BackendV2
 from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit import pulse
 from qiskit_dynamics import DynamicsBackend
 from qiskit_dynamics.array import Array
-from qiskit.circuit import ParameterVector, Parameter, ParameterExpression, QuantumCircuit, Gate
+from qiskit.circuit import ParameterVector, QuantumCircuit, Gate, QuantumRegister
 from qiskit.extensions import CXGate, XGate, SXGate, RZGate
 from qiskit.opflow import H, I, X
 
@@ -27,7 +28,7 @@ from tensorflow_probability.python.distributions import MultivariateNormalDiag
 # Additional imports
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from typing import Optional
+from typing import Optional, Union, List
 # configure jax to use 64 bit mode
 import jax
 
@@ -40,11 +41,42 @@ Array.set_default_backend('jax')
 
 """ 
 -----------------------------------------------------------------------------------------------------
-We set a RL agent based on PPO and an actor critic network to perform arbitrary state preparation based on
-scheme proposed in the appendix of Vladimir Sivak paper. 
+We set a RL agent based on PPO and an actor critic network to perform gate calibration based on
+scheme proposed in the appendix of Vladimir Sivak paper. Here, each gate is decomposed at the circuit level to enable
+optimal control pulse shaping.
 In there, we design classes for the environment (Quantum Circuit simulated on IBM Q simulator) and the agent 
 -----------------------------------------------------------------------------------------------------
 """
+
+
+def custom_pulse_schedule(backend: Union[BackendV1, BackendV2], qubit_tgt_register: Union[List[int],
+                          QuantumRegister], params: ParameterVector,
+                          default_schedule: Optional[Union[pulse.ScheduleBlock, pulse.Schedule]] = None):
+    """
+    Define parametrization of the pulse schedule characterizing the target gate
+        :param backend: IBM Backend on which schedule shall be added
+        :param qubit_tgt_register: Qubit register on which
+        :param params: Parameters of the Schedule
+        :param default_schedule:  baseline from which one can customize the pulse parameters
+
+        :return: Parametrized Schedule
+    """
+
+    if default_schedule is None:  # No baseline pulse, full waveform builder
+        pass
+    else:
+
+        # Look here for the pulse features to specifically optimize upon, for the x gate here, simply retrieve relevant
+        # parameters for the Drag pulse
+        pulse_ref = default_schedule.instructions[0][1].pulse
+
+        with pulse.build(backend=backend, name='param_schedule') as parametrized_schedule:
+
+            pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
+                                  beta=pulse_ref.beta, angle=pulse_ref.angle),
+                       channel=pulse.DriveChannel(qubit_tgt_register[0]))
+
+        return parametrized_schedule
 
 
 def apply_parametrized_circuit(qc: QuantumCircuit):
@@ -64,7 +96,7 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
 
     parametrized_gate = Gate(f"custom_{target['gate'].name}", len(qubit_tgt_register), params=[params[0]])
     default_schedule = fake_backend.defaults().instruction_schedule_map.get(target["gate"].name, qubit_tgt_register)
-    parametrized_schedule = custom_pulse_schedule(backend=backend, target=target, qubit_tgt_register=qubit_tgt_register,
+    parametrized_schedule = custom_pulse_schedule(backend=backend, qubit_tgt_register=qubit_tgt_register,
                                                   params=params, default_schedule=default_schedule)
     qc.add_calibration(parametrized_gate, qubit_tgt_register, parametrized_schedule)
     qc.append(parametrized_gate, qubit_tgt_register)
@@ -96,27 +128,23 @@ backend_name = 'ibm_perth'
 # control_channel_map = {**{qubits: runtime_backend.control_channel(qubits)[0].index
 #                           for qubits in runtime_backend.coupling_map}}
 
-fake_backend = FakeJakarta()
-fake_backend_v2 = FakeJakartaV2()
-control_channel_map = {}
-control_channel_map_backend = {
-    **{qubits: fake_backend.configuration().control_channels[qubits][0].index for qubits in
-       fake_backend.configuration().control_channels}}
-for qubits in control_channel_map_backend:
-    if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
-        control_channel_map[qubits] = control_channel_map_backend[qubits]
+fake_backend, fake_backend_v2 = FakeJakarta(), FakeJakartaV2()
+control_channel_map = get_control_channel_map(fake_backend, qubit_tgt_register)
+dt = fake_backend_v2.target.dt
 
-print(control_channel_map)
-dynamics_options = {'seed_simulator': 5000,  # "configuration": fake_backend.configuration(),
+dynamics_options = {'seed_simulator': None,  # "configuration": fake_backend.configuration(),
                     'control_channel_map': control_channel_map,
                     # Control channels to play CR tones, should match connectivity of device
                     'solver_options': {"method": "jax_odeint",
                                        "atol": 1e-6,
-                                       "rtol": 1e-8}
+                                       "rtol": 1e-8,
+                                       "hmax": dt}
                     }
 dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=qubit_tgt_register, **dynamics_options)
 target = dynamics_backend.target
 target.qubit_properties = fake_backend_v2.qubit_properties(qubit_tgt_register)
+
+
 # Choose here among the above backends, if simulator or dynamics_backend, set service to None
 backend = dynamics_backend
 
@@ -203,7 +231,7 @@ Policy parameters
 """
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
-hidden_units = [82, 82]  # List containing number of units in each hidden layer
+hidden_units = [10]  # List containing number of units in each hidden layer
 
 network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)
 network.summary()

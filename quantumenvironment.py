@@ -187,8 +187,11 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         target.add_instruction(TGate(), properties=single_qubit_properties)
         target.add_instruction(TdgGate(), properties=single_qubit_properties)
         target.add_instruction(HGate(), properties=single_qubit_properties)
-        target.add_instruction(Reset(), properties={**{(qubit,): pulse.Schedule() for qubit in range(num_qubits)}})
-        target.add_instruction(CXGate(), properties=two_qubit_properties)
+        target.add_instruction(Reset(), properties={
+            **{(qubit,): InstructionProperties(calibration=pulse.Schedule(name='reset'), error=0.0)
+               for qubit in range(num_qubits)}})
+        if num_qubits > 1 and bool(backend.options.control_channel_map):
+            target.add_instruction(CXGate(), properties=two_qubit_properties)
 
     for qubit in range(num_qubits):
         control_channels = list(filter(lambda x: x is not None,
@@ -248,11 +251,11 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         # batch_exp.run().block_for_results()
         # Doesn't work, needs the coupling map
 
-        cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
+        # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
         print("All calibrations are done")
     error_dict = {'x': {**{(qubit,): 0.0 for qubit in qubits}},
                   'sx': {**{(qubit,): 0.0 for qubit in qubits}},
-                  }
+                  'reset': {**{(qubit,): 0.0 for qubit in qubits}}}
     for qubit in range(num_qubits):
         sx_schedule = cals.get_inst_map().get('sx', (qubit,))
         rz_schedule = target.instruction_schedule_map().get('rz', (qubit,)).assign_parameters({phi: np.pi / 2},
@@ -262,7 +265,7 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
             h_schedule += instruction[1]
         target.update_instruction_properties('h', (qubit,), properties=InstructionProperties(calibration=h_schedule,
                                                                                              error=0.0))
-    print("Updated", target)
+    print("Updated Instruction Schedule Map", target.instruction_schedule_map())
     target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
 
     return cals, exp_results
@@ -334,7 +337,7 @@ class QuantumEnvironment:
                         assert len(qubits) >= len(self.tgt_register), 'List of qubits must be equal or larger ' \
                                                                       'than the register' \
                                                                       'on which the target gate will act'
-                        assert len(qubits) == self._n_qubits, "List of qubits does not match the indicated total number"\
+                        assert len(qubits) == self._n_qubits, "List of qubits does not match the indicated total number" \
                                                               "of qubits"
                         qubits = Qiskit_config['qubits']
 
@@ -362,7 +365,7 @@ class QuantumEnvironment:
         self.action_history = []
         self.density_matrix_history = []
         self.reward_history = []
-
+        self.qc_history = []
         if self.target_type == 'gate':
             self.input_output_state_fidelity_history = [[] for _ in range(len(self.target.get("input_states", 1)))]
             self.process_fidelity_history = []
@@ -443,12 +446,12 @@ class QuantumEnvironment:
         # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
         return target_state
 
-    def perform_action(self, actions: types.NestedTensorOrArray):
+    def perform_action(self, actions: types.NestedTensorOrArray, do_benchmark: bool = True):
         """
         Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
         :param actions: action vector to execute on quantum system
-        :return: Reward table (reward for each run in the batch), observations (measurement outcomes),
-        obtained density matrix
+        :param do_benchmark: Indicates if actual fidelity computation should be done on top of reward computation
+        :return: Reward table (reward for each run in the batch)
         """
         qc = QuantumCircuit(self.q_register)  # Reset the QuantumCircuit instance for next iteration
         angles, batch_size = np.array(actions), len(np.array(actions))
@@ -479,28 +482,28 @@ class QuantumEnvironment:
         # Apply parametrized quantum circuit (action), for benchmarking only
         parametrized_circ = QuantumCircuit(self._n_qubits)
         self.parametrized_circuit_func(parametrized_circ)
-        self._store_benchmarks(parametrized_circ, angles, do_pulse_benchmark=False)
+        qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
+        self.qc_history.append(qc_list)
+        if do_benchmark:
+            self._store_benchmarks(qc_list, angles)
 
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.parametrized_circuit_func(qc)
-
-        print("\n Sending job to Estimator...")
         job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
                                  parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
 
-        print("\n Job done")
         reward_table = job.result().values
         self.reward_history.append(reward_table)
+        self.action_history.append(angles)
         assert len(reward_table) == batch_size
         return reward_table  # Shape [batchsize]
 
-    def _store_benchmarks(self, parametrized_circ: QuantumCircuit, angles: np.array, do_pulse_benchmark=False):
+    def _store_benchmarks(self, qc_list: List[QuantumCircuit], angles: np.array):
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         """
-        self.action_history.append(angles)
+
         # Circuit list for each action of the batch
-        qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
         if self.abstraction_level == 'circuit':
             q_state_list = [Statevector.from_instruction(qc).to_operator() for qc in qc_list]
             density_matrix = DensityMatrix(np.mean([np.array(q_state) for q_state in q_state_list], axis=0))
@@ -523,20 +526,23 @@ class QuantumEnvironment:
                 #     self.input_output_state_fidelity_history[i].append(
                 #         np.mean([state_fidelity(input_state["target_state"]["dm"],
                 #                                 output_state) for output_state in output_states]))
-        elif self.abstraction_level == 'pulse' and do_pulse_benchmark:
+        elif self.abstraction_level == 'pulse':
             # Pulse simulation
             schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
             # unitaries = self.fast_pulse_sim(schedule_list).block_until_ready()
             unitaries = self._simulate_pulse_schedules(schedule_list)
-            unitaries = [unitary for unitary in unitaries]
-            print(unitaries)
             # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
             # TODO: transmon is simulated), adapt the target gate operator accordingly.
             unitaries = [Operator(np.array(unitary.y)) for unitary in unitaries]
-            self.process_fidelity_history.append(np.mean([process_fidelity(unitary, self.target["gate"])
+
+            if self.target_type == 'state':
+                density_matrix = DensityMatrix(np.mean([unitary @ Zero ^ self._n_qubits for unitary in unitaries]))
+                self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
+            else:
+                self.process_fidelity_history.append(np.mean([process_fidelity(unitary, self.target["gate"])
+                                                              for unitary in unitaries]))
+                self.avg_fidelity_history.append(np.mean([average_gate_fidelity(unitary, self.target["gate"])
                                                           for unitary in unitaries]))
-            self.avg_fidelity_history.append(np.mean([average_gate_fidelity(unitary, self.target["gate"])
-                                                      for unitary in unitaries]))
             self.built_unitaries.append(unitaries)
 
             # # Process tomography
@@ -572,3 +578,16 @@ class QuantumEnvironment:
         )
 
         return unitaries
+
+    def clear_history(self):
+        self.qc_history.clear()
+        self.action_history.clear()
+        self.reward_history.clear()
+        if self.target_type == 'gate':
+            self.avg_fidelity_history.clear()
+            self.process_fidelity_history.clear()
+            self.built_unitaries.clear()
+
+        else:
+            self.state_fidelity_history.clear()
+            self.density_matrix_history.clear()
