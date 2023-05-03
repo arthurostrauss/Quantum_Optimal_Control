@@ -343,9 +343,9 @@ class QuantumEnvironment:
 
                     self.pulse_backend = DynamicsBackend.from_backend(self.backend, subsystem_list=qubits)
                 else:
-                    calibration_files = Qiskit_config.get('calibration_files', None)
+                    calibration_files: List[str] = Qiskit_config.get('calibration_files', None)
                     self.calibrations, self.exp_results = perform_standard_calibrations(self.backend, calibration_files)
-                    self.pulse_backend = deepcopy(self.backend)
+                    self.pulse_backend: DynamicsBackend = deepcopy(self.backend)
                 # For benchmarking the gate at each epoch, set the tools for Pulse level simulator
                 self.solver: Solver = Qiskit_config.get('solver', self.pulse_backend.options.solver)  # Custom Solver
                 # Can describe noisy channels, if none provided, pick Solver associated to DynamicsBackend by default
@@ -378,58 +378,58 @@ class QuantumEnvironment:
         if 'register' not in target:
             target["register"] = list(range(self._n_qubits))
 
-        assert type(target['register']) == QuantumRegister or type(target['register'] == List[int]), \
+        tgt_register = target["register"]
+        assert type(tgt_register) == QuantumRegister or type(tgt_register == List[int]), \
             'Input state shall be specified over a QuantumRegister or a List'
-        assert len(target['register']) <= self._n_qubits, \
-            f"Target register has bigger size ({np.max([len(target['register']), np.max(target['register'])])}) " \
+        assert len(tgt_register) <= self._n_qubits, \
+            f"Target register has bigger size ({np.max([len(tgt_register), np.max(tgt_register)])}) " \
             f"than total number of qubits ({self._n_qubits}) characterizing the full system"
         if target.get("target_type", None) == "state" or target.get("target_type", None) is None:  # Default mode is
             # State preparation if no argument target_type is found
             if 'circuit' in target:
                 gate_op = target["circuit"]
 
-                if len(target["register"]) > self._n_qubits:
+                if len(tgt_register) > self._n_qubits:
                     raise ValueError("Target register has bigger size than the total number of qubits in circuit")
-                elif len(target["register"]) < self._n_qubits:
-                    gate_op = target["circuit"].permute(target['register'])
+                elif len(tgt_register) < self._n_qubits:
+                    gate_op = target["circuit"].permute(tgt_register)
                     if gate_op.num_qubits < self._n_qubits:  # If after permutation numbers still do not match
                         gate_op ^= I ^ (self._n_qubits - gate_op.num_qubits)
                 target["dm"] = DensityMatrix(gate_op @ (Zero ^ self._n_qubits))
             assert 'dm' in target, 'no DensityMatrix or circuit argument provided to target dictionary'
             assert type(target["dm"]) == DensityMatrix, 'Provided dm is not a DensityMatrix object'
-            if target.get("register", None) is None:
-                target["register"] = QuantumRegister(self._n_qubits)
-            return self.calculate_chi_target_state(target), "state", target["register"]
+
+            return self.calculate_chi_target_state(target), "state", tgt_register
         elif target.get("target_type", None) == "gate":
             # input_states = [self.calculate_chi_target_state(input_state) for input_state in target["input_states"]]
             assert 'input_states' in target, 'Gate calibration requires a set of input states (dict)'
             gate_op = CircuitOp(target['gate'])
-            if len(target['register']) < self._n_qubits:
-                gate_op = gate_op.permute(target['register'])
+            if len(tgt_register) < self._n_qubits:
+                gate_op = gate_op.permute(tgt_register)
                 if gate_op.num_qubits < self._n_qubits:
                     gate_op ^= I ^ (self._n_qubits - gate_op.num_qubits)
             for i, input_state in enumerate(target["input_states"]):
                 assert ('circuit' or 'dm') in input_state, f'input_state {i} does not have a ' \
                                                            f'DensityMatrix or circuit description'
 
-                target['input_states'][i]['target_state'] = {'target_type': 'state'}
+                input_state['target_state'] = {'target_type': 'state'}
                 if 'circuit' in input_state:
                     input_circuit: CircuitOp = input_state['circuit']
-                    if len(target['register']) < self._n_qubits:
-                        input_circuit = input_circuit.permute(target['register'])
+                    if len(tgt_register) < self._n_qubits:
+                        input_circuit = input_circuit.permute(tgt_register)
                         if input_circuit.num_qubits < self._n_qubits:
                             input_circuit ^= I ^ (self._n_qubits - input_circuit.num_qubits)
 
-                    target['input_states'][i]['dm'] = DensityMatrix(input_circuit @ (Zero ^ self._n_qubits))
-                    target['input_states'][i]['target_state']["dm"] = DensityMatrix(gate_op @ input_circuit
+                    input_state['dm'] = DensityMatrix(input_circuit @ (Zero ^ self._n_qubits))
+                    input_state['target_state']["dm"] = DensityMatrix(gate_op @ input_circuit
                                                                                     @ (Zero ^ self._n_qubits))
 
                 elif 'dm' in input_state:
-                    target['input_states'][i]['target_state']["dm"] = Operator(gate_op) @ input_state["dm"]
+                    input_state['target_state']["dm"] = Operator(gate_op) @ input_state["dm"]
 
-                target['input_states'][i]['target_state'] = self.calculate_chi_target_state(
-                    target['input_states'][i]['target_state'])
-            return target, "gate", target["register"]
+                input_state['target_state'] = self.calculate_chi_target_state(
+                    input_state['target_state'])
+            return target, "gate", tgt_register
         else:
             raise KeyError('target type not identified, must be either gate or state')
 
@@ -455,12 +455,13 @@ class QuantumEnvironment:
         """
         qc = QuantumCircuit(self.q_register)  # Reset the QuantumCircuit instance for next iteration
         angles, batch_size = np.array(actions), len(np.array(actions))
+        self.action_history.append(angles)
 
         if self.target_type == 'gate':
             # Pick random input state from the list of possible input states (forming a tomographically complete set)
             index = np.random.randint(len(self.target["input_states"]))
             input_state = self.target["input_states"][index]
-            target_state = self.target["input_states"][index]["target_state"]  # Deduce target state associated to input
+            target_state = input_state["target_state"]  # Ideal output state associated to input (Gate |input>=|output>)
             # Append input state circuit to full quantum circuit for gate calibration
             qc.append(input_state["circuit"].to_instruction(), self.tgt_register)
 
@@ -485,20 +486,18 @@ class QuantumEnvironment:
         qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
         self.qc_history.append(qc_list)
         if do_benchmark:
-            self._store_benchmarks(qc_list, angles)
+            self._store_benchmarks(qc_list)
 
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.parametrized_circuit_func(qc)
         job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
                                  parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
-
         reward_table = job.result().values
         self.reward_history.append(reward_table)
-        self.action_history.append(angles)
         assert len(reward_table) == batch_size
         return reward_table  # Shape [batchsize]
 
-    def _store_benchmarks(self, qc_list: List[QuantumCircuit], angles: np.array):
+    def _store_benchmarks(self, qc_list: List[QuantumCircuit]):
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         """

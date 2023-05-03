@@ -15,11 +15,12 @@ from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 from qiskit.providers import QubitProperties, BackendV1, BackendV2
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit import pulse
-from qiskit_dynamics import DynamicsBackend
+from qiskit_dynamics import DynamicsBackend, Solver
 from qiskit_dynamics.array import Array
 from qiskit.circuit import ParameterVector, QuantumCircuit, Gate, QuantumRegister
-from qiskit.extensions import CXGate, XGate, SXGate, RZGate
-from qiskit.opflow import H, I, X
+from qiskit.extensions import XGate
+from qiskit.opflow import H, I, X, Z
+from qiskit.quantum_info import Operator
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -49,8 +50,8 @@ In there, we design classes for the environment (Quantum Circuit simulated on IB
 """
 
 
-def custom_pulse_schedule(backend: Union[BackendV1, BackendV2], qubit_tgt_register: Union[List[int],
-                          QuantumRegister], params: ParameterVector,
+def custom_pulse_schedule(backend: Union[BackendV1, BackendV2], qubit_tgt_register: Union[List[int], QuantumRegister],
+                          params: ParameterVector,
                           default_schedule: Optional[Union[pulse.ScheduleBlock, pulse.Schedule]] = None):
     """
     Define parametrization of the pulse schedule characterizing the target gate
@@ -74,7 +75,7 @@ def custom_pulse_schedule(backend: Union[BackendV1, BackendV2], qubit_tgt_regist
 
             pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
                                   beta=pulse_ref.beta, angle=pulse_ref.angle),
-                       channel=pulse.DriveChannel(qubit_tgt_register[0]))
+                       channel=pulse.drive_channel(qubit_tgt_register[0]))
 
         return parametrized_schedule
 
@@ -95,7 +96,11 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     # original_calibration = backend.instruction_schedule_map.get(target["name"])
 
     parametrized_gate = Gate(f"custom_{target['gate'].name}", len(qubit_tgt_register), params=[params[0]])
-    default_schedule = fake_backend.defaults().instruction_schedule_map.get(target["gate"].name, qubit_tgt_register)
+    if isinstance(backend, BackendV1):
+        instruction_schedule_map = backend.defaults().instruction_schedule_map
+    else:
+        instruction_schedule_map = backend.target.instruction_schedule_map()
+    default_schedule = instruction_schedule_map.get(target["gate"].name, qubit_tgt_register)
     parametrized_schedule = custom_pulse_schedule(backend=backend, qubit_tgt_register=qubit_tgt_register,
                                                   params=params, default_schedule=default_schedule)
     qc.add_calibration(parametrized_gate, qubit_tgt_register, parametrized_schedule)
@@ -107,6 +112,7 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
 Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
+abstraction_level = 'pulse'
 qubit_tgt_register = [0]
 n_qubits = 1
 sampling_Paulis = 10
@@ -119,15 +125,17 @@ to run this code. If simulation, use DynamicsBackend and use BackendEstimator fo
 primitive enabling Pauli expectation value sampling. If real device, use Qiskit Runtime backend and set a 
 Runtime Service 
 """
-estimator_options = {'resilience_level': 0}
+
 
 """Real backend initialization"""
 backend_name = 'ibm_perth'
+estimator_options = {'resilience_level': 0}
 # service = QiskitRuntimeService(channel='ibm_quantum')
 # runtime_backend = service.get_backend(backend_name)
 # control_channel_map = {**{qubits: runtime_backend.control_channel(qubits)[0].index
 #                           for qubits in runtime_backend.coupling_map}}
 
+"""Fake Backend initialization"""
 fake_backend, fake_backend_v2 = FakeJakarta(), FakeJakartaV2()
 control_channel_map = get_control_channel_map(fake_backend, qubit_tgt_register)
 dt = fake_backend_v2.target.dt
@@ -144,10 +152,6 @@ dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=qub
 target = dynamics_backend.target
 target.qubit_properties = fake_backend_v2.qubit_properties(qubit_tgt_register)
 
-
-# Choose here among the above backends, if simulator or dynamics_backend, set service to None
-backend = dynamics_backend
-
 # Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
 # fidelity benchmarking
 channel_freq, solver = get_solver_and_freq_from_backend(
@@ -161,6 +165,46 @@ channel_freq, solver = get_solver_and_freq_from_backend(
     dissipator_operators=None
 )
 calibration_files = None
+
+
+"""
+Custom Hamiltonian model for building DynamicsBackend
+"""
+r = 0.1
+
+# Frequency of the qubit transition in GHz.
+w = 5.
+
+# Sample rate of the backend in ns.
+dt = 2.2222222e-10
+
+# Define gaussian envelope function to have a pi rotation.
+amp = 1.
+area = 1
+sig = area * 0.399128 / r / amp
+T = 4 * sig
+duration = int(T / dt)
+beta = 2.0
+
+drift = 2 * np.pi * w * Operator(Z) / 2
+operators = [2 * np.pi * r * Operator(X) / 2]
+
+hamiltonian_solver = Solver(
+    static_hamiltonian=drift,
+    hamiltonian_operators=operators,
+    rotating_frame=drift,
+    rwa_cutoff_freq=2 * 5.0,
+    hamiltonian_channels=['d0'],
+    channel_carrier_freqs={'d0': w},
+    dt=dt
+)
+
+custom_backend = DynamicsBackend(hamiltonian_solver, **dynamics_options)
+
+
+# Choose among defined backends {runtime_backend, dynamics_backend, custom_backend}
+backend = dynamics_backend
+
 # Define target gate
 X_tgt = {
     "target_type": 'gate',
@@ -187,7 +231,6 @@ target = X_tgt
 Qiskit_setup = {
     "backend": backend,
     "parametrized_circuit": apply_parametrized_circuit,
-    "estimator_options": estimator_options,
     # Below are optional keys for pulse simulation
     # Relevant only if backend is not a DynamicsBackend
     "qubits": qubit_tgt_register,
@@ -196,7 +239,7 @@ Qiskit_setup = {
     "calibration_files": calibration_files
 }
 
-q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="pulse",
+q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level=abstraction_level,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
 
@@ -218,11 +261,6 @@ grad_clip = 0.01
 critic_loss_coeff = 0.5
 optimizer = select_optimizer(lr=eta, optimizer=opti, grad_clip=grad_clip, concurrent_optimization=True, lr2=eta_2)
 sigma_eps = 1e-3  # for numerical stability
-grad_update_number = 20
-# class Agent:
-#     def __init__(self, epochs:int, batchsize:int, optimizer, lr: float, lr2: Optional[float], grad_clip:):
-#         pass
-
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -242,7 +280,7 @@ init_msmt = np.zeros((1, N_in))  # Here no feedback involved, so measurement seq
 Training loop
 -----------------------------------------------------------------------------------------------------
 """
-
+do_benchmark = False
 mu_old = tf.Variable(initial_value=network(init_msmt)[0][0], trainable=False)
 sigma_old = tf.Variable(initial_value=network(init_msmt)[1][0], trainable=False)
 
@@ -263,11 +301,11 @@ for i in tqdm(range(n_epochs)):
         Policy_distrib = MultivariateNormalDiag(loc=mu, scale_diag=sigma,
                                                 validate_args=True, allow_nan_stats=False)
 
-        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), 0, 1.))
+        action_vector = tf.stop_gradient(tf.clip_by_value(Policy_distrib.sample(batchsize), -0.5, 0.5))
 
         # Adjust the action vector according to params physical significance
 
-        reward = q_env.perform_action(action_vector)
+        reward = q_env.perform_action(action_vector, do_benchmark=do_benchmark)
         advantage = reward - b
 
         if use_PPO:
@@ -293,7 +331,8 @@ for i in tqdm(range(n_epochs)):
     print('sigma_vec:', np.array(sigma))
     print('baseline:', np.array(b))
     print("Average reward", np.mean(q_env.reward_history[i]))
-    # print("Average Gate Fidelity:", q_env.avg_fidelity_history[i])
+    if do_benchmark:
+        print("Average Gate Fidelity:", q_env.avg_fidelity_history[i])
 
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
