@@ -7,8 +7,8 @@ Code for model-free gate calibration in IBM device using Reinforcement Learning 
 
 import numpy as np
 
-from quantumenvironment import QuantumEnvironment, get_solver_and_freq_from_backend
-from helper_functions import select_optimizer, generate_model, get_control_channel_map
+from quantumenvironment import QuantumEnvironment
+from helper_functions import select_optimizer, generate_model, get_control_channel_map, get_solver_and_freq_from_backend
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
