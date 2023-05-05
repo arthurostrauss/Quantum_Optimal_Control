@@ -66,11 +66,10 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     single_qubit_properties = {**{(qubit,): None for qubit in range(num_qubits)}}
     two_qubit_properties = {**{qubits: None for qubits in backend.options.control_channel_map}}
     fixed_phase_gates: List[Tuple[Gate, Optional[float]]] = [(ZGate(), np.pi), (SGate(), np.pi / 2),
-                                                             (SdgGate(), -np.pi / 2),
-                                                             (TGate(), np.pi / 4), (TdgGate(), -np.pi / 4)]
-    single_qubit_gates: List[Tuple[Union[Gate, float]]] = fixed_phase_gates + [(RZGate(phi),), (IGate(),),
-                                                                               (HGate(),), (XGate(),), (SXGate(),),
-                                                                               (Reset(),)]
+                                                             (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
+                                                             (TdgGate(), -np.pi / 4)]
+    single_qubit_gates = fixed_phase_gates + [(RZGate(phi),), (IGate(),), (HGate(),), (XGate(),), (SXGate(),),
+                                              (Reset(),)]
     exp_results = {}
     existing_cals = calibration_files is not None
     if existing_cals:
@@ -80,11 +79,6 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"],
                                                                                     default_values=None)
                                                              for _ in range(num_qubits)])
-        print("Starting Rabi experiments...")
-        rabi_experiments = [RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.5, 0.5, 50))
-                            for qubit in qubits]
-        drag_experiments = [RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-30, 30, 30))
-                            for qubit in qubits]
 
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         for gate in single_qubit_gates:
@@ -100,7 +94,7 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
                                        [backend.options.control_channel_map.get((i, qubit), None)
                                         for i in range(num_qubits)]))
         with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
-            pulse.shift_phase(-phi, pulse.drive_channel(qubit))
+            pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
 
@@ -119,12 +113,14 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
                                                      error=0.0)
                                                  )
         if not existing_cals:
-            drag_experiments[qubit].set_experiment_options(reps=[3, 5, 7])
+            rabi_exp = RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 100))
+            drag_exp = RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15))
+            drag_exp.set_experiment_options(reps=[3, 5, 7])
             print(f"Starting Rabi experiment for qubit {qubit}...")
-            rabi_result = rabi_experiments[qubit].run().block_for_results()
+            rabi_result = rabi_exp.run().block_for_results()
             print(f"Rabi experiment for qubit {qubit} done.")
             print(f"Starting Drag experiment for qubit {qubit}...")
-            drag_result = drag_experiments[qubit].run().block_for_results()
+            drag_result = drag_exp.run().block_for_results()
             print(f"Drag experiments done for qubit {qubit} done.")
             exp_results[qubit] = [rabi_result, drag_result]
 
@@ -135,7 +131,6 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
             # batch_exp.run().block_for_results()
             # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
             print("All calibrations are done")
-
         sx_instruction = cals.get_inst_map().get('sx', (qubit,)).instructions
         s_instruction = target.instruction_schedule_map().get('s', (qubit,)).instructions
         h_schedule = pulse.Schedule(name="h")
@@ -216,11 +211,12 @@ class QuantumEnvironment:
                                                      "Runtime"
                     qubits = list(range(self._n_qubits))
                     if "qubits" in Qiskit_config:
-                        assert len(qubits) >= len(self.tgt_register), 'List of qubits must be equal or larger ' \
-                                                                      'than the register' \
+                        assert len(qubits) >= len(self.tgt_register), f'List of qubits (len {len(qubits)} must be >= ' \
+                                                                      f'than target register ' \
+                                                                      f'(len {len(self.tgt_register)}' \
                                                                       'on which the target gate will act'
-                        assert len(qubits) == self._n_qubits, "List of qubits does not match the indicated total number" \
-                                                              "of qubits"
+                        assert len(qubits) == self._n_qubits, f"List of qubits (len {len(qubits)}) does not match " \
+                                                              f"indicated total number of qubits {n_qubits}"
                         qubits = Qiskit_config['qubits']
 
                     self.pulse_backend = DynamicsBackend.from_backend(self.backend, subsystem_list=qubits)
@@ -414,7 +410,7 @@ class QuantumEnvironment:
             unitaries = self._simulate_pulse_schedules(schedule_list)
             # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
             # TODO: transmon is simulated), adapt the target gate operator accordingly.
-            unitaries = [Operator(np.array(unitary.y)) for unitary in unitaries]
+            unitaries = [Operator(np.array(unitary.y[0])) for unitary in unitaries]
 
             if self.target_type == 'state':
                 density_matrix = DensityMatrix(np.mean([unitary @ Zero ^ self._n_qubits for unitary in unitaries]))
@@ -426,22 +422,28 @@ class QuantumEnvironment:
                                                           for unitary in unitaries]))
             self.built_unitaries.append(unitaries)
 
-            # # Process tomography
-            # avg_gate_fidelity = 0.
-            # prc_fidelity = 0.
-            # batch_size = len(qc_list)
-            # for qc in qc_list:
-            #     process_tomography_exp = ProcessTomography(qc, backend=self.pulse_backend,
-            #                                                physical_qubits=self.tgt_register)
-            #
-            #     results = process_tomography_exp.run(self.pulse_backend).block_for_results()
-            #     process_results = results.analysis_results(0)
-            #     Choi_matrix = process_results.value
-            #     avg_gate_fidelity += average_gate_fidelity(Choi_matrix, Operator(self.target["gate"]))
-            #     prc_fidelity += process_fidelity(Choi_matrix, Operator(self.target["gate"]))
-            #
-            # self.process_fidelity_history.append(prc_fidelity / batch_size)
-            # self.avg_fidelity_history.append(avg_gate_fidelity / batch_size)
+    def gate_fidelity_from_process_tomography(self, qc_list: List[QuantumCircuit]):
+        """
+        Extract average gate and process fidelities from batch of Quantum Circuit for target gate
+        """
+        # Process tomography
+        assert self.target_type == 'gate', "Target must be of type gate"
+        avg_gate_fidelity = 0.
+        prc_fidelity = 0.
+        batch_size = len(qc_list)
+        for qc in qc_list:
+            process_tomography_exp = ProcessTomography(qc, backend=self.pulse_backend,
+                                                       physical_qubits=self.tgt_register)
+
+            results = process_tomography_exp.run(self.pulse_backend).block_for_results()
+            process_results = results.analysis_results(0)
+            Choi_matrix = process_results.value
+            avg_gate_fidelity += average_gate_fidelity(Choi_matrix, Operator(self.target["gate"]))
+            prc_fidelity += process_fidelity(Choi_matrix, Operator(self.target["gate"]))
+
+        self.process_fidelity_history.append(prc_fidelity / batch_size)
+        self.avg_fidelity_history.append(avg_gate_fidelity / batch_size)
+        return avg_gate_fidelity / batch_size, prc_fidelity / batch_size
 
     def _simulate_pulse_schedules(self, schedule_list: List[Union[pulse.Schedule, pulse.ScheduleBlock]]):
         """
