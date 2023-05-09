@@ -20,9 +20,9 @@ We briefly explain the overall logic of the algorithm below.
 ## Introduction
 
 Reinforcement Learning (RL) is an interaction-based learning procedure resulting from the interaction between two entities:
-- an Environment: in our case the quantum system of interest formed of $$n$$ qubits, characterized by a quantum state $$\rho\in \mathcal{H}$$, where the dimension of Hilbert space $$\mathcal{H}$$ is $$d=2^n$$ and from which 
-observations/measurements $$o_i \in \mathcal{O}$$  can be extracted. Measurements could be retrieved as bitstrings ($$\mathcal{O}= \{0, 1\}^{\otimes n}$$) or as IQ pairs if state discrimination is not done a priori, as shown in this recent work (https://arxiv.org/abs/2305.01169). The point here is that we restrict the observation space to values that can be easily retrieved from the actual quantum device.
-- an Agent: a classical Neural Network on the PC, whose goal is to learn a stochastic policy $$\pi_\theta(a|o_i)$$  from which actions $$a \in \mathbb{U}$$ are sampled to be applied on the Environment to set it in a specific target state. Typically, the goal 
+- an Environment: in our case the quantum system of interest formed of $$n$$ qubits, characterized by a quantum state $\rho\in \mathcal{H}$, where the dimension of Hilbert space $$\mathcal{H}$$ is $$d=2^n$$ and from which 
+observations/measurements $o_i \in \mathcal{O}$  can be extracted. Measurements could be retrieved as bitstrings ($$\mathcal{O}= \{0, 1\}^{\otimes n}$$) or as IQ pairs if state discrimination is not done a priori, as shown in this recent work (https://arxiv.org/abs/2305.01169). The point here is that we restrict the observation space to values that can be easily retrieved from the actual quantum device.
+- an Agent: a classical Neural Network on the PC, whose goal is to learn a stochastic policy $\pi_\theta(a|o_i)$  from which actions $a \in \mathbb{U}$ are sampled to be applied on the Environment to set it in a specific target state. Typically, the goal 
 of the Agent in the frame of Quantum Optimal Control is to find actions (e.g., circuit/pulse parameters)
 enabling the successful preparation of a target quantum state, or the calibration of a quantum gate operation.
 
@@ -41,41 +41,41 @@ Where the expectation value is empirically taken over a batch of actions sampled
 The average reward should therefore be a statistical estimator for the fidelity. The Direct Fidelity Estimation (DFE) scheme introduced in [2] gives us a protocol to build a single shot reward scheme based on Pauli expectation sampling. We take the same notation as in the paper below and write the corresponding protocol to derive the reward.
 
 The ﬁdelity between our desired pure state $$\rho$$ and the actual state $$\sigma$$ is given by:
-$$F(\rho, \sigma)=\left(\operatorname{tr}\left[(\sqrt{\rho} \sigma \sqrt{\rho})^{1 / 2}\right]\right)^2=\operatorname{tr}(\rho \sigma)$$
+$$F(\rho, \sigma)=\left(\mathrm{tr}\left[(\sqrt{\rho} \sigma \sqrt{\rho})^{1 / 2}\right]\right)^2=\mathrm{tr}(\rho \sigma)$$
 
 Let $$W_k \, (k=1,..,d^2)$$ denote all possible Pauli operators acting on $$n$$ qubits, that is all $$n$$-fold tensor products of Pauli matrices ($$I=\begin{pmatrix}1 & 0 \\ 0 & 1\end{pmatrix}$$, $$\sigma_x=\begin{pmatrix}0 & 1 \\ 1 & 0\end{pmatrix}$$, $$\sigma_y=\begin{pmatrix}0 & -i \\ i & 0\end{pmatrix}$$, $$\sigma_z=\begin{pmatrix}1 & 0 \\ 0 & -1\end{pmatrix}$$).
 
-Define the characteristic function $$\chi_\rho(k)=\operatorname{tr}(\rho W_k/\sqrt{d})=\langle W_k\rangle_\rho/\sqrt{d}$$, 
+Define the characteristic function $$\chi_\rho(k)=\mathrm{tr}(\rho W_k/\sqrt{d})=\langle W_k\rangle_\rho/\sqrt{d}$$, 
 where the expectation value is evaluated on the state $$\rho$$.
 
 Since those Pauli operators form an orthogonal basis for the density operators under the Hilbert-Schmidt product, one can see that:
 
-$$F(\rho, \sigma)=\operatorname{tr}(\rho \sigma)=\sum_k\chi_\rho(k)\chi_\sigma(k)=\sum_k\frac{\langle W_k\rangle_\rho\langle W_k\rangle_\sigma}{d}$$.
+$$F(\rho, \sigma)=\mathrm{tr}(\rho \sigma)=\sum_k\chi_\rho(k)\chi_\sigma(k)=\sum_k\frac{\langle W_k\rangle_\rho\langle W_k\rangle_\sigma}{d}$$.
 
-Note that for our target state $$\rho$$, we supposedly are able to evaluate analytically the expected value of each Pauli operator $$\langle W_k\rangle_\rho$$. However, we would have to experimentally sample from the quantum computer to deduce the value of $$\langle W_k\rangle_\sigma$$.
-In the original DFE paper, the idea was to provide an estimation of the required number of samples to reach a certain accuracy on the fidelity estimation. However, in our RL case, we are not interested in systematically getting an accurate estimation, as we would like the agent to rather explore multiple trajectories in parameter space (for one fixed policy) in order to quickly evaluate if the chosen policy should be discarded, or if it should try to fine-tune it to push the reward even further. This fact is commonly known in RL as the exploration/exploitation tradeoff. What we do, in line with the protocol is to build an estimator for the fidelity by selecting a set of random Pauli observables $$W_k$$ to sample from the quantum computer by choosing $$k\in\{1,...,d^2\}$$ such that:
+Note that for our target state $\rho$, we supposedly are able to evaluate analytically the expected value of each Pauli operator $\langle W_k\rangle_\rho$. However, we would have to experimentally sample from the quantum computer to deduce the value of $\langle W_k\rangle_\sigma$.
+In the original DFE paper, the idea was to provide an estimation of the required number of samples to reach a certain accuracy on the fidelity estimation. However, in our RL case, we are not interested in systematically getting an accurate estimation, as we would like the agent to rather explore multiple trajectories in parameter space (for one fixed policy) in order to quickly evaluate if the chosen policy should be discarded, or if it should try to fine-tune it to push the reward even further. This fact is commonly known in RL as the exploration/exploitation tradeoff. What we do, in line with the protocol is to build an estimator for the fidelity by selecting a set of random Pauli observables $$W_k$$ to sample from the quantum computer by choosing $k\in\{1,...,d^2\}$ such that:
 
-$$\operatorname{Pr}(k)=[\chi_\rho(k)]^2$$
+$$\mathrm{Pr}(k)=[\chi_\rho(k)]^2$$
 
 Once those indices have been sampled, we compute the expectation values $$\langle W_k\rangle_\sigma$$ by directly sampling in the appropriate Pauli basis on the quantum computer. We let the user choose how many shots per expectation value shall be executed, as well as the number of indices $$k$$ to be sampled. The choice of those hyperparameters will have a direct impact on the estimation accuracy of the actual state $$\sigma$$ properties and can therefore impact the convergence of the algorithm. 
-One can show that by constructing the estimator $$X = \langle W_k\rangle_\sigma/\langle W_k\rangle_\rho$$, it follows that $$\mathbb{E}_{k\sim\operatorname{Pr}(k)}[X]=F(\rho,\sigma)$$.
-We can define a single shot reward $$R$$ by replacing the actual expectation value $$\langle W_k\rangle_\sigma$$ by an empirical estimation $$\mathbb{E}_\sigma[W_k]$$, that is measure a finite number of times the created state $$\sigma$$ in the $$W_k$$ basis. In general, only the computational basis measurements are natively available on the quantum computer (specifically true for IBM backends), so additional local qubit rotations are  necessary before performing the measurement. This experimental workflow is automatically taken care of in our algorithm by the use of a Qiskit Estimator primitive (https://qiskit.org/documentation/partners/qiskit_ibm_runtime/tutorials/how-to-getting-started-with-estimator.html).
+One can show that by constructing the estimator $X = \langle W_k\rangle_\sigma/\langle W_k\rangle_\rho$, it follows that $$\mathbb{E}_{k\sim\operatorname{Pr}(k)}[X]=F(\rho,\sigma)$$.
+We can define a single shot reward $R$ by replacing the actual expectation value $\langle W_k\rangle_\sigma$ by an empirical estimation $\mathbb{E}_\sigma[W_k]$, that is measure a finite number of times the created state $\sigma$ in the $W_k$ basis. In general, only the computational basis measurements are natively available on the quantum computer (specifically true for IBM backends), so additional local qubit rotations are  necessary before performing the measurement. This experimental workflow is automatically taken care of in our algorithm by the use of a Qiskit Estimator primitive (https://qiskit.org/documentation/partners/qiskit_ibm_runtime/tutorials/how-to-getting-started-with-estimator.html).
 
-Our single shot reward $$R$$ can therefore be defined as: $$R=\frac{1}{d}\langle W_k\rangle_\rho W_k/\operatorname{Pr}(k)$$.
+Our single shot reward $R$ can therefore be defined as: $$R=\frac{1}{d}\langle W_k\rangle_\rho W_k/\mathrm{Pr}(k)$$.
 It is easy to see that we have:
 
-$$\mathbb{E}_{\pi_\theta, k\sim\operatorname{Pr}(k), \sigma} [R]=F(\rho, \sigma)$$
+$$\mathbb{E}_{\pi_\theta, k\sim\mathrm{Pr}(k), \sigma} [R]=F(\rho, \sigma)$$
 
 
 
 For a gate calibration task, we want to find parameters defining the quantum gate $$G(a)$$ that yield a high fidelity measure for all possible input states when comparing to the target $$G_{target}$$. We can therefore implement the same idea as target state preparation reward, but this times we add an additional averaging over all possible input states $$|\psi_{input}\rangle$$ such that for each input state, $$G(a)|\psi_{input}\rangle=G_{target}|\psi_{input}\rangle$$. The average gate fidelity is therefore given by:
-$$\mathbb{E}_{\pi_\theta, \,|\psi_{input}\rangle, \, k\sim\operatorname{Pr}(k), \, \sigma} [R]=F(\rho, \sigma)$$.
+$$\mathbb{E}_{\pi_\theta, \,|\psi_{input}\rangle, \, k\sim\mathrm{Pr}(k), \, \sigma} [R]=F(\rho, \sigma)$$.
 
 In the code, each average is empirically done over specific hyperparameters that must be tuned by the user at each experiment:
 
-- For the average over the policy ($$\mathbb{E}_{\pi_\theta}[.]$$): the user should adjust the ```batchsize``` hyperparameter, which indicates how many actions from one policy with fixed parameters should be drawn. 
-- For the average over input states: at each episode of learning, we sample a different random input state $$|\psi_{input}\rangle$$ for which the corresponding target state $$|\psi_{target}\rangle= G_{target}|\psi_{input}\rangle$$ is calculated. Once the target state is deduced, we can start the episode by applying our parametrized gate and measuring the set of Pauli observables to design the reward circuit (Pauli basis rotation at the end of the circuit).
-- For the average over the random Pauli observables to sample: the user should adjust the ```sampling_Pauli_space``` hyperparameter. This number will set the number of times an index $$k$$ shall be sampled based on the previously defined probability $$\operatorname{Pr}(k)$$. If the same index is sampled multiple times, this induces that the same Pauli observable will be sampled more accurately as the number of shots for one Pauli observable will scale as "number of times $$k$$ was sampled $$\times N_{shots}$$".
+- For the average over the policy ($\mathbb{E}_{\pi_\theta}[.]$): the user should adjust the ```batchsize``` hyperparameter, which indicates how many actions from one policy with fixed parameters should be drawn. 
+- For the average over input states: at each episode of learning, we sample a different random input state $|\psi_{input}\rangle$ for which the corresponding target state $|\psi_{target}\rangle= G_{target}|\psi_{input}\rangle$ is calculated. Once the target state is deduced, we can start the episode by applying our parametrized gate and measuring the set of Pauli observables to design the reward circuit (Pauli basis rotation at the end of the circuit).
+- For the average over the random Pauli observables to sample: the user should adjust the ```sampling_Pauli_space``` hyperparameter. This number will set the number of times an index $k$ shall be sampled based on the previously defined probability $\mathrm{Pr}(k)$. If the same index is sampled multiple times, this induces that the same Pauli observable will be sampled more accurately as the number of shots for one Pauli observable will scale as "number of times $k$ was sampled $\times N_{shots}$".
 - The average over the number of shots to estimate each Pauli observable with a certain accuracy: The user should adjust the parameter ```n_shots```, this will be the minimum number of samples that each observable will be estimated with. 
 
 Finally, the last hyperparameter of the overall RL algorithm is the number of epochs ```n_epochs```, which indicates how many times the policy parameters should be updated to try to reach the optimal near-deterministic policy enabling the successful preparation of the target state/gate.
