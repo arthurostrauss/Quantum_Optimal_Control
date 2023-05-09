@@ -9,7 +9,7 @@ Created on 28/11/2022
 from qiskit import QuantumCircuit, QuantumRegister, pulse, schedule
 from qiskit.pulse.transforms.canonicalization import block_to_schedule
 from qiskit.transpiler import InstructionProperties
-from qiskit.circuit import Parameter, Gate
+from qiskit.circuit import Parameter
 from qiskit.providers import BackendV1, BackendV2
 from qiskit.circuit.library import XGate, SXGate, RZGate, HGate, IGate, Reset, ZGate, SGate, SdgGate, TGate, TdgGate, \
     CXGate
@@ -19,14 +19,13 @@ from qiskit.quantum_info import DensityMatrix, Statevector, Pauli, SparsePauliOp
 # Qiskit dynamics for pulse simulation (benchmarking)
 from qiskit_dynamics import DynamicsBackend, Solver
 from qiskit_dynamics.array import Array, wrap
-from qiskit_dynamics.models import HamiltonianModel, LindbladModel
+from qiskit_dynamics.models import HamiltonianModel
 
 # Qiskit Experiments for generating reliable baseline for more complex gate calibrations / state preparations
 from qiskit_experiments.calibration_management.calibrations import Calibrations
 from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
 from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon
 from qiskit_experiments.library import ProcessTomography
-from qiskit_experiments.framework import BatchExperiment, ParallelExperiment
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
@@ -66,7 +65,11 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     phi = Parameter("phi")
     single_qubit_properties = {**{(qubit,): None for qubit in range(num_qubits)}}
     single_qubit_errors = {**{(qubit,): 0.0 for qubit in qubits}}
-    two_qubit_properties = {**{qubits: None for qubits in backend.options.control_channel_map}}
+    if backend.options.control_channel_map is None:
+        two_qubit_properties = None
+        backend.set_options(control_channel_map={})
+    else:
+        two_qubit_properties = {**{qubits: None for qubits in backend.options.control_channel_map}}
     fixed_phase_gates = [(ZGate(), np.pi), (SGate(), np.pi / 2), (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
                          (TdgGate(), -np.pi / 4)]
     other_gates = [(RZGate(phi),), (IGate(),), (HGate(),), (XGate(),), (SXGate(),), (Reset(),)]
@@ -77,26 +80,27 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     if existing_cals:
         cals = Calibrations.load(files=calibration_files)
     else:
-        cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"],
-                                                                                    default_values=None)
-                                                             for _ in range(num_qubits)])
-
+        # cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"],
+        #                                                                             default_values=None)
+        #                                                      for _ in range(num_qubits)])
+        cals = Calibrations(libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"])])
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         for gate in single_qubit_gates:
             target.add_instruction(gate[0], properties=single_qubit_properties)
-        if num_qubits > 1 and bool(backend.options.control_channel_map):
+        if num_qubits > 1:
             target.add_instruction(CXGate(), properties=two_qubit_properties)
+            # target.add_instruction(CXGate())
+            print(target)
 
     for qubit in qubits:  # Add calibrations for each qubit
         control_channels = list(filter(lambda x: x is not None,
-                                       [backend.options.control_channel_map.get((i, qubit), None)
-                                        for i in range(num_qubits)]))
-
-        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:  # Calibration of RZ gate, virtual Z-rotation
+                                       [backend.options.control_channel_map.get((i, qubit), None) for i in qubits]))
+        # Calibration of RZ gate, virtual Z-rotation
+        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
             pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
-
+        # Identity gate
         id_cal = pulse.Schedule(pulse.Delay(20, pulse.DriveChannel(qubit)))  # Wait 20 cycles for identity gate
 
         # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
@@ -120,16 +124,16 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
             drag_result = drag_exp.run().block_for_results()
             print(f"Drag experiments done for qubit {qubit} done.")
             exp_results[qubit] = [rabi_result, drag_result]
-            print("All calibrations are done")
-            # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
 
         # Build Hadamard gate schedule from following equivalence: H = S @ SX @ S
+
         sx_schedule = block_to_schedule(cals.get_schedule("sx", (qubit,)))
-        s_schedule = target.get_calibration('s', (qubit,))
-        h_schedule = pulse.Schedule(*[s_schedule, sx_schedule, s_schedule], name="h")
+        s_schedule = block_to_schedule(target.get_calibration('s', (qubit,)))
+        h_schedule = pulse.Schedule(s_schedule, sx_schedule, s_schedule, name="h")
         target.update_instruction_properties('h', (qubit,), properties=InstructionProperties(calibration=h_schedule,
                                                                                              error=0.0))
-
+    print("All calibrations are done")
+    # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
     error_dict = {'x': single_qubit_errors, 'sx': single_qubit_errors}
     target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
     print("Updated Instruction Schedule Map", target.instruction_schedule_map())
@@ -138,7 +142,7 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
 
 class QuantumEnvironment:
 
-    def __init__(self, n_qubits: int, target: Dict, abstraction_level: str,
+    def __init__(self, n_qubits: int, target: Dict, abstraction_level: str = 'circuit',
                  Qiskit_config: Optional[Dict] = None,
                  QUA_setup: Optional[Dict] = None,
                  sampling_Pauli_space: int = 10, n_shots: int = 1, c_factor: float = 0.5):
@@ -147,7 +151,8 @@ class QuantumEnvironment:
 
         :param n_qubits: Number of qubits in quantum system
         :param target: control target of interest (can be either a gate to be calibrated or a state to be prepared)
-            Target should be a Dict containing target type ('gate' or 'state') as well as necessary fields to initiate the calibration (cf. example)
+            Target should be a Dict containing target type ('gate' or 'state') as well as necessary fields to initiate
+            the calibration (cf. example)
         :param abstraction_level: Circuit or pulse level parametrization of action space
         :param Qiskit_config: Dictionary containing all info for running Qiskit program (i.e. service, backend,
             options, parametrized_circuit)
@@ -178,6 +183,9 @@ class QuantumEnvironment:
             self.q_register = QuantumRegister(n_qubits)
 
             self.backend: Union[BackendV1, BackendV2, None] = Qiskit_config["backend"]
+            if self.backend is not None:
+                assert n_qubits <= self.backend.num_qubits, f"n_qubits ({n_qubits} > " \
+                                                            f"backend.num_qubits ({self.backend.num_qubits})"
             self.parametrized_circuit_func: Callable = Qiskit_config["parametrized_circuit"]
             self.noise_model = Qiskit_config.get("noise_model", None)
             estimator_options: Dict = Qiskit_config.get("estimator_options", None)
@@ -189,14 +197,13 @@ class QuantumEnvironment:
                     self.estimator = Aer_Estimator()  # Estimator taking noise model into consideration
                     # TODO implement correct options from Aer Backend
                 else:
-                    self.estimator = Estimator()  # Estimator based on statevector simulation
+                    self.estimator = Estimator()  # Estimator based on state-vector simulation
             elif self.abstraction_level == 'pulse':
                 self.estimator = BackendEstimator(self.backend)
 
                 if not isinstance(self.backend, DynamicsBackend):
                     assert self.backend is not None, "A Backend is required for running algorithm at pulse level," \
-                                                     "Must be either DynamicsBackend or IBMBackend supporting Qiskit" \
-                                                     "Runtime"
+                                                     "Must be either DynamicsBackend or IBMBackend supporting OpenPulse"
                     qubits = list(range(self._n_qubits))
                     if "qubits" in Qiskit_config:
                         assert len(qubits) >= len(self.tgt_register), f'List of qubits (len {len(qubits)} must be >= ' \
@@ -233,7 +240,6 @@ class QuantumEnvironment:
         self.reward_history = []
         self.qc_history = []
         if self.target_type == 'gate':
-            self.input_output_state_fidelity_history = [[] for _ in range(len(self.target.get("input_states", 1)))]
             self.process_fidelity_history = []
             self.avg_fidelity_history = []
             self.built_unitaries = []
@@ -341,7 +347,7 @@ class QuantumEnvironment:
         reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self.d * distribution.prob(p))
                                   for p in pauli_index], 5)
 
-        # Figure out which observables to sample
+        # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
         observables = SparsePauliOp.from_list([(self.Pauli_ops[p]["name"], reward_factor[i])
                                                for i, p in enumerate(pauli_index)])
 
@@ -370,19 +376,20 @@ class QuantumEnvironment:
 
         # Circuit list for each action of the batch
         if self.abstraction_level == 'circuit':
-            q_state_list = [Statevector.from_instruction(qc).to_operator() for qc in qc_list]
-            density_matrix = DensityMatrix(np.mean([np.array(q_state) for q_state in q_state_list], axis=0))
+            q_state_list = [Statevector.from_instruction(qc) for qc in qc_list]
+            density_matrix = DensityMatrix(np.mean([q_state for q_state in q_state_list], axis=0))
             self.density_matrix_history.append(density_matrix)
 
             if self.target_type == 'state':
                 self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
             else:  # Gate calibration task
                 q_process_list = [Operator(qc) for qc in qc_list]
-                self.built_unitaries.append(q_process_list)
+
                 prc_fidelity = np.mean([process_fidelity(q_process, Operator(self.target["gate"]))
                                         for q_process in q_process_list])
                 avg_fidelity = np.mean([average_gate_fidelity(q_process, Operator(self.target["gate"]))
                                         for q_process in q_process_list])
+                self.built_unitaries.append(q_process_list)
                 self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
                 self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
                 # for i, input_state in enumerate(self.target["input_states"]):
@@ -394,7 +401,6 @@ class QuantumEnvironment:
         elif self.abstraction_level == 'pulse':
             # Pulse simulation
             schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
-            # unitaries = self.fast_pulse_sim(schedule_list).block_until_ready()
             unitaries = self._simulate_pulse_schedules(schedule_list)
             # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
             # TODO: transmon is simulated), adapt the target gate operator accordingly.
