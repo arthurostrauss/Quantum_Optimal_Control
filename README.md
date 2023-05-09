@@ -111,5 +111,6 @@ Our repo relies on the modelling of the quantum system as a class ```QuantumEnvi
 
 
 ## References
-[1] V. V. Sivak, A. Eickbusch, H. Liu, B. Royer, I. Tsioutsios, and M. H. Devoret, “Model Free Quantum Control with Reinforcement Learning”, Physical Review X, vol. 12, no. 1, p. 011 059, Mar. 2022,
+[1] V. V. Sivak, A. Eickbusch, H. Liu, B. Royer, I. Tsioutsios, and M. H. Devoret, “Model Free Quantum Control with Reinforcement Learning”, Physical Review X, vol. 12, no. 1, p. 011 059, Mar. 2022
+
 [2] S. T. Flammia and Y.-K. Liu, “Direct Fidelity Estimation from Few Pauli Measurements”, Physical Review Letters, vol. 106, no. 23, p. 230 501, Jun. 2011, Publisher: American Physical Society. DOI: 10.1103/PhysRevLett.106.230501. [Online]. Available: https://link.aps.org/doi/10.1103/PhysRevLett.106.230501

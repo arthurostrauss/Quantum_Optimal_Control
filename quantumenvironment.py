@@ -7,6 +7,7 @@ Created on 28/11/2022
 """
 # Qiskit imports
 from qiskit import QuantumCircuit, QuantumRegister, pulse, schedule
+from qiskit.pulse.transforms.canonicalization import block_to_schedule
 from qiskit.transpiler import InstructionProperties
 from qiskit.circuit import Parameter, Gate
 from qiskit.providers import BackendV1, BackendV2
@@ -35,7 +36,7 @@ from qiskit.opflow import Zero, I, CircuitOp
 
 import numpy as np
 from itertools import product
-from typing import Dict, Union, Optional, List, Tuple, Callable, Any
+from typing import Dict, Union, Optional, List, Callable
 from copy import deepcopy
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -54,28 +55,28 @@ jit = wrap(jax.jit, decorator=True)
 
 def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: Optional[List[str]] = None):
     """
-    Generate reliable baseline single qubit gates (X, SX, RZ) for doing Pauli rotations
+    Generate baseline single qubit gates (X, SX, RZ, H) for all qubits using traditional calibration experiments
     :param backend: Dynamics Backend on which calibrations should be run
     :param calibration_files: Optional calibration files containing single qubit gate calibrations for provided
-        DynamicsBackend instance
+        DynamicsBackend instance (Qiskit Experiments does not support this feature yet)
 
     """
 
     target, num_qubits, qubits = backend.target, backend.num_qubits, list(range(backend.num_qubits))
     phi = Parameter("phi")
     single_qubit_properties = {**{(qubit,): None for qubit in range(num_qubits)}}
+    single_qubit_errors = {**{(qubit,): 0.0 for qubit in qubits}}
     two_qubit_properties = {**{qubits: None for qubits in backend.options.control_channel_map}}
-    fixed_phase_gates: List[Tuple[Gate, Optional[float]]] = [(ZGate(), np.pi), (SGate(), np.pi / 2),
-                                                             (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
-                                                             (TdgGate(), -np.pi / 4)]
-    single_qubit_gates = fixed_phase_gates + [(RZGate(phi),), (IGate(),), (HGate(),), (XGate(),), (SXGate(),),
-                                              (Reset(),)]
+    fixed_phase_gates = [(ZGate(), np.pi), (SGate(), np.pi / 2), (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
+                         (TdgGate(), -np.pi / 4)]
+    other_gates = [(RZGate(phi),), (IGate(),), (HGate(),), (XGate(),), (SXGate(),), (Reset(),)]
+    single_qubit_gates = fixed_phase_gates + other_gates
     exp_results = {}
     existing_cals = calibration_files is not None
+
     if existing_cals:
         cals = Calibrations.load(files=calibration_files)
     else:
-        exp_results = {}
         cals = Calibrations.from_backend(backend, libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"],
                                                                                     default_values=None)
                                                              for _ in range(num_qubits)])
@@ -83,35 +84,31 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         for gate in single_qubit_gates:
             target.add_instruction(gate[0], properties=single_qubit_properties)
-        target.update_instruction_properties("reset", qargs=tuple(qubits),
-                                             properties=InstructionProperties(calibration=pulse.Schedule(name='reset'),
-                                                                              error=0.0))
         if num_qubits > 1 and bool(backend.options.control_channel_map):
             target.add_instruction(CXGate(), properties=two_qubit_properties)
 
-    for qubit in qubits:
+    for qubit in qubits:  # Add calibrations for each qubit
         control_channels = list(filter(lambda x: x is not None,
                                        [backend.options.control_channel_map.get((i, qubit), None)
                                         for i in range(num_qubits)]))
-        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
+
+        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:  # Calibration of RZ gate, virtual Z-rotation
             pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
 
-        id_cal = pulse.Schedule(pulse.Delay(20, pulse.DriveChannel(qubit)))
+        id_cal = pulse.Schedule(pulse.Delay(20, pulse.DriveChannel(qubit)))  # Wait 20 cycles for identity gate
 
-        target.update_instruction_properties('rz', (qubit,), properties=InstructionProperties(calibration=rz_cal,
-                                                                                              error=0.0))
-        target.update_instruction_properties('id', (qubit,), properties=InstructionProperties(calibration=id_cal,
-                                                                                              error=0.0))
-
+        # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
+        target.update_instruction_properties('rz', (qubit,), InstructionProperties(calibration=rz_cal, error=0.))
+        target.update_instruction_properties('id', (qubit,), InstructionProperties(calibration=id_cal, error=0.))
+        target.update_instruction_properties("reset", (qubit,), InstructionProperties(calibration=id_cal, error=0.))
         for gate in fixed_phase_gates:
-            target.update_instruction_properties(gate[0].name, (qubit,),
-                                                 properties=InstructionProperties(
-                                                     calibration=rz_cal.assign_parameters({phi: gate[1]},
-                                                                                          inplace=False),
-                                                     error=0.0)
-                                                 )
+            gate_cal = rz_cal.assign_parameters({phi: gate[1]}, inplace=False)
+            instruction_prop = InstructionProperties(calibration=gate_cal, error=0.)
+            target.update_instruction_properties(gate[0].name, (qubit,), instruction_prop)
+
+        # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
         if not existing_cals:
             rabi_exp = RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 100))
             drag_exp = RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15))
@@ -123,28 +120,19 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
             drag_result = drag_exp.run().block_for_results()
             print(f"Drag experiments done for qubit {qubit} done.")
             exp_results[qubit] = [rabi_result, drag_result]
-
-            # batch_exp = BatchExperiment(experiments=[ParallelExperiment(rabi_experiments),
-            #                                          ParallelExperiment(drag_experiments)],
-            #                             backend=backend, flatten_results=True)
-            #
-            # batch_exp.run().block_for_results()
-            # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
             print("All calibrations are done")
-        sx_instruction = cals.get_inst_map().get('sx', (qubit,)).instructions
-        s_instruction = target.instruction_schedule_map().get('s', (qubit,)).instructions
-        h_schedule = pulse.Schedule(name="h")
-        for instruction in s_instruction + sx_instruction + s_instruction:
-            h_schedule += instruction[1]
+            # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
+
+        # Build Hadamard gate schedule from following equivalence: H = S @ SX @ S
+        sx_schedule = block_to_schedule(cals.get_schedule("sx", (qubit,)))
+        s_schedule = target.get_calibration('s', (qubit,))
+        h_schedule = pulse.Schedule(*[s_schedule, sx_schedule, s_schedule], name="h")
         target.update_instruction_properties('h', (qubit,), properties=InstructionProperties(calibration=h_schedule,
                                                                                              error=0.0))
 
-    error_dict = {'x': {**{(qubit,): 0.0 for qubit in qubits}},
-                  'sx': {**{(qubit,): 0.0 for qubit in qubits}}
-                  }
+    error_dict = {'x': single_qubit_errors, 'sx': single_qubit_errors}
     target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
     print("Updated Instruction Schedule Map", target.instruction_schedule_map())
-
     return cals, exp_results
 
 
