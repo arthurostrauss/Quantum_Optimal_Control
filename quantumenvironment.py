@@ -63,13 +63,11 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
 
     target, num_qubits, qubits = backend.target, backend.num_qubits, list(range(backend.num_qubits))
     phi = Parameter("phi")
-    single_qubit_properties = {**{(qubit,): None for qubit in range(num_qubits)}}
-    single_qubit_errors = {**{(qubit,): 0.0 for qubit in qubits}}
-    if backend.options.control_channel_map is None:
-        two_qubit_properties = None
-        backend.set_options(control_channel_map={})
-    else:
-        two_qubit_properties = {**{qubits: None for qubits in backend.options.control_channel_map}}
+    single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
+    single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+
+    control_channel_map = backend.options.control_channel_map or {}
+    two_qubit_properties = {qubits: None for qubits in control_channel_map}
     fixed_phase_gates = [(ZGate(), np.pi), (SGate(), np.pi / 2), (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
                          (TdgGate(), -np.pi / 4)]
     other_gates = [(RZGate(phi),), (IGate(),), (HGate(),), (XGate(),), (SXGate(),), (Reset(),)]
@@ -93,8 +91,8 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
             print(target)
 
     for qubit in qubits:  # Add calibrations for each qubit
-        control_channels = list(filter(lambda x: x is not None,
-                                       [backend.options.control_channel_map.get((i, qubit), None) for i in qubits]))
+        control_channels = list(filter(lambda x: x is not None, [control_channel_map.get((i, qubit), None)
+                                                                 for i in qubits]))
         # Calibration of RZ gate, virtual Z-rotation
         with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
             pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
