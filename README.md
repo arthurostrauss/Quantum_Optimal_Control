@@ -30,6 +30,7 @@ Quantum Control has benefited from tremendous achievements in the past few years
 
 What we want to achieve here is to show that model-free quantum control with RL (Sivak et. al, https://link.aps.org/doi/10.1103/PhysRevX.12.011059) is able to capture the contextual dependence of such target preparation task and to provide suitable error mitigation strategies. In the examples currently available, we explain the overall logic of the algorithm itself, and detail later how the context dependence can be encompassed through a tailor-made training procedure.
 
+![Programming Pipeline](Programming_pipeline.png) 
 ## 1. Describing the QuantumEnvironment
 ### a. Deriving the reward for the quantum control problem
 As explained above, our framework builds upon the idea of transforming the quantum control task into a RL problem where an agent is missioned to probe and act upon an environment in order to steer it in a target state. The way this is usually done in RL is to introduce the concept of a reward signal $$R$$, which should be designed such that the maximization of this reward yields a set of actions providing a successful and reliable target preparation. 
@@ -104,6 +105,25 @@ Our repo relies on the modelling of the quantum system as a class ```QuantumEnvi
 
 ### c. The subtlety of the pulse level: Integrating Qiskit Dynamics and Qiskit Experiments
 
+While a ```QuantumCircuit``` can be simulated using Statevector simulation when only dealing with the circuit level abstraction, and does not necessarily require an actual
+backend (although one might want to use the ```ibmq_qasm_simulator```), simulating the circuit by providing a pulse level description requires a dedicated simulation backend.
+As our main code revolves around Qiskit structure, we use the recently released Qiskit Dynamics extension, which is a framework for simulating arbitrary pulse schedules.
+More specifically, we leverage the introduction of the ```DynamicsBackend``` object to emulate a real backend, receiving Pulse gates (you can learn more by checking Qiskit and Dynamics documentations).
+The DynamicsBackend can be declared in two main ways:
+1. Using the ```from_backend(BackendV1)``` method, which creates a ```DynamicsBackend``` carrying all the properties (in particular the Hamiltonian) of a real IBM backend.
+2. Creating a custom Hamiltonian (or Linbladian) describing our quantum system of interest, and declare a ```Solver``` object which will be provided to the backend.
+
+We provide examples of both declarations in the pulse_level_abstraction folder.
+
+The subtlety behind this ```DynamicsBackend``` is that this backend does not carry calibrations for elementary quantum gates on the qubits.
+This is an issue, as the current reward scheme is built on the ability to perform Pauli expectation sampling on the quantum computer.
+Indeed, since we only have access to a Z-basis measurement in the backend, one needs to be able to perform Pauli basis rotation gates in order to ensure we can extract 
+all Pauli operators. As a consequence, each qubit should have at the start calibrated Hadamard and S gates. The whole idea is to provide such baseline calibration for the
+custom ```DynamicsBackend``` instance. To do so, we use the library of elementary calibrations provided in the Qiskit Experiments module (which provide calibration workflows for elementary gates).
+Therefore, each time the ```QuantumEnvironment``` object is initialized with a ```DynamicsBackend``` object, a series of baseline calibrations will automatically start, such that the Estimator primitive (in this case the ```BackendEstimator``` present in Qiskit primitives)
+can append the appropriate gates for all Pauli expectation value sampling tasks.
+
+## 2. The RL Agent: PPO algorithm
 
 
 
