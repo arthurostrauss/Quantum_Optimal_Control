@@ -20,8 +20,8 @@ We briefly explain the overall logic of the algorithm below.
 ## Introduction
 
 Reinforcement Learning (RL) is an interaction-based learning procedure resulting from the interaction between two entities:
-- an Environment: in our case the quantum system of interest formed of $$n$$ qubits, characterized by a quantum state $\rho\in \mathcal{H}$, where the dimension of Hilbert space $$\mathcal{H}$$ is $$d=2^n$$ and from which 
-observations/measurements $o_i \in \mathcal{O}$  can be extracted. Measurements could be retrieved as bitstrings ($$\mathcal{O}= \{0, 1\}^{\otimes n}$$) or as IQ pairs if state discrimination is not done a priori, as shown in this recent work (https://arxiv.org/abs/2305.01169). The point here is that we restrict the observation space to values that can be easily retrieved from the actual quantum device.
+- an Environment: in our case the quantum system of interest formed of $$n$$ qubits, characterized by a quantum state $\rho\in \mathcal{H}$, where the dimension of Hilbert space $\mathcal{H}$ is $d=2^n$ and from which 
+observations/measurements $o_i \in \mathcal{O}$  can be extracted. Measurements could be retrieved as bitstrings ($\mathcal{O}= \{0, 1\}^{\otimes n}$) or as IQ pairs if state discrimination is not done a priori, as shown in this recent work (https://arxiv.org/abs/2305.01169). The point here is that we restrict the observation space to values that can be easily retrieved from the actual quantum device.
 - an Agent: a classical Neural Network on the PC, whose goal is to learn a stochastic policy $\pi_\theta(a|o_i)$  from which actions $a \in \mathbb{U}$ are sampled to be applied on the Environment to set it in a specific target state. Typically, the goal 
 of the Agent in the frame of Quantum Optimal Control is to find actions (e.g., circuit/pulse parameters)
 enabling the successful preparation of a target quantum state, or the calibration of a quantum gate operation.
@@ -33,44 +33,49 @@ What we want to achieve here is to show that model-free quantum control with RL 
 ![Programming Pipeline](Programming_pipeline.png) 
 ## 1. Describing the QuantumEnvironment
 ### a. Deriving the reward for the quantum control problem
-As explained above, our framework builds upon the idea of transforming the quantum control task into a RL problem where an agent is missioned to probe and act upon an environment in order to steer it in a target state. The way this is usually done in RL is to introduce the concept of a reward signal $$R$$, which should be designed such that the maximization of this reward yields a set of actions providing a successful and reliable target preparation. 
+As explained above, our framework builds upon the idea of transforming the quantum control task into a RL problem where an agent is missioned to probe and act upon an environment in order to steer it in a target state. The way this is usually done in RL is to introduce the concept of a reward signal $R$, which should be designed such that the maximization of this reward yields a set of actions providing a successful and reliable target preparation. 
 For a quantum state preparation task, this reward should be designed such that:
 
 $$\mathrm{argmax}_{|\psi\rangle}\,\mathbb{E}_{\pi_\theta} [R]= |\psi_{target}\rangle$$
 
-Where the expectation value is empirically taken over a batch of actions sampled from the policy $$\pi_\theta$$ (Monte Carlo sampling) yielding different rewards. It is clear that the reward should therefore act as a proxy for a distance measure between quantum states, for example the fidelity. 
+Where the expectation value is empirically taken over a batch of actions sampled from the policy $\pi_\theta$ (Monte Carlo sampling) yielding different rewards. It is clear that the reward should therefore act as a proxy for a distance measure between quantum states, for example the fidelity. 
 The average reward should therefore be a statistical estimator for the fidelity. The Direct Fidelity Estimation (DFE) scheme introduced in [2] gives us a protocol to build a single shot reward scheme based on Pauli expectation sampling. We take the same notation as in the paper below and write the corresponding protocol to derive the reward.
 
-The ﬁdelity between our desired pure state $$\rho$$ and the actual state $$\sigma$$ is given by:
+The ﬁdelity between our desired pure state $\rho$ and the actual state $\sigma$ is given by:
 $$F(\rho, \sigma)=\left(\mathrm{tr}\left[(\sqrt{\rho} \sigma \sqrt{\rho})^{1 / 2}\right]\right)^2=\mathrm{tr}(\rho \sigma)$$
 
-Let $$W_k \, (k=1,..,d^2)$$ denote all possible Pauli operators acting on $$n$$ qubits, that is all $$n$$-fold tensor products of Pauli matrices ($$I=\begin{pmatrix}1 & 0 \\ 0 & 1\end{pmatrix}$$, $$\sigma_x=\begin{pmatrix}0 & 1 \\ 1 & 0\end{pmatrix}$$, $$\sigma_y=\begin{pmatrix}0 & -i \\ i & 0\end{pmatrix}$$, $$\sigma_z=\begin{pmatrix}1 & 0 \\ 0 & -1\end{pmatrix}$$).
+Let $$W_k \, (k=1,..,d^2)$$ denote all possible Pauli operators acting on $n$ qubits, that is all $n$-fold tensor products of Pauli matrices ($$I=\begin{pmatrix}1 & 0 \\ 0 & 1\end{pmatrix}$$, $$\sigma_x=\begin{pmatrix}0 & 1 \\ 1 & 0\end{pmatrix}$$, $$\sigma_y=\begin{pmatrix}0 & -i \\ i & 0\end{pmatrix}$$, $$\sigma_z=\begin{pmatrix}1 & 0 \\ 0 & -1\end{pmatrix}$$).
 
 Define the characteristic function $$\chi_\rho(k)=\mathrm{tr}(\rho W_k/\sqrt{d})=\langle W_k\rangle_\rho/\sqrt{d}$$, 
-where the expectation value is evaluated on the state $$\rho$$.
+where the expectation value is evaluated on the state $\rho$.
 
 Since those Pauli operators form an orthogonal basis for the density operators under the Hilbert-Schmidt product, one can see that:
 
 $$F(\rho, \sigma)=\mathrm{tr}(\rho \sigma)=\sum_k\chi_\rho(k)\chi_\sigma(k)=\sum_k\frac{\langle W_k\rangle_\rho\langle W_k\rangle_\sigma}{d}$$.
 
 Note that for our target state $\rho$, we supposedly are able to evaluate analytically the expected value of each Pauli operator $\langle W_k\rangle_\rho$. However, we would have to experimentally sample from the quantum computer to deduce the value of $\langle W_k\rangle_\sigma$.
-In the original DFE paper, the idea was to provide an estimation of the required number of samples to reach a certain accuracy on the fidelity estimation. However, in our RL case, we are not interested in systematically getting an accurate estimation, as we would like the agent to rather explore multiple trajectories in parameter space (for one fixed policy) in order to quickly evaluate if the chosen policy should be discarded, or if it should try to fine-tune it to push the reward even further. This fact is commonly known in RL as the exploration/exploitation tradeoff. What we do, in line with the protocol is to build an estimator for the fidelity by selecting a set of random Pauli observables $$W_k$$ to sample from the quantum computer by choosing $k\in\{1,...,d^2\}$ such that:
+In the original DFE paper, the idea was to provide an estimation of the required number of samples to reach a certain accuracy on the fidelity estimation. However, in our RL case, we are not interested in systematically getting an accurate estimation, as we would like the agent to rather explore multiple trajectories in parameter space (for one fixed policy) in order to quickly evaluate if the chosen policy should be discarded, or if it should try to fine-tune it to push the reward even further. This fact is commonly known in RL as the exploration/exploitation tradeoff. What we do, in line with the protocol is to build an estimator for the fidelity by selecting a set of random Pauli observables $W_k$ to sample from the quantum computer by choosing $k\in\{1,...,d^2\}$ such that:
 
 $$\mathrm{Pr}(k)=[\chi_\rho(k)]^2$$
 
-Once those indices have been sampled, we compute the expectation values $$\langle W_k\rangle_\sigma$$ by directly sampling in the appropriate Pauli basis on the quantum computer. We let the user choose how many shots per expectation value shall be executed, as well as the number of indices $$k$$ to be sampled. The choice of those hyperparameters will have a direct impact on the estimation accuracy of the actual state $$\sigma$$ properties and can therefore impact the convergence of the algorithm. 
-One can show that by constructing the estimator $X = \langle W_k\rangle_\sigma/\langle W_k\rangle_\rho$, it follows that $$\mathbb{E}_{k\sim\operatorname{Pr}(k)}[X]=F(\rho,\sigma)$$.
+Once those indices have been sampled, we compute the expectation values $\langle W_k\rangle_\sigma$ by directly sampling in the appropriate Pauli basis on the quantum computer. We let the user choose how many shots per expectation value shall be executed, as well as the number of indices $k$ to be sampled. The choice of those hyperparameters will have a direct impact on the estimation accuracy of the actual state $\sigma$ properties and can therefore impact the convergence of the algorithm. 
+One can show that by constructing the estimator $X = \langle W_k\rangle_\sigma/\langle W_k\rangle_\rho$, it follows that:
+
+$$\mathbb{E}_{k\sim \mathrm{Pr(k)}}[X]=F(\rho,\sigma)$$.
 We can define a single shot reward $R$ by replacing the actual expectation value $\langle W_k\rangle_\sigma$ by an empirical estimation $\mathbb{E}_\sigma[W_k]$, that is measure a finite number of times the created state $\sigma$ in the $W_k$ basis. In general, only the computational basis measurements are natively available on the quantum computer (specifically true for IBM backends), so additional local qubit rotations are  necessary before performing the measurement. This experimental workflow is automatically taken care of in our algorithm by the use of a Qiskit Estimator primitive (https://qiskit.org/documentation/partners/qiskit_ibm_runtime/tutorials/how-to-getting-started-with-estimator.html).
 
-Our single shot reward $R$ can therefore be defined as: $$R=\frac{1}{d}\langle W_k\rangle_\rho W_k/\mathrm{Pr}(k)$$.
+Our single shot reward $R$ can therefore be defined as: 
+
+$$R=\frac{1}{d}\langle W_k\rangle_\rho W_k/\mathrm{Pr}(k)$$.
+
 It is easy to see that we have:
 
 $$\mathbb{E}_{\pi_\theta, k\sim\mathrm{Pr}(k), \sigma} [R]=F(\rho, \sigma)$$
 
 
 
-For a gate calibration task, we want to find parameters defining the quantum gate $$G(a)$$ that yield a high fidelity measure for all possible input states when comparing to the target $$G_{target}$$. We can therefore implement the same idea as target state preparation reward, but this times we add an additional averaging over all possible input states $$|\psi_{input}\rangle$$ such that for each input state, $$G(a)|\psi_{input}\rangle=G_{target}|\psi_{input}\rangle$$. The average gate fidelity is therefore given by:
-$$\mathbb{E}_{\pi_\theta, \,|\psi_{input}\rangle, \, k\sim\mathrm{Pr}(k), \, \sigma} [R]=F(\rho, \sigma)$$.
+For a gate calibration task, we want to find parameters defining the quantum gate $G(a)$ that yield a high fidelity measure for all possible input states when comparing to the target $G_{target}$. We can therefore implement the same idea as target state preparation reward, but this times we add an additional averaging over all possible input states $|\psi_{input}\rangle$ such that for each input state, $G(a)|\psi_{input}\rangle=G_{target}|\psi_{input}\rangle$. The average gate fidelity is therefore given by:
+$$\mathbb{E}_{\pi_\theta,\,|\psi_{input}\rangle, \, k\sim\mathrm{Pr}(k), \, \sigma} [R]=F(\rho, \sigma)$$.
 
 In the code, each average is empirically done over specific hyperparameters that must be tuned by the user at each experiment:
 
