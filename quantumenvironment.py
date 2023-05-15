@@ -31,6 +31,7 @@ from qiskit_experiments.library import ProcessTomography
 from qiskit.primitives import Estimator, BackendEstimator
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend
 from qiskit_aer.primitives import Estimator as Aer_Estimator
+from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit.opflow import Zero, I, CircuitOp
 
 import numpy as np
@@ -169,8 +170,7 @@ class QuantumEnvironment:
             raise AttributeError("Cannot provide simultaneously a QUA setup and a Qiskit config ")
         elif Qiskit_config is not None:
 
-            self.Pauli_ops = [{"name": ''.join(s), "matrix": Pauli(''.join(s)).to_matrix()}
-                              for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
+            self.Pauli_ops = [Pauli(''.join(s)) for s in product(["I", "X", "Y", "Z"], repeat=n_qubits)]
             self.c_factor = c_factor
             self._n_qubits = n_qubits
             self.d = 2 ** n_qubits  # Dimension of Hilbert space
@@ -185,16 +185,16 @@ class QuantumEnvironment:
                 assert n_qubits <= self.backend.num_qubits, f"n_qubits ({n_qubits} > " \
                                                             f"backend.num_qubits ({self.backend.num_qubits})"
             self.parametrized_circuit_func: Callable = Qiskit_config["parametrized_circuit"]
-            self.noise_model = Qiskit_config.get("noise_model", None)
             estimator_options: Dict = Qiskit_config.get("estimator_options", None)
 
-            if isinstance(self.backend, Runtime_Backend):
+            if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
                 self.estimator = Runtime_Estimator(session=self.backend, options=estimator_options)
-            elif self.abstraction_level == "circuit":
-                if self.noise_model is not None:
-                    self.estimator = Aer_Estimator()  # Estimator taking noise model into consideration
-                    # TODO implement correct options from Aer Backend
-                else:
+            elif self.abstraction_level == "circuit":  # Either statevector simulation (native) or AerBackend provided
+                if isinstance(self.backend, AerBackend):
+                    # Estimator taking noise model into consideration, have to provide an AerBackend
+                    self.estimator = Aer_Estimator(backend_options=self.backend.options)
+
+                else:  # No backend specified
                     self.estimator = Estimator()  # Estimator based on state-vector simulation
             elif self.abstraction_level == 'pulse':
                 self.estimator = BackendEstimator(self.backend)
@@ -311,7 +311,7 @@ class QuantumEnvironment:
         """
         assert 'dm' in target_state, 'No input data for target state, provide DensityMatrix'
         target_state["Chi"] = np.array([np.trace(np.array(target_state["dm"].to_operator())
-                                                 @ self.Pauli_ops[k]["matrix"]).real for k in range(self.d ** 2)])
+                                                 @ self.Pauli_ops[k].to_matrix()).real for k in range(self.d ** 2)])
         # Real part is taken to convert it in good format,
         # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
         return target_state
@@ -346,7 +346,7 @@ class QuantumEnvironment:
                                   for p in pauli_index], 5)
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        observables = SparsePauliOp.from_list([(self.Pauli_ops[p]["name"], reward_factor[i])
+        observables = SparsePauliOp.from_list([(self.Pauli_ops[p].to_label(), reward_factor[i])
                                                for i, p in enumerate(pauli_index)])
 
         # Benchmarking block: not part of reward calculation
@@ -375,7 +375,7 @@ class QuantumEnvironment:
         # Circuit list for each action of the batch
         if self.abstraction_level == 'circuit':
             q_state_list = [Statevector.from_instruction(qc) for qc in qc_list]
-            density_matrix = DensityMatrix(np.mean([q_state for q_state in q_state_list], axis=0))
+            density_matrix = DensityMatrix(np.mean([q_state.to_operator() for q_state in q_state_list], axis=0))
             self.density_matrix_history.append(density_matrix)
 
             if self.target_type == 'state':
