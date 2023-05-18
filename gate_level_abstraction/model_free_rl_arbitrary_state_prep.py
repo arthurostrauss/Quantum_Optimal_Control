@@ -12,9 +12,8 @@ from helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit.circuit import ParameterVector, QuantumCircuit
-from qiskit.quantum_info import DensityMatrix
+from qiskit.quantum_info import DensityMatrix, Statevector
 from qiskit_ibm_runtime import QiskitRuntimeService, Session
-from qiskit.opflow import Zero, One, Plus, Minus, H, I, X, CX, S
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -66,15 +65,17 @@ sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 
 # Target state: Bell state
-bell_circuit = CX @ (I ^ H)  # Specify quantum circuit required to prepare the ideal desired quantum state
-bell_tgt = {"circuit": bell_circuit}
+bell_circuit = QuantumCircuit(n_qubits)  # Specify quantum circuit required to prepare the ideal desired quantum state
+bell_circuit.h(0)
+bell_circuit.cx(0, 1)
+bell_tgt = {"circuit": bell_circuit,
+            }
 
-# Alternatively, provide argument density matrix 'dm': DensityMatrix(my_desired_state: np.array)
-# ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
-# ket00, ket11 = np.kron(ket0, ket0), np.kron(ket1, ket1)
-# bell_state = (ket00 + ket11) / np.sqrt(2)
-# bell_dm = bell_state @ bell_state.conj().T
-# bell_tgt = {"dm": DensityMatrix(bell_dm)}
+# Alternatively, provide argument density matrix 'dm':
+ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
+ket00, ket11 = np.kron(ket0, ket0), np.kron(ket1, ket1)
+bell_state = Statevector((ket00 + ket11) / np.sqrt(2))
+bell_tgt["dm"] = DensityMatrix(bell_state)
 
 Qiskit_setup = {
     "backend": None,

@@ -69,57 +69,57 @@ circuit_Plus_i = S @ H
 circuit_Minus_i = S @ H @ X
 cnot_target = {
     "target_type": "gate",
-    "gate": CXGate("CNOT"),
+    "gate": CXGate(),
     "register": [0, 1],
-    "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
-                      "circuit": I ^ 2,
-                      },
-                     {"name": "|01>",
-                      "circuit": X ^ I,
-                      },
-                     {"name": "|10>",
-                      "circuit": I ^ X,
-                      },
-                     {"name": "|11>",
-                      "circuit": X ^ X,
-                      },
-                     {"name": "|+_1>",
-                      "circuit": X ^ H,
-                      },
-                     {"name": "|0_->",
-                      "circuit": (H @ X) ^ I,
-                      },
-                     {"name": "|+_->",
-                      "circuit": (H @ X) ^ H,
-                      },
-                     {"name": "|1_->",
-                      "circuit": (H @ X) ^ X,
-                      },
-                     {"name": "|+_0>",
-                      "circuit": I ^ H,
-                      },
-                     {"name": "|0_->",
-                      "circuit": (H @ X) ^ I,
-                      },
-                     {"name": "|i_0>",
-                      "circuit": I ^ circuit_Plus_i,
-                      },
-                     {"name": "|i_1>",
-                      "circuit": X ^ circuit_Plus_i,
-                      },
-                     {"name": "|0_i>",
-                      "circuit": circuit_Plus_i ^ I,
-                      },
-                     {"name": "|i_i>",
-                      "circuit": circuit_Plus_i ^ circuit_Plus_i,
-                      },
-                     {"name": "|i_->",
-                      "circuit": (H @ X) ^ circuit_Plus_i,
-                      },
-                     {"name": "|+_i->",
-                      "circuit": circuit_Minus_i ^ H,
-                      },
-                     ]
+    # "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
+    #                   "circuit": I ^ 2,
+    #                   },
+    #                  {"name": "|01>",
+    #                   "circuit": X ^ I,
+    #                   },
+    #                  {"name": "|10>",
+    #                   "circuit": I ^ X,
+    #                   },
+    #                  {"name": "|11>",
+    #                   "circuit": X ^ X,
+    #                   },
+    #                  {"name": "|+_1>",
+    #                   "circuit": X ^ H,
+    #                   },
+    #                  {"name": "|0_->",
+    #                   "circuit": (H @ X) ^ I,
+    #                   },
+    #                  {"name": "|+_->",
+    #                   "circuit": (H @ X) ^ H,
+    #                   },
+    #                  {"name": "|1_->",
+    #                   "circuit": (H @ X) ^ X,
+    #                   },
+    #                  {"name": "|+_0>",
+    #                   "circuit": I ^ H,
+    #                   },
+    #                  {"name": "|0_->",
+    #                   "circuit": (H @ X) ^ I,
+    #                   },
+    #                  {"name": "|i_0>",
+    #                   "circuit": I ^ circuit_Plus_i,
+    #                   },
+    #                  {"name": "|i_1>",
+    #                   "circuit": X ^ circuit_Plus_i,
+    #                   },
+    #                  {"name": "|0_i>",
+    #                   "circuit": circuit_Plus_i ^ I,
+    #                   },
+    #                  {"name": "|i_i>",
+    #                   "circuit": circuit_Plus_i ^ circuit_Plus_i,
+    #                   },
+    #                  {"name": "|i_->",
+    #                   "circuit": (H @ X) ^ circuit_Plus_i,
+    #                   },
+    #                  {"name": "|+_i->",
+    #                   "circuit": circuit_Minus_i ^ H,
+    #                   },
+    #                  ]
 
 }
 
@@ -144,7 +144,7 @@ Hyperparameters for RL agent
 n_epochs = 600  # Number of epochs
 batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
-eta = 0.0015  # Learning rate for policy update step
+eta = 0.0018  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
 
 use_PPO = True
@@ -161,7 +161,7 @@ Policy parameters
 """
 # Policy parameters
 N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
-hidden_units = [80]  # List containing number of units in each hidden layer
+hidden_units = [20, 20, 30]  # List containing number of units in each hidden layer
 
 network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)
 network.summary()
@@ -250,12 +250,8 @@ ax1.plot(np.mean(q_env.reward_history, axis=1), '-.', label='Reward')
 # ax1.plot(data["baselines"], '-.', label='baseline')
 # ax1.plot(q_env.process_fidelity_history, '-o', label='Process Fidelity')
 ax1.plot(q_env.avg_fidelity_history, '-.', label='Average Gate Fidelity')
-for i in range(len(target["input_states"])):
-    ax1.plot(q_env.input_output_state_fidelity_history[i], '.-',
-             label=f"State fidelity on {target['gate'].name + target['input_states'][i]['name']}")
-
 ax1.set_xlabel("Epoch")
 ax1.set_ylabel("Expected reward")
 ax1.legend()
 # plot_examples(figure, ax2, q_env.reward_history)
-# plt.show()
+plt.show()
