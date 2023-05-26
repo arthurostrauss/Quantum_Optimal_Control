@@ -35,6 +35,7 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
             control_channel_map[qubits] = control_channel_map_backend[qubits]
     return control_channel_map
 
+
 def get_solver_and_freq_from_backend(backend: BackendV1,
                                      subsystem_list: Optional[List[int]] = None,
                                      rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",

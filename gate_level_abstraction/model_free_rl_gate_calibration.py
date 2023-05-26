@@ -10,10 +10,9 @@ from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit_ibm_runtime import QiskitRuntimeService, Estimator, Options
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
-from qiskit.opflow import H, I, X, S
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -22,7 +21,6 @@ from tensorflow_probability.python.distributions import MultivariateNormalDiag
 # Additional imports
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 
 """ 
 -----------------------------------------------------------------------------------------------------
@@ -53,20 +51,19 @@ Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
 
-# service = QiskitRuntimeService(channel='ibm_quantum')
-# backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
+service = QiskitRuntimeService(channel='ibm_quantum')
+backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 
-backend = None
+# backend = None
 seed = 3590  # Seed for action sampling
 
 estimator_options = {"seed_simulator": None, 'resilience_level': 0}
+
 n_qubits = 2
-sampling_Paulis = 10
-N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
+sampling_Paulis = 50
+N_shots = 10  # Number of shots for sampling the quantum computer for each action vector
 
 # Target gate: CNOT
-circuit_Plus_i = S @ H
-circuit_Minus_i = S @ H @ X
 cnot_target = {
     "target_type": "gate",
     "gate": CXGate(),
@@ -224,6 +221,8 @@ for i in tqdm(range(n_epochs)):
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
 
+if isinstance(q_env.estimator, Estimator):
+    q_env.estimator.session.close()
 """
 -----------------------------------------------------------------------------------------
 Plotting tools

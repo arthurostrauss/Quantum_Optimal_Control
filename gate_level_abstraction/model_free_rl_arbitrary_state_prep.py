@@ -11,9 +11,10 @@ from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
 
 # Qiskit imports for building RL environment (circuit level)
-from qiskit.circuit import ParameterVector, QuantumCircuit
+from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister
 from qiskit.quantum_info import DensityMatrix, Statevector
-from qiskit_ibm_runtime import QiskitRuntimeService, Session
+from qiskit_ibm_runtime import QiskitRuntimeService, Estimator, Options, RuntimeOptions
+from qiskit_ibm_runtime.options import SimulatorOptions, TranspilationOptions, EnvironmentOptions
 
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
@@ -55,21 +56,39 @@ Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
 
-# service = QiskitRuntimeService(channel='ibm_quantum')
-seed = 3590  # Seed for action sampling
-# print(service.backends())
-# backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
-estimator_options = {"seed_simulator": seed, 'resilience_level': 0}
 n_qubits = 2
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
+n_epochs = 800  # Number of epochs : default 1500
+batchsize = 200  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
+n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
+
+
+# Qiskit Runtime setup, if selected backend is IBMBackend or IBM cloud simulator
+# service = QiskitRuntimeService(channel='ibm_quantum')
+seed = 3590  # Seed for action sampling
+# print(service.backends())
+# backend = service.backends(simulator=True)[0]  # Simulation backend (could be any other backend from the service)
+
+sim_options = SimulatorOptions(seed_simulator=seed, noise_model=None, coupling_map=None, basis_gates=None)
+env_options = EnvironmentOptions(job_tags=[f"RL_state_prep_epoch{i}" for i in range(n_epochs)])
+estimator_options = Options(simulator=sim_options, environment=env_options, resilience_level=0)
+
+# Alternatively, simulation can be run locally by using built-in primitives (qiskit_aer, statevector(backend = None), or
+# FakeBackend)
+backend = None  # Local CPU State vector simulation
 
 # Target state: Bell state
-bell_circuit = QuantumCircuit(n_qubits)  # Specify quantum circuit required to prepare the ideal desired quantum state
-bell_circuit.h(0)
-bell_circuit.cx(0, 1)
-bell_tgt = {"circuit": bell_circuit,
-            }
+qr = QuantumRegister(n_qubits)
+bell_circuit = QuantumCircuit(qr)  # Specify quantum circuit required to prepare the ideal desired quantum state
+bell_circuit.h(qr[0])
+bell_circuit.cx(qr[0], qr[1])
+bell_tgt = {"circuit": bell_circuit}
+
+# In case you want to prepare a state for a specific qubit set in your real backend, you can set the transpiler initial
+# layout
+transpilation_options = TranspilationOptions(skip_transpilation=False, initial_layout={qr[0]: 0, qr[1]: 1})
+estimator_options.transpilation = transpilation_options
 
 # Alternatively, provide argument density matrix 'dm':
 ket0, ket1 = np.array([[1.], [0]]), np.array([[0.], [1.]])
@@ -83,8 +102,7 @@ Qiskit_setup = {
     "estimator_options": estimator_options
 }
 
-n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
-time_steps = 1  # Number of time steps within an episode (1 means you do one readout and assign right away the reward)
+
 
 q_env = QuantumEnvironment(n_qubits=n_qubits, target=bell_tgt, abstraction_level="circuit",
                            Qiskit_config=Qiskit_setup,
@@ -96,8 +114,7 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 800  # Number of epochs : default 1500
-batchsize = 200  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
+
 opti = "Adam"
 eta = 0.003  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step
@@ -182,6 +199,8 @@ for i in tqdm(range(n_epochs)):
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
 
+if isinstance(q_env.estimator, Estimator):
+    q_env.estimator.session.close()
 """
 -----------------------------------------------------------------------------------------
 Plotting tools

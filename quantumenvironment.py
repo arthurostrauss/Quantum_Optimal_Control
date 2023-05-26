@@ -30,12 +30,12 @@ from qiskit_experiments.library.tomography.basis import PauliPreparationBasis, P
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options
 from qiskit_aer.primitives import Estimator as Aer_Estimator
 from qiskit_aer.backends.aerbackend import AerBackend
 
 import numpy as np
-from itertools import product
+from itertools import product, permutations
 from typing import Dict, Union, Optional, List, Callable
 from copy import deepcopy
 
@@ -67,7 +67,8 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
     single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
 
-    control_channel_map = backend.options.control_channel_map or {}
+    control_channel_map = backend.options.control_channel_map or {(ctrl, tgt): None
+                                                                  for ctrl, tgt in permutations(qubits, 2)}
     two_qubit_properties = {qubits: None for qubits in control_channel_map}
     fixed_phase_gates = [(ZGate(), np.pi), (SGate(), np.pi / 2), (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
                          (TdgGate(), -np.pi / 4)]
@@ -138,7 +139,7 @@ class QuantumEnvironment:
 
     def __init__(self, n_qubits: int, target: Dict, abstraction_level: str = 'circuit',
                  Qiskit_config: Optional[Dict] = None,
-                 QUA_setup: Optional[Dict] = None,
+                 QUA_config: Optional[Dict] = None,
                  sampling_Pauli_space: int = 10, n_shots: int = 1, c_factor: float = 0.5):
         """
         Class for building quantum environment for RL agent aiming to perform a state preparation task.
@@ -150,7 +151,7 @@ class QuantumEnvironment:
         :param abstraction_level: Circuit or pulse level parametrization of action space
         :param Qiskit_config: Dictionary containing all info for running Qiskit program (i.e. service, backend,
             options, parametrized_circuit)
-        :param QUA_setup: Dictionary containing all infor for running a QUA program
+        :param QUA_config: Dictionary containing all infor for running a QUA program
         :param sampling_Pauli_space: Number of samples to build fidelity estimator for one action
         :param n_shots: Number of shots to sample for one specific computation (action/Pauli expectation sampling)
         :param c_factor: Scaling factor for reward normalization
@@ -159,32 +160,34 @@ class QuantumEnvironment:
         assert abstraction_level == 'circuit' or abstraction_level == 'pulse', 'Abstraction layer parameter can be' \
                                                                                'only pulse or circuit'
         self.abstraction_level: str = abstraction_level
-        if Qiskit_config is None and QUA_setup is None:
+        if Qiskit_config is None and QUA_config is None:
             raise AttributeError("QuantumEnvironment requires one software configuration (can be Qiskit or QUA based)")
-        if Qiskit_config is not None and QUA_setup is not None:
+        if Qiskit_config is not None and QUA_config is not None:
             raise AttributeError("Cannot provide simultaneously a QUA setup and a Qiskit config ")
         elif Qiskit_config is not None:
-
+            self._config_type = "Qiskit"
+            self._config = Qiskit_config
             self.Pauli_ops = pauli_basis(num_qubits=n_qubits)
 
             self.c_factor = c_factor
             self._n_qubits = n_qubits
-            self.d = 2 ** n_qubits  # Dimension of Hilbert space
+            self._d = 2 ** n_qubits  # Dimension of Hilbert space
             self.sampling_Pauli_space = sampling_Pauli_space
             self.n_shots = n_shots
 
             self.target, self.target_type, self.tgt_register = self._define_target(target)
-            self.q_register = QuantumRegister(n_qubits)
+            self._q_register = QuantumRegister(n_qubits)
 
             self.backend: Union[BackendV1, BackendV2, None] = Qiskit_config["backend"]
             if self.backend is not None:
                 assert n_qubits <= self.backend.num_qubits, f"n_qubits ({n_qubits} > " \
                                                             f"backend.num_qubits ({self.backend.num_qubits})"
             self.parametrized_circuit_func: Callable = Qiskit_config["parametrized_circuit"]
-            estimator_options: Dict = Qiskit_config.get("estimator_options", None)
+            estimator_options: Union[Options, Dict] = Qiskit_config.get("estimator_options", None)
 
             if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
                 self.estimator = Runtime_Estimator(session=self.backend, options=estimator_options)
+
             elif self.abstraction_level == "circuit":  # Either state-vector simulation (native) or AerBackend provided
                 if isinstance(self.backend, AerBackend):
                     # Estimator taking noise model into consideration, have to provide an AerBackend
@@ -196,8 +199,8 @@ class QuantumEnvironment:
                 self.estimator = BackendEstimator(self.backend)
 
                 if not isinstance(self.backend, DynamicsBackend):
-                    assert self.backend is not None, "A Backend is required for running algorithm at pulse level," \
-                                                     "Must be either DynamicsBackend or IBMBackend supporting OpenPulse"
+                    assert self.backend is not None, "A Backend is required for running algorithm at pulse level"
+                    assert self.backend.configuration().open_pulse, "Backend requires OpenPulse support"
                     qubits = list(range(self._n_qubits))
                     if "qubits" in Qiskit_config:
                         assert len(qubits) >= len(self.tgt_register), f'List of qubits (len {len(qubits)} must be >= ' \
@@ -224,7 +227,9 @@ class QuantumEnvironment:
                 else:
                     self.y_0 = Array(np.eye(self.model_dim ** 2))
                     self.ground_state = Array(np.array([1.0] + [0.0] * (self.model_dim ** 2 - 1)))
-        elif QUA_setup is not None:
+        elif QUA_config is not None:
+            self._config_type = "QUA"
+            self._config = QUA_config
             raise AttributeError("QUA compatibility not yet implemented")
             # TODO: Add a QUA program
 
@@ -247,10 +252,9 @@ class QuantumEnvironment:
                 assert target["gate"].num_qubits == self._n_qubits, f'No register provided and gate number of qubits ' \
                                                                     f'({target["gate"].num_qubits}) not compatible ' \
                                                                     f'with total number of qubits ({self._n_qubits})'
-
             target["register"] = list(range(self._n_qubits))
         tgt_register = target["register"]
-        assert type(tgt_register == List[int]), 'Input state shall be specified as a List'
+        assert isinstance(tgt_register, (List[int], QuantumRegister)), 'Input state shall be specified as a List'
         assert len(tgt_register) <= self._n_qubits, \
             f"Target register has bigger size ({np.max([len(tgt_register), np.max(tgt_register)])}) " \
             f"than total number of qubits ({self._n_qubits}) characterizing the full system"
@@ -305,14 +309,14 @@ class QuantumEnvironment:
                     input_circuit = QuantumCircuit(max(tgt_register) + 1).compose(input_circuit, qubits=tgt_register)
 
                     if input_circuit.num_qubits < self._n_qubits:
-                        new_input_circ = QuantumCircuit(self._n_qubits-input_circuit.num_qubits).tensor(input_circuit)
+                        new_input_circ = QuantumCircuit(self._n_qubits - input_circuit.num_qubits).tensor(input_circuit)
                         input_circuit = new_input_circ
 
                 # input_state['circuit'] = input_circuit
                 input_state['dm'] = DensityMatrix(input_circuit)
 
                 state_target_circuit = QuantumCircuit.copy(input_circuit)
-                state_target_circuit.append(gate_op, state_target_circuit.qubits)
+                state_target_circuit.append(gate_op, tgt_register)
                 input_state['target_state']["dm"] = DensityMatrix(state_target_circuit)
                 input_state['target_state']["circuit"] = state_target_circuit
                 input_state['target_state'] = self.calculate_chi_target_state(input_state['target_state'])
@@ -328,7 +332,7 @@ class QuantumEnvironment:
         """
         assert 'dm' in target_state, 'No input data for target state, provide DensityMatrix'
         target_state["Chi"] = np.array([np.trace(np.array(target_state["dm"].to_operator())
-                                                 @ self.Pauli_ops[k].to_matrix()).real for k in range(self.d ** 2)])
+                                                 @ self.Pauli_ops[k].to_matrix()).real for k in range(self._d ** 2)])
         # Real part is taken to convert it in good format,
         # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
         return target_state
@@ -340,7 +344,7 @@ class QuantumEnvironment:
         :param do_benchmark: Indicates if actual fidelity computation should be done on top of reward computation
         :return: Reward table (reward for each run in the batch)
         """
-        qc = QuantumCircuit(self.q_register)  # Reset the QuantumCircuit instance for next iteration
+        qc = QuantumCircuit(self._q_register)  # Reset the QuantumCircuit instance for next iteration
         angles, batch_size = np.array(actions), len(np.array(actions))
         self.action_history.append(angles)
 
@@ -358,7 +362,7 @@ class QuantumEnvironment:
         distribution = Categorical(probs=target_state["Chi"] ** 2)
         k_samples = distribution.sample(self.sampling_Pauli_space)
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self.d * distribution.prob(p))
+        reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self._d * distribution.prob(p))
                                   for p in pauli_index], 5)
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
@@ -421,7 +425,7 @@ class QuantumEnvironment:
             unitaries = [Operator(np.array(unitary.y[0])) for unitary in unitaries]
 
             if self.target_type == 'state':
-                density_matrix = DensityMatrix(np.mean([Statevector.from_int(0, dims=self.d).evolve(unitary)
+                density_matrix = DensityMatrix(np.mean([Statevector.from_int(0, dims=self._d).evolve(unitary)
                                                         for unitary in unitaries]))
                 self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
             else:
@@ -483,3 +487,28 @@ class QuantumEnvironment:
         else:
             self.state_fidelity_history.clear()
             self.density_matrix_history.clear()
+
+    def __repr__(self):
+        string = f"QuantumEnvironment composed of {self._n_qubits}, \n"
+        string += f"Defined target: {self.target_type} " \
+                  f"({self.target.get('gate', None) if not None else self.target['dm']})\n"
+        string += f"Defined backend: {self.backend},\n"
+        string += f"Abstraction level: {self.abstraction_level},\n"
+        return string
+
+    @property
+    def n_qubits(self):
+        return self._n_qubits
+
+    @n_qubits.setter
+    def n_qubits(self, n_qubits):
+        assert isinstance(n_qubits, int) and n_qubits > 0, "n_qubits must be a positive integer"
+        self._n_qubits = n_qubits
+
+    @property
+    def config_type(self):
+        return self._config_type
+
+    @property
+    def config(self):
+        return self._config

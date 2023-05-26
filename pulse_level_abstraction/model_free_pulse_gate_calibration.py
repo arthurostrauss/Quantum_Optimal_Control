@@ -13,12 +13,13 @@ from helper_functions import select_optimizer, generate_model, get_control_chann
 # Qiskit imports for building RL environment (circuit level)
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 from qiskit.providers import QubitProperties, BackendV1, BackendV2
-from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit_ibm_runtime import QiskitRuntimeService, Estimator
 from qiskit import pulse
 from qiskit_dynamics import DynamicsBackend, Solver
 from qiskit_dynamics.array import Array
 from qiskit.circuit import ParameterVector, QuantumCircuit, Gate, QuantumRegister
-from qiskit.extensions import XGate
+from qiskit.extensions import XGate, RXGate
+
 from qiskit.opflow import H, I, X, Z
 from qiskit.quantum_info import Operator
 
@@ -337,6 +338,8 @@ for i in tqdm(range(n_epochs)):
     # Apply gradients
     optimizer.apply_gradients(zip(grads, network.trainable_variables))
 
+if isinstance(q_env.estimator, Estimator):
+    q_env.estimator.session.close()
 """
 -----------------------------------------------------------------------------------------
 Plotting tools
