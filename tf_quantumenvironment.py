@@ -72,8 +72,10 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
     def _reset(self) -> ts.TimeStep:
         pass
 
-    def __init__(self, q_env: QuantumEnvironment, action_spec: types.ArraySpec, observation_spec: types.ArraySpec,
-                 batch_size: int = 100 ):
+    def __init__(self, q_env: QuantumEnvironment, circuit_context: QuantumCircuit,
+                 action_spec: types.ArraySpec,
+                 observation_spec: types.ArraySpec,
+                 batch_size: int = 100):
         """
         Class for building quantum environment for RL agent aiming to perform a state preparation task.
 
@@ -81,11 +83,12 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         :param batch_size: Number of trajectories to compute average return
         """
         if q_env.config_type == "Qiskit":
-            super().__init__(q_env.n_qubits, q_env.target, q_env.abstraction_level, q_env.config, None,
+            super().__init__(q_env.target, q_env.abstraction_level, q_env.config, None,
                              q_env.sampling_Pauli_space, q_env.n_shots, q_env.c_factor)
-        elif q_env.config_type == "QUA":
-            super().__init__(q_env.n_qubits, q_env.target, q_env.abstraction_level, None, q_env.config,
+        else:
+            super().__init__(q_env.target, q_env.abstraction_level, None, q_env.config,
                              q_env.sampling_Pauli_space, q_env.n_shots, q_env.c_factor)
+
         self._batch_size = batch_size
 
     def batched(self) -> bool:

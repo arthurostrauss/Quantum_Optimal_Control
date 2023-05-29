@@ -56,7 +56,7 @@ Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
 
-n_qubits = 2
+n_qubits = 3
 sampling_Paulis = 100
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 n_epochs = 800  # Number of epochs : default 1500
@@ -83,7 +83,8 @@ qr = QuantumRegister(n_qubits)
 bell_circuit = QuantumCircuit(qr)  # Specify quantum circuit required to prepare the ideal desired quantum state
 bell_circuit.h(qr[0])
 bell_circuit.cx(qr[0], qr[1])
-bell_tgt = {"circuit": bell_circuit}
+bell_tgt = {"circuit": bell_circuit,
+            "register": qr}
 
 # In case you want to prepare a state for a specific qubit set in your real backend, you can set the transpiler initial
 # layout
@@ -103,8 +104,7 @@ Qiskit_setup = {
 }
 
 
-
-q_env = QuantumEnvironment(n_qubits=n_qubits, target=bell_tgt, abstraction_level="circuit",
+q_env = QuantumEnvironment(target=bell_tgt, abstraction_level="circuit",
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.125)
 

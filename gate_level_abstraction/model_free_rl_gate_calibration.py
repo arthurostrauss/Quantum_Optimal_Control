@@ -54,7 +54,7 @@ Variables to define environment
 service = QiskitRuntimeService(channel='ibm_quantum')
 backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 
-# backend = None
+backend = None
 seed = 3590  # Seed for action sampling
 
 estimator_options = {"seed_simulator": None, 'resilience_level': 0}
@@ -128,7 +128,7 @@ Qiskit_setup = {
 target = cnot_target
 n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
 
-q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level="circuit",
+q_env = QuantumEnvironment(target=target, abstraction_level="circuit",
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.25)
 

@@ -240,7 +240,7 @@ Qiskit_setup = {
     "calibration_files": calibration_files
 }
 
-q_env = QuantumEnvironment(n_qubits=n_qubits, target=target, abstraction_level=abstraction_level,
+q_env = QuantumEnvironment(target=target, abstraction_level=abstraction_level,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
 
