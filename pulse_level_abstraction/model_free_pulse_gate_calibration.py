@@ -9,7 +9,7 @@ import numpy as np
 
 from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model, get_control_channel_map, get_solver_and_freq_from_backend
-
+from qconfig import QiskitConfig
 # Qiskit imports for building RL environment (circuit level)
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 from qiskit.providers import QubitProperties, BackendV1, BackendV2
@@ -119,7 +119,8 @@ n_qubits = 1
 sampling_Paulis = 10
 N_shots = 1  # Number of shots for sampling the quantum computer for each action vector
 n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
-
+n_epochs = 200  # Number of epochs
+batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 """
 Choose your backend: Here we deal with pulse level implementation. In Qiskit, there are only way two ways
 to run this code. If simulation, use DynamicsBackend and use BackendEstimator for implementing the 
@@ -208,37 +209,15 @@ backend = dynamics_backend
 
 # Define target gate
 X_tgt = {
-    "target_type": 'gate',
     "gate": XGate("X"),
-    "register": qubit_tgt_register,
-    "input_states": [
-        {"name": '|0>',
-         "circuit": I},
-
-        {"name": '|1>',
-         "circuit": X},
-
-        {"name": '|+>',
-         "circuit": H},
-        {"name": '|->',
-         "circuit": H @ X},
-    ]
-
+    "register": qubit_tgt_register
 }
 
 target = X_tgt
 
 # Wrap all info in one dict Qiskit_setup
-Qiskit_setup = {
-    "backend": backend,
-    "parametrized_circuit": apply_parametrized_circuit,
-    # Below are optional keys for pulse simulation
-    # Relevant only if backend is not a DynamicsBackend
-    "qubits": qubit_tgt_register,
-    "channel_freq": channel_freq,
-    "solver": solver,
-    "calibration_files": calibration_files
-}
+Qiskit_setup = QiskitConfig(parametrized_circuit=apply_parametrized_circuit, backend=backend, channel_freq=channel_freq,
+                            solver=solver, calibration_files=calibration_files)
 
 q_env = QuantumEnvironment(target=target, abstraction_level=abstraction_level,
                            Qiskit_config=Qiskit_setup,
@@ -250,8 +229,7 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 200  # Number of epochs
-batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
+
 opti = "Adam"
 eta = 0.001  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step

@@ -9,8 +9,8 @@ Created on 28/11/2022
 from qiskit import pulse, schedule
 from qiskit.pulse.transforms.canonicalization import block_to_schedule
 from qiskit.transpiler import InstructionProperties
-from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Reset, Gate, CircuitInstruction
-from qiskit.circuit.library import XGate, SXGate, RZGate, HGate, IGate, ZGate, SGate, SdgGate, TGate, TdgGate, CXGate
+from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Gate, CircuitInstruction
+from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
 from qiskit.providers import BackendV1, BackendV2
 
 from qiskit.quantum_info.states import DensityMatrix, Statevector
@@ -26,8 +26,7 @@ from qiskit_experiments.calibration_management.calibrations import Calibrations
 from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
 from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon
 from qiskit_experiments.library import ProcessTomography
-from qiskit_experiments.library.tomography.basis import PauliPreparationBasis, Pauli6PreparationBasis
-
+from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options
@@ -39,6 +38,7 @@ from itertools import product, permutations
 from typing import Dict, Union, Optional, List, Callable
 from copy import deepcopy
 import json
+from qconfig import QiskitConfig
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -64,29 +64,35 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     """
 
     target, num_qubits, qubits = backend.target, backend.num_qubits, list(range(backend.num_qubits))
-    phi = Parameter("phi")
     single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
     single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
 
     control_channel_map = backend.options.control_channel_map or {(ctrl, tgt): None
                                                                   for ctrl, tgt in permutations(qubits, 2)}
     two_qubit_properties = {qubits: None for qubits in control_channel_map}
-    fixed_phase_gates = [(ZGate(), np.pi), (SGate(), np.pi / 2), (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
-                         (TdgGate(), -np.pi / 4)]
-    other_gates = [(RZGate(phi),), (IGate(),), (HGate(),), (XGate(),), (SXGate(),), (Reset(),)]
+
+    # fixed_phase_gates = [(ZGate(), np.pi), (SGate(), np.pi / 2), (SdgGate(), -np.pi / 2), (TGate(), np.pi / 4),
+    #                      (TdgGate(), -np.pi / 4)]
+    standard_gates: Dict[str, Gate] = get_standard_gate_name_mapping()  # standard gate library
+    fixed_phase_gates = ["z", "s", "sdg", "t", "tdg"]
+    fixed_phases = np.pi * np.array([1, 1/2, -1/2, 1/4, -1/4])
+    other_gates = ["rz", "id", "h", "x", "sx", "reset"]
     single_qubit_gates = fixed_phase_gates + other_gates
+    two_qubit_gates = ["cx"]
     exp_results = {}
     existing_cals = calibration_files is not None
 
+    phi: Parameter = standard_gates["rz"].params[0]
     if existing_cals:
         cals = Calibrations.load(files=calibration_files)
     else:
         cals = Calibrations(libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"])])
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         for gate in single_qubit_gates:
-            target.add_instruction(gate[0], properties=single_qubit_properties)
+            target.add_instruction(standard_gates[gate], properties=single_qubit_properties)
         if num_qubits > 1:
-            target.add_instruction(CXGate(), properties=two_qubit_properties)
+            for gate in two_qubit_gates:
+                target.add_instruction(standard_gates[gate], properties=two_qubit_properties)
 
     for qubit in qubits:  # Add calibrations for each qubit
         control_channels = list(filter(lambda x: x is not None, [control_channel_map.get((i, qubit), None)
@@ -103,10 +109,10 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
         target.update_instruction_properties('rz', (qubit,), InstructionProperties(calibration=rz_cal, error=0.))
         target.update_instruction_properties('id', (qubit,), InstructionProperties(calibration=id_cal, error=0.))
         target.update_instruction_properties("reset", (qubit,), InstructionProperties(calibration=id_cal, error=0.))
-        for gate in fixed_phase_gates:
-            gate_cal = rz_cal.assign_parameters({phi: gate[1]}, inplace=False)
+        for phase, gate in zip(fixed_phases, fixed_phase_gates):
+            gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
             instruction_prop = InstructionProperties(calibration=gate_cal, error=0.)
-            target.update_instruction_properties(gate[0].name, (qubit,), instruction_prop)
+            target.update_instruction_properties(gate, (qubit,), instruction_prop)
 
         # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
         if not existing_cals:
@@ -136,10 +142,100 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     return cals, exp_results
 
 
+def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
+    """
+    Calculate for all P
+    :param target_state: Dictionary containing info on target state (name, density matrix)
+    :param n_qubits: Number of qubits
+    :return: Target state supplemented with appropriate "Chi" key
+    """
+    assert 'dm' in target_state, 'No input data for target state, provide DensityMatrix'
+    d = 2 ** n_qubits
+    Pauli_basis = pauli_basis(num_qubits=n_qubits)
+    target_state["Chi"] = np.array([np.trace(np.array(target_state["dm"].to_operator())
+                                             @ Pauli_basis[k].to_matrix()).real
+                                    for k in range(d ** 2)])
+    # Real part is taken to convert it in good format,
+    # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
+    return target_state
+
+
+def _define_target(target: Dict):
+
+    if "register" in target:
+        assert isinstance(target["register"], (List, QuantumRegister)), "Register should be of type List[int] " \
+                                                                        "or Quantum Register"
+    tgt_register = target.get("register", None)
+
+    if 'gate' not in target and 'circuit' not in target and 'dm' not in target:
+        raise KeyError("No target provided, need to have one of the following: 'gate' for gate calibration,"
+                       " 'circuit' or 'dm' for state preparation")
+    if ('gate' in target and 'circuit' in target) or ('gate' in target and 'dm' in target):
+        raise KeyError("Cannot have simultaneously a gate target and a state target")
+    if "circuit" in target or "dm" in target:
+        target["target_type"] = "state"
+        if 'circuit' in target:
+            assert isinstance(target["circuit"], QuantumCircuit), "Provided circuit is not a qiskit.QuantumCircuit " \
+                                                                  "object"
+            target["dm"] = DensityMatrix(target["circuit"])
+
+        assert 'dm' in target, 'no DensityMatrix or circuit argument provided to target dictionary'
+        assert isinstance(target["dm"], DensityMatrix), 'Provided dm is not a DensityMatrix object'
+        dm: DensityMatrix = target["dm"]
+        n_qubits = dm.num_qubits
+
+        if tgt_register is None:
+            tgt_register = list(range(n_qubits))
+
+        return _calculate_chi_target_state(target, n_qubits), "state", tgt_register, n_qubits
+
+    elif "gate" in target:
+        target["target_type"] = "gate"
+        assert isinstance(target["gate"], Gate), "Provided gate is not a qiskit.circuit.Gate operation"
+        gate: Gate = target["gate"]
+        n_qubits = target["gate"].num_qubits
+        if tgt_register is None:
+            tgt_register = QuantumRegister(n_qubits)
+
+        assert gate.num_qubits == len(tgt_register), f"Target gate number of qubits ({gate.num_qubits}) " \
+                                                     f"incompatible with indicated 'register' ({len(tgt_register)})"
+        if 'input_states' not in target:
+            target['input_states'] = [{"circuit": PauliPreparationBasis().circuit(s).decompose()}
+                                      for s in product(range(4), repeat=len(tgt_register))]
+
+            # target['input_states'] = [{"dm": Pauli6PreparationBasis().matrix(s),
+            #                            "circuit": CircuitOp(Pauli6PreparationBasis().circuit(s).decompose())}
+            #                           for s in product(range(6), repeat=len(tgt_register))]
+
+        for i, input_state in enumerate(target["input_states"]):
+            if 'circuit' not in input_state:
+                raise KeyError("'circuit' key missing in input_state")
+            assert isinstance(input_state["circuit"], QuantumCircuit), "Provided circuit is not a" \
+                                                                       "qiskit.QuantumCircuit object"
+
+            input_circuit: QuantumCircuit = input_state['circuit']
+            input_state['dm'] = DensityMatrix(input_circuit)
+
+            if isinstance(tgt_register, QuantumRegister):
+                state_target_circuit = QuantumCircuit(tgt_register)
+            else:
+                state_target_circuit = QuantumCircuit(len(tgt_register))
+
+            state_target_circuit.append(input_circuit.to_instruction(), tgt_register)
+            state_target_circuit.append(CircuitInstruction(gate, tgt_register))
+            input_state['target_state'] = {"dm": DensityMatrix(state_target_circuit),
+                                           "circuit": state_target_circuit,
+                                           "target_type": "state"}
+            input_state['target_state'] = _calculate_chi_target_state(input_state['target_state'], n_qubits)
+        return target, "gate", tgt_register, n_qubits
+    else:
+        raise KeyError('target type not identified, must be either gate or state')
+
+
 class QuantumEnvironment:
 
     def __init__(self, target: Dict, abstraction_level: str = 'circuit',
-                 Qiskit_config: Optional[Dict] = None,
+                 Qiskit_config: Optional[QiskitConfig] = None,
                  QUA_config: Optional[Dict] = None,
                  sampling_Pauli_space: int = 10, n_shots: int = 1, c_factor: float = 0.5):
         """
@@ -158,7 +254,7 @@ class QuantumEnvironment:
         """
 
         assert abstraction_level == 'circuit' or abstraction_level == 'pulse', 'Abstraction layer parameter can be' \
-                                                                               'only pulse or circuit'
+                                                                               ' either pulse or circuit'
         self.abstraction_level: str = abstraction_level
         if Qiskit_config is None and QUA_config is None:
             raise AttributeError("QuantumEnvironment requires one software configuration (can be Qiskit or QUA based)")
@@ -167,16 +263,16 @@ class QuantumEnvironment:
         elif Qiskit_config is not None:
             self._config_type = "Qiskit"
             self._config = Qiskit_config
-            self.target, self.target_type, self.tgt_register, self._n_qubits = self._define_target(target)
+            self.target, self.target_type, self.tgt_register, self._n_qubits = _define_target(target)
 
             self._d = 2 ** self.n_qubits
             self.c_factor = c_factor
             self.sampling_Pauli_space = sampling_Pauli_space
             self.n_shots = n_shots
 
-            self.backend: Union[BackendV1, BackendV2, None] = Qiskit_config["backend"]
-            self.parametrized_circuit_func: Callable = Qiskit_config["parametrized_circuit"]
-            estimator_options: Union[Options, Dict] = Qiskit_config.get("estimator_options", None)
+            self.backend: Union[BackendV1, BackendV2, None] = Qiskit_config.backend
+            self.parametrized_circuit_func: Callable = Qiskit_config.parametrized_circuit
+            estimator_options: Union[Options, Dict] = Qiskit_config.estimator_options
             self.Pauli_ops = pauli_basis(num_qubits=self._n_qubits)
 
             if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
@@ -194,14 +290,14 @@ class QuantumEnvironment:
                 self.estimator = BackendEstimator(self.backend)
 
                 if isinstance(self.backend, DynamicsBackend):
-                    calibration_files: List[str] = Qiskit_config.get('calibration_files', None)
+                    calibration_files: List[str] = Qiskit_config.calibration_files
                     self.calibrations, self.exp_results = perform_standard_calibrations(self.backend, calibration_files)
                     self.pulse_backend: DynamicsBackend = deepcopy(self.backend)
                 # For benchmarking the gate at each epoch, set the tools for Pulse level simulator
-                self.solver: Solver = Qiskit_config.get('solver', self.pulse_backend.options.solver)  # Custom Solver
+                self.solver: Solver = Qiskit_config.solver  # Custom Solver
                 # Can describe noisy channels, if none provided, pick Solver associated to DynamicsBackend by default
                 self.model_dim = self.solver.model.dim
-                self.channel_freq = Qiskit_config.get('channel_freq', None)
+                self.channel_freq = Qiskit_config.channel_freq
                 if isinstance(self.solver.model, HamiltonianModel):
                     self.y_0 = Array(np.eye(self.model_dim))
                     self.ground_state = Array(np.array([1.0] + [0.0] * (self.model_dim - 1)))
@@ -226,84 +322,6 @@ class QuantumEnvironment:
             self.built_unitaries = []
         else:
             self.state_fidelity_history = []
-
-    def _define_target(self, target: Dict):
-
-        if "register" in target:
-            assert isinstance(target["register"], (List, QuantumRegister)), "Register should be of type List[int] " \
-                                                                            "or Quantum Register"
-        tgt_register = target.get("register", None)
-
-        if target.get("target_type", None) == "state" or target.get("target_type", None) is None:
-            # Default mode is State preparation if no argument target_type is found
-            if 'circuit' in target:
-                assert isinstance(target["circuit"], QuantumCircuit), "Provided circuit is not a qiskit.QuantumCircuit " \
-                                                                      "object"
-                target["dm"] = DensityMatrix(target["circuit"])
-
-            assert 'dm' in target, 'no DensityMatrix or circuit argument provided to target dictionary'
-            assert isinstance(target["dm"], DensityMatrix), 'Provided dm is not a DensityMatrix object'
-            dm: DensityMatrix = target["dm"]
-            n_qubits = dm.num_qubits
-
-            if tgt_register is None:
-                tgt_register = list(range(n_qubits))
-
-            return self.calculate_chi_target_state(target, n_qubits), "state", tgt_register, n_qubits
-
-        elif target.get("target_type", None) == "gate":
-            if 'gate' not in target:
-                raise KeyError("No 'gate' key in target whereas target_type is set to 'gate'")
-            assert isinstance(target["gate"], Gate), "Provided gate is not a qiskit.circuit.Gate operation"
-            gate: Gate = target["gate"]
-            n_qubits = target["gate"].num_qubits
-            if tgt_register is None:
-                tgt_register = list(range(n_qubits))
-            assert gate.num_qubits == len(tgt_register), f"Target gate number of qubits ({gate.num_qubits}) " \
-                                                         f"incompatible with indicated 'register' ({len(tgt_register)})"
-            if 'input_states' not in target:
-                target['input_states'] = [{"circuit": PauliPreparationBasis().circuit(s).decompose()}
-                                          for s in product(range(4), repeat=len(tgt_register))]
-
-                # target['input_states'] = [{"dm": Pauli6PreparationBasis().matrix(s),
-                #                            "circuit": CircuitOp(Pauli6PreparationBasis().circuit(s).decompose())}
-                #                           for s in product(range(6), repeat=len(tgt_register))]
-
-            for i, input_state in enumerate(target["input_states"]):
-                if 'circuit' not in input_state:
-                    raise KeyError("'circuit' key missing in input_state")
-                assert isinstance(input_state["circuit"], QuantumCircuit), "Provided circuit is not a" \
-                                                                           "qiskit.QuantumCircuit object"
-
-                input_circuit: QuantumCircuit = input_state['circuit']
-                input_state['dm'] = DensityMatrix(input_circuit)
-
-                state_target_circuit = QuantumCircuit.copy(input_circuit)
-                state_target_circuit.append(CircuitInstruction(gate, tgt_register))
-                input_state['target_state'] = {"dm": DensityMatrix(state_target_circuit),
-                                               "circuit": state_target_circuit,
-                                               "target_type": "state"}
-                input_state['target_state'] = self.calculate_chi_target_state(input_state['target_state'], n_qubits)
-            return target, "gate", tgt_register, n_qubits
-        else:
-            raise KeyError('target type not identified, must be either gate or state')
-
-    def calculate_chi_target_state(self, target_state: Dict, n_qubits: int):
-        """
-        Calculate for all P
-        :param target_state: Dictionary containing info on target state (name, density matrix)
-        :param n_qubits: Number of qubits
-        :return: Target state supplemented with appropriate "Chi" key
-        """
-        assert 'dm' in target_state, 'No input data for target state, provide DensityMatrix'
-        d = 2**n_qubits
-        Pauli_basis = pauli_basis(num_qubits=n_qubits)
-        target_state["Chi"] = np.array([np.trace(np.array(target_state["dm"].to_operator())
-                                                 @ Pauli_basis[k].to_matrix()).real
-                                        for k in range(d ** 2)])
-        # Real part is taken to convert it in good format,
-        # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
-        return target_state
 
     def perform_action(self, actions: types.NestedTensorOrArray, do_benchmark: bool = True):
         """
@@ -440,8 +458,6 @@ class QuantumEnvironment:
         Method used to simulate pulse schedules, jit compatible
         """
         time_f = self.backend.target.dt * schedule_list[0].duration
-        # converter = InstructionToSignals(dt, self.channel_freq, channels=None)
-        # signals = [converter.get_signals(sched) for sched in schedule_list]
         unitaries = self.solver.solve(
             t_span=Array([0.0, time_f]),
             y0=self.y_0,
@@ -510,14 +526,13 @@ class QuantumEnvironment:
         """Return a MyCustomClass instance based on the input JSON string."""
 
         class_info = json.loads(json_str)
-        n_qubits = class_info["n_qubits"]
         abstraction_level = class_info["abstraction_level"]
         target = class_info["target"]
         n_shots = class_info["n_shots"]
         c_factor = class_info["c_factor"]
         sampling_Pauli_space = class_info["sampling_Pauli_space"]
         config = class_info["config"]
-        q_env = cls(n_qubits, target, abstraction_level, config, None, sampling_Pauli_space,
+        q_env = cls(target, abstraction_level, config, None, sampling_Pauli_space,
                     n_shots, c_factor)
         q_env.reward_history = class_info["reward_history"]
         q_env.action_history = class_info["action_history"]

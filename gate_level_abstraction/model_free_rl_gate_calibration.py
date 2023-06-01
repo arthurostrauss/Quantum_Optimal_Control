@@ -6,14 +6,17 @@ Code for arbitrary gate calibration using model-free reinforcement learning
 """
 
 import numpy as np
+from qiskit_ibm_runtime.options import SimulatorOptions, EnvironmentOptions
+
 from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
+from qconfig import QiskitConfig
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit_ibm_runtime import QiskitRuntimeService, Estimator, Options
 from qiskit.circuit import ParameterVector, QuantumCircuit
 from qiskit.extensions import CXGate, XGate
-
+from qconfig import QiskitConfig
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
 from tensorflow_probability.python.distributions import MultivariateNormalDiag
@@ -50,81 +53,31 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
 Variables to define environment
 -----------------------------------------------------------------------------------------------------
 """
+n_qubits = 2
+sampling_Paulis = 50
+N_shots = 10  # Number of shots for sampling the quantum computer for each action vector
+n_epochs = 600  # Number of epochs
+batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 
 service = QiskitRuntimeService(channel='ibm_quantum')
 backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 
 backend = None
 seed = 3590  # Seed for action sampling
+sim_options = SimulatorOptions(seed_simulator=seed, noise_model=None, coupling_map=None, basis_gates=None)
+env_options = EnvironmentOptions(job_tags=[f"RL_state_prep_epoch{i}" for i in range(n_epochs)])
+estimator_options = Options(simulator=sim_options, environment=env_options, resilience_level=0)
 
-estimator_options = {"seed_simulator": None, 'resilience_level': 0}
-
-n_qubits = 2
-sampling_Paulis = 50
-N_shots = 10  # Number of shots for sampling the quantum computer for each action vector
 
 # Target gate: CNOT
 cnot_target = {
-    "target_type": "gate",
     "gate": CXGate(),
     "register": [0, 1],
-    # "input_states": [{"name": "|00>",  # Drawn from Ref [21] of PhysRevLett.93.080502
-    #                   "circuit": I ^ 2,
-    #                   },
-    #                  {"name": "|01>",
-    #                   "circuit": X ^ I,
-    #                   },
-    #                  {"name": "|10>",
-    #                   "circuit": I ^ X,
-    #                   },
-    #                  {"name": "|11>",
-    #                   "circuit": X ^ X,
-    #                   },
-    #                  {"name": "|+_1>",
-    #                   "circuit": X ^ H,
-    #                   },
-    #                  {"name": "|0_->",
-    #                   "circuit": (H @ X) ^ I,
-    #                   },
-    #                  {"name": "|+_->",
-    #                   "circuit": (H @ X) ^ H,
-    #                   },
-    #                  {"name": "|1_->",
-    #                   "circuit": (H @ X) ^ X,
-    #                   },
-    #                  {"name": "|+_0>",
-    #                   "circuit": I ^ H,
-    #                   },
-    #                  {"name": "|0_->",
-    #                   "circuit": (H @ X) ^ I,
-    #                   },
-    #                  {"name": "|i_0>",
-    #                   "circuit": I ^ circuit_Plus_i,
-    #                   },
-    #                  {"name": "|i_1>",
-    #                   "circuit": X ^ circuit_Plus_i,
-    #                   },
-    #                  {"name": "|0_i>",
-    #                   "circuit": circuit_Plus_i ^ I,
-    #                   },
-    #                  {"name": "|i_i>",
-    #                   "circuit": circuit_Plus_i ^ circuit_Plus_i,
-    #                   },
-    #                  {"name": "|i_->",
-    #                   "circuit": (H @ X) ^ circuit_Plus_i,
-    #                   },
-    #                  {"name": "|+_i->",
-    #                   "circuit": circuit_Minus_i ^ H,
-    #                   },
-    #                  ]
-
 }
 
-Qiskit_setup = {
-    "backend": backend,
-    "parametrized_circuit": apply_parametrized_circuit,
-    "estimator_options": estimator_options
-}
+Qiskit_setup = QiskitConfig(parametrized_circuit=apply_parametrized_circuit, backend=backend,
+                            estimator_options=estimator_options)
+
 target = cnot_target
 n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
 
@@ -138,8 +91,6 @@ Hyperparameters for RL agent
 -----------------------------------------------------------------------------------------------------
 """
 # Hyperparameters for the agent
-n_epochs = 600  # Number of epochs
-batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
 opti = "Adam"
 eta = 0.0018  # Learning rate for policy update step
 eta_2 = None  # Learning rate for critic (value function) update step

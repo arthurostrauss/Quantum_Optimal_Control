@@ -3,15 +3,14 @@ Class to generate a RL environment suitable for usage with TF-agents, leveraging
 quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
-Created on 28/11/2022
+Created on 26/05/2023
 """
-from abc import ABC
 
 # Qiskit imports
 from qiskit import pulse, schedule
 from qiskit.pulse.transforms.canonicalization import block_to_schedule
 from qiskit.transpiler import InstructionProperties
-from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Reset, Gate
+from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Reset, Gate, CircuitInstruction
 from qiskit.circuit.library import XGate, SXGate, RZGate, HGate, IGate, ZGate, SGate, SdgGate, TGate, TdgGate, CXGate
 from qiskit.providers import BackendV1, BackendV2
 from quantumenvironment import QuantumEnvironment
@@ -61,10 +60,10 @@ jit = wrap(jax.jit, decorator=True)
 class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
 
     def observation_spec(self) -> types.NestedArraySpec:
-        pass
+        return self._observation_spec
 
     def action_spec(self) -> types.NestedArraySpec:
-        pass
+        return self._action_spec
 
     def _step(self, action: types.NestedArray) -> ts.TimeStep:
         pass
@@ -90,6 +89,41 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
                              q_env.sampling_Pauli_space, q_env.n_shots, q_env.c_factor)
 
         self._batch_size = batch_size
+        self.circuit_context = circuit_context.remove_final_measurements(inplace=False)
+        self.circuit_context.qubit_start_time()
+        self._action_spec = action_spec
+        self._observation_spec = observation_spec
+        self._qregs = self.circuit_context.qregs
+        assert self.target_type == 'gate', "This class is made for gate calibration only"
+        if isinstance(self.target["register"], QuantumRegister):
+            assert self.target["register"] in self.circuit_context.qregs, "Provided register not in circuit context " \
+                                                                          "list of registers"
+            self.target_instruction = CircuitInstruction(self.target["gate"], self.target["register"])
+        else:  # target register given as a list of integers
+            qreg = []
+            for q in self.target["register"]:
+                qreg.append(self.circuit_context.qubits[q])
+            self.target_instruction = CircuitInstruction(self.target["gate"], qreg)
+
+        self.circuit_truncations = [QuantumCircuit(*self.circuit_context.qregs)
+                                    for _ in range(self.circuit_context.data.count(self.target_instruction))]
+
+        for i, circuit in enumerate(self.circuit_truncations):
+            for instruction in circuit_context.data:
+                counts = circuit.data.count(self.target_instruction)
+                if counts <= i:
+                    circuit.append(instruction)
+                elif instruction.qubits != self.target_instruction.qubits:
+                    circuit.append(instruction)
+                # elif counts == i:
+                #     check = True
+                #     if instruction
+                #     for qubit in instruction.qubits:
+                #         if qubit in self.target_instruction.qubits:
+                #             check = False
+                #     if check:
+                #         circuit.append(instruction)
+
 
     def batched(self) -> bool:
         if self.config == 'Qiskit':

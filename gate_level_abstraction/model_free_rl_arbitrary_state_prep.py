@@ -9,6 +9,7 @@ Code for arbitrary state preparation based on scheme described in Appendix D.2b 
 import numpy as np
 from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
+from qconfig import QiskitConfig
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister
@@ -97,11 +98,8 @@ ket00, ket11 = np.kron(ket0, ket0), np.kron(ket1, ket1)
 bell_state = Statevector((ket00 + ket11) / np.sqrt(2))
 bell_tgt["dm"] = DensityMatrix(bell_state)
 
-Qiskit_setup = {
-    "backend": None,
-    "parametrized_circuit": apply_parametrized_circuit,
-    "estimator_options": estimator_options
-}
+Qiskit_setup = QiskitConfig(parametrized_circuit=apply_parametrized_circuit, backend=backend,
+                            estimator_options=estimator_options)
 
 
 q_env = QuantumEnvironment(target=bell_tgt, abstraction_level="circuit",

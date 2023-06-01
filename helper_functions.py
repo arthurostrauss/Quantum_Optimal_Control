@@ -1,15 +1,18 @@
 import tensorflow as tf
 import numpy as np
-from typing import Optional, Tuple, List, Union, Dict
+from typing import Optional, Tuple, List, Union, Dict, Sequence
 from tensorflow.python.keras.layers import Input, Dense
 from tensorflow.python.keras import Model
-from qiskit.providers import BackendV1
-from qiskit.quantum_info import Operator
+from qiskit.providers import BackendV1, Backend
+from qiskit.quantum_info import Operator, average_gate_fidelity, state_fidelity, process_fidelity
+from qiskit.circuit import QuantumCircuit, Gate
 from qiskit_dynamics import Solver, DynamicsBackend, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit.exceptions import QiskitError
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
 from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs
+from qiskit_experiments.framework import BatchExperiment, BaseAnalysis
+from qiskit_experiments.library.tomography import StateTomography, ProcessTomography
 
 
 def constrain_mean_value(mu_var):
@@ -18,6 +21,35 @@ def constrain_mean_value(mu_var):
 
 def constrain_std_value(std_var):
     return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
+
+
+def state_fidelity_from_state_tomography(qc_list: List[QuantumCircuit], backend: Backend,
+                                         measurement_indices: Optional[Sequence[int]],
+                                         analysis: Union[BaseAnalysis, None, str] = "default"):
+    state_tomo = BatchExperiment([StateTomography(qc, measurement_indices=measurement_indices, analysis=analysis)
+                                  for qc in qc_list], backend=backend)
+    exp_data = state_tomo.run().block_for_results()
+    child_data = exp_data.child_data()
+    exp_results = [data.analysis_result() for data in child_data]
+    fidelities = [data.analysis_result("state_fidelity").value for data in child_data]
+
+    return fidelities, exp_results
+
+
+def gate_fidelity_from_process_tomography(qc_list: List[QuantumCircuit], backend: Backend,
+                                          target_gate: Gate, physical_qubits: Optional[Sequence[int]],
+                                          analysis: Union[BaseAnalysis, None, str] = "default"):
+    """
+    Extract average gate and process fidelities from batch of Quantum Circuit for target gate
+    """
+    # Process tomography
+    process_tomo = BatchExperiment([ProcessTomography(qc, physical_qubits=physical_qubits, analysis=analysis)
+                                    for qc in qc_list], backend=backend)
+
+    results = process_tomo.run().block_for_results()
+    process_results = [data.analysis_result() for data in results.child_data()]
+
+    return process_results
 
 
 def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):

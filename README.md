@@ -92,7 +92,6 @@ Finally, the last hyperparameter of the overall RL algorithm is the number of ep
 Our repo relies on the modelling of the quantum system as a class ```QuantumEnvironment```, which is characterized by the following attributes:
 
 - ``` target: Dict```: a dictionary containing information about the target that the RL agent should prepare. It could either be a target state or a target gate. This dictionary should contain the following keys:
-    - ``` target_type: str = Union["gate", "state"]```:  specifies the type of target the RL agent should prepare
     - ```gate: qiskit.circuit.Gate```: if the target type is a gate, which quantum gate is the target the agent should calibrate
     - ```circuit: qiskit.circuit.QuantumCircuit```: If target type is a state, provides an ideal quantum circuit that should prepare the target state of interest
     - ```dm: qiskit.quantum_info.DensityMatrix```: Alternatively to the ```circuit```key, one can provide a ```DensityMatrix```describing the target state of interest (if target type is a state).
