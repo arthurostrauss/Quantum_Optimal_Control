@@ -7,9 +7,9 @@ Created on 26/05/2023
 """
 
 # Qiskit imports
-from qiskit import pulse, schedule
+from qiskit import pulse, schedule, transpile
 from qiskit.pulse.transforms.canonicalization import block_to_schedule
-from qiskit.transpiler import InstructionProperties
+from qiskit.transpiler import InstructionProperties, InstructionDurations, Layout, CouplingMap
 from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Reset, Gate, CircuitInstruction
 from qiskit.circuit.library import XGate, SXGate, RZGate, HGate, IGate, ZGate, SGate, SdgGate, TGate, TdgGate, CXGate
 from qiskit.providers import BackendV1, BackendV2
@@ -29,6 +29,7 @@ from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDr
 from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon
 from qiskit_experiments.library import ProcessTomography
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis, Pauli6PreparationBasis
+from qiskit_experiments.framework import BackendData
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
@@ -38,7 +39,7 @@ from qiskit_aer.backends.aerbackend import AerBackend
 
 import numpy as np
 from itertools import product
-from typing import Dict, Union, Optional, List, Callable
+from typing import Dict, Union, Optional, List, Callable, Any
 from copy import deepcopy
 
 # QUA imports
@@ -50,7 +51,9 @@ from copy import deepcopy
 from tensorflow_probability.python.distributions import Categorical
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
+from tf_agents.specs import BoundedArraySpec, ArraySpec
 from tf_agents.environments import PyEnvironment
+from tf_agents.trajectories.time_step import TimeStep
 
 import jax
 
@@ -71,60 +74,95 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
     def _reset(self) -> ts.TimeStep:
         pass
 
+    def close(self) -> None:
+        if isinstance(self.estimator, Runtime_Estimator):
+            self.estimator.session.close()
+
+    def get_info(self) -> Any:
+        pass
+    def time_step_spec(self) -> ts.TimeStep:
+        pass
+
     def __init__(self, q_env: QuantumEnvironment, circuit_context: QuantumCircuit,
                  action_spec: types.ArraySpec,
                  observation_spec: types.ArraySpec,
-                 batch_size: int = 100):
+                 batch_size: int = 100,
+                 ):
         """
         Class for building quantum environment for RL agent aiming to perform a state preparation task.
 
-        :param q_env: Existing QuantumEnvironment object, containing a target and a configuration
-        :param batch_size: Number of trajectories to compute average return
+        :param q_env: Existing QuantumEnvironment object, containing a target and a configuration.
+        :param circuit_context: Transpiled QuantumCircuit where target gate is located to perform context aware gate
+            calibration.
+        :param batch_size: Number of trajectories to compute average return.
         """
+        #TODO: Redeclare everything instead of reinitializing (loss of time especially for DynamicsBackend declaration)
         if q_env.config_type == "Qiskit":
+            q_env.config.do_calibrations = False
             super().__init__(q_env.target, q_env.abstraction_level, q_env.config, None,
                              q_env.sampling_Pauli_space, q_env.n_shots, q_env.c_factor)
         else:
             super().__init__(q_env.target, q_env.abstraction_level, None, q_env.config,
                              q_env.sampling_Pauli_space, q_env.n_shots, q_env.c_factor)
 
-        self._batch_size = batch_size
-        self.circuit_context = circuit_context.remove_final_measurements(inplace=False)
-        self.circuit_context.qubit_start_time()
-        self._action_spec = action_spec
-        self._observation_spec = observation_spec
-        self._qregs = self.circuit_context.qregs
         assert self.target_type == 'gate', "This class is made for gate calibration only"
-        if isinstance(self.target["register"], QuantumRegister):
-            assert self.target["register"] in self.circuit_context.qregs, "Provided register not in circuit context " \
-                                                                          "list of registers"
-            self.target_instruction = CircuitInstruction(self.target["gate"], self.target["register"])
-        else:  # target register given as a list of integers
-            qreg = []
-            for q in self.target["register"]:
-                qreg.append(self.circuit_context.qubits[q])
-            self.target_instruction = CircuitInstruction(self.target["gate"], qreg)
+        self.backend_data = BackendData(self.backend)
+        if isinstance(self.backend, BackendV1):
+            instruction_durations = InstructionDurations.from_backend(self.backend)
+        elif isinstance(self.backend, BackendV2):
+            instruction_durations = self.backend.instruction_durations
+        else:
+            raise Warning("No InstructionDuration object found in backend, will not be able to run the experiment")
+
+
+        self.physical_qubits = list(self.layout.get_physical_bits().keys())
+        if self.tgt_register in circuit_context.qregs:
+            qreg = self.tgt_register
+            ancilla_reg = [reg for reg in circuit_context.qregs if reg != qreg]
+            for reg in ancilla_reg:
+                self.layout.add_register(reg)
+        elif len(circuit_context.qregs) > 1:
+            raise ValueError("Target physical qubits not assignable at the moment when circuit is composed with more"
+                             "than one QuantumRegister if target register is not in circuit"
+                             " (mapping not straightforward)")
+        else:
+            qreg = QuantumRegister(bits=[circuit_context.qregs[0][i] for i in self.physical_qubits], name="tgt_reg")
+            ancilla_reg = QuantumRegister(bits=[qubit for j, qubit in enumerate(circuit_context.qregs[0]) if j not in self.physical_qubits], name='ancilla_reg')
+            self.layout = Layout({qreg[i]: self.physical_qubits[i] for i in range(len(qreg))})
+            self.layout.add_register(ancilla_reg)
+
+
+        self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False), backend=self.backend,
+                                         scheduling_method='asap',
+                                         instruction_durations=instruction_durations,
+                                         optimization_level=1)
+
+        qreg = QuantumRegister(bits=[self.circuit_context.qregs[0][i] for i in self.physical_qubits], name="tgt_reg")
+        self.target_instruction = CircuitInstruction(self.target["gate"], qreg)
 
         self.circuit_truncations = [QuantumCircuit(*self.circuit_context.qregs)
                                     for _ in range(self.circuit_context.data.count(self.target_instruction))]
 
+        self._target_instruction_indices = []
+        self._target_instruction_timings = []
+        for i, instruction in enumerate(self.circuit_context.data):
+            if instruction == self.target_instruction:
+                self._target_instruction_indices.append(i)
+                self._target_instruction_timings.append(self.circuit_context.op_start_times[i])
+
         for i, circuit in enumerate(self.circuit_truncations):
-            for instruction in circuit_context.data:
+            for start_time, instruction in zip(self.circuit_context.op_start_times, self.circuit_context.data):
                 counts = circuit.data.count(self.target_instruction)
-                if counts <= i:
+                if counts <= i or start_time <= self._target_instruction_timings[i]:
                     circuit.append(instruction)
-                elif instruction.qubits != self.target_instruction.qubits:
-                    circuit.append(instruction)
-                # elif counts == i:
-                #     check = True
-                #     if instruction
-                #     for qubit in instruction.qubits:
-                #         if qubit in self.target_instruction.qubits:
-                #             check = False
-                #     if check:
-                #         circuit.append(instruction)
 
 
+        self._batch_size = batch_size
+        self._action_spec = action_spec
+        self._observation_spec = observation_spec
+
+    def reward_spec(self) -> types.NestedArraySpec:
+        return ArraySpec(shape=(self.batch_size,), dtype=float)
     def batched(self) -> bool:
         if self.config == 'Qiskit':
             return True
