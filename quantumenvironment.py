@@ -5,6 +5,8 @@ quantum system (could also include QUA code in the future)
 Author: Arthur Strauss
 Created on 28/11/2022
 """
+import time
+
 # Qiskit imports
 from qiskit import pulse, schedule, transpile
 from qiskit.pulse.transforms.canonicalization import block_to_schedule
@@ -29,13 +31,15 @@ from qiskit_experiments.library import ProcessTomography, CrossResonanceHamilton
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session, QiskitRuntimeService
 from qiskit_aer.primitives import Estimator as Aer_Estimator
 from qiskit_aer.backends.aerbackend import AerBackend
 
 import numpy as np
 from itertools import product, permutations
-from typing import Dict, Union, Optional, List, Callable, Tuple
+from typing import Dict, Union, Optional, List, Callable
+# For compatibility for options formatting between Estimators.
+from dataclasses import asdict
 from copy import deepcopy
 import json
 from qconfig import QiskitConfig, QuaConfig
@@ -191,7 +195,7 @@ def _define_target(target: Dict):
     if isinstance(tgt_register, List):
         q_register = QuantumRegister(len(tgt_register))
         layout = Layout({q_register[i]: tgt_register[i] for i in range(len(tgt_register))})
-    else: # QuantumRegister or None
+    else:  # QuantumRegister or None
         q_register = tgt_register
         layout = None
 
@@ -230,7 +234,6 @@ def _define_target(target: Dict):
         if layout is None:
             layout = Layout.generate_trivial_layout(q_register)
 
-
         assert gate.num_qubits == len(q_register), f"Target gate number of qubits ({gate.num_qubits}) " \
                                                      f"incompatible with indicated 'register' ({len(tgt_register)})"
         if 'input_states' not in target:
@@ -250,11 +253,10 @@ def _define_target(target: Dict):
             input_circuit: QuantumCircuit = input_state['circuit']
             input_state['dm'] = DensityMatrix(input_circuit)
 
-
             state_target_circuit = QuantumCircuit(q_register)
-
             state_target_circuit.append(input_circuit.to_instruction(), q_register)
             state_target_circuit.append(CircuitInstruction(gate, q_register))
+
             input_state['target_state'] = {"dm": DensityMatrix(state_target_circuit),
                                            "circuit": state_target_circuit,
                                            "target_type": "state"}
@@ -307,8 +309,11 @@ class QuantumEnvironment:
             self.parametrized_circuit_func: Callable = Qiskit_config.parametrized_circuit
             estimator_options: Optional[Union[Options, Dict]] = Qiskit_config.estimator_options
 
+
             if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
-                self.estimator = Runtime_Estimator(session=self.backend, options=estimator_options)
+                self.estimator = Runtime_Estimator(session=Session(self.backend.service, self.backend),
+                                                   options=estimator_options)
+                self.estimator.set_options(initial_layout=self.layout)
 
             elif self.abstraction_level == "circuit":  # Either state-vector simulation (native) or AerBackend provided
                 if isinstance(self.backend, AerBackend):
@@ -331,7 +336,7 @@ class QuantumEnvironment:
                 # For benchmarking the gate at each epoch, set the tools for Pulse level simulator
                 self.solver: Solver = Qiskit_config.solver
                 if Qiskit_config.solver is None:
-                    self.solver:Solver = self.pulse_backend.options.solver # Custom Solver
+                    self.solver: Solver = self.pulse_backend.options.solver  # Custom Solver
                 # Can describe noisy channels, if none provided, pick Solver associated to DynamicsBackend by default
                 self.model_dim = self.solver.model.dim
                 self.channel_freq = Qiskit_config.channel_freq
