@@ -8,27 +8,14 @@ Created on 26/05/2023
 
 # Qiskit imports
 from qiskit import pulse, schedule, transpile
-from qiskit.pulse.transforms.canonicalization import block_to_schedule
-from qiskit.transpiler import InstructionProperties, InstructionDurations, Layout, CouplingMap
+from qiskit.transpiler import InstructionDurations, Layout, CouplingMap
 from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Gate, CircuitInstruction, ParameterVector
-from qiskit.circuit.library import XGate, SXGate, RZGate, HGate, IGate, ZGate, SGate, SdgGate, TGate, TdgGate, CXGate
 from qiskit.providers import BackendV1, BackendV2
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
-# Qiskit dynamics for pulse simulation (benchmarking)
-from qiskit_dynamics import DynamicsBackend, Solver
-from qiskit_dynamics.array import Array, wrap
-from qiskit_dynamics.models import HamiltonianModel
-
-# Qiskit Experiments for generating reliable baseline for more complex gate calibrations / state preparations
-from qiskit_experiments.calibration_management.calibrations import Calibrations
-from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
-from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon
-from qiskit_experiments.library import ProcessTomography
-from qiskit_experiments.library.tomography.basis import PauliPreparationBasis, Pauli6PreparationBasis
 from qiskit_experiments.framework import BackendData
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
@@ -39,25 +26,15 @@ from qiskit_aer.backends.aerbackend import AerBackend
 
 import numpy as np
 from itertools import product, chain
-from typing import Dict, Union, Optional, List, Callable, Any, Tuple
-from copy import deepcopy
-
-# QUA imports
-# from qualang_tools.bakery.bakery import baking
-# from qm.qua import *
-# from qm.QuantumMachinesManager import QuantumMachinesManager
+from typing import Dict, Optional, List, Any, Tuple
 
 # Tensorflow modules
+import tensorflow as tf
 from tensorflow_probability.python.distributions import Categorical
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
-from tf_agents.specs import BoundedArraySpec, ArraySpec
+from tf_agents.specs import ArraySpec, TensorSpec, BoundedArraySpec
 from tf_agents.environments import PyEnvironment
-from tf_agents.trajectories.time_step import TimeStep
-
-import jax
-
-jit = wrap(jax.jit, decorator=True)
 
 
 def create_array(circ_trunc, batchsize, n_actions):
@@ -70,10 +47,11 @@ def create_array(circ_trunc, batchsize, n_actions):
 class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
 
     def __init__(self, q_env: QuantumEnvironment, circuit_context: QuantumCircuit,
-                 action_spec: types.ArraySpec,
-                 observation_spec: types.ArraySpec,
-                 batch_size: int = 100,
-                 training_steps_per_gate: int = 1500
+                 action_spec: types.Spec,
+                 observation_spec: types.Spec,
+                 batch_size: int,
+                 training_steps_per_gate: int = 1500,
+                 intermediate_rewards: bool = False,
                  ):
         """
         Class for building quantum environment for RL agent aiming to perform a state preparation task.
@@ -83,7 +61,6 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
             calibration.
         :param action_spec: ActionSpec
         :param observation_spec: ObservationSpec
-        :param batch_size: Number of trajectories to compute average return.
         """
         # TODO: Redeclare everything instead of reinitializing (loss of time especially for DynamicsBackend declaration)
         if q_env.config_type == "Qiskit":
@@ -143,10 +120,9 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         self.target_instruction = CircuitInstruction(self.target["gate"], self.tgt_register)
         self.tgt_instruction_counts = self.circuit_context.data.count(self.target_instruction)
 
-        self._parameters = [ParameterVector(f"a_{j}", action_spec.shape[0]) for j in range(self.tgt_instruction_counts)]
-
-        self._param_values = create_array(self.tgt_instruction_counts, batch_size, action_spec.shape[0])
-        print("Initial", self._param_values)
+        self._parameters = [ParameterVector(f"a_{j}", action_spec.shape[-1]) for j in
+                            range(self.tgt_instruction_counts)]
+        self._param_values = create_array(self.tgt_instruction_counts, batch_size, action_spec.shape[-1])
         self._target_instruction_indices, self._target_instruction_timings = [], []
 
         # Store time and instruction indices where target gate is played in circuit
@@ -163,6 +139,8 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
         self._training_steps_per_gate = training_steps_per_gate
         self._inside_trunc_tracker = 0
+        self._episode_ended = False
+        self._intermediate_rewards = intermediate_rewards
 
     def _generate_circuit_truncations(self) -> Tuple[List[QuantumCircuit], List[QuantumCircuit]]:
         custom_circuit_truncations = [QuantumCircuit(self.tgt_register, self.nn_register, name=f'c_circ_trunc_{i}')
@@ -222,6 +200,7 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         self.circuit_truncations = self._generate_circuit_truncations()
 
     def do_benchmark(self, step_tracker, current_time_step):
+        # TODO: Create a saving log for specific time steps (every once in a while), should have an additional input
         return False
 
     def _retrieve_target_state(self, input_state_index: int, iteration: int) -> Dict:
@@ -269,7 +248,7 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
                 #     self.input_output_state_fidelity_history[i].append(
                 #         np.mean([state_fidelity(input_state["target_state"]["dm"],
                 #                                 output_state) for output_state in output_states]))
-        elif self.abstraction_level == 'pulse':
+        else:
             # Pulse simulation
             schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
             unitaries = self._simulate_pulse_schedules(schedule_list)
@@ -302,7 +281,20 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         return self._action_spec
 
     def reward_spec(self) -> types.NestedArraySpec:
-        return ArraySpec(shape=(self.batch_size,), dtype=float)
+        # return TensorSpec(shape=(self.batch_size,), dtype=float)
+        return ArraySpec(shape=(self.batch_size,), dtype=float, name='reward')
+
+    # def discount_spec(self) -> types.NestedArraySpec:
+    #     return BoundedArraySpec(shape=(self.batch_size,), dtype=float, minimum=0., maximum=1., name='discount')
+    #
+    #
+    # def time_step_spec(self) -> ts.TimeStep:
+    #     return ts.TimeStep(
+    #         observation=self.observation_spec(),
+    #         step_type=ArraySpec(shape=(self.batch_size,), dtype=int, name="step_type"),
+    #         reward=self.reward_spec(),
+    #         discount=self.discount_spec()
+    #     )
 
     def batched(self) -> bool:
         if self.config == 'Qiskit':
@@ -334,9 +326,22 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         except AssertionError:
             raise ValueError('Training steps number should be positive integer.')
 
-    def _step(self, action: types.NestedArray) -> ts.TimeStep:
+    def _reset(self) -> ts.TimeStep:
+        self._param_values = create_array(self.tgt_instruction_counts, self.batch_size, self.action_spec().shape[0])
+        self._inside_trunc_tracker = 0
+        self._episode_ended = False
+        self._current_time_step = ts.restart(observation=np.reshape(np.tile([self._index_input_state,
+                                                                             self._inside_trunc_tracker],
+                                                                            self.batch_size), (20, 2)),
+                                             reward_spec=ArraySpec(shape=(self.batch_size,), dtype=float,
+                                                                   name='reward'))
+        return self.current_time_step()
 
-        trunc_index = self._step_tracker // self.training_steps_per_gate
+    def _step(self, action: types.NestedArray) -> ts.TimeStep:
+        if self._episode_ended:
+            return self.reset()
+        trunc_index = self._select_trunc_index()
+
         if trunc_index >= self.tgt_instruction_counts:
             raise IndexError(f"Circuit does contain only {self.tgt_instruction_counts} target gates and step"
                              f" function tries to access gate nb {trunc_index} ")
@@ -344,14 +349,39 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         # Figure out if in middle of param loading or should compute the reward
         step_status = self._inside_trunc_tracker
         params, batch_size = np.array(action), len(np.array(action))
-        print(trunc_index, step_status)
-        print(self._param_values)
+        # self.batch_size = batch_size
         self._param_values[trunc_index][step_status] = params
 
-        if step_status < trunc_index:  # TODO: Check if second condition holds up
+        if step_status < trunc_index:
             self._inside_trunc_tracker += 1
-            return ts.transition(observation=self._index_input_state, reward=np.zeros(batch_size), discount=1,
-                                 outer_dims=batch_size)
+            if self._intermediate_rewards:
+                reward_table = self.compute_reward(trunc_index)
+                obs = reward_table  # Set observation to obtained reward (might not be the smartest choice here)
+                self._current_time_step = ts.transition(observation=obs,
+                                                        reward=reward_table,
+                                                        discount=1.,
+                                                        )
+            else:
+                obs = np.reshape(np.tile([self._index_input_state,self._inside_trunc_tracker],
+                                         self.batch_size), (20, 2))
+                self._current_time_step = ts.transition(observation=obs,
+                                                        reward=np.zeros((batch_size,)),
+                                                        discount=1.,
+                                                        )
+
+        else:
+            reward_table = self.compute_reward(trunc_index)
+            if self._intermediate_rewards:
+                obs = reward_table
+            else:
+                obs = np.array([self._index_input_state, self._inside_trunc_tracker])
+
+            self._current_time_step = ts.termination(observation=obs,
+                                                     reward=reward_table)
+            self._episode_ended = True
+        return self.current_time_step()
+
+    def compute_reward(self, trunc_index: int):
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
 
         target_state = self._retrieve_target_state(self._index_input_state, trunc_index)
@@ -364,9 +394,8 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
                                   for p in pauli_index], 5)
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        observables = SparsePauliOp.from_list(
-            [(pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
-             for i, p in enumerate(pauli_index)])
+        observables = SparsePauliOp.from_list([(pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
+                                               for i, p in enumerate(pauli_index)])
 
         # self.parametrized_circuit_func(training_circ, self._parameters[:iteration])
 
@@ -374,35 +403,25 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         # Apply parametrized quantum circuit (action), for benchmarking only
         #
         benchmark_circ = training_circ.copy(name='benchmark_circ')
-        print(benchmark_circ.parameters)
-        print(self._param_values[trunc_index])
-        print(np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]), (batch_size, trunc_index + 1)))
-        # TODO: Find a way to plug parameters for benchmarking and for estimator...
-        qc_list = [benchmark_circ.bind_parameters(param)
-                   for param in np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]),
-                                           (batch_size, trunc_index + 1))]
-        self.qc_history.append(qc_list)
 
+        reshaped_params = np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]),
+                                     (self.batch_size, trunc_index + 1))
+        qc_list = [benchmark_circ.bind_parameters(param) for param in reshaped_params]
+        self.qc_history.append(qc_list)
         if self.do_benchmark(self._step_tracker, self.current_time_step()):
             self._store_benchmarks(qc_list)
 
             # Build full quantum circuit: concatenate input state prep and parametrized unitary
-        job = self.estimator.run(circuits=[training_circ] * batch_size, observables=[observables] * batch_size,
-                                 parameter_values=np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]), (batch_size, trunc_index + 1)),
+        job = self.estimator.run(circuits=[training_circ] * self.batch_size,
+                                 observables=[observables] * self.batch_size,
+                                 parameter_values=reshaped_params,
                                  shots=self.sampling_Pauli_space * self.n_shots,
                                  job_tags=[f"rl_qoc_step{self._step_tracker}"])
 
         reward_table = job.result().values
         self.reward_history.append(reward_table)
-        assert len(reward_table) == batch_size
-
-        return ts.termination(observation=self._index_input_state, reward=reward_table, outer_dims=batch_size)
-
-    def _reset(self) -> ts.TimeStep:
-        self._param_values = create_array(self.tgt_instruction_counts, self.batch_size, self.action_spec().shape[0])
-        self._inside_trunc_tracker = 0
-        return ts.restart(observation=self._index_input_state, batch_size=self.batch_size,
-                          reward_spec=ArraySpec((self.batch_size,), dtype=float))
+        assert len(reward_table) == self.batch_size
+        return reward_table
 
     def close(self) -> None:
         if isinstance(self.estimator, Runtime_Estimator):
@@ -413,3 +432,9 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
 
     def perform_action(self, actions: types.NestedTensorOrArray, do_benchmark: bool = True):
         raise NotImplementedError("This method shall not be used in this class, use QuantumEnvironment instead")
+
+    def _select_trunc_index(self):
+        if self._intermediate_rewards:
+            return self.step_tracker % self.tgt_instruction_counts
+        else:
+            return self._step_tracker // self.training_steps_per_gate

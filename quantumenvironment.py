@@ -546,6 +546,10 @@ class QuantumEnvironment:
     def config(self):
         return self._config
 
+    @property
+    def step_tracker(self):
+        return self._step_tracker
+
     def to_json(self):
         return json.dumps({"n_qubits": self.n_qubits, "config": self._config,
                            "abstraction_level": self.abstraction_level,
