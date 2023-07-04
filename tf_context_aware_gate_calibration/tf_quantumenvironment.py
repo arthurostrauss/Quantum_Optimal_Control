@@ -405,7 +405,7 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         benchmark_circ = training_circ.copy(name='benchmark_circ')
 
         reshaped_params = np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]),
-                                     (self.batch_size, trunc_index + 1))
+                                     (self.batch_size, (trunc_index + 1)* self.action_spec().shape[-1]))
         qc_list = [benchmark_circ.bind_parameters(param) for param in reshaped_params]
         self.qc_history.append(qc_list)
         if self.do_benchmark(self._step_tracker, self.current_time_step()):

@@ -7,9 +7,9 @@ Created on 26/06/2023
 """
 
 # Qiskit imports
-from qiskit import pulse, schedule, transpile
+from qiskit import schedule, transpile
 from qiskit.transpiler import InstructionDurations, Layout, CouplingMap
-from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Gate, CircuitInstruction, ParameterVector
+from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector
 from qiskit.providers import BackendV1, BackendV2
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 
@@ -17,20 +17,18 @@ from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
 from qiskit_experiments.framework import BackendData
-
+from qiskit_aer.backends import UnitarySimulator, AerSimulator
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit.primitives import Estimator, BackendEstimator
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend
-from qiskit_aer.primitives import Estimator as Aer_Estimator
-from qiskit_aer.backends.aerbackend import AerBackend
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator
 
 import numpy as np
-from itertools import product, chain
+from itertools import chain
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat
 
 from gymnasium import Env
 from gymnasium.spaces import Space
-from torch.distributions import Categorical
+from tensorflow_probability.python.distributions import Categorical
+from torch import Size, Tensor
 
 ObsType = TypeVar("ObsType")
 ActType = TypeVar("ActType")
@@ -39,6 +37,7 @@ def create_array(circ_trunc, batchsize, n_actions):
     for i in range(circ_trunc):
         arr[i] = np.zeros((i + 1, batchsize, n_actions))
     return arr
+
 
 
 class TorchQuantumEnvironment(QuantumEnvironment, Env):
@@ -95,7 +94,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                          optimization_level=0)
 
         self.estimator.set_options(skip_transpilation=True, initial_layout=None)
-
+        self._benchmark_backend = UnitarySimulator()
         self.tgt_register = QuantumRegister(bits=[self.circuit_context.qregs[0][i]
                                                   for i in self.physical_target_qubits], name="tgt")
         self.nn_register = QuantumRegister(bits=[self.circuit_context.qregs[0][i]
@@ -116,7 +115,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 self._target_instruction_timings.append(self.circuit_context.op_start_times[i])
 
         self.circuit_truncations, self.baseline_truncations = self._generate_circuit_truncations()
-
+        self._target_unitaries = self._retrieve_target_unitaries(self.baseline_truncations)
         self._batch_size = batch_size
         self.action_space = action_spec
         self.observation_space = observation_spec
@@ -124,7 +123,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
         self._training_steps_per_gate = training_steps_per_gate
         self._inside_trunc_tracker = 0
+        self._trunc_index = 0
         self._episode_ended = False
+        self._episode_tracker = 0
         self._intermediate_rewards = intermediate_rewards
 
     @property
@@ -182,9 +183,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         except AssertionError:
             raise ValueError('Training steps number should be positive integer.')
 
-    def do_benchmark(self, step_tracker, current_time_step):
+    def do_benchmark(self, step_tracker):
         # TODO: Create a saving log for specific time steps (every once in a while), should have an additional input
-        return False
+        return True
 
     def _retrieve_target_state(self, input_state_index: int, iteration: int) -> Dict:
 
@@ -201,6 +202,13 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         return _calculate_chi_target_state({"dm": DensityMatrix(target_circuit), "circuit": custom_target_circuit,
                                             "target_type": "state"}, n_qubits=target_circuit.num_qubits)
+
+    def _retrieve_target_unitaries(self, circuits: list[QuantumCircuit]):
+        circuits2 = [circuit.decompose() for circuit in circuits]
+        results = self._benchmark_backend.run(circuits2).result()
+        q_process_list = [results.get_unitary(i) for i in range(len(circuits))]
+        # q_process_list = [Operator(qc) for qc in circuits]
+        return q_process_list
 
     def _generate_circuit_truncations(self) -> Tuple[List[QuantumCircuit], List[QuantumCircuit]]:
         custom_circuit_truncations = [QuantumCircuit(self.tgt_register, self.nn_register, name=f'c_circ_trunc_{i}')
@@ -235,28 +243,21 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         # Circuit list for each action of the batch
         if self.abstraction_level == 'circuit':
-            q_state_list = [Statevector.from_instruction(qc) for qc in qc_list]
-            density_matrix = DensityMatrix(np.mean([q_state.to_operator() for q_state in q_state_list], axis=0))
-            self.density_matrix_history.append(density_matrix)
 
-            if self.target_type == 'state':
-                self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
-            else:  # Gate calibration task
-                q_process_list = [Operator(qc) for qc in qc_list]
-
-                prc_fidelity = np.mean([process_fidelity(q_process, Operator(self.target["gate"]))
-                                        for q_process in q_process_list])
-                avg_fidelity = np.mean([average_gate_fidelity(q_process, Operator(self.target["gate"]))
-                                        for q_process in q_process_list])
-                self.built_unitaries.append(q_process_list)
-                self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
-                self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
-                # for i, input_state in enumerate(self.target["input_states"]):
-                #     output_states = [DensityMatrix(Operator(qc) @ input_state["dm"] @ Operator(qc).adjoint())
-                #                      for qc in qc_list]
-                #     self.input_output_state_fidelity_history[i].append(
-                #         np.mean([state_fidelity(input_state["target_state"]["dm"],
-                #                                 output_state) for output_state in output_states]))
+            q_process_list = self._retrieve_target_unitaries(qc_list)
+            prc_fidelity = np.mean([process_fidelity(q_process, self._target_unitaries[self._trunc_index])
+                                    for q_process in q_process_list])
+            avg_fidelity = np.mean([average_gate_fidelity(q_process, self._target_unitaries[self._trunc_index])
+                                    for q_process in q_process_list])
+            self.built_unitaries.append(q_process_list)
+            self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
+            self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
+            # for i, input_state in enumerate(self.target["input_states"]):
+            #     output_states = [DensityMatrix(Operator(qc) @ input_state["dm"] @ Operator(qc).adjoint())
+            #                      for qc in qc_list]
+            #     self.input_output_state_fidelity_history[i].append(
+            #         np.mean([state_fidelity(input_state["target_state"]["dm"],
+            #                                 output_state) for output_state in output_states]))
         else:
             # Pulse simulation
             schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
@@ -267,19 +268,19 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             if self.model_dim % 2 != 0:
                 dms = [DensityMatrix.from_int(0, self.model_dim).evolve(unitary) for unitary in unitaries]
 
-            qubitized_unitaries = [np.zeros((self.d, self.d)) for _ in range(len(unitaries))]
+            qubitized_unitaries = [np.zeros((self._d, self._d)) for _ in range(len(unitaries))]
             for u in range(len(unitaries)):
-                for i in range(self.d):
-                    for j in range(self.d):
+                for i in range(self._d):
+                    for j in range(self._d):
                         qubitized_unitaries[u][i, j] = unitaries[u]
             if self.target_type == 'state':
-                density_matrix = DensityMatrix(np.mean([Statevector.from_int(0, dims=self.d).evolve(unitary)
+                density_matrix = DensityMatrix(np.mean([Statevector.from_int(0, dims=self._d).evolve(unitary)
                                                         for unitary in unitaries]))
                 self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
             else:
-                self.process_fidelity_history.append(np.mean([process_fidelity(unitary, self.target["gate"])
+                self.process_fidelity_history.append(np.mean([process_fidelity(unitary, Operator(self.baseline_truncations[self._trunc_index]))
                                                               for unitary in unitaries]))
-                self.avg_fidelity_history.append(np.mean([average_gate_fidelity(unitary, self.target["gate"])
+                self.avg_fidelity_history.append(np.mean([average_gate_fidelity(unitary, Operator(self.baseline_truncations[self._trunc_index]))
                                                           for unitary in unitaries]))
             self.built_unitaries.append(unitaries)
 
@@ -287,21 +288,32 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         if self._intermediate_rewards:
             return self.step_tracker % self.tgt_instruction_counts
         else:
-            return self._step_tracker // self.training_steps_per_gate
+            return np.min([self._step_tracker // self.training_steps_per_gate, self.tgt_instruction_counts-1])
+
+    def episode_length(self, global_step: int):
+        assert global_step == self.step_tracker, "Given step not synchronized with internal environment step counter"
+        return self._select_trunc_index() + 1
 
     def close(self) -> None:
         if isinstance(self.estimator, Runtime_Estimator):
             self.estimator.session.close()
 
     def _get_info(self) -> Any:
-        step = self.step_tracker
-        info = {
-            "step": step,
-            "average fidelity": self.avg_fidelity_history[step],
-            "average return": np.mean(self.reward_history, axis=1)[step],
-            "max return": np.max(np.mean(self.reward_history, axis =1)),
-            "max fidelity": np.max(self.avg_fidelity_history),
-        }
+        step = self._episode_tracker-1
+        if self._episode_ended:
+            info = {
+                "step": step,
+                "average fidelity": self.avg_fidelity_history[step],
+                "average return": np.mean(self.reward_history, axis=1)[step],
+                "max return": np.max(np.mean(self.reward_history, axis =1)),
+                "max fidelity": np.max(self.avg_fidelity_history),
+                "gate_index": self._inside_trunc_tracker,
+                "input_state": self._index_input_state
+                }
+        else:
+            info = {"step": step,
+                    "gate_index": self._inside_trunc_tracker,
+                    "input_state": self._index_input_state}
         return info
 
     def perform_action(self, actions, do_benchmark: bool = True):
@@ -314,6 +326,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         training_circ: QuantumCircuit = target_state["circuit"]
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         distribution = Categorical(probs=target_state["Chi"] ** 2)
+
         k_samples = distribution.sample(self.sampling_Pauli_space)
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
@@ -332,7 +345,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         benchmark_circ = training_circ.copy(name='benchmark_circ')
 
         reshaped_params = np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]),
-                                     (self.batch_size, trunc_index + 1))
+                                     (self.batch_size, (trunc_index + 1)* self.action_space.shape[-1]))
+
         qc_list = [benchmark_circ.bind_parameters(param) for param in reshaped_params]
         self.qc_history.append(qc_list)
         if self.do_benchmark(self._step_tracker):
@@ -360,27 +374,36 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         self._param_values = create_array(self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0])
         self._inside_trunc_tracker = 0
+        self._episode_tracker += 1
         self._episode_ended = False
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
 
-        return (self._index_input_state, self._inside_trunc_tracker), self._get_info()
+        return np.array([self._index_input_state, self._inside_trunc_tracker]), self._get_info()
 
     def step(
         self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
 
+        # trunc_index tells us which circuit truncation should be trained
+        # Dependent on global_step and method select_trunc_index
+        self._trunc_index = self._select_trunc_index()
+        trunc_index = self._trunc_index
+        # Figure out if in middle of param loading or should compute the final reward (step_status < trunc_index or ==)
+        step_status = self._inside_trunc_tracker
+        self._step_tracker += 1
+
         if self._episode_ended:
             terminated = True
             return self.reset()[0], np.zeros(self.batch_size), terminated, False, self._get_info()
-        trunc_index = self._select_trunc_index()
+
         if trunc_index >= self.tgt_instruction_counts:
             # raise IndexError(f"Circuit does contain only {self.tgt_instruction_counts} target gates and step"
             #                  f" function tries to access gate nb {trunc_index} ")
             truncated = True
-            return self.reset()[0], np.zeros(self.batch_size), False, True, self._get_info()
-        self._step_tracker += 1
-        # Figure out if in middle of param loading or should compute the reward
-        step_status = self._inside_trunc_tracker
+            return self.reset()[0], np.zeros(self.batch_size), False, truncated, self._get_info()
+
+
+
         params, batch_size = np.array(action), len(np.array(action))
         if batch_size != self.batch_size:
             self.batch_size = batch_size
@@ -391,7 +414,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             terminated = False
 
             if self._intermediate_rewards:
-                reward_table = self.compute_reward(trunc_index)
+                reward_table = self.compute_reward(step_status)
                 obs = reward_table  # Set observation to obtained reward (might not be the smartest choice here)
                 return obs, reward_table, terminated, False, self._get_info()
             else:
@@ -400,6 +423,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         else:
             terminated = True
+            self._episode_ended = terminated
             reward_table = self.compute_reward(trunc_index)
             if self._intermediate_rewards:
                 obs = reward_table

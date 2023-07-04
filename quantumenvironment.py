@@ -29,11 +29,13 @@ from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDr
 from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from qiskit_experiments.library import ProcessTomography, CrossResonanceHamiltonian, EchoedCrossResonanceHamiltonian
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
+from qiskit_experiments.framework import BatchExperiment
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit.primitives import Estimator, BackendEstimator
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session, QiskitRuntimeService
 from qiskit_aer.primitives import Estimator as Aer_Estimator
 from qiskit_aer.backends.aerbackend import AerBackend
+from qiskit_aer.backends import AerSimulator, UnitarySimulator, StatevectorSimulator
 
 import numpy as np
 from itertools import product, permutations
@@ -309,19 +311,16 @@ class QuantumEnvironment:
             self.parametrized_circuit_func: Callable = Qiskit_config.parametrized_circuit
             estimator_options: Optional[Union[Options, Dict]] = Qiskit_config.estimator_options
 
-
-            if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
-                self.estimator = Runtime_Estimator(session=Session(self.backend.service, self.backend),
-                                                   options=estimator_options)
-                self.estimator.set_options(initial_layout=self.layout)
-
-            elif self.abstraction_level == "circuit":  # Either state-vector simulation (native) or AerBackend provided
+            if self.abstraction_level == "circuit":  # Either state-vector simulation (native) or AerBackend provided
+                if self.target_type == "state":
+                    self._benchmark_backend = StatevectorSimulator()
+                else:
+                    self._benchmark_backend = UnitarySimulator()
                 if isinstance(self.backend, AerBackend):
                     # Estimator taking noise model into consideration, have to provide an AerBackend
                     # TODO: Extract from TranspilationOptions a dict that can go in following definition
                     self.estimator = Aer_Estimator(backend_options=self.backend.options,
                                                    transpile_options={'initial_layout': self.layout})
-
                 else:  # No backend specified
                     self.estimator = Estimator()  # Estimator based on state-vector simulation
             elif self.abstraction_level == 'pulse':
@@ -332,11 +331,11 @@ class QuantumEnvironment:
                         calibration_files: List[str] = Qiskit_config.calibration_files
                         self.calibrations, self.exp_results = perform_standard_calibrations(self.backend,
                                                                                             calibration_files)
-                    self.pulse_backend: DynamicsBackend = deepcopy(self.backend)
+                    self._benchmark_backend= self.backend
                 # For benchmarking the gate at each epoch, set the tools for Pulse level simulator
                 self.solver: Solver = Qiskit_config.solver
                 if Qiskit_config.solver is None:
-                    self.solver: Solver = self.pulse_backend.options.solver  # Custom Solver
+                    self.solver: Solver = self._benchmark_backend.options.solver  # Custom Solver
                 # Can describe noisy channels, if none provided, pick Solver associated to DynamicsBackend by default
                 self.model_dim = self.solver.model.dim
                 self.channel_freq = Qiskit_config.channel_freq
@@ -346,6 +345,12 @@ class QuantumEnvironment:
                 else:
                     self.y_0 = Array(np.eye(self.model_dim ** 2))
                     self.ground_state = Array(np.array([1.0] + [0.0] * (self.model_dim ** 2 - 1)))
+
+            if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
+                self.estimator = Runtime_Estimator(session=Session(self.backend.service, self.backend),
+                                                   options=estimator_options)
+                self.estimator.set_options(initial_layout=self.layout)
+
         elif QUA_config is not None:
             self._config_type = "QUA"
             self._config = QUA_config
@@ -476,22 +481,22 @@ class QuantumEnvironment:
         """
         # Process tomography
         assert self.target_type == 'gate', "Target must be of type gate"
-        avg_gate_fidelity = 0.
-        prc_fidelity = 0.
         batch_size = len(qc_list)
-        for qc in qc_list:
-            process_tomography_exp = ProcessTomography(qc, backend=self.pulse_backend,
-                                                       physical_qubits=self.tgt_register)
 
-            results = process_tomography_exp.run(self.pulse_backend).block_for_results()
-            process_results = results.analysis_results(0)
-            Choi_matrix = process_results.value
-            avg_gate_fidelity += average_gate_fidelity(Choi_matrix, Operator(self.target["gate"]))
-            prc_fidelity += process_fidelity(Choi_matrix, Operator(self.target["gate"]))
+        process_tomography_exps = BatchExperiment([ProcessTomography(qc, backend=self._benchmark_backend,
+                                                       physical_qubits=self.tgt_register) for qc in qc_list])
 
-        self.process_fidelity_history.append(prc_fidelity / batch_size)
-        self.avg_fidelity_history.append(avg_gate_fidelity / batch_size)
-        return avg_gate_fidelity / batch_size, prc_fidelity / batch_size
+        results = process_tomography_exps.run(self._benchmark_backend)
+        process_results = [results.child_data(i).analysis_results(0) for i in range(batch_size)]
+        Choi_matrices = [matrix.value for matrix in process_results]
+        avg_gate_fidelity = np.mean([average_gate_fidelity(Choi_matrix, Operator(self.target["gate"]))
+                                     for Choi_matrix in Choi_matrices])
+        prc_fidelity = np.mean([process_fidelity(Choi_matrix, Operator(self.target["gate"]))
+                                     for Choi_matrix in Choi_matrices])
+
+        self.process_fidelity_history.append(prc_fidelity)
+        self.avg_fidelity_history.append(avg_gate_fidelity)
+        return avg_gate_fidelity, prc_fidelity
 
     def _simulate_pulse_schedules(self, schedule_list: List[Union[pulse.Schedule, pulse.ScheduleBlock]]):
         """
