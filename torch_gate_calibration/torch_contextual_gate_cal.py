@@ -2,7 +2,7 @@ import os
 
 from qiskit.providers.models import QasmBackendConfiguration
 
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 # Qiskit imports
 from qiskit import pulse, transpile
 from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister, Gate, \
@@ -24,7 +24,6 @@ from gymnasium.spaces import Box, MultiDiscrete, Space
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-import wandb
 import torch.optim as optim
 from torch.distributions import MultivariateNormal, LowRankMultivariateNormal, Normal
 
@@ -32,6 +31,8 @@ import numpy as np
 import tqdm
 import time
 from typing import Union, Optional, List, Sequence
+
+
 # Save your credentials on disk.
 # IBMProvider.save_account(token='<IBM Quantum API key>')
 
@@ -68,20 +69,21 @@ def custom_pulse_schedule(backend: Union[BackendV1, BackendV2], qubit_tgt_regist
 
 
 def param_circuit(qc: QuantumCircuit,
-                  params: Optional[ParameterVector], q_reg: Optional[QuantumRegister]=None):
-
+                  params: Optional[ParameterVector], q_reg: Optional[QuantumRegister] = None):
     # To build a unique gate identifier, choose the name based on the input circuit name (by default and if used
     # with TFQuantumEnvironment class, this circuit name is of the form c_circ_trunc_{i})
     # custom_gate_name = f"{target['gate'].name}_{qc.name[-1]}"
-    # custom_gate = Gate(custom_gate_name, len(target["register"]), params=[param for param in params])
+    # custom_gate = Gate(custom_gate_name, len(target["register"]), params=params.params)
     # custom_sched = custom_pulse_schedule(backend=backend, qubit_tgt_register=physical_qubits, params=params,
     #                                      default_schedule=backend.target.get_calibration(target["gate"].name,
     #                                                                                      tuple(physical_qubits)))
     # qc.add_calibration(custom_gate, physical_qubits, custom_sched)
     # qc.append(custom_gate, physical_qubits)
-    qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
-    qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    qc.rzx(2 * np.pi * params[6], 0, 1)
+    # qc.u(np.pi * params[0], np.pi * params[1], np.pi * params[2], 0)
+    # qc.u(np.pi * params[3], np.pi * params[4], np.pi * params[5], 1)
+    # qc.rzx(np.pi * params[6], 0, 1)
+    qc.rx(np.pi*params[0], physical_qubits)
+
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -95,43 +97,43 @@ N_shots = 1  # Number of shots for sampling the quantum computer for each action
 fake_backend = FakeJakartaV2()
 
 aer_backend = AerSimulator.from_backend(fake_backend, noise_model=None)
-backend = fake_backend
-target_gate = CXGate()
-physical_qubits = [0, 1]
+backend = aer_backend
+target_gate = XGate()
+physical_qubits = [0]
 n_qubits = len(physical_qubits)
 target = {"gate": target_gate, 'register': physical_qubits}
 config = QiskitConfig(parametrized_circuit=param_circuit, backend=backend)
-
 
 q_env = QuantumEnvironment(target, "circuit", config)
 
 # Circuit context
 seed = 10
 training_steps_per_gate = 1500
-target_circuit = transpile(random_circuit(4, depth=2, max_operands=2, seed=seed), backend)
-target_circuit = QuantumCircuit(2)
-target_circuit.cx(0, 1)
+# target_circuit = transpile(random_circuit(4, depth=2, max_operands=2, seed=seed), backend)
+target_circuit = QuantumCircuit(1)
+target_circuit.x(0)
 tgt_qubits = [target_circuit.qubits[i] for i in physical_qubits]
 
 tgt_instruction_counts = target_circuit.data.count(CircuitInstruction(target_gate, tgt_qubits))
 
-batchsize = 300  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
-n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
+batchsize = 400  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
+n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
 min_bound_actions = -1.
 max_bound_actions = 1.
-observation_space = Box(low=np.array([0, 0]), high=np.array([4**n_qubits, tgt_instruction_counts]), shape=(2,),
+observation_space = Box(low=np.array([0, 0]), high=np.array([4 ** n_qubits, tgt_instruction_counts]), shape=(2,),
                         seed=seed)
 action_space = Box(low=min_bound_actions, high=max_bound_actions, shape=(n_actions,), seed=seed)
 
 torch_env = TorchQuantumEnvironment(q_env, target_circuit, action_space, observation_space, batch_size=batchsize,
-                                    training_steps_per_gate=training_steps_per_gate, intermediate_rewards=False, seed=None)
+                                    training_steps_per_gate=training_steps_per_gate, intermediate_rewards=False,
+                                    seed=None)
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, observation_space: Space, hidden_layers:Sequence[int],
+    def __init__(self, observation_space: Space, hidden_layers: Sequence[int],
                  n_actions: int,
-                 hidden_activation_functions:Optional[Sequence[nn.Module]]=None,
-                 include_critic = True,
+                 hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
+                 include_critic=True,
                  chkpt_dir: str = 'tmp/ppo'):
         super(ActorNetwork, self).__init__()
 
@@ -146,7 +148,7 @@ class ActorNetwork(nn.Module):
         layers = []
 
         # Iterate over the layer sizes to create the network layers
-        for i in range(len(layer_sizes)-1):
+        for i in range(len(layer_sizes) - 1):
             # Add a linear layer with the current and next layer sizes
             layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
 
@@ -171,7 +173,6 @@ class ActorNetwork(nn.Module):
     def forward(self, x):
         x = self.base_network(x)
         mean_action = self.mean_action(x)
-
         std_action = self.std_action(x)
         std_action = self.std_activation(std_action)
         critic_output = self.critic_output(x)
@@ -185,10 +186,13 @@ class ActorNetwork(nn.Module):
         x = self.base_network(x)
         x = self.critic_output(x)
         return x
+
     def save_checkpoint(self):
         torch.save(self, self.checkpoint_dir)
+
     def load_checkpoint(self):
         torch.load(self.checkpoint_dir)
+
 
 class CriticNetwork(nn.Module):
     def __init__(self, observation_space: Space, hidden_layers: Sequence[int],
@@ -230,8 +234,10 @@ class CriticNetwork(nn.Module):
 
     def save_checkpoint(self):
         torch.save(self, self.checkpoint_dir)
+
     def load_checkpoint(self):
         torch.load(self.checkpoint_dir)
+
 
 class Agent(nn.Module):
     def __init__(self, actor_net: ActorNetwork, critic_net: Optional[CriticNetwork]):
@@ -242,6 +248,7 @@ class Agent(nn.Module):
 
         if self.critic_net is not None:
             assert not self.actor_net.include_critic, "Critic already included in Actor Network"
+
     def forward(self, x):
         if self.actor_net.include_critic:
             return self.actor_net(x)
@@ -258,11 +265,15 @@ class Agent(nn.Module):
             assert self.critic_net is not None, 'Critic Network not provided and not included in ActorNetwork'
             return self.critic_net(x)
 
+    def save_checkpoint(self):
+        self.actor_net.save_checkpoint()
+        if self.critic_net is not None:
+            self.critic_net.save_checkpoint()
 
 
-actor_net = ActorNetwork(observation_space, [50, 50], n_actions).to(device)
-critic_net = CriticNetwork(observation_space, [50, 50]).to(device)
-agent = Agent(actor_net, critic_net=None)
+actor_net = ActorNetwork(observation_space, [128, 128], n_actions, [nn.ELU(), nn.ELU(), nn.ELU()]).to(device)
+critic_net = CriticNetwork(observation_space, [128, 128], [nn.ELU(), nn.ELU(), nn.ELU()]).to(device)
+agent = Agent(actor_net, critic_net=None).to(device)
 """
 -----------------------------------------------------------------------------------------------------
 Hyperparameters for RL agent
@@ -275,8 +286,8 @@ writer = SummaryWriter(f"runs/{run_name}")
 #     "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
 # )
 # Hyperparameters for the agent
-n_epochs = 200  # Number of epochs : default 1500
-num_updates = 1000
+n_epochs = 10  # Number of epochs : default 1500
+num_updates = 5000
 opti = "Adam"
 lr_actor = 0.0005  # Learning rate for policy update step
 lr_critic = 0.0018  # Learning rate for critic (value function) update step
@@ -291,9 +302,9 @@ gamma = 1.
 gae_lambda = 0.95
 
 # Clipping
-clip_vloss = False
-grad_clip = 0.01
-clip_coef = 5.
+clip_vloss = True
+grad_clip = 0.05
+clip_coef = 0.5
 normalize_advantage = False
 
 # other coefficients
@@ -312,12 +323,14 @@ train_obs = torch.zeros((batchsize,) + torch_env.observation_space.shape, requir
 # Start the Environment
 start_time = time.time()
 
+
 for update in tqdm.tqdm(range(1, num_updates + 1)):
-    num_steps = torch_env.episode_length(global_step)
     next_obs, _ = torch_env.reset(seed=seed)
-    next_obs = torch.Tensor(next_obs).to(device)
+    num_steps = torch_env.episode_length(global_step)
+    next_obs = torch.Tensor([next_obs]*batchsize).to(device)
     next_done = torch.zeros(batchsize).to(device)
-    print("episode length:", num_steps)
+
+    # print("episode length:", num_steps)
 
     for step in range(num_steps):
         global_step += 1
@@ -327,19 +340,21 @@ for update in tqdm.tqdm(range(1, num_updates + 1)):
         with torch.no_grad():
             mean_action, std_action, critic_value = agent(next_obs)
             probs = Normal(mean_action, std_action)
-            action = probs.sample(torch.Size((batchsize,)))
+            action = torch.clip(probs.sample(), min_bound_actions, max_bound_actions)
             logprob = probs.log_prob(action).sum(1)
+            values[step] = critic_value.flatten()
 
         actions[step] = action
         logprobs[step] = logprob
+        # next_obs, reward, terminated, truncated, infos = torch_env.step(action.cpu().numpy())
         next_obs, reward, terminated, truncated, infos = torch_env.step(action.cpu().numpy())
         done = np.logical_or(terminated, truncated)
         rewards[step] = torch.tensor(reward).to(device)
-        next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(np.array([int(done)]*batchsize)).to(device)
-
+        next_obs = torch.Tensor(np.array([next_obs]*batchsize)).to(device)
+        next_done = torch.Tensor(np.array([int(done)] * batchsize)).to(device)
         # Only print when at least 1 env is done
 
-        print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
+        #print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
         writer.add_scalar("charts/episodic_return", np.mean(reward), global_step)
         writer.add_scalar("charts/episodic_length", num_steps, global_step)
 
@@ -377,10 +392,16 @@ for update in tqdm.tqdm(range(1, num_updates + 1)):
             mb_inds = b_inds[start:end]
             new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
             new_dist = Normal(new_mean, new_sigma)
+            print('new_mean', new_mean)
+            print('new_sigma', new_sigma)
+            print('new_value', new_value)
             new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(1), new_dist.entropy().sum(1)
             logratio = new_logprob - b_logprobs[mb_inds]
+            print("new_logprob", new_logprob)
+            print('b_logprob', b_logprobs[mb_inds])
+            print("logratio", logratio)
             ratio = logratio.exp()
-
+            print("ratio", ratio)
             with torch.no_grad():
                 # calculate approx_kl http://joschu.net/blog/kl-approx.html
                 old_approx_kl = (-logratio).mean()
@@ -388,7 +409,7 @@ for update in tqdm.tqdm(range(1, num_updates + 1)):
                 clipfracs += [((ratio - 1.0).abs() > epsilon).float().mean().item()]
 
             mb_advantages = b_advantages[mb_inds]
-            if normalize_advantage: # Normalize advantage
+            if normalize_advantage:  # Normalize advantage
                 mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
             # Policy loss
@@ -422,21 +443,21 @@ for update in tqdm.tqdm(range(1, num_updates + 1)):
     y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
     var_y = np.var(y_true)
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-    print("Average return:", np.mean(torch_env.reward_history, axis =1)[-1])
+    print("Average return:", np.mean(torch_env.reward_history, axis=1)[-1])
     # print(np.mean(torch_env.reward_history, axis =1)[-1])
-    print("Average gate fidelity:", torch_env.avg_fidelity_history[-1])
+    print("Circuit fidelity:", torch_env.circuit_fidelity_history[-1])
     # TRY NOT TO MODIFY: record rewards for plotting purposes
     writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
     writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-    writer.add_scalar("losses/avg_return", np.mean(torch_env.reward_history, axis =1)[-1], global_step)
-    writer.add_scalar("losses/avg_gate_fidelity", torch_env.avg_fidelity_history[-1], global_step)
+    writer.add_scalar("losses/avg_return", np.mean(torch_env.reward_history, axis=1)[-1], global_step)
+    # writer.add_scalar("losses/avg_gate_fidelity", torch_env.avg_fidelity_history[-1], global_step)
+    writer.add_scalar("losses/circuit_fidelity", torch_env.circuit_fidelity_history[-1], global_step)
     writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
     writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
     writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
     writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
     writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
     writer.add_scalar("losses/explained_variance", explained_var, global_step)
-
 
 torch_env.close()
 writer.close()
