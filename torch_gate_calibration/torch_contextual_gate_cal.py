@@ -82,7 +82,7 @@ def param_circuit(qc: QuantumCircuit,
     # qc.u(np.pi * params[0], np.pi * params[1], np.pi * params[2], 0)
     # qc.u(np.pi * params[3], np.pi * params[4], np.pi * params[5], 1)
     # qc.rzx(np.pi * params[6], 0, 1)
-    qc.rx(np.pi*params[0], physical_qubits)
+    qc.rx(2*np.pi*params[0], physical_qubits)
 
 
 """
@@ -118,7 +118,7 @@ tgt_instruction_counts = target_circuit.data.count(CircuitInstruction(target_gat
 
 batchsize = 400  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
 n_actions = 1  # Choose how many control parameters in pulse/circuit parametrization
-min_bound_actions = -1.
+min_bound_actions = 0.
 max_bound_actions = 1.
 observation_space = Box(low=np.array([0, 0]), high=np.array([4 ** n_qubits, tgt_instruction_counts]), shape=(2,),
                         seed=seed)
@@ -287,7 +287,7 @@ writer = SummaryWriter(f"runs/{run_name}")
 # )
 # Hyperparameters for the agent
 n_epochs = 10  # Number of epochs : default 1500
-num_updates = 5000
+num_updates = 1000
 opti = "Adam"
 lr_actor = 0.0005  # Learning rate for policy update step
 lr_critic = 0.0018  # Learning rate for critic (value function) update step
@@ -303,7 +303,7 @@ gae_lambda = 0.95
 
 # Clipping
 clip_vloss = True
-grad_clip = 0.05
+grad_clip = 0.005
 clip_coef = 0.5
 normalize_advantage = False
 
@@ -392,16 +392,9 @@ for update in tqdm.tqdm(range(1, num_updates + 1)):
             mb_inds = b_inds[start:end]
             new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
             new_dist = Normal(new_mean, new_sigma)
-            print('new_mean', new_mean)
-            print('new_sigma', new_sigma)
-            print('new_value', new_value)
             new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(1), new_dist.entropy().sum(1)
             logratio = new_logprob - b_logprobs[mb_inds]
-            print("new_logprob", new_logprob)
-            print('b_logprob', b_logprobs[mb_inds])
-            print("logratio", logratio)
             ratio = logratio.exp()
-            print("ratio", ratio)
             with torch.no_grad():
                 # calculate approx_kl http://joschu.net/blog/kl-approx.html
                 old_approx_kl = (-logratio).mean()
