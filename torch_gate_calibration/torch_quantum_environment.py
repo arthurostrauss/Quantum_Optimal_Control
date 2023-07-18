@@ -241,17 +241,6 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                             "target_type": "state", "theoretical_circ": target_circuit},
                                            n_qubits=target_circuit.num_qubits)
 
-    def _retrieve_target_unitaries(self, circuits: list[QuantumCircuit]) -> Tuple[List[Operator], List[Statevector]]:
-        # unitary_backend = AerSimulator(method='unitary')
-        # density_backend = AerSimulator(method='statevector')
-        # circuits2 = [circuit.decompose() for circuit in circuits]
-        # results = unitary_backend.run(circuits2).result()
-        # q_process_list = [results.get_unitary(i) for i in range(len(circuits))]
-        batchsize = len(circuits)
-        q_process_list = [Operator(qc) for qc in circuits]
-        output_states = [Statevector(qc) for qc in circuits]
-        return q_process_list, output_states
-
     def _generate_circuit_truncations(self) -> Tuple[List[QuantumCircuit], List[QuantumCircuit], List[Instruction]]:
         custom_circuit_truncations = [QuantumCircuit(self.tgt_register, self.nn_register, name=f'c_circ_trunc_{i}')
                                       for i in range(self.tgt_instruction_counts)]
@@ -287,27 +276,41 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         """
         n_actions = self.action_space.shape[-1]
-        benchmark_circ = self.circuit_truncations[self._trunc_index]  # Retrieve custom circuit without input state prep
-        qc_list = [benchmark_circ.bind_parameters(param) for param in params]  # Bind each action of the batch to a circ
         custom_gates_list = []
-        for i in range(self.tgt_instruction_counts):
+        n_custom_instructions = self._trunc_index + 1  # Count custom instructions present in the current truncation
+
+        # Retrieve custom circuit without input state prep
+        benchmark_circ = self.circuit_truncations[self._trunc_index].copy(name='b_circ')
+        benchmark_circ.save_statevector()
+        unitary_backend = AerSimulator(method="unitary")
+        state_backend = AerSimulator(method='statevector')
+        states_result = state_backend.run(benchmark_circ.decompose(),
+                                          parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
+                                                            for i in range(n_custom_instructions)
+                                                            for j in range(n_actions)
+                                                            }]).result()
+        output_state_list = [states_result.get_statevector(i) for i in range(self.batch_size)]
+        qc_list = [benchmark_circ.bind_parameters(param) for param in params]  # Bind each action of the batch to a circ
+
+        for i in range(n_custom_instructions):
             assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
             # to check its individual gate fidelity (have to detour by a QuantumCircuit)
             assigned_gate.append(self.custom_gates[i], self.tgt_register)
-            assigned_instructions = [Operator(assigned_gate.bind_parameters(param[i * n_actions: (i + 1) * n_actions]))
-                                     for param in params]
+            assigned_gate.save_unitary()
+            gates_result = unitary_backend.run(assigned_gate.decompose(),
+                                               parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
+                                                                 for j in range(n_actions)}]).result()
+            assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
             custom_gates_list.append(assigned_instructions)
         # Circuit list for each action of the batch
         if self.abstraction_level == 'circuit':
             tgt_gate = self.target["gate"]
-            q_process_list, output_state_list = self._retrieve_target_unitaries(qc_list)
             batched_dm = DensityMatrix(
                 np.sum([output_state.to_operator().to_matrix() for output_state in output_state_list],
                        axis=0) / self.batch_size)
             batched_circuit_fidelity = state_fidelity(batched_dm,
                                                       Statevector(self.baseline_truncations[self._trunc_index]))
-            # prc_fidelity = np.mean([process_fidelity(q_process, self._target_unitaries[self._trunc_index])
-            #                         for q_process in q_process_list])
+
             avg_fidelities = np.array([[average_gate_fidelity(custom_gate, tgt_gate) for custom_gate in custom_gates]
                                        for custom_gates in custom_gates_list])
             circuit_fidelities = np.array([state_fidelity(output_state,
@@ -318,16 +321,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self._punctual_circuit_fidelities = circuit_fidelities
             self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
             self.circuit_fidelity_history.append(batched_circuit_fidelity)  # Avg gate fidelity over the action batch
-            # self.built_unitaries.append(q_process_list)
-            # self.process_fidelity_history.append(prc_fidelity)  # Avg process fidelity over the action batch
-            # for i, input_state in enumerate(self.target["input_states"]):
-            #     output_states = [DensityMatrix(Operator(qc) @ input_state["dm"] @ Operator(qc).adjoint())
-            #                      for qc in qc_list]
-            #     self.input_output_state_fidelity_history[i].append(
-            #         np.mean([state_fidelity(input_state["target_state"]["dm"],
-            #                                 output_state) for output_state in output_states]))
-        else:
-            # Pulse simulation
+        else:  # Pulse simulation
+
             schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
             unitaries = self._simulate_pulse_schedules(schedule_list)
             # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
@@ -504,6 +499,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         params, batch_size = np.array(action), len(np.array(action))
         if batch_size != self.batch_size:
+            print("Batchsize changed")
             self.batch_size = batch_size
         self._param_values[trunc_index][step_status] = params
 

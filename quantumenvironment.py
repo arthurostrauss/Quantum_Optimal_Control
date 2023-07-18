@@ -36,7 +36,7 @@ from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Run
     QiskitRuntimeService
 from qiskit_aer.primitives import Estimator as Aer_Estimator
 from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit_aer.backends import AerSimulator  # , UnitarySimulator, StatevectorSimulator
+from qiskit_aer.backends import AerSimulator
 
 import numpy as np
 from itertools import product, permutations
@@ -54,7 +54,6 @@ from qconfig import QiskitConfig, QuaConfig
 
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
-from tf_agents.typing import types
 
 import jax
 
@@ -313,15 +312,12 @@ class QuantumEnvironment:
             estimator_options: Optional[Union[Options, Dict]] = Qiskit_config.estimator_options
 
             if self.abstraction_level == "circuit":  # Either state-vector simulation (native) or AerBackend provided
-                # if self.target_type == "state":
-                #     self._benchmark_backend = StatevectorSimulator()
-                # else:
-                #     self._benchmark_backend = UnitarySimulator()
                 if isinstance(self.backend, AerBackend):
                     # Estimator taking noise model into consideration, have to provide an AerBackend
                     # TODO: Extract from TranspilationOptions a dict that can go in following definition
                     self._estimator: BaseEstimator = Aer_Estimator(backend_options=self.backend.options,
-                                                   transpile_options={'initial_layout': self._layout})
+                                                                   transpile_options={'initial_layout': self._layout},
+                                                                   approximation=True)
                 else:  # No backend specified
                     self._estimator: BaseEstimator = Estimator(
                         options={"initial_layout": self._layout})  # Estimator based on state-vector simulation
@@ -372,7 +368,7 @@ class QuantumEnvironment:
         else:
             self.state_fidelity_history = []
 
-    def perform_action(self, actions: types.NestedTensorOrArray, do_benchmark: bool = True):
+    def perform_action(self, actions: np.array, do_benchmark: bool = True):
         """
         Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
         :param actions: action vector to execute on quantum system
@@ -483,11 +479,10 @@ class QuantumEnvironment:
         assert self.target_type == 'gate', "Target must be of type gate"
         batch_size = len(qc_list)
 
-        process_tomography_exps = BatchExperiment([ProcessTomography(qc, backend=self._benchmark_backend,
-                                                                     physical_qubits=self.tgt_register) for qc in
-                                                   qc_list])
+        exps = BatchExperiment([ProcessTomography(qc, backend=self.backend, physical_qubits=self.tgt_register)
+                                for qc in qc_list])
 
-        results = process_tomography_exps.run(self._benchmark_backend)
+        results = exps.run().block_for_results()
         process_results = [results.child_data(i).analysis_results(0) for i in range(batch_size)]
         Choi_matrices = [matrix.value for matrix in process_results]
         avg_gate_fidelity = np.mean([average_gate_fidelity(Choi_matrix, Operator(self.target["gate"]))
