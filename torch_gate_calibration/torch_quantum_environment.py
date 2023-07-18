@@ -17,7 +17,7 @@ from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
 from qiskit_experiments.framework import BackendData
-from qiskit_aer.backends import AerSimulator , UnitarySimulator, StatevectorSimulator
+from qiskit_aer.backends import AerSimulator, UnitarySimulator, StatevectorSimulator
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator
@@ -52,7 +52,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                  batch_size: int,
                  training_steps_per_gate: int = 1500,
                  intermediate_rewards: bool = False,
-                 seed=1000
+                 seed: Optional[int] = None
                  ):
         """
              Class for building quantum environment for RL agent aiming to perform a state preparation task.
@@ -109,9 +109,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                  self.nn_register[j]: self._physical_neighbor_qubits[j]
                                  for j in range(len(self.nn_register))})
 
-        self.estimator.set_options(initial_layout=self.layout)
+        self.estimator.set_options(initial_layout=self.layout, optimization_level=0)
         if isinstance(self.estimator, AerEstimator):
-            self.estimator._transpile_options = Options(initial_layout=self.layout)
+            self.estimator._transpile_options = Options(initial_layout=self.layout, optimization_level=0)
 
         self._d = 2 ** self.tgt_register.size
         self.target_instruction = CircuitInstruction(self.target["gate"], self.tgt_register)
@@ -132,11 +132,13 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._batch_size = batch_size
         self._punctual_avg_fidelities = np.zeros(batch_size)
         self._punctual_circuit_fidelities = np.zeros(batch_size)
+        self._punctual_observable: SparsePauliOp = SparsePauliOp("X")
         self.circuit_fidelity_history = []
         self.action_space = action_spec
         self.observation_space = observation_spec
         self._seed = seed
-        self.np_random = seed
+        if isinstance(seed, int):
+            self.np_random = seed
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
         self._training_steps_per_gate = training_steps_per_gate
         self._inside_trunc_tracker = 0
@@ -194,10 +196,10 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         except AssertionError:
             raise ValueError('Batch size should be positive integer.')
 
-
     @property
     def done(self):
         return self._episode_ended
+
     @property
     def training_steps_per_gate(self):
         return self._training_steps_per_gate
@@ -218,13 +220,17 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             return False
 
     def _retrieve_target_state(self, input_state_index: int, iteration: int) -> Dict:
-
+        """
+        Calculate anticipated target state for fidelity estimation based on input state preparation
+        and truncation of the circuit
+        :param input_state_index: Integer index indicating the PauliPreparationBasis vector
+        :param iteration: Truncation index of the transpiled contextual circuit
+        """
         input_circuit: QuantumCircuit = self.target["input_states"][input_state_index]["circuit"]
         ref_circuit, custom_circuit = self.baseline_truncations[iteration], self.circuit_truncations[iteration]
         target_circuit = QuantumCircuit(self.tgt_register)
         custom_target_circuit = custom_circuit.copy_empty_like(name=f'qc_{input_state_index}_{ref_circuit.name[-1]}')
-        custom_target_circuit.append(input_circuit.to_instruction(),
-                                     self.tgt_register)
+        custom_target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
         custom_target_circuit.compose(custom_circuit, inplace=True)
         target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
         for gate in ref_circuit.data:  # Append only gates that are applied on the target register
@@ -232,7 +238,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 target_circuit.append(gate)
 
         return _calculate_chi_target_state({"dm": DensityMatrix(target_circuit), "circuit": custom_target_circuit,
-                                            "target_type": "state"}, n_qubits=target_circuit.num_qubits)
+                                            "target_type": "state", "theoretical_circ": target_circuit},
+                                           n_qubits=target_circuit.num_qubits)
 
     def _retrieve_target_unitaries(self, circuits: list[QuantumCircuit]) -> Tuple[List[Operator], List[Statevector]]:
         # unitary_backend = AerSimulator(method='unitary')
@@ -242,8 +249,6 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         # q_process_list = [results.get_unitary(i) for i in range(len(circuits))]
         batchsize = len(circuits)
         q_process_list = [Operator(qc) for qc in circuits]
-        batched_dm = DensityMatrix(np.sum([Statevector(qc).to_operator().to_matrix()/batchsize for qc in circuits],
-                                          axis=0))
         output_states = [Statevector(qc) for qc in circuits]
         return q_process_list, output_states
 
@@ -282,24 +287,23 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         """
         n_actions = self.action_space.shape[-1]
-        benchmark_circ = self.circuit_truncations[self._trunc_index]
-        qc_list = [benchmark_circ.bind_parameters(param) for param in params]
+        benchmark_circ = self.circuit_truncations[self._trunc_index]  # Retrieve custom circuit without input state prep
+        qc_list = [benchmark_circ.bind_parameters(param) for param in params]  # Bind each action of the batch to a circ
         custom_gates_list = []
-        n_custom_instructions = self._trunc_index + 1
-        for i in range(n_custom_instructions):
-            assigned_gate = QuantumCircuit(self.tgt_register)
+        for i in range(self.tgt_instruction_counts):
+            assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
+            # to check its individual gate fidelity (have to detour by a QuantumCircuit)
             assigned_gate.append(self.custom_gates[i], self.tgt_register)
-            assigned_instructions = [Operator(assigned_gate.bind_parameters(param[i*n_actions: (i+1)*n_actions]))
+            assigned_instructions = [Operator(assigned_gate.bind_parameters(param[i * n_actions: (i + 1) * n_actions]))
                                      for param in params]
             custom_gates_list.append(assigned_instructions)
         # Circuit list for each action of the batch
         if self.abstraction_level == 'circuit':
             tgt_gate = self.target["gate"]
-
             q_process_list, output_state_list = self._retrieve_target_unitaries(qc_list)
             batched_dm = DensityMatrix(
-                np.sum([output_state.to_operator().to_matrix() / self.batch_size for output_state in output_state_list],
-                       axis=0))
+                np.sum([output_state.to_operator().to_matrix() for output_state in output_state_list],
+                       axis=0) / self.batch_size)
             batched_circuit_fidelity = state_fidelity(batched_dm,
                                                       Statevector(self.baseline_truncations[self._trunc_index]))
             # prc_fidelity = np.mean([process_fidelity(q_process, self._target_unitaries[self._trunc_index])
@@ -379,7 +383,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "arg max circuit fidelity": np.argmax(self.circuit_fidelity_history),
                     "truncation_index": self._trunc_index,
-                    "input_state": self.target["input_states"][self._index_input_state]["circuit"].name
+                    "input_state": self.target["input_states"][self._index_input_state]["circuit"].name,
+                    "observable": self._punctual_observable
                 }
             else:
                 info = {
@@ -389,23 +394,25 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     "max return": np.max(np.mean(self.reward_history, axis=1)),
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "truncation_index": self._trunc_index,
-                    "input_state": self.target["input_states"][self._index_input_state]["circuit"].name
+                    "input_state": self.target["input_states"][self._index_input_state]["circuit"].name,
+                    "observable": self._punctual_observable
                 }
         else:
             info = {
-                    "reset_stage": self._inside_trunc_tracker == 0,
-                    "step": step,
-                    "gate_index": self._inside_trunc_tracker,
-                    "input_state": self.target["input_states"][self._index_input_state]["circuit"].name,
-                    "truncation_index": self._trunc_index,
+                "reset_stage": self._inside_trunc_tracker == 0,
+                "step": step,
+                "gate_index": self._inside_trunc_tracker,
+                "input_state": self.target["input_states"][self._index_input_state]["circuit"].name,
+                "truncation_index": self._trunc_index,
+                "observable": self._punctual_observable
             }
         return info
 
     def perform_action(self, actions, do_benchmark: bool = False):
         raise NotImplementedError("This method shall not be used in this class, use QuantumEnvironment instead")
 
-    def compute_reward(self, fidelity_access=True):
-        trunc_index = self._trunc_index
+    def compute_reward(self, fidelity_access=False):
+        trunc_index = self._inside_trunc_tracker
         target_state = self._retrieve_target_state(self._index_input_state, trunc_index)
         training_circ: QuantumCircuit = target_state["circuit"]
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
@@ -414,7 +421,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         k_samples = distribution.sample(self.sampling_Pauli_space)
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self._d * np.exp(distribution.log_prob(p)))
+        reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self._d * distribution.prob(p))
                                   for p in pauli_index], 5)
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
@@ -423,6 +430,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         observables = SparsePauliOp.from_list([("I" * len(self.nn_register) +
                                                 pauli_basis(len(self.tgt_register))[p].to_label(),
                                                 reward_factor[i]) for i, p in enumerate(pauli_index)])
+        self._punctual_observable = observables
         # self.parametrized_circuit_func(training_circ, self._parameters[:iteration])
 
         reshaped_params = np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]),
@@ -431,13 +439,15 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         # qc_list = [benchmark_circ.bind_parameters(param) for param in reshaped_params]
         # self.qc_history.append(qc_list)
         if self.do_benchmark():
+            print("Starting benchmarking...")
             self._store_benchmarks(reshaped_params)
+            print("Finished benchmarking")
         if fidelity_access:
             reward_table = self._punctual_circuit_fidelities
             self.reward_history.append(reward_table)
             return reward_table
             # Build full quantum circuit: concatenate input state prep and parametrized unitary
-
+        print("Running Estimator")
         job = self.estimator.run(circuits=[training_circ] * self.batch_size,
                                  observables=[observables] * self.batch_size,
                                  parameter_values=reshaped_params,
@@ -445,10 +455,14 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                  job_tags=[f"rl_qoc_step{self._step_tracker}"])
 
         reward_table = job.result().values
+        print('Job done')
         self.reward_history.append(reward_table)
         assert len(reward_table) == self.batch_size
 
         return reward_table
+
+    def reset_global_step(self):
+        self._step_tracker = 0
 
     def reset(
             self,
