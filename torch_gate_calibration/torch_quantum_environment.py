@@ -9,6 +9,7 @@ Created on 26/06/2023
 # Qiskit imports
 from qiskit import schedule, transpile
 from qiskit.transpiler import InstructionDurations, Layout, CouplingMap
+from qiskit.converters import circuit_to_dag
 from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector, Instruction
 from qiskit.providers import BackendV1, BackendV2, Options
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
@@ -79,50 +80,60 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         if isinstance(self.backend, BackendV1):
             instruction_durations = InstructionDurations.from_backend(self.backend)
+            basis_gates = self.backend.configuration().basis_gates
         elif isinstance(self.backend, BackendV2):
             instruction_durations = self.backend.instruction_durations
+            basis_gates = self.backend.operation_names
         else:
-            raise Warning("No InstructionDuration object found in backend, will not be able to run the experiment")
-
+            raise AttributeError("This class needs an Backend")
         self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
         self._physical_neighbor_qubits = list(filter(lambda x: x not in self.physical_target_qubits,
                                                      chain(*[list(CouplingMap(self.backend_data.coupling_map).neighbors(
                                                          target_qubit))
                                                          for target_qubit in self.physical_target_qubits])))
-        self.instruction_durations = instruction_durations
+
+        ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'reset', 'measure', 'delay']
+        if "ecr" in basis_gates:
+            ibm_basis_gates.append("ecr")
+        else:
+            ibm_basis_gates.append("cx")
         self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False), backend=self.backend,
                                          scheduling_method='asap',
-                                         instruction_durations=self.instruction_durations,
+                                         basis_gates=ibm_basis_gates,
+                                         instruction_durations=instruction_durations,
                                          optimization_level=0)
         # self._benchmark_backend = UnitarySimulator()
         self.tgt_register = QuantumRegister(bits=[self.circuit_context.qubits[i]
                                                   for i in self.physical_target_qubits], name="tgt")
         self.nn_register = QuantumRegister(bits=[self.circuit_context.qubits[i]
                                                  for i in self._physical_neighbor_qubits], name='nn')
-        # self.tgt_register = QuantumRegister(len(self._physical_target_qubits),
-        #                                     name="tgt")
-        # self.nn_register = QuantumRegister(
-        #     len(self._physical_neighbor_qubits),
-        #     name="nn")
+
         self.layout = Layout({self.tgt_register[i]: self.physical_target_qubits[i]
                               for i in range(len(self.tgt_register))} | {
                                  self.nn_register[j]: self._physical_neighbor_qubits[j]
                                  for j in range(len(self.nn_register))})
 
-        self.estimator.set_options(initial_layout=self.layout, optimization_level=0)
+        # TODO: Use line below when Runtime Options supports Layout class
+        # self.estimator.set_options(initial_layout=self.layout, optimization_level=0,
+        #                            resilience_level=0)
+        self.estimator.set_options(initial_layout=self.physical_target_qubits+self.physical_neighbor_qubits,
+                                   optimization_level=0,
+                                   resilience_level=0)
         if isinstance(self.estimator, AerEstimator):
-            self.estimator._transpile_options = Options(initial_layout=self.layout, optimization_level=0)
+            self.estimator._transpile_options = Options(initial_layout=self.layout,
+                                                        optimization_level=0)
 
         self._d = 2 ** self.tgt_register.size
         self.target_instruction = CircuitInstruction(self.target["gate"], self.tgt_register)
         self.tgt_instruction_counts = self.circuit_context.data.count(self.target_instruction)
 
-        self._parameters = [ParameterVector(f"a_{j}", action_spec.shape[-1]) for j in
+        self._parameters = [ParameterVector(f'a_{j}', action_spec.shape[-1]) for j in
                             range(self.tgt_instruction_counts)]
         self._param_values = create_array(self.tgt_instruction_counts, batch_size, action_spec.shape[-1])
-        self._target_instruction_indices, self._target_instruction_timings = [], []
+
 
         # Store time and instruction indices where target gate is played in circuit
+        self._target_instruction_indices, self._target_instruction_timings = [], []
         for i, instruction in enumerate(self.circuit_context.data):
             if instruction == self.target_instruction:
                 self._target_instruction_indices.append(i)
@@ -146,44 +157,15 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._episode_ended = False
         self._episode_tracker = 0
         self._intermediate_rewards = intermediate_rewards
+        self._max_return = 0
+        self._best_action = np.zeros((batch_size, action_spec.shape[-1]))
 
     @property
     def physical_target_qubits(self):
         return self._physical_target_qubits
-
-    @physical_target_qubits.setter
-    def physical_target_qubits(self, target_qubits: List[int]):
-        self._physical_target_qubits = target_qubits
-        self._physical_neighbor_qubits = list(filter(lambda x: x not in self.physical_target_qubits,
-                                                     chain(*[list(
-                                                         CouplingMap(self.backend_data.coupling_map).neighbors(
-                                                             target_qubit))
-                                                         for target_qubit in self.physical_target_qubits])))
-
-        self.tgt_register = QuantumRegister(
-            bits=[self.circuit_context.qregs[0][i] for i in self._physical_target_qubits],
-            name="tgt")
-        self.nn_register = QuantumRegister(
-            bits=[self.circuit_context.qregs[0][i] for i in self._physical_neighbor_qubits],
-            name="nn")
-        self.layout = Layout({self.tgt_register[i]: self.physical_target_qubits[i]
-                              for i in range(len(self.tgt_register))} | {
-                                 self.nn_register[j]: self._physical_neighbor_qubits[j]
-                                 for j in range(len(self.nn_register))})
-
-        self._d = 2 ** (self.tgt_register.size + self.nn_register.size)
-        self.target_instruction = CircuitInstruction(self.target["gate"], self.tgt_register)
-        self.tgt_instruction_counts = self.circuit_context.data.count(self.target_instruction)
-        self._target_instruction_indices = []
-        self._target_instruction_timings = []
-
-        # Store time and instruction indices where target gate is played in circuit
-        for i, instruction in enumerate(self.circuit_context.data):
-            if instruction == self.target_instruction:
-                self._target_instruction_indices.append(i)
-                self._target_instruction_timings.append(self.circuit_context.op_start_times[i])
-        self.circuit_truncations = self._generate_circuit_truncations()
-
+    @property
+    def physical_neighbor_qubits(self):
+        return self._physical_neighbor_qubits
     @property
     def batch_size(self) -> Optional[int]:
         return self._batch_size
@@ -278,38 +260,39 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         n_actions = self.action_space.shape[-1]
         custom_gates_list = []
         n_custom_instructions = self._trunc_index + 1  # Count custom instructions present in the current truncation
-
-        # Retrieve custom circuit without input state prep
         benchmark_circ = self.circuit_truncations[self._trunc_index].copy(name='b_circ')
-        benchmark_circ.save_statevector()
-        unitary_backend = AerSimulator(method="unitary")
-        state_backend = AerSimulator(method='statevector')
-        states_result = state_backend.run(benchmark_circ.decompose(),
-                                          parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
-                                                            for i in range(n_custom_instructions)
-                                                            for j in range(n_actions)
-                                                            }]).result()
-        output_state_list = [states_result.get_statevector(i) for i in range(self.batch_size)]
-        qc_list = [benchmark_circ.bind_parameters(param) for param in params]  # Bind each action of the batch to a circ
-
-        for i in range(n_custom_instructions):
-            assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
-            # to check its individual gate fidelity (have to detour by a QuantumCircuit)
-            assigned_gate.append(self.custom_gates[i], self.tgt_register)
-            assigned_gate.save_unitary()
-            gates_result = unitary_backend.run(assigned_gate.decompose(),
-                                               parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
-                                                                 for j in range(n_actions)}]).result()
-            assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
-            custom_gates_list.append(assigned_instructions)
-        # Circuit list for each action of the batch
         if self.abstraction_level == 'circuit':
+            # Retrieve custom circuit without input state prep
+            benchmark_circ.save_statevector()
+            unitary_backend = AerSimulator(method="unitary")
+            state_backend = AerSimulator(method='statevector')
+            states_result = state_backend.run(benchmark_circ.decompose(),
+                                              parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
+                                                                for i in range(n_custom_instructions)
+                                                                for j in range(n_actions)
+                                                                }]).result()
+            output_state_list = [states_result.get_statevector(i) for i in range(self.batch_size)]
+
+
+            for i in range(n_custom_instructions):
+                assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
+                # to check its individual gate fidelity (have to detour by a QuantumCircuit)
+                assigned_gate.append(self.custom_gates[i], self.tgt_register)
+                assigned_gate.save_unitary()
+                gates_result = unitary_backend.run(assigned_gate.decompose(),
+                                                   parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
+                                                                     for j in range(n_actions)}]).result()
+                assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
+                custom_gates_list.append(assigned_instructions)
+        # Circuit list for each action of the batch
+
             tgt_gate = self.target["gate"]
             batched_dm = DensityMatrix(
-                np.sum([output_state.to_operator().to_matrix() for output_state in output_state_list],
-                       axis=0) / self.batch_size)
+                np.mean([output_state.to_operator().to_matrix() for output_state in output_state_list],
+                       axis=0))
             batched_circuit_fidelity = state_fidelity(batched_dm,
                                                       Statevector(self.baseline_truncations[self._trunc_index]))
+
 
             avg_fidelities = np.array([[average_gate_fidelity(custom_gate, tgt_gate) for custom_gate in custom_gates]
                                        for custom_gates in custom_gates_list])
@@ -322,7 +305,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
             self.circuit_fidelity_history.append(batched_circuit_fidelity)  # Avg gate fidelity over the action batch
         else:  # Pulse simulation
-
+            qc_list = [benchmark_circ.bind_parameters(param) for param in
+                       params]  # Bind each action of the batch to a circ
             schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
             unitaries = self._simulate_pulse_schedules(schedule_list)
             # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
@@ -375,8 +359,13 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     "circuit fidelity": self.circuit_fidelity_history[-1],
                     "max return": np.max(np.mean(self.reward_history, axis=1)),
                     "max circuit fidelity": np.max(self.circuit_fidelity_history),
-                    "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
+                    "max avg gate fidelity": [np.max(np.array(self.avg_fidelity_history)[:, i])
+                                              for i in range(len(self.avg_fidelity_history[0]))],
+                    "arg max avg gate fidelity": [np.argmax(np.array(self.avg_fidelity_history)[:, i])
+                                                  for i in range(len(self.avg_fidelity_history[0]))],
+                    "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "arg max circuit fidelity": np.argmax(self.circuit_fidelity_history),
+                    "best action": self._best_action,
                     "truncation_index": self._trunc_index,
                     "input_state": self.target["input_states"][self._index_input_state]["circuit"].name,
                     "observable": self._punctual_observable
@@ -388,6 +377,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     "average return": np.mean(self.reward_history, axis=1)[-1],
                     "max return": np.max(np.mean(self.reward_history, axis=1)),
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
+                    "best action": self._best_action,
                     "truncation_index": self._trunc_index,
                     "input_state": self.target["input_states"][self._index_input_state]["circuit"].name,
                     "observable": self._punctual_observable
@@ -403,6 +393,10 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             }
         return info
 
+    def _get_obs(self):
+        obs = np.array([self._index_input_state/len(self.target["input_states"]), self._inside_trunc_tracker])
+        # obs = np.array([0., 0])
+        return obs
     def perform_action(self, actions, do_benchmark: bool = False):
         raise NotImplementedError("This method shall not be used in this class, use QuantumEnvironment instead")
 
@@ -434,30 +428,43 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         # qc_list = [benchmark_circ.bind_parameters(param) for param in reshaped_params]
         # self.qc_history.append(qc_list)
         if self.do_benchmark():
-            print("Starting benchmarking...")
+            # print("Starting benchmarking...")
             self._store_benchmarks(reshaped_params)
-            print("Finished benchmarking")
+            # print("Finished benchmarking")
         if fidelity_access:
             reward_table = self._punctual_circuit_fidelities
-            self.reward_history.append(reward_table)
-            return reward_table
-            # Build full quantum circuit: concatenate input state prep and parametrized unitary
-        print("Running Estimator")
-        job = self.estimator.run(circuits=[training_circ] * self.batch_size,
-                                 observables=[observables] * self.batch_size,
-                                 parameter_values=reshaped_params,
-                                 shots=self.sampling_Pauli_space * self.n_shots,
-                                 job_tags=[f"rl_qoc_step{self._step_tracker}"])
+        else:
 
-        reward_table = job.result().values
-        print('Job done')
+            print("Sending job...")
+            job = self.estimator.run(circuits=[training_circ] * self.batch_size,
+                                     observables=[observables] * self.batch_size,
+                                     parameter_values=reshaped_params,
+                                     shots=self.sampling_Pauli_space * self.n_shots,
+                                     job_tags=[f"rl_qoc_step{self._step_tracker}"])
+
+            reward_table = job.result().values
+            scaling_reward_factor = len(observables) / 4**len(self.tgt_register)
+            reward_table /= (scaling_reward_factor * np.mean(reward_table))
+            print('Job done')
+
+        if np.mean(reward_table) > self._max_return:
+            self._max_return = np.mean(reward_table)
+            self._best_action = np.mean(reshaped_params, axis=0)
         self.reward_history.append(reward_table)
         assert len(reward_table) == self.batch_size
 
         return reward_table
 
-    def reset_global_step(self):
+    def clear_history(self):
         self._step_tracker = 0
+        self._episode_tracker = 0
+        self.qc_history.clear()
+        self.action_history.clear()
+        self.reward_history.clear()
+        self.avg_fidelity_history.clear()
+        self.process_fidelity_history.clear()
+        self.built_unitaries.clear()
+        self.circuit_fidelity_history.clear()
 
     def reset(
             self,
@@ -472,8 +479,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._episode_tracker += 1
         self._episode_ended = False
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
-
-        return np.array([self._index_input_state, self._inside_trunc_tracker]), self._get_info()
+        # TODO: Remove line below when it works for gate fidelity as well
+        #self._index_input_state = 0
+        return self._get_obs(), self._get_info()
 
     def step(
             self, action: ActType
@@ -481,8 +489,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         # trunc_index tells us which circuit truncation should be trained
         # Dependent on global_step and method select_trunc_index
-        self._trunc_index = self._select_trunc_index()
-        trunc_index = self._trunc_index
+        trunc_index = self._trunc_index = self._select_trunc_index()
+
         # Figure out if in middle of param loading or should compute the final reward (step_status < trunc_index or ==)
         step_status = self._inside_trunc_tracker
         self._step_tracker += 1
@@ -503,7 +511,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self.batch_size = batch_size
         self._param_values[trunc_index][step_status] = params
 
-        if step_status < trunc_index:  # Intermediate step within the same circuit
+        if step_status < trunc_index:  # Intermediate step within the circuit truncation
             self._inside_trunc_tracker += 1
             terminated = False
 
@@ -512,8 +520,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 obs = reward_table  # Set observation to obtained reward (might not be the smartest choice here)
                 return obs, reward_table, terminated, False, self._get_info()
             else:
-                obs = np.array([self._index_input_state, self._inside_trunc_tracker])
-                return obs, np.zeros(batch_size), terminated, False, self._get_info()
+
+                return self._get_obs(), np.zeros(batch_size), terminated, False, self._get_info()
 
         else:
             terminated = True
@@ -522,6 +530,6 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             if self._intermediate_rewards:
                 obs = reward_table
             else:
-                obs = np.array([self._index_input_state, self._inside_trunc_tracker])
+                obs = self._get_obs()
 
             return obs, reward_table, terminated, False, self._get_info()
