@@ -11,7 +11,7 @@ from qiskit import schedule, transpile
 from qiskit.transpiler import InstructionDurations, Layout, CouplingMap
 from qiskit.converters import circuit_to_dag
 from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector, Instruction
-from qiskit.providers import BackendV1, BackendV2, Options
+from qiskit.providers import BackendV1, BackendV2, Options as Aer_Options
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 
 from qiskit.quantum_info.states import DensityMatrix, Statevector
@@ -21,12 +21,13 @@ from qiskit_experiments.framework import BackendData
 from qiskit_aer.backends import AerSimulator, UnitarySimulator, StatevectorSimulator
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, Options as Runtime_Options
 from qiskit_aer.primitives import Estimator as AerEstimator
-
+from qiskit_algorithms.state_fidelities import ComputeUncompute
 import numpy as np
 from itertools import chain
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat
+from dataclasses import asdict
 
 from gymnasium import Env
 from gymnasium.spaces import Space
@@ -118,9 +119,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         #                            resilience_level=0)
         self.estimator.set_options(initial_layout=self.physical_target_qubits+self.physical_neighbor_qubits,
                                    optimization_level=0,
-                                   resilience_level=0)
+                                   resilience_level=0) # TODO: Could change this resilience level
+        if isinstance(self.estimator, Runtime_Estimator):
+            self._sampler = Sampler(session=self.estimator.session, options=dict(self.estimator.options))
         if isinstance(self.estimator, AerEstimator):
-            self.estimator._transpile_options = Options(initial_layout=self.layout,
+            self.estimator._transpile_options = Aer_Options(initial_layout=self.layout,
                                                         optimization_level=0)
 
         self._d = 2 ** self.tgt_register.size
@@ -261,77 +264,85 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         custom_gates_list = []
         n_custom_instructions = self._trunc_index + 1  # Count custom instructions present in the current truncation
         benchmark_circ = self.circuit_truncations[self._trunc_index].copy(name='b_circ')
-        if self.abstraction_level == 'circuit':
-            # Retrieve custom circuit without input state prep
-            benchmark_circ.save_statevector()
-            unitary_backend = AerSimulator(method="unitary")
-            state_backend = AerSimulator(method='statevector')
-            states_result = state_backend.run(benchmark_circ.decompose(),
-                                              parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
-                                                                for i in range(n_custom_instructions)
-                                                                for j in range(n_actions)
-                                                                }]).result()
-            output_state_list = [states_result.get_statevector(i) for i in range(self.batch_size)]
-
-
-            for i in range(n_custom_instructions):
-                assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
-                # to check its individual gate fidelity (have to detour by a QuantumCircuit)
-                assigned_gate.append(self.custom_gates[i], self.tgt_register)
-                assigned_gate.save_unitary()
-                gates_result = unitary_backend.run(assigned_gate.decompose(),
-                                                   parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
-                                                                     for j in range(n_actions)}]).result()
-                assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
-                custom_gates_list.append(assigned_instructions)
-        # Circuit list for each action of the batch
-
-            tgt_gate = self.target["gate"]
-            batched_dm = DensityMatrix(
-                np.mean([output_state.to_operator().to_matrix() for output_state in output_state_list],
-                       axis=0))
-            batched_circuit_fidelity = state_fidelity(batched_dm,
-                                                      Statevector(self.baseline_truncations[self._trunc_index]))
-
-
-            avg_fidelities = np.array([[average_gate_fidelity(custom_gate, tgt_gate) for custom_gate in custom_gates]
-                                       for custom_gates in custom_gates_list])
-            circuit_fidelities = np.array([state_fidelity(output_state,
-                                                          Statevector(self.baseline_truncations[self._trunc_index]))
-                                           for output_state in output_state_list])
-            avg_fidelity = np.mean(avg_fidelities, axis=1)
-            self._punctual_avg_fidelities = avg_fidelities
+        baseline_circ = self.baseline_truncations[self._trunc_index]
+        if isinstance(self.estimator, Runtime_Estimator):
+            fidelity_checker = ComputeUncompute(self._sampler)
+            job = fidelity_checker.run([benchmark_circ]*len(params), [baseline_circ]*len(params), values_1=params)
+            circuit_fidelities = job.result().fidelities
             self._punctual_circuit_fidelities = circuit_fidelities
-            self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
-            self.circuit_fidelity_history.append(batched_circuit_fidelity)  # Avg gate fidelity over the action batch
-        else:  # Pulse simulation
-            qc_list = [benchmark_circ.bind_parameters(param) for param in
-                       params]  # Bind each action of the batch to a circ
-            schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
-            unitaries = self._simulate_pulse_schedules(schedule_list)
-            # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
-            # TODO: transmon is simulated), adapt the target gate operator accordingly.
-            unitaries = [Operator(np.array(unitary.y[0])) for unitary in unitaries]
-            if self.model_dim % 2 != 0:
-                dms = [DensityMatrix.from_int(0, self.model_dim).evolve(unitary) for unitary in unitaries]
+            self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
+            
 
-            qubitized_unitaries = [np.zeros((self._d, self._d)) for _ in range(len(unitaries))]
-            for u in range(len(unitaries)):
-                for i in range(self._d):
-                    for j in range(self._d):
-                        qubitized_unitaries[u][i, j] = unitaries[u]
-            if self.target_type == 'state':
-                density_matrix = DensityMatrix(np.mean([Statevector.from_int(0, dims=self._d).evolve(unitary)
-                                                        for unitary in unitaries]))
-                self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
-            else:
-                self.process_fidelity_history.append(
-                    np.mean([process_fidelity(unitary, Operator(self.baseline_truncations[self._trunc_index]))
-                             for unitary in unitaries]))
-                self.avg_fidelity_history.append(
-                    np.mean([average_gate_fidelity(unitary, Operator(self.baseline_truncations[self._trunc_index]))
-                             for unitary in unitaries]))
-            self.built_unitaries.append(unitaries)
+        else:
+            if self.abstraction_level == 'circuit':
+                # Retrieve custom circuit without input state prep
+                benchmark_circ.save_statevector()
+                unitary_backend = AerSimulator(method="unitary")
+                state_backend = AerSimulator(method='statevector')
+                states_result = state_backend.run(benchmark_circ.decompose(),
+                                                  parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
+                                                                    for i in range(n_custom_instructions)
+                                                                    for j in range(n_actions)
+                                                                    }]).result()
+                output_state_list = [states_result.get_statevector(i) for i in range(self.batch_size)]
+
+
+                for i in range(n_custom_instructions):
+                    assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
+                    # to check its individual gate fidelity (have to detour by a QuantumCircuit)
+                    assigned_gate.append(self.custom_gates[i], self.tgt_register)
+                    assigned_gate.save_unitary()
+                    gates_result = unitary_backend.run(assigned_gate.decompose(),
+                                                       parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
+                                                                         for j in range(n_actions)}]).result()
+                    assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
+                    custom_gates_list.append(assigned_instructions)
+            # Circuit list for each action of the batch
+
+                tgt_gate = self.target["gate"]
+                batched_dm = DensityMatrix(
+                    np.mean([output_state.to_operator().to_matrix() for output_state in output_state_list],
+                           axis=0))
+                batched_circuit_fidelity = state_fidelity(batched_dm, Statevector(baseline_circ))
+
+                avg_fidelities = np.array([[average_gate_fidelity(custom_gate, tgt_gate) for custom_gate in custom_gates]
+                                           for custom_gates in custom_gates_list])
+                circuit_fidelities = np.array([state_fidelity(output_state,
+                                                              Statevector(self.baseline_truncations[self._trunc_index]))
+                                               for output_state in output_state_list])
+                avg_fidelity = np.mean(avg_fidelities, axis=1)
+                self._punctual_avg_fidelities = avg_fidelities
+                self._punctual_circuit_fidelities = circuit_fidelities
+                self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
+                self.circuit_fidelity_history.append(batched_circuit_fidelity)  # Avg gate fidelity over the action batch
+            else:  # Pulse simulation
+                qc_list = [benchmark_circ.bind_parameters(param) for param in
+                           params]  # Bind each action of the batch to a circ
+                schedule_list = [schedule(qc, backend=self.backend, dt=self.backend.target.dt) for qc in qc_list]
+                unitaries = self._simulate_pulse_schedules(schedule_list)
+                # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
+                # TODO: transmon is simulated), adapt the target gate operator accordingly.
+                unitaries = [Operator(np.array(unitary.y[0])) for unitary in unitaries]
+                if self.model_dim % 2 != 0:
+                    dms = [DensityMatrix.from_int(0, self.model_dim).evolve(unitary) for unitary in unitaries]
+
+                qubitized_unitaries = [np.zeros((self._d, self._d)) for _ in range(len(unitaries))]
+                for u in range(len(unitaries)):
+                    for i in range(self._d):
+                        for j in range(self._d):
+                            qubitized_unitaries[u][i, j] = unitaries[u]
+                if self.target_type == 'state':
+                    density_matrix = DensityMatrix(np.mean([Statevector.from_int(0, dims=self._d).evolve(unitary)
+                                                            for unitary in unitaries]))
+                    self.state_fidelity_history.append(state_fidelity(self.target["dm"], density_matrix))
+                else:
+                    self.process_fidelity_history.append(
+                        np.mean([process_fidelity(unitary, Operator(self.baseline_truncations[self._trunc_index]))
+                                 for unitary in unitaries]))
+                    self.avg_fidelity_history.append(
+                        np.mean([average_gate_fidelity(unitary, Operator(self.baseline_truncations[self._trunc_index]))
+                                 for unitary in unitaries]))
+                self.built_unitaries.append(unitaries)
 
     def _select_trunc_index(self):
         if self._intermediate_rewards:
