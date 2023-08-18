@@ -5,57 +5,52 @@ quantum system (could also include QUA code in the future)
 Author: Arthur Strauss
 Created on 28/11/2022
 """
-import time
 
+# For compatibility for options formatting between Estimators.
+import json
+from itertools import product, permutations
+from typing import Dict, Union, Optional, List, Callable
+
+import jax
+import numpy as np
 # Qiskit imports
-from qiskit import pulse, schedule, transpile
-from qiskit.pulse.transforms.canonicalization import block_to_schedule
-from qiskit.transpiler import InstructionProperties, Layout, CouplingMap
+from qiskit import pulse, schedule
 from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Gate, CircuitInstruction
 from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
-from qiskit.providers import BackendV1, BackendV2
-
-from qiskit.quantum_info.states import DensityMatrix, Statevector
+# Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
+from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
+# Qiskit backends
+from qiskit.providers import Backend
+from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
+from qiskit.pulse.transforms.canonicalization import block_to_schedule
+# Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
-# Qiskit dynamics for pulse simulation (benchmarking)
+from qiskit.quantum_info.states import DensityMatrix, Statevector
+from qiskit.transpiler import InstructionProperties, Layout
+from qiskit_aer.backends.aerbackend import AerBackend
+from qiskit_aer.primitives import Estimator as Aer_Estimator
+# Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend, Solver
 from qiskit_dynamics.array import Array, wrap
 from qiskit_dynamics.models import HamiltonianModel
-
-# Qiskit Experiments for generating reliable baseline for more complex gate calibrations / state preparations
-from qiskit_experiments.calibration_management.calibrations import Calibrations
-from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
 from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
-from qiskit_experiments.library import ProcessTomography, CrossResonanceHamiltonian, EchoedCrossResonanceHamiltonian
-from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
+# Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
+from qiskit_experiments.calibration_management.calibrations import Calibrations
 from qiskit_experiments.framework import BatchExperiment
-# Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session, \
-    QiskitRuntimeService
-from qiskit_aer.primitives import Estimator as Aer_Estimator
-from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit_aer.backends import AerSimulator
+from qiskit_experiments.library import ProcessTomography, CrossResonanceHamiltonian
+from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
+from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session
+# Tensorflow modules
+from tensorflow_probability.python.distributions import Categorical
 
-import numpy as np
-from itertools import product, permutations
-from typing import Dict, Union, Optional, List, Callable
-# For compatibility for options formatting between Estimators.
-from dataclasses import asdict
-from copy import deepcopy
-import json
 from qconfig import QiskitConfig, QuaConfig
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
 # from qm.qua import *
 # from qm.QuantumMachinesManager import QuantumMachinesManager
-
-# Tensorflow modules
-from tensorflow_probability.python.distributions import Categorical
-
-import jax
 
 jit = wrap(jax.jit, decorator=True)
 
@@ -75,14 +70,14 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
 
     control_channel_map = backend.options.control_channel_map or {(qubits[0], qubits[1]): index
                                                                   for index, qubits in
-                                                                  enumerate(permutations(qubits, 2))}
+                                                                  enumerate(tuple(permutations(qubits, 2)))}
     if backend.options.control_channel_map:
         physical_control_channel_map = {(qubit_pair[0], qubit_pair[1]): backend.control_channel((qubit_pair[0],
                                                                                                  qubit_pair[1]))
                                         for qubit_pair in backend.options.control_channel_map}
     else:
         physical_control_channel_map = {(qubit_pair[0], qubit_pair[1]): [pulse.ControlChannel(index)]
-                                        for index, qubit_pair in enumerate(permutations(qubits, 2))}
+                                        for index, qubit_pair in enumerate(tuple(permutations(qubits, 2)))}
     backend.set_options(control_channel_map=control_channel_map)
     coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
     two_qubit_properties = {qubits: None for qubits in control_channel_map}
@@ -289,8 +284,8 @@ class QuantumEnvironment:
         :param c_factor: Scaling factor for reward normalization
         """
 
-        assert abstraction_level == 'circuit' or abstraction_level == 'pulse', 'Abstraction layer parameter can be' \
-                                                                               ' either pulse or circuit'
+        assert abstraction_level == 'circuit' or abstraction_level == 'pulse', 'Abstraction layer can be either pulse' \
+                                                                               ' or circuit'
         self.abstraction_level: str = abstraction_level
         if Qiskit_config is None and QUA_config is None:
             raise AttributeError("QuantumEnvironment requires one software configuration (can be Qiskit or QUA based)")
@@ -307,21 +302,24 @@ class QuantumEnvironment:
             self.n_shots = n_shots
             self.Pauli_ops = pauli_basis(num_qubits=self._n_qubits)
 
-            self.backend: Union[BackendV1, BackendV2, None] = Qiskit_config.backend
+            self.backend: Optional[Backend] = Qiskit_config.backend
             self.parametrized_circuit_func: Callable = Qiskit_config.parametrized_circuit
             estimator_options: Optional[Union[Options, Dict]] = Qiskit_config.estimator_options
 
             if self.abstraction_level == "circuit":  # Either state-vector simulation (native) or AerBackend provided
-                if isinstance(self.backend, AerBackend):
+                if isinstance(self.backend, (AerBackend, FakeBackend, FakeBackendV2)):
                     # Estimator taking noise model into consideration, have to provide an AerBackend
                     # TODO: Extract from TranspilationOptions a dict that can go in following definition
                     self._estimator: BaseEstimator = Aer_Estimator(backend_options=self.backend.options,
                                                                    transpile_options={'initial_layout': self._layout},
                                                                    approximation=True)
-                else:  # No backend specified
-                    self._estimator: BaseEstimator = Estimator(
-                        options={"initial_layout": self._layout})  # Estimator based on state-vector simulation
-            elif self.abstraction_level == 'pulse':
+                else:  # No backend specified, ideal state-vector simulation
+                    self._estimator: BaseEstimator = Estimator(options={"initial_layout": self._layout})
+
+            else: # Pulse level abstraction
+                if not isinstance(self.backend, (Runtime_Backend, DynamicsBackend)):
+                    raise TypeError("Backend must be either DynamicsBackend or Qiskit Runtime backend if pulse level"
+                                    "abstraction is selected (Aer Pulse simulator deprecated")
                 self._estimator: BaseEstimator = BackendEstimator(self.backend, options={"initial_layout": self._layout})
 
                 if isinstance(self.backend, DynamicsBackend):
@@ -330,13 +328,16 @@ class QuantumEnvironment:
                         self.calibrations, self.exp_results = perform_standard_calibrations(self.backend,
                                                                                             calibration_files)
                     self._benchmark_backend = self.backend
-                # For benchmarking the gate at each epoch, set the tools for Pulse level simulator
-                self.solver: Solver = Qiskit_config.solver
-                if Qiskit_config.solver is None:
+                else:
+                    self._benchmark_backend = DynamicsBackend.from_backend(self.backend,
+                                                                           subsystem_list=target["register"])
+                # For benchmarking the gate at each epoch, set tools for Pulse level simulator
+                if Qiskit_config.solver is not None:
+                    self.solver: Solver = Qiskit_config.solver
+                else:
                     self.solver: Solver = self._benchmark_backend.options.solver  # Custom Solver
                 # Can describe noisy channels, if none provided, pick Solver associated to DynamicsBackend by default
-                self.model_dim = self.solver.model.dim
-                self.channel_freq = Qiskit_config.channel_freq
+                self.model_dim, self.channel_freq  = self.solver.model.dim, Qiskit_config.channel_freq
                 if isinstance(self.solver.model, HamiltonianModel):
                     self.y_0 = Array(np.eye(self.model_dim))
                     self.ground_state = Array(np.array([1.0] + [0.0] * (self.model_dim - 1)))
@@ -346,13 +347,14 @@ class QuantumEnvironment:
 
             if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
                 self._estimator: BaseEstimator = Runtime_Estimator(session=Session(self.backend.service, self.backend),
-                                                    options=estimator_options)
+                                                                   options=estimator_options)
                 self._estimator.set_options(initial_layout=self._layout)
 
         elif QUA_config is not None:
-            self._config_type = "QUA"
-            self._config = QUA_config
             raise AttributeError("QUA compatibility not yet implemented")
+            # self._config_type = "QUA"
+            # self._config = QUA_config
+
             # TODO: Add a QUA program
 
         # Data storage for TF-Agents or plotting
@@ -522,12 +524,17 @@ class QuantumEnvironment:
             self.state_fidelity_history.clear()
             self.density_matrix_history.clear()
 
+    def close(self) -> None:
+        if isinstance(self.estimator, Runtime_Estimator):
+            self.estimator.session.close()
+
     def __repr__(self):
-        string = f"QuantumEnvironment composed of {self._n_qubits}, \n"
+        string = f"QuantumEnvironment composed of {self._n_qubits} qubits, \n"
         string += f"Defined target: {self.target_type} " \
                   f"({self.target.get('gate', None) if not None else self.target['dm']})\n"
-        string += f"Defined backend: {self.backend},\n"
+        string += f"Backend: {self.backend},\n"
         string += f"Abstraction level: {self.abstraction_level},\n"
+        string += f"Run options: N_shots ({self.n_shots}), Sampling_Pauli_space ({self.sampling_Pauli_space}), \n"
         return string
 
     @property
@@ -566,6 +573,10 @@ class QuantumEnvironment:
     @property
     def step_tracker(self):
         return self._step_tracker
+    @step_tracker.setter
+    def step_tracker(self, step:int):
+        assert step >= 0, 'step must be positive integer'
+        self._step_tracker = step
 
     def to_json(self):
         return json.dumps({"n_qubits": self.n_qubits, "config": self._config,

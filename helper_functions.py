@@ -1,18 +1,18 @@
-import tensorflow as tf
-import numpy as np
 from typing import Optional, Tuple, List, Union, Dict, Sequence
-from tensorflow.python.keras.layers import Input, Dense
-from tensorflow.python.keras import Model
-from qiskit.providers import BackendV1, Backend
-from qiskit.quantum_info import Operator, average_gate_fidelity, state_fidelity, process_fidelity
+
+import numpy as np
+import tensorflow as tf
 from qiskit.circuit import QuantumCircuit, Gate
-from qiskit_dynamics import Solver, DynamicsBackend, RotatingFrame
-from qiskit_dynamics.array import Array
 from qiskit.exceptions import QiskitError
+from qiskit.providers import BackendV1, Backend
+from qiskit_dynamics import Solver, RotatingFrame
+from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
 from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs
 from qiskit_experiments.framework import BatchExperiment, BaseAnalysis
 from qiskit_experiments.library.tomography import StateTomography, ProcessTomography
+from tensorflow.python.keras import Model
+from tensorflow.python.keras.layers import Input, Dense
 
 
 def constrain_mean_value(mu_var):
@@ -22,6 +22,54 @@ def constrain_mean_value(mu_var):
 def constrain_std_value(std_var):
     return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
 
+def count_gates(qc: QuantumCircuit):
+    gate_count = {qubit: 0 for qubit in qc.qubits}
+    for gate in qc.data:
+        for qubit in gate.qubits:
+            gate_count[qubit] += 1
+    return gate_count
+def remove_unused_wires(qc: QuantumCircuit):
+    gate_count = count_gates(qc)
+    for qubit, count in gate_count.items():
+        if count == 0:
+            qc.qubits.remove(qubit)
+    return qc
+
+def determine_ecr_params(backend: Backend, physical_qubits: List[int], basis_gate="cx"):
+    if isinstance(backend, BackendV1):
+        instruction_schedule_map = backend.defaults().instruction_schedule_map
+    else:
+        instruction_schedule_map = backend.target.instruction_schedule_map()
+
+    q_c, q_t = (physical_qubits[0],), (physical_qubits[1],)
+    physical_qubits = tuple(physical_qubits)
+    cx_instructions = instruction_schedule_map.get(basis_gate, qubits=physical_qubits)
+    cx_pulses = np.array(cx_instructions.instructions)[:,1]
+    control_pulse = target_pulse = x_pulse = None
+    for pulse in list(cx_pulses):
+        name = str(pulse.name)
+        if "Xp_d" in name:
+            x_pulse = pulse.pulse
+        elif "CR90p_d" in name:
+            target_pulse = pulse.pulse
+        elif "CR90p_u" in name:
+            control_pulse = pulse.pulse
+
+    default_params = {("amp", q_c, "x"): x_pulse.amp,
+                      ("σ", q_c, "x"): x_pulse.sigma,
+                      ("β", q_c, "x"): x_pulse.beta,
+                      ("duration", q_c, "x"): x_pulse.duration,
+                      ("angle", q_c, "x"): x_pulse.angle}
+    for sched in ["cr45p", "cr45m"]:
+        default_params.update({("amp", physical_qubits, sched): control_pulse.amp,
+                               ("tgt_amp", physical_qubits, sched): target_pulse.amp,
+                               ("angle", physical_qubits, sched): control_pulse.angle,
+                               ("tgt_angle", physical_qubits, sched): target_pulse.angle,
+                               ("duration", physical_qubits, sched): control_pulse.duration,
+                               ("σ", physical_qubits, sched): control_pulse.sigma,
+                               ("risefall", physical_qubits, sched) : (control_pulse.duration - control_pulse.width)/(2*control_pulse.sigma)})
+
+    return default_params, cx_instructions, cx_pulses
 
 def state_fidelity_from_state_tomography(qc_list: List[QuantumCircuit], backend: Backend,
                                          measurement_indices: Optional[Sequence[int]],
@@ -44,7 +92,7 @@ def gate_fidelity_from_process_tomography(qc_list: List[QuantumCircuit], backend
     """
     # Process tomography
     process_tomo = BatchExperiment([ProcessTomography(qc, physical_qubits=physical_qubits, analysis=analysis)
-                                    for qc in qc_list], backend=backend)
+                                    for qc in qc_list], backend=backend, flatten_results=True)
 
     results = process_tomo.run().block_for_results()
     process_results = [data.analysis_result() for data in results.child_data()]

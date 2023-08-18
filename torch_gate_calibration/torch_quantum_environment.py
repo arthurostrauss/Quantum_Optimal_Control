@@ -6,32 +6,29 @@ Author: Arthur Strauss
 Created on 26/06/2023
 """
 
-# Qiskit imports
-from qiskit import schedule, transpile
-from qiskit.transpiler import InstructionDurations, Layout, CouplingMap
-from qiskit.converters import circuit_to_dag
-from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector, Instruction
-from qiskit.providers import BackendV1, BackendV2, Options as Aer_Options
-from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
-
-from qiskit.quantum_info.states import DensityMatrix, Statevector
-from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
-from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
-from qiskit_experiments.framework import BackendData
-from qiskit_aer.backends import AerSimulator, UnitarySimulator, StatevectorSimulator
-
-# Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, Options as Runtime_Options
-from qiskit_aer.primitives import Estimator as AerEstimator
-from qiskit_algorithms.state_fidelities import ComputeUncompute
-import numpy as np
 from itertools import chain
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat
-from dataclasses import asdict
 
+import numpy as np
 from gymnasium import Env
 from gymnasium.spaces import Space
+# Qiskit imports
+from qiskit import schedule, transpile
+from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector, Instruction
+from qiskit.providers import BackendV1, BackendV2, Options as Aer_Options
+from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
+from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
+from qiskit.quantum_info.states import DensityMatrix, Statevector
+from qiskit.transpiler import InstructionDurations, Layout, CouplingMap
+from qiskit_aer.backends import AerSimulator
+from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
+from qiskit_algorithms.state_fidelities import ComputeUncompute
+from qiskit_experiments.framework import BackendData
+# Qiskit Primitive: for computing Pauli expectation value sampling easily
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler
 from tensorflow_probability.python.distributions import Categorical
+
+from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 
 ObsType = TypeVar("ObsType")
 ActType = TypeVar("ActType")
@@ -53,6 +50,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                  observation_spec: Space,
                  batch_size: int,
                  training_steps_per_gate: int = 1500,
+                 benchmark_cycle: int = 100,
                  intermediate_rewards: bool = False,
                  seed: Optional[int] = None
                  ):
@@ -79,6 +77,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         assert self.target_type == 'gate', "This class is made for gate calibration only"
         self.backend_data = BackendData(self.backend)
 
+
         if isinstance(self.backend, BackendV1):
             instruction_durations = InstructionDurations.from_backend(self.backend)
             basis_gates = self.backend.configuration().basis_gates
@@ -86,23 +85,34 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             instruction_durations = self.backend.instruction_durations
             basis_gates = self.backend.operation_names
         else:
-            raise AttributeError("This class needs an Backend")
+            raise AttributeError("TorchQuantumEnvironment requires a Backend argument")
         self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
+        coupling_map = CouplingMap(self.backend_data.coupling_map)
+        dt = self.backend_data.dt
+        if dt is None:
+            dt = 2.2222222222222221e-10
+
+        if coupling_map.size() == 0:
+            coupling_map = CouplingMap(self.estimator.options.simulator["coupling_map"])
         self._physical_neighbor_qubits = list(filter(lambda x: x not in self.physical_target_qubits,
-                                                     chain(*[list(CouplingMap(self.backend_data.coupling_map).neighbors(
-                                                         target_qubit))
+                                                     chain(*[list(coupling_map.neighbors(target_qubit))
                                                          for target_qubit in self.physical_target_qubits])))
 
-        ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'reset', 'measure', 'delay']
+        ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'ecr', 'reset', 'measure', 'delay']
+        if "basis_gates" in self.estimator.options.simulator:
+            ibm_basis_gates = self.estimator.options.simulator["basis_gates"]
         if "ecr" in basis_gates:
             ibm_basis_gates.append("ecr")
         else:
             ibm_basis_gates.append("cx")
-        self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False), backend=self.backend,
+
+        self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False),
+                                         backend=self.backend,
                                          scheduling_method='asap',
                                          basis_gates=ibm_basis_gates,
+                                         coupling_map=coupling_map,
                                          instruction_durations=instruction_durations,
-                                         optimization_level=0)
+                                         optimization_level=0, dt=dt)
         # self._benchmark_backend = UnitarySimulator()
         self.tgt_register = QuantumRegister(bits=[self.circuit_context.qubits[i]
                                                   for i in self.physical_target_qubits], name="tgt")
@@ -122,9 +132,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                    resilience_level=0) # TODO: Could change this resilience level
         if isinstance(self.estimator, Runtime_Estimator):
             self._sampler = Sampler(session=self.estimator.session, options=dict(self.estimator.options))
-        if isinstance(self.estimator, AerEstimator):
+        elif isinstance(self.estimator, AerEstimator):
             self.estimator._transpile_options = Aer_Options(initial_layout=self.layout,
                                                         optimization_level=0)
+            self._sampler = AerSampler(backend_options=self.backend.options,
+                                       transpile_options={'initial_layout':self.layout, 'optimization_level':0})
 
         self._d = 2 ** self.tgt_register.size
         self.target_instruction = CircuitInstruction(self.target["gate"], self.tgt_register)
@@ -159,6 +171,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._trunc_index = 0
         self._episode_ended = False
         self._episode_tracker = 0
+        self._benchmark_cycle = benchmark_cycle
         self._intermediate_rewards = intermediate_rewards
         self._max_return = 0
         self._best_action = np.zeros((batch_size, action_spec.shape[-1]))
@@ -189,6 +202,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
     def training_steps_per_gate(self):
         return self._training_steps_per_gate
 
+
     @training_steps_per_gate.setter
     def training_steps_per_gate(self, nb_of_steps: int):
         try:
@@ -197,10 +211,17 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         except AssertionError:
             raise ValueError('Training steps number should be positive integer.')
 
+    @property
+    def benchmark_cycle(self):
+        return self._benchmark_cycle
+    @benchmark_cycle.setter
+    def benchmark_cycle(self, step):
+        assert step >=1, 'Cycle needs to be a positive integer'
+        self._benchmark_cycle = step
     def do_benchmark(self):
         # TODO: Create a saving log for specific time steps (every once in a while), should have an additional input
-        if self.abstraction_level == 'circuit':
-            return True
+        if isinstance(self.estimator, Runtime_Estimator) or self.abstraction_level == 'circuit':
+            return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
         else:
             return False
 
@@ -265,19 +286,43 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         n_custom_instructions = self._trunc_index + 1  # Count custom instructions present in the current truncation
         benchmark_circ = self.circuit_truncations[self._trunc_index].copy(name='b_circ')
         baseline_circ = self.baseline_truncations[self._trunc_index]
-        if isinstance(self.estimator, Runtime_Estimator):
+
+        if isinstance(self.estimator, (Runtime_Estimator, AerEstimator)):
+
+            # Assess circuit fidelity with ComputeUncompute algo
             fidelity_checker = ComputeUncompute(self._sampler)
             job = fidelity_checker.run([benchmark_circ]*len(params), [baseline_circ]*len(params), values_1=params)
             circuit_fidelities = job.result().fidelities
             self._punctual_circuit_fidelities = circuit_fidelities
             self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
-            
+
+            # TODO: Implement a valid gate characterization subroutine compatible with Runtime primitives
+            # Calculate average gate fidelities for each gate instance within circuit truncation
+
+            unitary_backend = AerSimulator(method="unitary")
+            for i in range(n_custom_instructions):
+                assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
+                # to check its individual gate fidelity (have to detour by a QuantumCircuit)
+                assigned_gate.append(self.custom_gates[i], self.tgt_register)
+                assigned_gate.save_unitary()
+                gates_result = unitary_backend.run(assigned_gate.decompose(),
+                                                   parameter_binds=[{self._parameters[i][j]:
+                                                                         params[:, i * n_actions + j]
+                                                                     for j in range(n_actions)
+                                                                     }]).result()
+                assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
+                custom_gates_list.append(assigned_instructions)
+
+            tgt_gate = self.target["gate"]
+            avg_fidelities = np.array([[average_gate_fidelity(custom_gate, tgt_gate) for custom_gate in custom_gates]
+                                       for custom_gates in custom_gates_list])
+            self._punctual_avg_fidelities = avg_fidelities
+            self.avg_fidelity_history.append(np.mean(avg_fidelities, axis=1))
 
         else:
             if self.abstraction_level == 'circuit':
-                # Retrieve custom circuit without input state prep
+                # Calculate circuit fidelity with statevector simulation
                 benchmark_circ.save_statevector()
-                unitary_backend = AerSimulator(method="unitary")
                 state_backend = AerSimulator(method='statevector')
                 states_result = state_backend.run(benchmark_circ.decompose(),
                                                   parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
@@ -285,36 +330,35 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                                                     for j in range(n_actions)
                                                                     }]).result()
                 output_state_list = [states_result.get_statevector(i) for i in range(self.batch_size)]
+                batched_dm = DensityMatrix(np.mean([state.to_operator().to_matrix() for state in output_state_list], axis=0))
+                batched_circuit_fidelity = state_fidelity(batched_dm, Statevector(baseline_circ))
+                self.circuit_fidelity_history.append(batched_circuit_fidelity)  # Circuit fidelity over the action batch
+
+                circuit_fidelities = [state_fidelity(state, Statevector(baseline_circ)) for state in output_state_list]
+                self._punctual_circuit_fidelities = np.array(circuit_fidelities)
 
 
+                # Calculate average gate fidelities for each gate instance within circuit truncation
+                unitary_backend = AerSimulator(method="unitary")
                 for i in range(n_custom_instructions):
                     assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
                     # to check its individual gate fidelity (have to detour by a QuantumCircuit)
                     assigned_gate.append(self.custom_gates[i], self.tgt_register)
                     assigned_gate.save_unitary()
                     gates_result = unitary_backend.run(assigned_gate.decompose(),
-                                                       parameter_binds=[{self._parameters[i][j]: params[:, i * n_actions + j]
-                                                                         for j in range(n_actions)}]).result()
+                                                       parameter_binds=[{self._parameters[i][j]:
+                                                                             params[:, i * n_actions + j]
+                                                                         for j in range(n_actions)
+                                                                         }]).result()
                     assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
                     custom_gates_list.append(assigned_instructions)
-            # Circuit list for each action of the batch
 
                 tgt_gate = self.target["gate"]
-                batched_dm = DensityMatrix(
-                    np.mean([output_state.to_operator().to_matrix() for output_state in output_state_list],
-                           axis=0))
-                batched_circuit_fidelity = state_fidelity(batched_dm, Statevector(baseline_circ))
-
                 avg_fidelities = np.array([[average_gate_fidelity(custom_gate, tgt_gate) for custom_gate in custom_gates]
                                            for custom_gates in custom_gates_list])
-                circuit_fidelities = np.array([state_fidelity(output_state,
-                                                              Statevector(self.baseline_truncations[self._trunc_index]))
-                                               for output_state in output_state_list])
-                avg_fidelity = np.mean(avg_fidelities, axis=1)
                 self._punctual_avg_fidelities = avg_fidelities
-                self._punctual_circuit_fidelities = circuit_fidelities
-                self.avg_fidelity_history.append(avg_fidelity)  # Avg gate fidelity over the action batch
-                self.circuit_fidelity_history.append(batched_circuit_fidelity)  # Avg gate fidelity over the action batch
+                self.avg_fidelity_history.append(np.mean(avg_fidelities, axis=1))  # Avg gate fidelity over action batch
+
             else:  # Pulse simulation
                 qc_list = [benchmark_circ.bind_parameters(param) for param in
                            params]  # Bind each action of the batch to a circ
@@ -353,10 +397,6 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
     def episode_length(self, global_step: int):
         assert global_step == self.step_tracker, "Given step not synchronized with internal environment step counter"
         return self._select_trunc_index() + 1
-
-    def close(self) -> None:
-        if isinstance(self.estimator, Runtime_Estimator):
-            self.estimator.session.close()
 
     def _get_info(self) -> Any:
         step = self._episode_tracker
@@ -455,7 +495,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
             reward_table = job.result().values
             scaling_reward_factor = len(observables) / 4**len(self.tgt_register)
-            reward_table /= (scaling_reward_factor * np.mean(reward_table))
+            reward_table /= scaling_reward_factor
             print('Job done')
 
         if np.mean(reward_table) > self._max_return:
@@ -467,7 +507,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         return reward_table
 
     def clear_history(self):
-        self._step_tracker = 0
+        self.step_tracker = 0
         self._episode_tracker = 0
         self.qc_history.clear()
         self.action_history.clear()
@@ -544,3 +584,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 obs = self._get_obs()
 
             return obs, reward_table, terminated, False, self._get_info()
+
+    def __repr__(self):
+        string = QuantumEnvironment.__repr__(self)
+        string += f'Batchsize: {self.batch_size}, \n'
+        string += f'Number of target gates in circuit context: {self.tgt_instruction_counts}\n'
+        return string
