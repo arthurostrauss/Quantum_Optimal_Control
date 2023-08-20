@@ -15,6 +15,7 @@ from gymnasium.spaces import Space
 # Qiskit imports
 from qiskit import schedule, transpile
 from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector, Instruction
+from qiskit.primitives import BackendEstimator, BackendSampler
 from qiskit.providers import BackendV1, BackendV2, Options as Aer_Options
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
@@ -99,12 +100,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                                          for target_qubit in self.physical_target_qubits])))
 
         ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'ecr', 'reset', 'measure', 'delay']
-        if "basis_gates" in self.estimator.options.simulator:
-            ibm_basis_gates = self.estimator.options.simulator["basis_gates"]
-        if "ecr" in basis_gates:
-            ibm_basis_gates.append("ecr")
-        else:
-            ibm_basis_gates.append("cx")
+        if isinstance(self.estimator, Runtime_Estimator):
+            if "basis_gates" in self.estimator.options.simulator:
+                ibm_basis_gates = self.estimator.options.simulator["basis_gates"]
 
         self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False),
                                          backend=self.backend,
@@ -124,19 +122,26 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                  self.nn_register[j]: self._physical_neighbor_qubits[j]
                                  for j in range(len(self.nn_register))})
 
-        # TODO: Use line below when Runtime Options supports Layout class
-        # self.estimator.set_options(initial_layout=self.layout, optimization_level=0,
-        #                            resilience_level=0)
-        self.estimator.set_options(initial_layout=self.physical_target_qubits+self.physical_neighbor_qubits,
-                                   optimization_level=0,
-                                   resilience_level=0) # TODO: Could change this resilience level
         if isinstance(self.estimator, Runtime_Estimator):
+            # self.estimator.options.simulator["skip_transpilation"]=True
+            # TODO: Could change resilience level
+            self.estimator.set_options(optimization_level = 0, resilience_level=0)
+            # TODO: Use line below when Runtime Options supports Layout class
+            self.estimator.options.simulator["initial_layout"]=self.physical_target_qubits+self.physical_neighbor_qubits
             self._sampler = Sampler(session=self.estimator.session, options=dict(self.estimator.options))
+
         elif isinstance(self.estimator, AerEstimator):
-            self.estimator._transpile_options = Aer_Options(initial_layout=self.layout,
-                                                        optimization_level=0)
+            self.estimator._transpile_options = Aer_Options(initial_layout=self.layout, optimization_level=0)
             self._sampler = AerSampler(backend_options=self.backend.options,
-                                       transpile_options={'initial_layout':self.layout, 'optimization_level':0})
+                                       transpile_options={'initial_layout':self.layout, 'optimization_level':0},
+                                       skip_transpilation=False)
+        elif isinstance(self.estimator, BackendEstimator):
+            self.estimator.set_transpile_options(initial_layout=self.layout, optimization_level=0)
+            self._sampler = BackendSampler(self.backend, self.estimator.options, skip_transpilation=False)
+            self._sampler.set_transpile_options(initial_layout=self.layout, optimization_level=0)
+
+        else:
+            raise TypeError("Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime")
 
         self._d = 2 ** self.tgt_register.size
         self.target_instruction = CircuitInstruction(self.target["gate"], self.tgt_register)
@@ -490,8 +495,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             job = self.estimator.run(circuits=[training_circ] * self.batch_size,
                                      observables=[observables] * self.batch_size,
                                      parameter_values=reshaped_params,
-                                     shots=self.sampling_Pauli_space * self.n_shots,
-                                     job_tags=[f"rl_qoc_step{self._step_tracker}"])
+                                     shots=self.sampling_Pauli_space * self.n_shots)
 
             reward_table = job.result().values
             scaling_reward_factor = len(observables) / 4**len(self.tgt_register)
@@ -530,6 +534,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._episode_tracker += 1
         self._episode_ended = False
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
+        if isinstance(self.estimator, Runtime_Estimator):
+            self.estimator.options.environment["job_tags"]=[f"rl_qoc_step{self._step_tracker}"]
         # TODO: Remove line below when it works for gate fidelity as well
         #self._index_input_state = 0
         return self._get_obs(), self._get_info()

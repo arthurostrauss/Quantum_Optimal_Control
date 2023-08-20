@@ -5,10 +5,11 @@ import tensorflow as tf
 from qiskit.circuit import QuantumCircuit, Gate
 from qiskit.exceptions import QiskitError
 from qiskit.providers import BackendV1, Backend
+from qiskit.pulse import DriveChannel, ControlChannel
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
-from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs
+from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs, DynamicsBackend
 from qiskit_experiments.framework import BatchExperiment, BaseAnalysis
 from qiskit_experiments.library.tomography import StateTomography, ProcessTomography
 from tensorflow.python.keras import Model
@@ -43,17 +44,28 @@ def determine_ecr_params(backend: Backend, physical_qubits: List[int], basis_gat
 
     q_c, q_t = (physical_qubits[0],), (physical_qubits[1],)
     physical_qubits = tuple(physical_qubits)
-    cx_instructions = instruction_schedule_map.get(basis_gate, qubits=physical_qubits)
-    cx_pulses = np.array(cx_instructions.instructions)[:,1]
+    basis_gate_instructions = instruction_schedule_map.get(basis_gate, qubits=physical_qubits)
+    pulses = np.array(basis_gate_instructions.instructions)[:,1]
     control_pulse = target_pulse = x_pulse = None
-    for pulse in list(cx_pulses):
-        name = str(pulse.name)
-        if "Xp_d" in name:
-            x_pulse = pulse.pulse
-        elif "CR90p_d" in name:
-            target_pulse = pulse.pulse
-        elif "CR90p_u" in name:
-            control_pulse = pulse.pulse
+
+    if isinstance(backend, DynamicsBackend):
+        x_pulse = instruction_schedule_map.get("x", q_c).instructions[0][1].pulse
+        cr45p_instructions = np.array(instruction_schedule_map.get("cr45p", physical_qubits).instructions)[:,1]
+        for op in cr45p_instructions:
+            if isinstance(op.channel, DriveChannel):
+                target_pulse = op.pulse
+            elif isinstance(op.channel, ControlChannel):
+                control_pulse = op.pulse
+
+    else:
+        for pulse in list(pulses):
+            name = str(pulse.name)
+            if "Xp_d" in name:
+                x_pulse = pulse.pulse
+            elif "CR90p_d" in name:
+                target_pulse = pulse.pulse
+            elif "CR90p_u" in name:
+                control_pulse = pulse.pulse
 
     default_params = {("amp", q_c, "x"): x_pulse.amp,
                       ("σ", q_c, "x"): x_pulse.sigma,
@@ -69,7 +81,7 @@ def determine_ecr_params(backend: Backend, physical_qubits: List[int], basis_gat
                                ("σ", physical_qubits, sched): control_pulse.sigma,
                                ("risefall", physical_qubits, sched) : (control_pulse.duration - control_pulse.width)/(2*control_pulse.sigma)})
 
-    return default_params, cx_instructions, cx_pulses
+    return default_params, basis_gate_instructions, pulses
 
 def state_fidelity_from_state_tomography(qc_list: List[QuantumCircuit], backend: Backend,
                                          measurement_indices: Optional[Sequence[int]],

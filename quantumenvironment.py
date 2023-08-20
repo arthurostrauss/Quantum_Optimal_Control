@@ -34,11 +34,11 @@ from qiskit_aer.primitives import Estimator as Aer_Estimator
 from qiskit_dynamics import DynamicsBackend, Solver
 from qiskit_dynamics.array import Array, wrap
 from qiskit_dynamics.models import HamiltonianModel
-from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
+# from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_experiments.calibration_management.calibrations import Calibrations
 from qiskit_experiments.framework import BatchExperiment
-from qiskit_experiments.library import ProcessTomography, CrossResonanceHamiltonian
+from qiskit_experiments.library import ProcessTomography
 from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session
@@ -46,6 +46,7 @@ from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Run
 from tensorflow_probability.python.distributions import Categorical
 
 from qconfig import QiskitConfig, QuaConfig
+from torch_gate_calibration.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -64,7 +65,11 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
 
     """
 
-    target, num_qubits, qubits = backend.target, backend.num_qubits, list(range(backend.num_qubits))
+    target, qubits = backend.target, []
+    for i, dim in enumerate(backend.options.subsystem_dims):
+        if dim > 1:
+            qubits.append(i)
+    num_qubits = len(qubits)
     single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
     single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
 
@@ -86,7 +91,7 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array([1, 1 / 2, -1 / 2, 1 / 4, -1 / 4])
     other_gates = ["rz", "id", "h", "x", "sx", "reset"]
     single_qubit_gates = fixed_phase_gates + other_gates
-    two_qubit_gates = ["cx", "ecr"]
+    two_qubit_gates = ["ecr"]
     exp_results = {}
     existing_cals = calibration_files is not None
 
@@ -96,13 +101,12 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     else:
         cals = Calibrations(coupling_map=coupling_map, control_channel_map=physical_control_channel_map,
                             libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"]),
-                                       EchoedCrossResonance(basis_gates=['cr45p', 'cr45m', 'ecr', 'rzx'])])
+                                       EchoedCrossResonance(basis_gates=['cr45p', 'cr45m', 'ecr', 'rzx'])],
+                            backend_name=backend.name, backend_version=backend.backend_version)
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         for gate in single_qubit_gates:
             target.add_instruction(standard_gates[gate], properties=single_qubit_properties)
         if num_qubits > 1:
-            target.add_instruction(CrossResonanceHamiltonian.CRPulseGate(width=Parameter("width")),
-                                   properties=two_qubit_properties)
             for gate in two_qubit_gates:
                 target.add_instruction(standard_gates[gate], properties=two_qubit_properties)
             target.build_coupling_map(two_q_gate=two_qubit_gates[0])
@@ -153,13 +157,13 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     error_dict = {'x': single_qubit_errors, 'sx': single_qubit_errors}
     target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
     print(control_channel_map)
-    for qubit_pair in control_channel_map:
-        print(qubit_pair)
-        cr_ham_exp = CrossResonanceHamiltonian(physical_qubits=qubit_pair, flat_top_widths=np.linspace(0, 5000, 17),
-                                               backend=backend)
-        print("Calibrating CR for qubits", qubit_pair, "...")
-        data_cr = cr_ham_exp.run().block_for_results()
-        exp_results[qubit_pair] = data_cr
+    # for qubit_pair in control_channel_map:
+    #     print(qubit_pair)
+    #     cr_ham_exp = CrossResonanceHamiltonian(physical_qubits=qubit_pair, flat_top_widths=np.linspace(0, 5000, 17),
+    #                                            backend=backend)
+    #     print("Calibrating CR for qubits", qubit_pair, "...")
+    #     data_cr = cr_ham_exp.run().block_for_results()
+    #     exp_results[qubit_pair] = data_cr
 
     print("Updated Instruction Schedule Map", target.instruction_schedule_map())
 
@@ -320,7 +324,8 @@ class QuantumEnvironment:
                 if not isinstance(self.backend, (Runtime_Backend, DynamicsBackend)):
                     raise TypeError("Backend must be either DynamicsBackend or Qiskit Runtime backend if pulse level"
                                     "abstraction is selected (Aer Pulse simulator deprecated")
-                self._estimator: BaseEstimator = BackendEstimator(self.backend, options={"initial_layout": self._layout})
+                self._estimator: BaseEstimator = BackendEstimator(self.backend, skip_transpilation= False)
+                self._estimator.set_transpile_options(initial_layout=self.layout)
 
                 if isinstance(self.backend, DynamicsBackend):
                     if self.config.do_calibrations:
@@ -329,7 +334,8 @@ class QuantumEnvironment:
                                                                                             calibration_files)
                     self._benchmark_backend = self.backend
                 else:
-                    self._benchmark_backend = DynamicsBackend.from_backend(self.backend,
+                    if hasattr(self.backend, "configuration"):
+                        self._benchmark_backend = DynamicsBackend.from_backend(self.backend,
                                                                            subsystem_list=target["register"])
                 # For benchmarking the gate at each epoch, set tools for Pulse level simulator
                 if Qiskit_config.solver is not None:
