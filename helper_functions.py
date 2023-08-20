@@ -6,6 +6,7 @@ from qiskit.circuit import QuantumCircuit, Gate
 from qiskit.exceptions import QiskitError
 from qiskit.providers import BackendV1, Backend
 from qiskit.pulse import DriveChannel, ControlChannel
+from qiskit.quantum_info import Operator
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
@@ -103,13 +104,16 @@ def gate_fidelity_from_process_tomography(qc_list: List[QuantumCircuit], backend
     Extract average gate and process fidelities from batch of Quantum Circuit for target gate
     """
     # Process tomography
-    process_tomo = BatchExperiment([ProcessTomography(qc, physical_qubits=physical_qubits, analysis=analysis)
-                                    for qc in qc_list], backend=backend, flatten_results=True)
+    process_tomo = BatchExperiment([ProcessTomography(qc, physical_qubits=physical_qubits, analysis=analysis,
+                                                      target=Operator(target_gate))for qc in qc_list], backend=backend,
+                                   flatten_results=True)
 
     results = process_tomo.run().block_for_results()
-    process_results = [data.analysis_result() for data in results.child_data()]
-
-    return process_results
+    print(results.analysis_results("process_fidelity"))
+    process_results = [results.analysis_results("process_fidelity")[i] for i in range(len(qc_list))]
+    dim, _= Operator(target_gate).dim
+    avg_gate_fid = np.mean([(dim* f_pro + 1)/ (dim+1) for f_pro in process_results])
+    return avg_gate_fid
 
 
 def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
