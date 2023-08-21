@@ -14,7 +14,7 @@ from gymnasium import Env
 from gymnasium.spaces import Space
 # Qiskit imports
 from qiskit import transpile, schedule
-from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector, Instruction
+from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector
 from qiskit.primitives import BackendEstimator, BackendSampler
 from qiskit.providers import BackendV1, BackendV2, Options as Aer_Options
 from qiskit.quantum_info.operators import SparsePauliOp, pauli_basis, Operator
@@ -111,7 +111,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                          basis_gates=ibm_basis_gates,
                                          coupling_map=coupling_map,
                                          instruction_durations=instruction_durations,
-                                         optimization_level=0, dt=dt)
+                                         optimization_level=1, dt=dt)
         # self._benchmark_backend = UnitarySimulator()
         self.tgt_register = QuantumRegister(bits=[self.circuit_context.qubits[i]
                                                   for i in self.physical_target_qubits], name="tgt")
@@ -225,7 +225,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         assert step >=1, 'Cycle needs to be a positive integer'
         self._benchmark_cycle = step
     def do_benchmark(self):
-        return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
+        return False
+        # return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
         # if isinstance(self.estimator, Runtime_Estimator) or self.abstraction_level == 'circuit':
         #     return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
         # else:
@@ -253,12 +254,12 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                             "target_type": "state", "theoretical_circ": target_circuit},
                                            n_qubits=target_circuit.num_qubits)
 
-    def _generate_circuit_truncations(self) -> Tuple[List[QuantumCircuit], List[QuantumCircuit], List[Instruction]]:
+    def _generate_circuit_truncations(self) -> Tuple[List[QuantumCircuit], List[QuantumCircuit], List[QuantumCircuit]]:
         custom_circuit_truncations = [QuantumCircuit(self.tgt_register, self.nn_register, name=f'c_circ_trunc_{i}')
                                       for i in range(self.tgt_instruction_counts)]
         baseline_circuit_truncations = [QuantumCircuit(self.tgt_register, self.nn_register, name=f'b_circ_trunc_{i}')
                                         for i in range(self.tgt_instruction_counts)]
-        custom_gates = []
+        custom_gates, custom_gate_circ = [], []
         # Build sub-circuit contexts: each circuit goes until target gate and preserves nearest neighbor operations
         for i in range(self.tgt_instruction_counts):
             counts = 0
@@ -277,21 +278,26 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                             # custom_circuit_truncations[i].append(CircuitInstruction(custom_gate, self.tgt_register))
                             self.parametrized_circuit_func(custom_circuit_truncations[i], self._parameters[counts],
                                                            self.tgt_register)
-                            op = custom_circuit_truncations[i].data[-1].operation
+                            op = custom_circuit_truncations[i].data[-1]
                             if op not in custom_gates:
                                 custom_gates.append(op)
+                                gate_circ = QuantumCircuit(self.tgt_register)
+                                self.parametrized_circuit_func(gate_circ, self._parameters[counts], self.tgt_register)
+                                custom_gate_circ.append(gate_circ)
                             counts += 1
-        return custom_circuit_truncations, baseline_circuit_truncations, custom_gates
+        return custom_circuit_truncations, baseline_circuit_truncations, custom_gate_circ
 
     def _store_benchmarks(self, params: np.array, check_on_exp=True):
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         """
         n_actions = self.action_space.shape[-1]
-        custom_gate_circuits = []
+
         n_custom_instructions = self._trunc_index + 1  # Count custom instructions present in the current truncation
         benchmark_circ = self.circuit_truncations[self._trunc_index].copy(name='b_circ')
         baseline_circ = self.baseline_truncations[self._trunc_index]
+
+        custom_gate_circuits = []
         for i in range(n_custom_instructions):
             assigned_gate = QuantumCircuit(self.tgt_register)  # Assign parameter to each custom gate
             # to check its individual gate fidelity (have to detour by a QuantumCircuit)
@@ -310,7 +316,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             if not isinstance(self.estimator, Runtime_Estimator):
                 avg_gate_fidelities = []
                 for i in range(n_custom_instructions):
-                    assigned_gates = [custom_gate_circuits[i].bind_parameters({self._parameters[i]:
+                    assigned_gates = [self.custom_gates[i].bind_parameters({self._parameters[i]:
                                                                              params[j]}) for j in range(len(params))]
 
                     # rb_exp = BatchExperiment([InterleavedRB(gate, self.physical_target_qubits,
@@ -327,11 +333,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
             else: #If Runtime, need to trick the Experiments module to run within Session
                 # TODO: Implement a valid gate characterization subroutine compatible with Runtime primitives
-                #TODO: Find a way to incorprate workflow in Session, meantime ideal sim
+                #TODO: Find a way to incorporate workflow in Session, meantime ideal sim
                 # Calculate average gate fidelities for each gate instance within circuit truncation
                 custom_gates_list = []
                 unitary_backend = AerSimulator(method="unitary")
-                for i, gate in enumerate(custom_gate_circuits):
+                for i, gate in enumerate(self.custom_gates):
                     gate.save_unitary()
                     gates_result = unitary_backend.run(gate.decompose(),
                                                        parameter_binds=[{self._parameters[i][j]:
@@ -370,7 +376,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 # Calculate average gate fidelities for each gate instance within circuit truncation
                 custom_gates_list = []
                 unitary_backend = AerSimulator(method="unitary")
-                for i, gate in enumerate(custom_gate_circuits):
+                for i, gate in enumerate(self.custom_gates):
                     gate.save_unitary()
                     gates_result = unitary_backend.run(gate.decompose(),
                                                        parameter_binds=[{self._parameters[i][j]:
