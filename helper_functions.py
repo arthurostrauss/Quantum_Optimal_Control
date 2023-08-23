@@ -13,6 +13,7 @@ from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser imp
 from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs, DynamicsBackend
 from qiskit_experiments.framework import BatchExperiment, BaseAnalysis
 from qiskit_experiments.library.tomography import StateTomography, ProcessTomography
+from qiskit_ibm_runtime import Session, IBMBackend
 from tensorflow.python.keras import Model
 from tensorflow.python.keras.layers import Input, Dense
 
@@ -96,21 +97,37 @@ def state_fidelity_from_state_tomography(qc_list: List[QuantumCircuit], backend:
 
     return fidelities, exp_results
 
+def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options = None):
+    jobs = []
+    runtime_inputs = {'circuits': circuits,
+                      'skip_transpilation': True, **run_options}
+    jobs.append(session.run('circuit_runner', inputs=runtime_inputs))
+
+    return jobs
 
 def gate_fidelity_from_process_tomography(qc_list: List[QuantumCircuit], backend: Backend,
                                           target_gate: Gate, physical_qubits: Optional[Sequence[int]],
-                                          analysis: Union[BaseAnalysis, None, str] = "default"):
+                                          analysis: Union[BaseAnalysis, None, str] = "default",
+                                          session: Optional[Session]=None):
     """
     Extract average gate and process fidelities from batch of Quantum Circuit for target gate
     """
     # Process tomography
     process_tomo = BatchExperiment([ProcessTomography(qc, physical_qubits=physical_qubits, analysis=analysis,
-                                                      target=Operator(target_gate))for qc in qc_list], backend=backend,
+                                                      target=Operator(target_gate))for qc in qc_list],
+                                   backend=backend,
                                    flatten_results=True)
 
-    results = process_tomo.run().block_for_results()
-    print(results.analysis_results("process_fidelity"))
-    process_results = [results.analysis_results("process_fidelity")[i] for i in range(len(qc_list))]
+    if isinstance(backend, IBMBackend):
+        circuits = process_tomo._transpiled_circuits()
+        jobs = run_jobs(session, circuits)
+        exp_data = process_tomo._initialize_experiment_data()
+        exp_data.add_jobs(jobs)
+        results = process_tomo.analysis.run(exp_data).block_for_results()
+    else:
+        results = process_tomo.run().block_for_results()
+
+    process_results = [results.analysis_results("process_fidelity")[i].value for i in range(len(qc_list))]
     dim, _= Operator(target_gate).dim
     avg_gate_fid = np.mean([(dim* f_pro + 1)/ (dim+1) for f_pro in process_results])
     return avg_gate_fid

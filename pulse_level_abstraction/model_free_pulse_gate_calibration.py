@@ -203,7 +203,6 @@ hamiltonian_solver = Solver(
 
 custom_backend = DynamicsBackend(hamiltonian_solver, **dynamics_options)
 
-
 # Choose among defined backends {runtime_backend, dynamics_backend, custom_backend}
 backend = dynamics_backend
 

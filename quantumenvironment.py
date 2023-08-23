@@ -324,10 +324,11 @@ class QuantumEnvironment:
                 if not isinstance(self.backend, (Runtime_Backend, DynamicsBackend)):
                     raise TypeError("Backend must be either DynamicsBackend or Qiskit Runtime backend if pulse level"
                                     "abstraction is selected (Aer Pulse simulator deprecated")
-                self._estimator: BaseEstimator = BackendEstimator(self.backend, skip_transpilation= False)
-                self._estimator.set_transpile_options(initial_layout=self.layout)
+
 
                 if isinstance(self.backend, DynamicsBackend):
+                    self._estimator: BaseEstimator = BackendEstimator(self.backend, skip_transpilation= False)
+                    self._estimator.set_transpile_options(initial_layout=self.layout)
                     if self.config.do_calibrations:
                         calibration_files: List[str] = Qiskit_config.calibration_files
                         self.calibrations, self.exp_results = perform_standard_calibrations(self.backend,
@@ -354,7 +355,8 @@ class QuantumEnvironment:
             if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
                 self._estimator: BaseEstimator = Runtime_Estimator(session=Session(self.backend.service, self.backend),
                                                                    options=estimator_options)
-                self._estimator.set_options(initial_layout=self._layout)
+                if self.estimator.options.transpilation['initial_layout'] is None:
+                    self.estimator.options.transpilation['initial_layout']=self._layout.get_physical_bits()
 
         elif QUA_config is not None:
             raise AttributeError("QUA compatibility not yet implemented")
@@ -420,9 +422,14 @@ class QuantumEnvironment:
 
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.parametrized_circuit_func(qc)
-        job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
+        if isinstance(self.estimator, Runtime_Estimator):
+            job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
                                  parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots,
                                  job_tags=[f"rl_qoc_step{self._step_tracker}"])
+        else:
+            job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
+                                     parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
+
         self._step_tracker += 1
         reward_table = job.result().values
         self.reward_history.append(reward_table)

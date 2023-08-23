@@ -128,7 +128,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             # TODO: Could change resilience level
             self.estimator.set_options(optimization_level = 0, resilience_level=0)
             # TODO: Use line below when Runtime Options supports Layout class
-            self.estimator.options.simulator["initial_layout"]=self.physical_target_qubits+self.physical_neighbor_qubits
+            self.estimator.options.transpilation["initial_layout"]=self.physical_target_qubits+self.physical_neighbor_qubits
             self._sampler = Sampler(session=self.estimator.session, options=dict(self.estimator.options))
 
         elif isinstance(self.estimator, AerEstimator):
@@ -222,11 +222,13 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         return self._benchmark_cycle
     @benchmark_cycle.setter
     def benchmark_cycle(self, step):
-        assert step >=1, 'Cycle needs to be a positive integer'
+        assert step >=0, 'Cycle needs to be a positive integer'
         self._benchmark_cycle = step
     def do_benchmark(self):
-        return False
-        # return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
+        if self.benchmark_cycle == 0:
+            return False
+        else:
+            return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 1
         # if isinstance(self.estimator, Runtime_Estimator) or self.abstraction_level == 'circuit':
         #     return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
         # else:
@@ -313,45 +315,30 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
 
         # Calculate average gate fidelities for each gate instance within circuit truncation
-            if not isinstance(self.estimator, Runtime_Estimator):
-                avg_gate_fidelities = []
-                for i in range(n_custom_instructions):
-                    assigned_gates = [self.custom_gates[i].bind_parameters({self._parameters[i]:
-                                                                             params[j]}) for j in range(len(params))]
 
-                    # rb_exp = BatchExperiment([InterleavedRB(gate, self.physical_target_qubits,
-                    #                                         np.arange(1, 600, 50))
-                    #                           for gate in assigned_gates], self.backend, flatten_results=True)
-                    # results = rb_exp.run().block_for_results().analysis_results()
-                    # gate_fidelities = 1.- np.array([result.EPC for result in results])
+            avg_gate_fidelities = []
+            for i in range(n_custom_instructions):
+                assigned_gates = [self.custom_gates[i].bind_parameters({self._parameters[i]:
+                                                                         params[j]}) for j in range(len(params))]
 
+                # rb_exp = BatchExperiment([InterleavedRB(gate, self.physical_target_qubits,
+                #                                         np.arange(1, 600, 50))
+                #                           for gate in assigned_gates], self.backend, flatten_results=True)
+                # results = rb_exp.run().block_for_results().analysis_results()
+                # gate_fidelities = 1.- np.array([result.EPC for result in results])
+                if isinstance(self.estimator, Runtime_Estimator):
+                    avg_gate_fidelity = gate_fidelity_from_process_tomography(assigned_gates, self.backend,
+                                                                          self.target["gate"],
+                                                                          self.physical_target_qubits,
+                                                                          session=self.estimator.session)
+                else:
                     avg_gate_fidelity = gate_fidelity_from_process_tomography(assigned_gates, self.backend,
                                                                               self.target["gate"],
                                                                               self.physical_target_qubits)
-                    avg_gate_fidelities.append(avg_gate_fidelity)
-                self.avg_fidelity_history.append(avg_gate_fidelities)
 
-            else: #If Runtime, need to trick the Experiments module to run within Session
-                # TODO: Implement a valid gate characterization subroutine compatible with Runtime primitives
-                #TODO: Find a way to incorporate workflow in Session, meantime ideal sim
-                # Calculate average gate fidelities for each gate instance within circuit truncation
-                custom_gates_list = []
-                unitary_backend = AerSimulator(method="unitary")
-                for i, gate in enumerate(self.custom_gates):
-                    gate.save_unitary()
-                    gates_result = unitary_backend.run(gate.decompose(),
-                                                       parameter_binds=[{self._parameters[i][j]:
-                                                                             params[:, i * n_actions + j]
-                                                                         for j in range(n_actions)
-                                                                         }]).result()
-                    assigned_instructions = [gates_result.get_unitary(i) for i in range(self.batch_size)]
-                    custom_gates_list.append(assigned_instructions)
+                avg_gate_fidelities.append(avg_gate_fidelity)
+            self.avg_fidelity_history.append(avg_gate_fidelities)
 
-                tgt_gate = self.target["gate"]
-                avg_fidelities = np.array([[average_gate_fidelity(custom_gate, tgt_gate) for custom_gate in custom_gates]
-                                           for custom_gates in custom_gates_list])
-                self._punctual_avg_fidelities = avg_fidelities
-                self.avg_fidelity_history.append(np.mean(avg_fidelities, axis=1))  # Avg gate fidelity over action batch
 
         else: # Perform ideal simulation at circuit or pulse level
             if self.abstraction_level == 'circuit':
@@ -509,12 +496,10 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         reshaped_params = np.reshape(np.vstack([param_set for param_set in self._param_values[trunc_index]]),
                                      (self.batch_size, (trunc_index + 1) * self.action_space.shape[-1]))
 
-        # qc_list = [benchmark_circ.bind_parameters(param) for param in reshaped_params]
-        # self.qc_history.append(qc_list)
         if self.do_benchmark():
-            # print("Starting benchmarking...")
+            print("Starting benchmarking...")
             self._store_benchmarks(reshaped_params)
-            # print("Finished benchmarking")
+            print("Finished benchmarking")
         if fidelity_access:
             reward_table = self._punctual_circuit_fidelities
         else:
