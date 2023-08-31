@@ -141,8 +141,8 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     """
     control_channel_map = {}
     control_channel_map_backend = {
-        **{qubits: backend.configuration().control_channels[qubits][0].index for qubits in
-           backend.configuration().control_channels}}
+        qubits: backend.configuration().control_channels[qubits][0].index for qubits in
+        backend.configuration().control_channels}
     for qubits in control_channel_map_backend:
         if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
             control_channel_map[qubits] = control_channel_map_backend[qubits]

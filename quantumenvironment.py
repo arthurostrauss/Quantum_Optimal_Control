@@ -45,7 +45,7 @@ from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Run
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
 
-from qconfig import QiskitConfig, QuaConfig
+from qconfig import QiskitConfig
 from torch_gate_calibration.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 
 # QUA imports
@@ -271,7 +271,7 @@ class QuantumEnvironment:
 
     def __init__(self, target: Dict, abstraction_level: str = 'circuit',
                  Qiskit_config: Optional[QiskitConfig] = None,
-                 QUA_config: Optional[QuaConfig] = None,
+                 QUA_config: Optional[Dict] = None,
                  sampling_Pauli_space: int = 10, n_shots: int = 1, c_factor: float = 0.5):
         """
         Class for building quantum environment for RL agent aiming to perform a state preparation task.

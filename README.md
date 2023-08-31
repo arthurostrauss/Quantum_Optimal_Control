@@ -27,7 +27,7 @@ What we want to achieve here is to show that model-free quantum control with RL 
 As explained above, our framework builds upon the idea of transforming the quantum control task into a RL problem where an agent is missioned to probe and act upon an environment in order to steer it into a target state. The way this is usually done in RL is to introduce the concept of a reward signal $R$, which should be designed such that the maximization of this reward yields a set of actions providing a successful and reliable target preparation. 
 For a quantum state preparation task, this reward should be designed such that:
 
-$$\mathrm{argmax}_{|\psi\rangle}\,\mathbb{E}_{\pi_\theta} [R]= |\psi_{target}\rangle$$
+![equation](https://latex.codecogs.com/svg.image?\inline&space;\mathrm{argmax}_{|\psi\rangle}\,\mathbb{E}_{\pi_\theta}[R]=|\psi_{target}\rangle)
 
 Where the expectation value is empirically taken over a batch of actions sampled from the policy $\pi_\theta$ (Monte Carlo sampling) yielding different rewards. It is clear that the reward should therefore act as a proxy for a distance measure between quantum states such as the fidelity. 
 The average reward could therefore be a statistical estimator for the fidelity. The Direct Fidelity Estimation (DFE) scheme introduced in [2] gives us a protocol to build a single shot reward scheme based on Pauli expectation sampling. We take the same notation as in the paper below and write the corresponding protocol to derive the reward.
@@ -35,7 +35,7 @@ The average reward could therefore be a statistical estimator for the fidelity. 
 The ﬁdelity between our desired pure state $\rho$ and the actual state $\sigma$ is given by:
 $$F(\rho, \sigma)=\left(\mathrm{tr}\left[(\sqrt{\rho} \sigma \sqrt{\rho})^{1 / 2}\right]\right)^2=\mathrm{tr}(\rho \sigma)$$
 
-Let $W_k \, (k=1,..,d^2)$ denote all possible Pauli operators acting on $n$ qubits, that is all $n$-fold tensor products of Pauli matrices ($I=\begin{pmatrix}1 & 0 \\ 0 & 1\end{pmatrix}$, $\sigma_x=\begin{pmatrix}0 & 1 \\ 1 & 0\end{pmatrix}$, $\sigma_y=\begin{pmatrix}0 & -i \\ i & 0\end{pmatrix}$, $\sigma_z=\begin{pmatrix}1 & 0 \\ 0 & -1\end{pmatrix}$).
+Let $W_k \, (k=1,..,d^2)$ denote all possible Pauli operators acting on $n$ qubits, that is all $n$-fold tensor products of Pauli matrices (![equation](https://latex.codecogs.com/svg.image?\\inline&space;\large&space;\dpi{110}I=\begin{pmatrix}1&0\\0&1\end{pmatrix}), ![equation](https://latex.codecogs.com/svg.image?\inline&space;\large&space;\sigma_x=\begin{pmatrix}0&1\\1&0\end{pmatrix}), ![equation](https://latex.codecogs.com/svg.image?\inline&space;\large&space;\sigma_y=\begin{pmatrix}0&-i\\i&0\end{pmatrix}), ![equation](https://latex.codecogs.com/svg.image?\inline&space;\large&space;\sigma_z=\begin{pmatrix}1&1\\1&0\end{pmatrix})).
 
 Define the characteristic function $$\chi_\rho(k)=\mathrm{tr}(\rho W_k/\sqrt{d})=\langle W_k\rangle_\rho/\sqrt{d}$$ 
 where the expectation value is evaluated on the state $\rho$.
@@ -65,13 +65,13 @@ $$\mathbb{E}_{\pi_\theta, k\sim\mathrm{Pr}(k), \sigma} [R]=F(\rho, \sigma)$$
 
 
 For a gate calibration task, we want to find parameters defining the quantum gate $G(a)$ that yield a high fidelity measure for all possible input states when comparing to the target $G_{target}$. We can therefore implement the same idea as target state preparation reward, but this time we add an averaging over all possible input states $|\psi_{input}\rangle$ such that for each input state, $G(a)|\psi_{input}\rangle=G_{target}|\psi_{input}\rangle$. The average gate fidelity is therefore given by:
-$$\mathbb{E}_{\pi_\theta,\,|\psi_{input}\rangle, \, k\sim\mathrm{Pr}(k), \, \sigma} [R]=F(\rho, \sigma)$$.
+![equation](https://latex.codecogs.com/svg.image?\inline&space;\large&space;\mathbb{E}_{\pi_\theta,\,|\psi_{input}\rangle,\,k\sim\mathrm{Pr}(k),\,\sigma}[R]=F(G,G_{target})).
 
 In the code, each average is empirically done over specific hyperparameters that must be tuned by the user at each experiment:
 
-- For the average over the policy ($\mathbb{E}_{\pi_\theta}[.]$): the user should adjust the ```batchsize``` hyperparameter, which indicates how many actions from one policy with fixed parameters should be drawn. 
+- For the average over the policy (![equation](https://latex.codecogs.com/svg.image?\inline&space;\large&space;\mathbb{E}_{\pi_\theta[.])): the user should adjust the ```batchsize``` hyperparameter, which indicates how many actions from one policy with fixed parameters should be drawn. 
 - For the average over input states: at each episode of learning, we sample a different random input state $|\psi_{input}\rangle$ for which the corresponding target state $|\psi_{target}\rangle= G_{target}|\psi_{input}\rangle$ is calculated. Once the target state is deduced, we can start the episode by applying our parametrized gate and measuring the set of Pauli observables to design the reward circuit (Pauli basis rotation at the end of the circuit).
-- For the average over the random Pauli observables to sample: the user should adjust the ```sampling_Pauli_space``` hyperparameter. This number will set the number of times an index $k$ shall be sampled based on the previously defined probability $\mathrm{Pr}(k)$. If the same index is sampled multiple times, this induces that the same Pauli observable will be sampled more accurately as the number of shots for one Pauli observable will scale as "number of times $k$ was sampled $\times N_{shots}$".
+- For the average over the random Pauli observables to sample: the user should adjust the ```sampling_Pauli_space``` hyperparameter. This number will set the number of times an index $k$ shall be sampled based on the previously defined probability $\mathrm{Pr}(k)$. If the same index is sampled multiple times, this induces that the same Pauli observable will be sampled more accurately as the number of shots for one Pauli observable will scale as "number of times $k$ was sampled $\times N_{shots}$". However, due to a constraint of Qiskit, it is not possible to adjust the number of shots for each individual observable. Moreover, it could be that some observables can be inferred from the same measurements (commuting observables). Due to those facts, we settle for 
 - The average over the number of shots to estimate each Pauli observable with a certain accuracy: The user should adjust the parameter ```n_shots```, this will be the minimum number of samples that each observable will be estimated with. 
 
 Finally, the last hyperparameter of the overall RL algorithm is the number of epochs ```n_epochs```, which indicates how many times the policy parameters should be updated to try to reach the optimal near-deterministic policy enabling the successful preparation of the target state/gate.
@@ -115,7 +115,27 @@ custom ```DynamicsBackend``` instance. To do so, we use the library of elementar
 Therefore, each time the ```QuantumEnvironment``` object is initialized with a ```DynamicsBackend``` object, a series of baseline calibrations will automatically start, such that the Estimator primitive (in this case the ```BackendEstimator``` present in Qiskit primitives)
 can append the appropriate gates for all Pauli expectation value sampling tasks.
 
-## 2. The RL Agent: PPO algorithm
+## 2. Integrating context awareness to the Environment
+
+In this repo, there are mainly two RL workflows that are used: Tensorflow 2 and PyTorch. While Tensorflow is used for the earlier examples of state preparation and gate calibration, we have for now fixed the context aware calibration workflow on PyTorch for more clarity. More specifically, the whole RL workflow is based on a "Gymified" ```QuantumEnvironment``` called ```TorchEnvironment``` and an Agent built on Torch modules. The implementation of the PPO follows closely the one proposed by the CleanRL library (http://docs.cleanrl.dev/).
+
+In what follows, we explain the logic behind the context-aware gate calibration workflow.
+
+### a. the ```TorchQuantumEnvironment``` wrapper
+
+The main motivation behind this work comes from the realization that in most traditional gate calibration procedures, the noise that could emerge from a specific sequence of logical operations is often neglected or averaged out over a large series of different sequences to build an "on-average" noise robust calibration of the target gate.
+While this paradigm inherent to the gate model modular structure is certainly convenient for the execution of complex quantum circuits, we have to acknowledge that this might not be enough to reach satisfying circuit fidelities in the near-term. In fact, spatio-temporally correlated noise sources such as non-Markovianity or crosstalk could impact significantly the quality of a typical gate. It is to be noted that such effect is typically dependent on the operations that are executed around the target gate. 
+Characterizing this noise is known to be tedious because of the computational heaviness of the process (e.g. Simultaneous RB for crosstalk, Process tensor tomography for non-Markovianity). In typical experiments, we first spend some time characterizing the noise channels, and then derive a series of gate calibrations countering all the effects simultaneously. 
+In our quantum control approach, we decide to intertwine the characterization and the calibration procedure, by letting the RL agent build from its training an internal representation of the contextual noise concurrently to the trial of new controls for suppressing it.
+
+Earlier, we have defined our ```QuantumEnvironment``` to include all details regarding the reward computation and the quantum system access (simulation or real backend). In this new ```TorchQuantumEnvironment``` class, we include all the details regarding the calibration done within a circuit context training.
+
+For this, we first declare the ```TorchQuantumEnvironment``` as follows:
+
+
+
+
+## 3. The RL Agent: PPO algorithm
 
 
 

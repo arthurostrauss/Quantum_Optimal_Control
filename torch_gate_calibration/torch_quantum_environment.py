@@ -7,7 +7,7 @@ Created on 26/06/2023
 """
 
 from itertools import chain
-from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat
+from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
 from gymnasium import Env
@@ -26,7 +26,7 @@ from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampl
 from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_experiments.framework import BackendData
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError
 from tensorflow_probability.python.distributions import Categorical
 
 from helper_functions import gate_fidelity_from_process_tomography
@@ -51,19 +51,31 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                  action_spec: Space,
                  observation_spec: Space,
                  batch_size: int,
-                 training_steps_per_gate: int = 1500,
+                 training_steps_per_gate: Union[List[int], int] = 1500,
                  benchmark_cycle: int = 100,
                  intermediate_rewards: bool = False,
                  seed: Optional[int] = None
                  ):
         """
-             Class for building quantum environment for RL agent aiming to perform a state preparation task.
+             Class for wrapping a quantum environment in a Gym environment able to tackle
+             context-aware gate calibration. Target gate should be pre-defined through the declaration of a
+             QuantumEnvironment, and a circuit in which this gate is used should be provided.
+             This class will look for the locations of the target gates in the circuit context and will enable the
+             writing of new parametrized circuits, where each gate instance is replaced by a custom gate defined by the Callable parametrized_circuit_func in QuantumEnvironment.
 
              :param q_env: Existing QuantumEnvironment object, containing a target and a configuration.
-             :param circuit_context: Transpiled QuantumCircuit where target gate is located to perform context aware gate
+             :param circuit_context: QuantumCircuit where target gate is located to perform context aware gate
                  calibration.
-             :param action_spec: ActionSpec
-             :param observation_spec: ObservationSpec
+             :param action_spec: Gym Space specifying the shape of the action vector at each step
+             :param observation_spec: Gym Space specifying the shape of the observations that should be retrieved
+             :param batch_size: Number of parametrized circuits to be sent in each job (or equivalently in RL, number of
+                different trajectories to collect for average return empirical estimation
+             :param training_steps_per_gate: Number of calibration steps per gate instance in circuit context
+                (for sequential calibration mode)
+             :param benchmark_cycle: Step interval to perform fidelity benchmarking on top of RL based calibration
+             :param intermediate_rewards: Specify if calibration within circuit should be sequential (False)
+              or across circuit context (True). For now, sequential mode is preferred.
+             :param seed: Seed to provide the Gym environment
          """
 
         # TODO: Redeclare everything instead of reinitializing (loss of time especially for DynamicsBackend declaration)
@@ -102,7 +114,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'ecr', 'reset', 'measure', 'delay']
         if isinstance(self.estimator, Runtime_Estimator):
-            if "basis_gates" in self.estimator.options.simulator:
+            if self.estimator.options.simulator["basis_gates"] is not None:
+                assert self.backend.simulator, "Simulator options provided whereas Backend is not a Runtime simulator"
                 ibm_basis_gates = self.estimator.options.simulator["basis_gates"]
 
         self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False),
@@ -112,7 +125,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                          coupling_map=coupling_map,
                                          instruction_durations=instruction_durations,
                                          optimization_level=1, dt=dt)
-        # self._benchmark_backend = UnitarySimulator()
+
         self.tgt_register = QuantumRegister(bits=[self.circuit_context.qubits[i]
                                                   for i in self.physical_target_qubits], name="tgt")
         self.nn_register = QuantumRegister(bits=[self.circuit_context.qubits[i]
@@ -124,26 +137,24 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                  for j in range(len(self.nn_register))})
 
         if isinstance(self.estimator, Runtime_Estimator):
-            # self.estimator.options.simulator["skip_transpilation"]=True
             # TODO: Could change resilience level
-            self.estimator.set_options(optimization_level = 0, resilience_level=0)
-            # TODO: Use line below when Runtime Options supports Layout class
-            self.estimator.options.transpilation["initial_layout"]=self.physical_target_qubits+self.physical_neighbor_qubits
+            self.estimator.set_options(optimization_level = 0, resilience_level=0, skip_transpilation=True,
+                                       initial_layout = self.physical_target_qubits+self.physical_neighbor_qubits)
             self._sampler = Sampler(session=self.estimator.session, options=dict(self.estimator.options))
 
         elif isinstance(self.estimator, AerEstimator):
             self.estimator._transpile_options = Aer_Options(initial_layout=self.layout, optimization_level=0)
             self._sampler = AerSampler(backend_options=self.backend.options,
                                        transpile_options={'initial_layout':self.layout, 'optimization_level':0},
-                                       skip_transpilation=False)
+                                       skip_transpilation=True)
         elif isinstance(self.estimator, BackendEstimator):
             self.estimator.set_transpile_options(initial_layout=self.layout, optimization_level=0)
-            self._sampler = BackendSampler(self.backend, self.estimator.options, skip_transpilation=False)
+            self._sampler = BackendSampler(self.backend, self.estimator.options, skip_transpilation=True)
             self._sampler.set_transpile_options(initial_layout=self.layout, optimization_level=0)
 
         else:
             raise TypeError("Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime")
-
+        self.fidelity_checker = ComputeUncompute(self._sampler)
         self._d = 2 ** self.tgt_register.size
         self.target_instruction = CircuitInstruction(self.target["gate"], self.tgt_register)
         self.tgt_instruction_counts = self.circuit_context.data.count(self.target_instruction)
@@ -308,9 +319,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         if check_on_exp: # Perform real experiments to retrieve from measurement data fidelities
             # Assess circuit fidelity with ComputeUncompute algo
-            fidelity_checker = ComputeUncompute(self._sampler)
-            job = fidelity_checker.run([benchmark_circ]*len(params), [baseline_circ]*len(params), values_1=params)
-            circuit_fidelities = job.result().fidelities
+            try:
+                job = self.fidelity_checker.run([benchmark_circ]*len(params), [baseline_circ]*len(params), values_1=params)
+                circuit_fidelities = job.result().fidelities
+            except Exception as exc:
+                raise IBMRuntimeError("ComputeUncompute failed") from exc
             self._punctual_circuit_fidelities = circuit_fidelities
             self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
 
@@ -505,12 +518,15 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         else:
 
             print("Sending job...")
-            job = self.estimator.run(circuits=[training_circ] * self.batch_size,
-                                     observables=[observables] * self.batch_size,
-                                     parameter_values=reshaped_params,
-                                     shots=self.sampling_Pauli_space * self.n_shots)
+            try:
+                job = self.estimator.run(circuits=[training_circ] * self.batch_size,
+                                         observables=[observables] * self.batch_size,
+                                         parameter_values=reshaped_params,
+                                         shots=np.max(pauli_shots) * self.n_shots)
 
-            reward_table = job.result().values
+                reward_table = job.result().values
+            except Exception as exc:
+                raise IBMRuntimeError("Estimator primitive failed") from exc
             scaling_reward_factor = len(observables) / 4**len(self.tgt_register)
             reward_table /= scaling_reward_factor
             print('Job done')
