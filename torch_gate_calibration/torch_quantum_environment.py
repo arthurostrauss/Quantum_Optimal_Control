@@ -111,8 +111,13 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._physical_neighbor_qubits = list(filter(lambda x: x not in self.physical_target_qubits,
                                                      chain(*[list(coupling_map.neighbors(target_qubit))
                                                          for target_qubit in self.physical_target_qubits])))
-
-        ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'ecr', 'reset', 'measure', 'delay']
+        if self.abstraction_level == 'pulse':
+            ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'ecr', 'reset', 'measure', 'delay']
+            if "ecr" not in basis_gates:
+                assert "cx" in basis_gates, "Unknown basis two qubit gate "
+                raise ValueError("Backend must carry 'ecr' as basis_gate, will change in the future")
+        else:
+            ibm_basis_gates = basis_gates
         if isinstance(self.estimator, Runtime_Estimator):
             if self.estimator.options.simulator["basis_gates"] is not None:
                 assert self.backend.simulator, "Simulator options provided whereas Backend is not a Runtime simulator"
@@ -138,8 +143,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         if isinstance(self.estimator, Runtime_Estimator):
             # TODO: Could change resilience level
-            self.estimator.set_options(optimization_level = 0, resilience_level=0, skip_transpilation=True,
-                                       initial_layout = self.physical_target_qubits+self.physical_neighbor_qubits)
+            self.estimator.set_options(optimization_level = 0, resilience_level=0, skip_transpilation=True)
+            self.estimator.options.transpilation["initial_layout"]=self.physical_target_qubits+self.physical_neighbor_qubits
             self._sampler = Sampler(session=self.estimator.session, options=dict(self.estimator.options))
 
         elif isinstance(self.estimator, AerEstimator):
