@@ -16,11 +16,11 @@ from gymnasium.spaces import Space
 from qiskit import transpile, schedule
 from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector
 from qiskit.primitives import BackendEstimator, BackendSampler
-from qiskit.providers import BackendV1, BackendV2, Options as Aer_Options
+from qiskit.providers import Options as Aer_Options
 from qiskit.quantum_info.operators import SparsePauliOp, pauli_basis, Operator
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, process_fidelity, state_fidelity
 from qiskit.quantum_info.states import Statevector, DensityMatrix
-from qiskit.transpiler import InstructionDurations, Layout, CouplingMap
+from qiskit.transpiler import Layout
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_algorithms.state_fidelities import ComputeUncompute
@@ -29,7 +29,7 @@ from qiskit_experiments.framework import BackendData
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError
 from tensorflow_probability.python.distributions import Categorical
 
-from helper_functions import gate_fidelity_from_process_tomography
+from helper_functions import gate_fidelity_from_process_tomography, retrieve_backend_info
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 
 ObsType = TypeVar("ObsType")
@@ -89,47 +89,27 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         Env.__init__(self)
         assert self.target_type == 'gate', "This class is made for gate calibration only"
+
+        # Retrieve information on the backend for building circuit context workflow
         self.backend_data = BackendData(self.backend)
+        dt, coupling_map, basis_gates, instruction_durations = retrieve_backend_info(self.backend, self.estimator)
 
-
-        if isinstance(self.backend, BackendV1):
-            instruction_durations = InstructionDurations.from_backend(self.backend)
-            basis_gates = self.backend.configuration().basis_gates
-        elif isinstance(self.backend, BackendV2):
-            instruction_durations = self.backend.instruction_durations
-            basis_gates = self.backend.operation_names
-        else:
-            raise AttributeError("TorchQuantumEnvironment requires a Backend argument")
+        # Retrieve qubits forming the local circuit context (target qubits + nearest neighbor qubits on the chip)
         self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
-        coupling_map = CouplingMap(self.backend_data.coupling_map)
-        dt = self.backend_data.dt
-        if dt is None:
-            dt = 2.2222222222222221e-10
-
-        if coupling_map.size() == 0:
-            coupling_map = CouplingMap(self.estimator.options.simulator["coupling_map"])
         self._physical_neighbor_qubits = list(filter(lambda x: x not in self.physical_target_qubits,
                                                      chain(*[list(coupling_map.neighbors(target_qubit))
                                                          for target_qubit in self.physical_target_qubits])))
         if self.abstraction_level == 'pulse':
-            ibm_basis_gates = ['id', 'rz', 'sx', 'x', 'ecr', 'reset', 'measure', 'delay']
             if "ecr" not in basis_gates:
-                assert "cx" in basis_gates, "Unknown basis two qubit gate "
-                raise ValueError("Backend must carry 'ecr' as basis_gate, will change in the future")
-        else:
-            ibm_basis_gates = basis_gates
-        if isinstance(self.estimator, Runtime_Estimator):
-            if self.estimator.options.simulator["basis_gates"] is not None:
-                assert self.backend.simulator, "Simulator options provided whereas Backend is not a Runtime simulator"
-                ibm_basis_gates = self.estimator.options.simulator["basis_gates"]
+                raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the future")
 
         self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False),
                                          backend=self.backend,
                                          scheduling_method='asap',
-                                         basis_gates=ibm_basis_gates,
+                                         basis_gates= basis_gates,
                                          coupling_map=coupling_map,
                                          instruction_durations=instruction_durations,
-                                         optimization_level=1, dt=dt)
+                                         optimization_level=0, dt=dt)
 
         self.tgt_register = QuantumRegister(bits=[self.circuit_context.qubits[i]
                                                   for i in self.physical_target_qubits], name="tgt")
@@ -170,11 +150,12 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
 
         # Store time and instruction indices where target gate is played in circuit
-        self._target_instruction_indices, self._target_instruction_timings = [], []
-        for i, instruction in enumerate(self.circuit_context.data):
-            if instruction == self.target_instruction:
-                self._target_instruction_indices.append(i)
-                self._target_instruction_timings.append(self.circuit_context.op_start_times[i])
+
+        self._target_instruction_timings = []
+        if instruction_durations is not None:
+            for i, instruction in enumerate(self.circuit_context.data):
+                if instruction == self.target_instruction:
+                    self._target_instruction_timings.append(self.circuit_context.op_start_times[i])
 
         self.circuit_truncations, self.baseline_truncations, self.custom_gates = self._generate_circuit_truncations()
         self._batch_size = batch_size
@@ -282,18 +263,23 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         for i in range(self.tgt_instruction_counts):
             counts = 0
             for start_time, instruction in zip(self.circuit_context.op_start_times, self.circuit_context.data):
-                if all([qubit in self.tgt_register or qubit in self.nn_register for qubit in instruction.qubits]):
+                qubits_in_vicinity= np.array([(qubit, qubit in self.tgt_register or qubit in self.nn_register)
+                                     for qubit in instruction.qubits])
+                other_qubits =[qubit[0] for qubit in qubits_in_vicinity if not qubit[1]
+                               and qubit[0] not in custom_circuit_truncations[i].qubits]
+
+                # if all([qubit in self.tgt_register or qubit in self.nn_register for qubit in instruction.qubits]):
+                if any(qubits_in_vicinity[:,1]):
                     if counts <= i or start_time <= self._target_instruction_timings[i]:  # Append until reaching tgt i
+                        if other_qubits:
+                            baseline_circuit_truncations[i].add_bits(other_qubits)
+                            custom_circuit_truncations[i].add_bits(other_qubits)
                         baseline_circuit_truncations[i].append(instruction)
 
                         if instruction != self.target_instruction:
                             custom_circuit_truncations[i].append(instruction)
 
                         else:  # Add custom instruction in place of target gate
-                            # custom_gate = Gate(name=f"{self.target['gate'].name}_{counts}",
-                            #                    num_qubits=len(self.tgt_register), params=
-                            #                    [param for param in self._parameters[counts]])
-                            # custom_circuit_truncations[i].append(CircuitInstruction(custom_gate, self.tgt_register))
                             self.parametrized_circuit_func(custom_circuit_truncations[i], self._parameters[counts],
                                                            self.tgt_register)
                             op = custom_circuit_truncations[i].data[-1]
@@ -303,6 +289,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                 self.parametrized_circuit_func(gate_circ, self._parameters[counts], self.tgt_register)
                                 custom_gate_circ.append(gate_circ)
                             counts += 1
+
         return custom_circuit_truncations, baseline_circuit_truncations, custom_gate_circ
 
     def _store_benchmarks(self, params: np.array, check_on_exp=True):
@@ -505,7 +492,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
         # observables = SparsePauliOp.from_list([(pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
         #                                        for i, p in enumerate(pauli_index)])
-        observables = SparsePauliOp.from_list([("I" * len(self.nn_register) +
+        observables = SparsePauliOp.from_list([("I" * (len(training_circ.qubits)-len(self.tgt_register)) +
                                                 pauli_basis(len(self.tgt_register))[p].to_label(),
                                                 reward_factor[i]) for i, p in enumerate(pauli_index)])
         self._punctual_observable = observables
@@ -630,3 +617,4 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         string += f'Batchsize: {self.batch_size}, \n'
         string += f'Number of target gates in circuit context: {self.tgt_instruction_counts}\n'
         return string
+
