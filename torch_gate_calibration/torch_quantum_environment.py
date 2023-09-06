@@ -15,21 +15,24 @@ from gymnasium.spaces import Space
 # Qiskit imports
 from qiskit import transpile, schedule
 from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector
+from qiskit.circuit.library import ECRGate
 from qiskit.primitives import BackendEstimator, BackendSampler
 from qiskit.providers import Options as Aer_Options
 from qiskit.quantum_info.operators import SparsePauliOp, pauli_basis, Operator
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, process_fidelity, state_fidelity
 from qiskit.quantum_info.states import Statevector, DensityMatrix
-from qiskit.transpiler import Layout
+from qiskit.transpiler import Layout, InstructionProperties, Target
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_algorithms.state_fidelities import ComputeUncompute
+from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BackendData
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError
 from tensorflow_probability.python.distributions import Categorical
 
-from helper_functions import gate_fidelity_from_process_tomography, retrieve_backend_info
+from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
+from helper_functions import gate_fidelity_from_process_tomography, retrieve_backend_info, determine_ecr_params
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 
 ObsType = TypeVar("ObsType")
@@ -101,7 +104,24 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                                                          for target_qubit in self.physical_target_qubits])))
         if self.abstraction_level == 'pulse':
             if "ecr" not in basis_gates:
-                raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the future")
+                target: Target = self.backend.target
+                target.add_instruction(ECRGate(), properties= {qubits: None for qubits in coupling_map.get_edges()})
+                cals = Calibrations.from_backend(self.backend, [FixedFrequencyTransmon(["x", "sx"]),
+                                                                EchoedCrossResonance(["cr45p", "cr45m", "ecr"])],
+                                                 add_parameter_defaults=True)
+
+                for qubit_pair in coupling_map.get_edges():
+                    if target.has_calibration('cx', qubit_pair):
+                        default_params, _, _ = determine_ecr_params(self.backend, qubit_pair, basis_gate="cx")
+                        error = self.backend.target["cx"][qubit_pair].error
+                        target.update_instruction_properties('ecr', qubit_pair,
+                                                             InstructionProperties(error=error, calibration=cals.get_schedule("ecr",
+                                                                                                                              qubit_pair, default_params)))
+                basis_gates.append("ecr")
+                for i, gate in enumerate(basis_gates):
+                    if gate == "cx":
+                        basis_gates.pop(i)
+                #raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the future")
 
         self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False),
                                          backend=self.backend,
@@ -120,10 +140,10 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                               for i in range(len(self.tgt_register))} | {
                                  self.nn_register[j]: self._physical_neighbor_qubits[j]
                                  for j in range(len(self.nn_register))})
-
+        skip_transpilation = False
         if isinstance(self.estimator, Runtime_Estimator):
             # TODO: Could change resilience level
-            self.estimator.set_options(optimization_level = 0, resilience_level=0, skip_transpilation=True)
+            self.estimator.set_options(optimization_level = 0, resilience_level=0, skip_transpilation=skip_transpilation)
             self.estimator.options.transpilation["initial_layout"]=self.physical_target_qubits+self.physical_neighbor_qubits
             self._sampler = Sampler(session=self.estimator.session, options=dict(self.estimator.options))
 
@@ -131,10 +151,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self.estimator._transpile_options = Aer_Options(initial_layout=self.layout, optimization_level=0)
             self._sampler = AerSampler(backend_options=self.backend.options,
                                        transpile_options={'initial_layout':self.layout, 'optimization_level':0},
-                                       skip_transpilation=True)
+                                       skip_transpilation=skip_transpilation)
         elif isinstance(self.estimator, BackendEstimator):
             self.estimator.set_transpile_options(initial_layout=self.layout, optimization_level=0)
-            self._sampler = BackendSampler(self.backend, self.estimator.options, skip_transpilation=True)
+            self._sampler = BackendSampler(self.backend, dict(self.estimator.options),
+                                           skip_transpilation=skip_transpilation)
             self._sampler.set_transpile_options(initial_layout=self.layout, optimization_level=0)
 
         else:
@@ -242,6 +263,12 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         ref_circuit, custom_circuit = self.baseline_truncations[iteration], self.circuit_truncations[iteration]
         target_circuit = QuantumCircuit(self.tgt_register)
         custom_target_circuit = custom_circuit.copy_empty_like(name=f'qc_{input_state_index}_{ref_circuit.name[-1]}')
+
+        # # Reset qubit system
+        # _, _, basis_gates, _ = retrieve_backend_info(self.backend)
+        # if "reset" in basis_gates:
+        #     custom_target_circuit.reset(custom_target_circuit.qubits)
+
         custom_target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
         custom_target_circuit.compose(custom_circuit, inplace=True)
         target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
@@ -272,8 +299,16 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 if any(qubits_in_vicinity[:,1]):
                     if counts <= i or start_time <= self._target_instruction_timings[i]:  # Append until reaching tgt i
                         if other_qubits:
-                            baseline_circuit_truncations[i].add_bits(other_qubits)
-                            custom_circuit_truncations[i].add_bits(other_qubits)
+                            last_reg_name = baseline_circuit_truncations[i].qregs[-1].name
+                            if last_reg_name != "nn":
+                                new_reg = QuantumRegister(name=last_reg_name+str(int(last_reg_name[-1])+1),
+                                                          bits=other_qubits)
+                            else:
+                                new_reg = QuantumRegister(name="anc_0", bits=other_qubits)
+                            baseline_circuit_truncations[i].add_register(new_reg)
+                            custom_circuit_truncations[i].add_register(new_reg)
+                            # baseline_circuit_truncations[i].add_bits(other_qubits)
+                            # custom_circuit_truncations[i].add_bits(other_qubits)
                         baseline_circuit_truncations[i].append(instruction)
 
                         if instruction != self.target_instruction:
@@ -514,10 +549,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 job = self.estimator.run(circuits=[training_circ] * self.batch_size,
                                          observables=[observables] * self.batch_size,
                                          parameter_values=reshaped_params,
-                                         shots=np.max(pauli_shots) * self.n_shots)
+                                         shots=int(np.max(pauli_shots) * self.n_shots))
 
                 reward_table = job.result().values
             except Exception as exc:
+                self.close()
                 raise IBMRuntimeError("Estimator primitive failed") from exc
             scaling_reward_factor = len(observables) / 4**len(self.tgt_register)
             reward_table /= scaling_reward_factor

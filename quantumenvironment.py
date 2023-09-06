@@ -11,7 +11,6 @@ import json
 from itertools import product, permutations
 from typing import Dict, Union, Optional, List, Callable
 
-import jax
 import numpy as np
 # Qiskit imports
 from qiskit import pulse, schedule
@@ -20,7 +19,7 @@ from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
 # Qiskit backends
-from qiskit.providers import Backend
+from qiskit.providers import BackendV1, BackendV2
 from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
 from qiskit.pulse.transforms.canonicalization import block_to_schedule
 # Qiskit Quantum Information, for fidelity benchmarking
@@ -34,18 +33,17 @@ from qiskit_aer.primitives import Estimator as Aer_Estimator
 from qiskit_dynamics import DynamicsBackend, Solver
 from qiskit_dynamics.array import Array, wrap
 from qiskit_dynamics.models import HamiltonianModel
-# from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_experiments.calibration_management.calibrations import Calibrations
 from qiskit_experiments.framework import BatchExperiment
-from qiskit_experiments.library import ProcessTomography
-from qiskit_experiments.library.calibration import RoughXSXAmplitudeCal, RoughDragCal
+from qiskit_experiments.library import ProcessTomography, RoughXSXAmplitudeCal, RoughDragCal
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
 
 from qconfig import QiskitConfig
+# from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from torch_gate_calibration.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 
 # QUA imports
@@ -53,8 +51,8 @@ from torch_gate_calibration.basis_gate_library import FixedFrequencyTransmon, Ec
 # from qm.qua import *
 # from qm.QuantumMachinesManager import QuantumMachinesManager
 
-jit = wrap(jax.jit, decorator=True)
-
+Estimator_type = Union[Aer_Estimator, Runtime_Estimator, Estimator, BackendEstimator]
+Backend_type = Union[BackendV1, BackendV2]
 
 def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: Optional[List[str]] = None):
     """
@@ -101,7 +99,7 @@ def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: O
     else:
         cals = Calibrations(coupling_map=coupling_map, control_channel_map=physical_control_channel_map,
                             libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"]),
-                                       EchoedCrossResonance(basis_gates=['cr45p', 'cr45m', 'ecr', 'rzx'])],
+                                       EchoedCrossResonance(basis_gates=['cr45p', 'cr45m', 'ecr'])],
                             backend_name=backend.name, backend_version=backend.backend_version)
     if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
         for gate in single_qubit_gates:
@@ -306,7 +304,7 @@ class QuantumEnvironment:
             self.n_shots = n_shots
             self.Pauli_ops = pauli_basis(num_qubits=self._n_qubits)
 
-            self.backend: Optional[Backend] = Qiskit_config.backend
+            self.backend: Optional[Backend_type] = Qiskit_config.backend
             self.parametrized_circuit_func: Callable = Qiskit_config.parametrized_circuit
             estimator_options: Optional[Union[Options, Dict]] = Qiskit_config.estimator_options
 
@@ -314,11 +312,11 @@ class QuantumEnvironment:
                 if isinstance(self.backend, (AerBackend, FakeBackend, FakeBackendV2)):
                     # Estimator taking noise model into consideration, have to provide an AerBackend
                     # TODO: Extract from TranspilationOptions a dict that can go in following definition
-                    self._estimator: BaseEstimator = Aer_Estimator(backend_options=self.backend.options,
+                    self._estimator: Estimator_type = Aer_Estimator(backend_options=self.backend.options,
                                                                    transpile_options={'initial_layout': self._layout},
                                                                    approximation=True)
                 else:  # No backend specified, ideal state-vector simulation
-                    self._estimator: BaseEstimator = Estimator(options={"initial_layout": self._layout})
+                    self._estimator: Estimator_type = Estimator(options={"initial_layout": self._layout})
 
             else: # Pulse level abstraction
                 if not isinstance(self.backend, (Runtime_Backend, DynamicsBackend)):
@@ -327,7 +325,9 @@ class QuantumEnvironment:
 
 
                 if isinstance(self.backend, DynamicsBackend):
-                    self._estimator: BaseEstimator = BackendEstimator(self.backend, skip_transpilation= False)
+                    import jax
+                    jit = wrap(jax.jit, decorator=True)
+                    self._estimator: Estimator_type = BackendEstimator(self.backend, skip_transpilation= False)
                     self._estimator.set_transpile_options(initial_layout=self.layout)
                     if self.config.do_calibrations:
                         calibration_files: List[str] = Qiskit_config.calibration_files
@@ -353,7 +353,7 @@ class QuantumEnvironment:
                     self.ground_state = Array(np.array([1.0] + [0.0] * (self.model_dim ** 2 - 1)))
 
             if isinstance(self.backend, Runtime_Backend):  # Real backend, or Simulation backend from Runtime Service
-                self._estimator: BaseEstimator = Runtime_Estimator(session=Session(self.backend.service, self.backend),
+                self._estimator: Estimator_type = Runtime_Estimator(session=Session(self.backend.service, self.backend),
                                                                    options=estimator_options)
                 if self.estimator.options.transpilation['initial_layout'] is None:
                     self.estimator.options.transpilation['initial_layout']=self._layout.get_physical_bits()
@@ -545,6 +545,7 @@ class QuantumEnvironment:
         string = f"QuantumEnvironment composed of {self._n_qubits} qubits, \n"
         string += f"Defined target: {self.target_type} " \
                   f"({self.target.get('gate', None) if not None else self.target['dm']})\n"
+        string += f"Physical qubits: {self.target['register']}\n"
         string += f"Backend: {self.backend},\n"
         string += f"Abstraction level: {self.abstraction_level},\n"
         string += f"Run options: N_shots ({self.n_shots}), Sampling_Pauli_space ({self.sampling_Pauli_space}), \n"
@@ -576,7 +577,7 @@ class QuantumEnvironment:
         return self._config
 
     @property
-    def estimator(self):
+    def estimator(self) -> Estimator_type:
         return self._estimator
 
     @estimator.setter

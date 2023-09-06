@@ -4,16 +4,17 @@ import numpy as np
 import tensorflow as tf
 from qiskit.circuit import QuantumCircuit, Gate
 from qiskit.exceptions import QiskitError
-from qiskit.providers import BackendV1, Backend
+from qiskit.providers import BackendV1, Backend, BackendV2
 from qiskit.pulse import DriveChannel, ControlChannel
 from qiskit.quantum_info import Operator
+from qiskit.transpiler import CouplingMap, InstructionDurations
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
 from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs, DynamicsBackend
-from qiskit_experiments.framework import BatchExperiment, BaseAnalysis
+from qiskit_experiments.framework import BatchExperiment, BaseAnalysis, BackendData
 from qiskit_experiments.library.tomography import StateTomography, ProcessTomography
-from qiskit_ibm_runtime import Session, IBMBackend
+from qiskit_ibm_runtime import Session, IBMBackend, Estimator as Runtime_Estimator
 from tensorflow.python.keras import Model
 from tensorflow.python.keras.layers import Input, Dense
 
@@ -38,7 +39,7 @@ def remove_unused_wires(qc: QuantumCircuit):
             qc.qubits.remove(qubit)
     return qc
 
-def determine_ecr_params(backend: Backend, physical_qubits: List[int], basis_gate="cx"):
+def determine_ecr_params(backend: Union[BackendV1, BackendV2], physical_qubits: List[int], basis_gate="cx"):
     if isinstance(backend, BackendV1):
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
@@ -68,7 +69,13 @@ def determine_ecr_params(backend: Backend, physical_qubits: List[int], basis_gat
                 target_pulse = pulse.pulse
             elif "CR90p_u" in name:
                 control_pulse = pulse.pulse
+            elif "CX_u" in name:
+                control_pulse = pulse.pulse
+            elif "CX_d" in name:
+                target_pulse = pulse.pulse
 
+        if x_pulse is None:
+            x_pulse = instruction_schedule_map.get("x", q_c).instructions[0][1].pulse
     default_params = {("amp", q_c, "x"): x_pulse.amp,
                       ("σ", q_c, "x"): x_pulse.sigma,
                       ("β", q_c, "x"): x_pulse.beta,
@@ -76,9 +83,9 @@ def determine_ecr_params(backend: Backend, physical_qubits: List[int], basis_gat
                       ("angle", q_c, "x"): x_pulse.angle}
     for sched in ["cr45p", "cr45m"]:
         default_params.update({("amp", physical_qubits, sched): control_pulse.amp,
-                               ("tgt_amp", physical_qubits, sched): target_pulse.amp,
+                               ("tgt_amp", physical_qubits, sched): target_pulse.amp if hasattr(target_pulse, 'amp') else np.linalg.norm(np.max(target_pulse.samples)),
                                ("angle", physical_qubits, sched): control_pulse.angle,
-                               ("tgt_angle", physical_qubits, sched): target_pulse.angle,
+                               ("tgt_angle", physical_qubits, sched): target_pulse.angle if hasattr(target_pulse, 'angle') else np.angle(np.max(target_pulse.samples)),
                                ("duration", physical_qubits, sched): control_pulse.duration,
                                ("σ", physical_qubits, sched): control_pulse.sigma,
                                ("risefall", physical_qubits, sched) : (control_pulse.duration - control_pulse.width)/(2*control_pulse.sigma)})
@@ -254,7 +261,29 @@ def get_solver_and_freq_from_backend(backend: BackendV1,
 
     return channel_freqs, solver
 
-
+def retrieve_backend_info(backend: Backend, estimator: Optional[Runtime_Estimator]=None):
+    """
+    Retrieve useful Backend data to run context aware gate calibration
+    """
+    backend_data = BackendData(backend)
+    dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
+    coupling_map = CouplingMap(backend_data.coupling_map)
+    if coupling_map.size() == 0 and estimator is not None:
+        coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
+        if coupling_map is None:
+            raise ValueError("To build a local circuit context, backend needs a coupling map")
+    # Check basis_gates and their respective durations of backend (for identifying timing context)
+    if isinstance(backend, BackendV1):
+        instruction_durations = InstructionDurations.from_backend(backend)
+        basis_gates = backend.configuration().basis_gates
+    elif isinstance(backend, BackendV2):
+        instruction_durations = backend.instruction_durations
+        basis_gates = backend.operation_names
+    else:
+        raise AttributeError("TorchQuantumEnvironment requires a Backend argument")
+    if not instruction_durations.duration_by_name_qubits:
+        raise AttributeError("InstructionDurations not specified in provided Backend, required for transpilation")
+    return dt, coupling_map,  basis_gates, instruction_durations
 def select_optimizer(lr: float, optimizer: str = "Adam", grad_clip: Optional[float] = None,
                      concurrent_optimization: bool = True, lr2: Optional[float] = None):
     if concurrent_optimization:
