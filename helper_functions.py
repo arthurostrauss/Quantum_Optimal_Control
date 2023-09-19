@@ -1,22 +1,28 @@
+from itertools import permutations
 from typing import Optional, Tuple, List, Union, Dict, Sequence
 
 import numpy as np
 import tensorflow as tf
-from qiskit.circuit import QuantumCircuit, Gate
+from qiskit import pulse
+from qiskit.circuit import QuantumCircuit, Gate, Parameter
+from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
 from qiskit.providers import BackendV1, Backend, BackendV2
-from qiskit.pulse import DriveChannel, ControlChannel
+from qiskit.pulse.transforms import block_to_schedule
 from qiskit.quantum_info import Operator
-from qiskit.transpiler import CouplingMap, InstructionDurations
+from qiskit.transpiler import CouplingMap, InstructionDurations, InstructionProperties
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import parse_backend_hamiltonian_dict
 from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs, DynamicsBackend
+from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BatchExperiment, BaseAnalysis, BackendData
-from qiskit_experiments.library.tomography import StateTomography, ProcessTomography
+from qiskit_experiments.library import StateTomography, ProcessTomography, RoughXSXAmplitudeCal, RoughDragCal
 from qiskit_ibm_runtime import Session, IBMBackend, Estimator as Runtime_Estimator
 from tensorflow.python.keras import Model
 from tensorflow.python.keras.layers import Input, Dense
+
+from torch_gate_calibration.basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 
 
 def constrain_mean_value(mu_var):
@@ -39,7 +45,128 @@ def remove_unused_wires(qc: QuantumCircuit):
             qc.qubits.remove(qubit)
     return qc
 
-def determine_ecr_params(backend: Union[BackendV1, BackendV2], physical_qubits: List[int], basis_gate="cx"):
+def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: Optional[List[str]] = None):
+    """
+    Generate baseline single qubit gates (X, SX, RZ, H) for all qubits using traditional calibration experiments
+    :param backend: Dynamics Backend on which calibrations should be run
+    :param calibration_files: Optional calibration files containing single qubit gate calibrations for provided
+        DynamicsBackend instance (Qiskit Experiments does not support this feature yet)
+
+    """
+
+    target, qubits = backend.target, []
+    for i, dim in enumerate(backend.options.subsystem_dims):
+        if dim > 1:
+            qubits.append(i)
+    num_qubits = len(qubits)
+    single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
+    single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+
+    control_channel_map = backend.options.control_channel_map or {(qubits[0], qubits[1]): index
+                                                                  for index, qubits in
+                                                                  enumerate(tuple(permutations(qubits, 2)))}
+    if backend.options.control_channel_map:
+        physical_control_channel_map = {(qubit_pair[0], qubit_pair[1]): backend.control_channel((qubit_pair[0],
+                                                                                                 qubit_pair[1]))
+                                        for qubit_pair in backend.options.control_channel_map}
+    else:
+        physical_control_channel_map = {(qubit_pair[0], qubit_pair[1]): [pulse.ControlChannel(index)]
+                                        for index, qubit_pair in enumerate(tuple(permutations(qubits, 2)))}
+    backend.set_options(control_channel_map=control_channel_map)
+    coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
+    two_qubit_properties = {qubits: None for qubits in control_channel_map}
+    two_qubit_errors = {qubits: 0.0 for qubits in control_channel_map}
+    standard_gates: Dict[str, Gate] = get_standard_gate_name_mapping()  # standard gate library
+    fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array([1, 1 / 2, -1 / 2, 1 / 4, -1 / 4])
+    other_gates = ["rz", "id", "h", "x", "sx", "reset"]
+    single_qubit_gates = fixed_phase_gates + other_gates
+    two_qubit_gates = ["ecr"]
+    exp_results = {}
+    existing_cals = calibration_files is not None
+
+    phi: Parameter = standard_gates["rz"].params[0]
+    if existing_cals:
+        cals = Calibrations.load(files=calibration_files)
+    else:
+        cals = Calibrations(coupling_map=coupling_map, control_channel_map=physical_control_channel_map,
+                            libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"]),
+                                       EchoedCrossResonance(basis_gates=['cr45p', 'cr45m', 'ecr'])],
+                            backend_name=backend.name, backend_version=backend.backend_version)
+    if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
+        for gate in single_qubit_gates:
+            target.add_instruction(standard_gates[gate], properties=single_qubit_properties)
+        if num_qubits > 1:
+            for gate in two_qubit_gates:
+                target.add_instruction(standard_gates[gate], properties=two_qubit_properties)
+            target.build_coupling_map(two_q_gate=two_qubit_gates[0])
+
+    for qubit in qubits:  # Add calibrations for each qubit
+        control_channels = list(filter(lambda x: x is not None, [control_channel_map.get((i, qubit), None)
+                                                                 for i in qubits]))
+        # Calibration of RZ gate, virtual Z-rotation
+        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
+            pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
+            for q in control_channels:
+                pulse.shift_phase(-phi, pulse.ControlChannel(q))
+        # Identity gate
+        id_cal = pulse.Schedule(pulse.Delay(20, pulse.DriveChannel(qubit)))  # Wait 20 cycles for identity gate
+
+        # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
+        target.update_instruction_properties('rz', (qubit,), InstructionProperties(calibration=rz_cal, error=0.))
+        target.update_instruction_properties('id', (qubit,), InstructionProperties(calibration=id_cal, error=0.))
+        target.update_instruction_properties("reset", (qubit,), InstructionProperties(calibration=id_cal, error=0.))
+        for phase, gate in zip(fixed_phases, fixed_phase_gates):
+            gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
+            instruction_prop = InstructionProperties(calibration=gate_cal, error=0.)
+            target.update_instruction_properties(gate, (qubit,), instruction_prop)
+
+        # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
+        if not existing_cals:
+            rabi_exp = RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 100))
+            drag_exp = RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15))
+            drag_exp.set_experiment_options(reps=[3, 5, 7])
+            print(f"Starting Rabi experiment for qubit {qubit}...")
+            rabi_result = rabi_exp.run().block_for_results()
+            print(f"Rabi experiment for qubit {qubit} done.")
+            print(f"Starting Drag experiment for qubit {qubit}...")
+            drag_result = drag_exp.run().block_for_results()
+            print(f"Drag experiments done for qubit {qubit} done.")
+            exp_results[qubit] = [rabi_result, drag_result]
+
+        # Build Hadamard gate schedule from following equivalence: H = S @ SX @ S
+
+        sx_schedule = block_to_schedule(cals.get_schedule("sx", (qubit,)))
+        s_schedule = block_to_schedule(target.get_calibration('s', (qubit,)))
+        h_schedule = pulse.Schedule(s_schedule, sx_schedule, s_schedule, name="h")
+        target.update_instruction_properties('h', (qubit,), properties=InstructionProperties(calibration=h_schedule,
+                                                                                             error=0.0))
+
+    print("All single qubit calibrations are done")
+    # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
+    error_dict = {'x': single_qubit_errors, 'sx': single_qubit_errors}
+    target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
+    print(control_channel_map)
+    # for qubit_pair in control_channel_map:
+    #     print(qubit_pair)
+    #     cr_ham_exp = CrossResonanceHamiltonian(physical_qubits=qubit_pair, flat_top_widths=np.linspace(0, 5000, 17),
+    #                                            backend=backend)
+    #     print("Calibrating CR for qubits", qubit_pair, "...")
+    #     data_cr = cr_ham_exp.run().block_for_results()
+    #     exp_results[qubit_pair] = data_cr
+
+    print("Updated Instruction Schedule Map", target.instruction_schedule_map())
+
+    return cals, exp_results
+def determine_ecr_params(backend: Union[BackendV1, BackendV2], physical_qubits: List[int]):
+    basis_gate = None
+    basis_gates = backend.configuration().basis_gates if isinstance(backend, BackendV1) else backend.operation_names
+    if "cx" in basis_gates:
+        basis_gate = "cx"
+        print("Basis gate Library for CX gate not yet available, will be transpiled over ECR basis gate")
+    elif "ecr" in basis_gates:
+        basis_gate = "ecr"
+    else:
+        raise ValueError("No identifiable two-qubit gate found, must be 'cx' or 'ecr'")
     if isinstance(backend, BackendV1):
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
@@ -48,31 +175,37 @@ def determine_ecr_params(backend: Union[BackendV1, BackendV2], physical_qubits: 
     q_c, q_t = (physical_qubits[0],), (physical_qubits[1],)
     physical_qubits = tuple(physical_qubits)
     basis_gate_instructions = instruction_schedule_map.get(basis_gate, qubits=physical_qubits)
-    pulses = np.array(basis_gate_instructions.instructions)[:,1]
+    instructions_array = np.array(basis_gate_instructions.instructions)[:,1]
     control_pulse = target_pulse = x_pulse = None
 
     if isinstance(backend, DynamicsBackend):
         x_pulse = instruction_schedule_map.get("x", q_c).instructions[0][1].pulse
         cr45p_instructions = np.array(instruction_schedule_map.get("cr45p", physical_qubits).instructions)[:,1]
         for op in cr45p_instructions:
-            if isinstance(op.channel, DriveChannel):
+            if isinstance(op.channel, pulse.DriveChannel):
                 target_pulse = op.pulse
-            elif isinstance(op.channel, ControlChannel):
+            elif isinstance(op.channel, pulse.ControlChannel):
                 control_pulse = op.pulse
 
     else:
-        for pulse in list(pulses):
-            name = str(pulse.name)
+        for instruction in list(instructions_array):
+            if bool(x_pulse and target_pulse and control_pulse):
+                break
+            name = str(instruction.name)
             if "Xp_d" in name:
-                x_pulse = pulse.pulse
+                x_pulse = instruction.pulse
+                continue
             elif "CR90p_d" in name:
-                target_pulse = pulse.pulse
+                target_pulse = instruction.pulse
+                continue
             elif "CR90p_u" in name:
-                control_pulse = pulse.pulse
+                control_pulse = instruction.pulse
+                continue
             elif "CX_u" in name:
-                control_pulse = pulse.pulse
+                control_pulse = instruction.pulse
+                continue
             elif "CX_d" in name:
-                target_pulse = pulse.pulse
+                target_pulse = instruction.pulse
 
         if x_pulse is None:
             x_pulse = instruction_schedule_map.get("x", q_c).instructions[0][1].pulse
@@ -90,7 +223,51 @@ def determine_ecr_params(backend: Union[BackendV1, BackendV2], physical_qubits: 
                                ("σ", physical_qubits, sched): control_pulse.sigma,
                                ("risefall", physical_qubits, sched) : (control_pulse.duration - control_pulse.width)/(2*control_pulse.sigma)})
 
-    return default_params, basis_gate_instructions, pulses
+    return default_params, basis_gate_instructions, instructions_array
+
+def get_schedule_dict(sched: Union[pulse.Schedule, pulse.ScheduleBlock]):
+    """
+    To be used for custom Qiskit Dynamics simulation with DynamicsBackend, format pulse Schedule in a Jax Pytree structure to
+    speed up simulations by jitting the schedule to samples conversion
+
+    """
+    new_sched = block_to_schedule(sched) if isinstance(sched, pulse.ScheduleBlock) else sched
+    assert new_sched.is_parameterized()
+    instructions_array = np.array(new_sched.instructions)[:, 1]
+    instructions_info = []
+    for instruction in instructions_array:
+        if isinstance(instruction, pulse.Play):
+            if isinstance(instruction.pulse, pulse.ScalableSymbolicPulse):
+                info = {"type": "Play", "channel": instruction.channel,
+                                    "pulse_type": instruction.pulse.pulse_type, "parameters": instruction.pulse.parameters}
+                instructions_info.append(info)
+            else:
+                raise QiskitError(f"{instruction.pulse} not JAX compatible")
+        elif isinstance(instruction, pulse.ShiftPhase):
+            info = {"type": "ShiftPhase", "channel": instruction.channel, "parameters": instruction.phase}
+            instructions_info.append(info)
+        elif isinstance(instruction, pulse.ShiftFrequency):
+            info = {"type": "ShiftFrequency", "channel": instruction.channel, "parameters": instruction.frequency}
+            instructions_info.append(info)
+        elif isinstance(instruction, pulse.SetPhase):
+            info = {"type": "SetPhase", "channel": instruction.channel, "parameters": instruction.phase}
+            instructions_info.append(info)
+        elif isinstance(instruction, pulse.SetFrequency):
+            info = {"type": "SetFrequency", "channel": instruction.channel, "parameters": instruction.frequency}
+            instructions_info.append(info)
+        elif isinstance(instruction, pulse.instructions.RelativeBarrier):
+            info = {"type": "RelativeBarrier", "channel": instruction.channels}
+            instructions_info.append(info)
+        elif isinstance(instruction, pulse.instructions.Acquire):
+            info = {"type": "Acquire", "channel": instruction.channel, "parameters": [instruction.duration, instruction.reg_slot, instruction.mem_slot]}
+            instructions_info.append(info)
+        elif isinstance(instruction, pulse.instructions.Delay):
+            info = {"type": "Delay", "channel": instruction.channel, "parameters": instruction.duration}
+            instructions_info.append(info)
+        elif isinstance(instruction, pulse.instructions.Reference):
+            pass
+
+    return instructions_info
 
 def state_fidelity_from_state_tomography(qc_list: List[QuantumCircuit], backend: Backend,
                                          measurement_indices: Optional[Sequence[int]],

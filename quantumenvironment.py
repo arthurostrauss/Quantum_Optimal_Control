@@ -8,25 +8,23 @@ Created on 28/11/2022
 
 # For compatibility for options formatting between Estimators.
 import json
-from itertools import product, permutations
+from itertools import product
 from typing import Dict, Union, Optional, List, Callable
 
 import numpy as np
 # Qiskit imports
 from qiskit import pulse, schedule
-from qiskit.circuit import Parameter, QuantumCircuit, QuantumRegister, Gate, CircuitInstruction
-from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
+from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruction
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
 # Qiskit backends
 from qiskit.providers import BackendV1, BackendV2
 from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
-from qiskit.pulse.transforms.canonicalization import block_to_schedule
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity, process_fidelity
 from qiskit.quantum_info.states import DensityMatrix, Statevector
-from qiskit.transpiler import InstructionProperties, Layout
+from qiskit.transpiler import Layout
 from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_aer.primitives import Estimator as Aer_Estimator
 # Qiskit dynamics for pulse simulation (& benchmarking)
@@ -34,17 +32,17 @@ from qiskit_dynamics import DynamicsBackend, Solver
 from qiskit_dynamics.array import Array, wrap
 from qiskit_dynamics.models import HamiltonianModel
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
-from qiskit_experiments.calibration_management.calibrations import Calibrations
 from qiskit_experiments.framework import BatchExperiment
-from qiskit_experiments.library import ProcessTomography, RoughXSXAmplitudeCal, RoughDragCal
+from qiskit_experiments.library import ProcessTomography
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  # , Pauli6PreparationBasis
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
 
+from helper_functions import perform_standard_calibrations
 from qconfig import QiskitConfig
+
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
-from torch_gate_calibration.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -53,120 +51,6 @@ from torch_gate_calibration.basis_gate_library import FixedFrequencyTransmon, Ec
 
 Estimator_type = Union[Aer_Estimator, Runtime_Estimator, Estimator, BackendEstimator]
 Backend_type = Union[BackendV1, BackendV2]
-
-def perform_standard_calibrations(backend: DynamicsBackend, calibration_files: Optional[List[str]] = None):
-    """
-    Generate baseline single qubit gates (X, SX, RZ, H) for all qubits using traditional calibration experiments
-    :param backend: Dynamics Backend on which calibrations should be run
-    :param calibration_files: Optional calibration files containing single qubit gate calibrations for provided
-        DynamicsBackend instance (Qiskit Experiments does not support this feature yet)
-
-    """
-
-    target, qubits = backend.target, []
-    for i, dim in enumerate(backend.options.subsystem_dims):
-        if dim > 1:
-            qubits.append(i)
-    num_qubits = len(qubits)
-    single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
-    single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
-
-    control_channel_map = backend.options.control_channel_map or {(qubits[0], qubits[1]): index
-                                                                  for index, qubits in
-                                                                  enumerate(tuple(permutations(qubits, 2)))}
-    if backend.options.control_channel_map:
-        physical_control_channel_map = {(qubit_pair[0], qubit_pair[1]): backend.control_channel((qubit_pair[0],
-                                                                                                 qubit_pair[1]))
-                                        for qubit_pair in backend.options.control_channel_map}
-    else:
-        physical_control_channel_map = {(qubit_pair[0], qubit_pair[1]): [pulse.ControlChannel(index)]
-                                        for index, qubit_pair in enumerate(tuple(permutations(qubits, 2)))}
-    backend.set_options(control_channel_map=control_channel_map)
-    coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
-    two_qubit_properties = {qubits: None for qubits in control_channel_map}
-    two_qubit_errors = {qubits: 0.0 for qubits in control_channel_map}
-    standard_gates: Dict[str, Gate] = get_standard_gate_name_mapping()  # standard gate library
-    fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array([1, 1 / 2, -1 / 2, 1 / 4, -1 / 4])
-    other_gates = ["rz", "id", "h", "x", "sx", "reset"]
-    single_qubit_gates = fixed_phase_gates + other_gates
-    two_qubit_gates = ["ecr"]
-    exp_results = {}
-    existing_cals = calibration_files is not None
-
-    phi: Parameter = standard_gates["rz"].params[0]
-    if existing_cals:
-        cals = Calibrations.load(files=calibration_files)
-    else:
-        cals = Calibrations(coupling_map=coupling_map, control_channel_map=physical_control_channel_map,
-                            libraries=[FixedFrequencyTransmon(basis_gates=["x", "sx"]),
-                                       EchoedCrossResonance(basis_gates=['cr45p', 'cr45m', 'ecr'])],
-                            backend_name=backend.name, backend_version=backend.backend_version)
-    if len(target.instruction_schedule_map().instructions) <= 1:  # Check if instructions have already been added
-        for gate in single_qubit_gates:
-            target.add_instruction(standard_gates[gate], properties=single_qubit_properties)
-        if num_qubits > 1:
-            for gate in two_qubit_gates:
-                target.add_instruction(standard_gates[gate], properties=two_qubit_properties)
-            target.build_coupling_map(two_q_gate=two_qubit_gates[0])
-
-    for qubit in qubits:  # Add calibrations for each qubit
-        control_channels = list(filter(lambda x: x is not None, [control_channel_map.get((i, qubit), None)
-                                                                 for i in qubits]))
-        # Calibration of RZ gate, virtual Z-rotation
-        with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
-            pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
-            for q in control_channels:
-                pulse.shift_phase(-phi, pulse.ControlChannel(q))
-        # Identity gate
-        id_cal = pulse.Schedule(pulse.Delay(20, pulse.DriveChannel(qubit)))  # Wait 20 cycles for identity gate
-
-        # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
-        target.update_instruction_properties('rz', (qubit,), InstructionProperties(calibration=rz_cal, error=0.))
-        target.update_instruction_properties('id', (qubit,), InstructionProperties(calibration=id_cal, error=0.))
-        target.update_instruction_properties("reset", (qubit,), InstructionProperties(calibration=id_cal, error=0.))
-        for phase, gate in zip(fixed_phases, fixed_phase_gates):
-            gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
-            instruction_prop = InstructionProperties(calibration=gate_cal, error=0.)
-            target.update_instruction_properties(gate, (qubit,), instruction_prop)
-
-        # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
-        if not existing_cals:
-            rabi_exp = RoughXSXAmplitudeCal([qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 100))
-            drag_exp = RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15))
-            drag_exp.set_experiment_options(reps=[3, 5, 7])
-            print(f"Starting Rabi experiment for qubit {qubit}...")
-            rabi_result = rabi_exp.run().block_for_results()
-            print(f"Rabi experiment for qubit {qubit} done.")
-            print(f"Starting Drag experiment for qubit {qubit}...")
-            drag_result = drag_exp.run().block_for_results()
-            print(f"Drag experiments done for qubit {qubit} done.")
-            exp_results[qubit] = [rabi_result, drag_result]
-
-        # Build Hadamard gate schedule from following equivalence: H = S @ SX @ S
-
-        sx_schedule = block_to_schedule(cals.get_schedule("sx", (qubit,)))
-        s_schedule = block_to_schedule(target.get_calibration('s', (qubit,)))
-        h_schedule = pulse.Schedule(s_schedule, sx_schedule, s_schedule, name="h")
-        target.update_instruction_properties('h', (qubit,), properties=InstructionProperties(calibration=h_schedule,
-                                                                                             error=0.0))
-
-    print("All single qubit calibrations are done")
-    # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
-    error_dict = {'x': single_qubit_errors, 'sx': single_qubit_errors}
-    target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
-    print(control_channel_map)
-    # for qubit_pair in control_channel_map:
-    #     print(qubit_pair)
-    #     cr_ham_exp = CrossResonanceHamiltonian(physical_qubits=qubit_pair, flat_top_widths=np.linspace(0, 5000, 17),
-    #                                            backend=backend)
-    #     print("Calibrating CR for qubits", qubit_pair, "...")
-    #     data_cr = cr_ham_exp.run().block_for_results()
-    #     exp_results[qubit_pair] = data_cr
-
-    print("Updated Instruction Schedule Map", target.instruction_schedule_map())
-
-    return cals, exp_results
-
 
 def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
     """
