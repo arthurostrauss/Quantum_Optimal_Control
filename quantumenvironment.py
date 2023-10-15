@@ -38,6 +38,9 @@ from qiskit_experiments.library.tomography.basis import PauliPreparationBasis  #
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, IBMBackend as Runtime_Backend, Options, Session
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
+# Pytorch module
+import torch
+import torch.distributions as dist
 
 from helper_functions import perform_standard_calibrations
 from qconfig import QiskitConfig
@@ -272,7 +275,7 @@ class QuantumEnvironment:
 
         qc = QuantumCircuit(self.tgt_register)  # Reset the QuantumCircuit instance for next iteration
         parametrized_circ = QuantumCircuit(self.tgt_register)
-        angles, batch_size = np.array(actions), len(np.array(actions))
+        angles, batch_size = torch.tensor(actions), len(actions)  # Convert to PyTorch tensor
         self.action_history.append(angles)
 
         if self.target_type == 'gate':
@@ -286,39 +289,68 @@ class QuantumEnvironment:
         else:  # State preparation task
             target_state = self.target
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        distribution = Categorical(probs=target_state["Chi"] ** 2)
-        k_samples = distribution.sample(self.sampling_Pauli_space)
-        pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self._d * distribution.prob(p))
-                                  for p in pauli_index], 5)
 
-        # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
+        # TensorFlow modules        
+        # distribution = Categorical(probs=target_state["Chi"] ** 2)
+        # k_samples = distribution.sample(self.sampling_Pauli_space)
+        
+        # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
+        distribution = dist.Categorical(probs=torch.tensor(target_state["Chi"] ** 2))
+        k_samples = distribution.sample((self.sampling_Pauli_space,))
+        print('k samples of Pauli operators: ', k_samples)
+
+        # Get unique values and their counts
+        unique_vals, counts = torch.unique(k_samples, return_counts=True)
+        pauli_index = unique_vals.numpy()
+        pauli_shots = counts.numpy()
+
+        print(type(self.c_factor))
+        print(type(target_state["Chi"]))
+        print(type(self._d))
+        print(type(distribution.probs))
+
+        # Calculate reward factor using PyTorch operations
+        reward_factor = torch.round(self.c_factor * target_state["Chi"] / (self._d * distribution.probs), 5)
+
+
+        # Convert to a tensor and round to 5 decimal places
+        reward_tensor = torch.tensor(reward_factor)
+        rounded_reward = torch.round(reward_tensor * 1e5) / 1e5
+        reward_factor = rounded_reward.numpy()
+
         observables = SparsePauliOp.from_list([(self.Pauli_ops[p].to_label(), reward_factor[i])
                                                for i, p in enumerate(pauli_index)])
+
         # Benchmarking block: not part of reward calculation
         # Apply parametrized quantum circuit (action), for benchmarking only
 
-        self.parametrized_circuit_func(parametrized_circ)
+        self.parametrized_circuit_func(parametrized_circ, angles)
         qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
         self.qc_history.append(qc_list)
+
         if do_benchmark:
             self._store_benchmarks(qc_list)
 
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
-        self.parametrized_circuit_func(qc)
+        self.parametrized_circuit_func(qc, angles)
+        
         if isinstance(self.estimator, Runtime_Estimator):
-            job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
-                                 parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots,
-                                 job_tags=[f"rl_qoc_step{self._step_tracker}"])
+            parameter_values = angles.cpu().numpy()
         else:
-            job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
-                                     parameter_values=angles, shots=self.sampling_Pauli_space * self.n_shots)
+            parameter_values = angles.numpy()
+
+        job = self.estimator.run(circuits=[qc] * batch_size, observables=[observables] * batch_size,
+                                 parameter_values=parameter_values, shots=self.sampling_Pauli_space * self.n_shots,
+                                 job_tags=[f"rl_qoc_step{self._step_tracker}"])
+
 
         self._step_tracker += 1
         reward_table = job.result().values
         self.reward_history.append(reward_table)
+
         assert len(reward_table) == batch_size
-        return reward_table # Shape [batchsize]
+
+        return reward_table
 
     def _store_benchmarks(self, qc_list: List[QuantumCircuit]):
         """
