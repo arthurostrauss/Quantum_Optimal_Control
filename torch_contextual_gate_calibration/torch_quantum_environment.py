@@ -39,7 +39,7 @@ from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BackendData
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError
+from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError, Session
 from tensorflow_probability.python.distributions import Categorical
 
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
@@ -102,6 +102,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         """
 
         # TODO: Redeclare everything instead of reinitializing (loss of time especially for DynamicsBackend declaration)
+
         if q_env.config_type == "Qiskit":
             q_env.config.do_calibrations = False
             super().__init__(
@@ -866,6 +867,14 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         else:
             print("Sending job...")
             try:
+                if isinstance(self.estimator, Runtime_Estimator):
+                    """Open a new Session if time limit of the ongoing one is reached"""
+                    if self.estimator.session.status() == "Closed":
+                        self._session_counts += 1
+                        print(f'New Session opened (#{self._session_counts})')
+                        session = Session(self.estimator.session.service, self.backend)
+                        options = self.estimator.options
+                        self.estimator = Runtime_Estimator(session=session, options=dict(options))
                 job = self.estimator.run(
                     circuits=[training_circ] * self.batch_size,
                     observables=[observables] * self.batch_size,

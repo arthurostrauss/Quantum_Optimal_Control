@@ -319,6 +319,7 @@ class QuantumEnvironment:
                     self.estimator.options.transpilation[
                         "initial_layout"
                     ] = self._layout.get_physical_bits()
+                self._session_counts = 0
 
         elif QUA_config is not None:
             raise AttributeError("QUA compatibility not yet implemented")
