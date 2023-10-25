@@ -37,6 +37,7 @@ from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampl
 from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BackendData
+from qiskit_ibm_provider import IBMBackend
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError, Session
@@ -49,7 +50,7 @@ from helper_functions import (
     determine_ecr_params,
 )
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
-from torch_contextual_gate_calibration.custom_jax_pulse_sim_backend import (
+from custom_jax_sim import (
     DynamicsBackendEstimator,
 )
 
@@ -387,32 +388,19 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         input_circuit: QuantumCircuit = self.target["input_states"][input_state_index][
             "circuit"
         ]
-        ref_circuit, custom_circuit = (
-            self.baseline_truncations[iteration],
-            self.circuit_truncations[iteration],
-        )
-        target_circuit = QuantumCircuit(self.tgt_register)
-        custom_target_circuit = custom_circuit.copy_empty_like(
-            name=f"qc_{input_state_index}_{ref_circuit.name[-1]}"
-        )
-
-        # # Reset qubit system
-        # _, _, basis_gates, _ = retrieve_backend_info(self.backend)
-        # if "reset" in basis_gates:
-        #     custom_target_circuit.reset(custom_target_circuit.qubits)
+        ref_circuit, custom_circuit = self.baseline_truncations[iteration], self.circuit_truncations[iteration]
+        target_circuit = ref_circuit.copy_empty_like()
+        custom_target_circuit = custom_circuit.copy_empty_like(name=f"qc_{input_state_index}_{ref_circuit.name[-1]}")
 
         custom_target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
-        if isinstance(self.estimator, DynamicsBackendEstimator):
-            self.estimator.set_options(initial_state=Statevector(custom_target_circuit))
-        custom_target_circuit.compose(custom_circuit, inplace=True)
         target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
-        for (
-            gate
-        ) in (
-            ref_circuit.data
-        ):  # Append only gates that are applied on the target register
-            if all([qubit in self.tgt_register for qubit in gate.qubits]):
-                target_circuit.append(gate)
+
+        custom_target_circuit.compose(custom_circuit, inplace=True)
+        target_circuit.compose(ref_circuit, inplace=True)
+
+        # for gate in ref_circuit.data:  # Append only gates that are applied on the target register
+        #     if all([qubit in self.tgt_register for qubit in gate.qubits]):
+        #         target_circuit.append(gate)
 
         return _calculate_chi_target_state(
             {
@@ -827,29 +815,13 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         k_samples = distribution.sample(self.sampling_Pauli_space)
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = np.round(
-            [
-                self.c_factor
-                * target_state["Chi"][p]
-                / (self._d * distribution.prob(p))
-                for p in pauli_index
-            ],
-            5,
-        )
+        reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self._d * distribution.prob(p))
+                                  for p in pauli_index], 5)
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        # observables = SparsePauliOp.from_list([(pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
-        #                                        for i, p in enumerate(pauli_index)])
-        observables = SparsePauliOp.from_list(
-            [
-                (
-                    "I" * (len(training_circ.qubits) - len(self.tgt_register))
-                    + pauli_basis(len(self.tgt_register))[p].to_label(),
-                    reward_factor[i],
-                )
-                for i, p in enumerate(pauli_index)
-            ]
-        )
+        observables = SparsePauliOp.from_list([(pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
+                                               for i, p in enumerate(pauli_index)])
+
         self._punctual_observable = observables
         # self.parametrized_circuit_func(training_circ, self._parameters[:iteration])
 
@@ -870,11 +842,20 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 if isinstance(self.estimator, Runtime_Estimator):
                     """Open a new Session if time limit of the ongoing one is reached"""
                     if self.estimator.session.status() == "Closed":
+                        old_session = self.estimator.session
                         self._session_counts += 1
                         print(f'New Session opened (#{self._session_counts})')
-                        session = Session(self.estimator.session.service, self.backend)
-                        options = self.estimator.options
+                        session, options = Session(old_session.service, self.backend), self.estimator.options
                         self.estimator = Runtime_Estimator(session=session, options=dict(options))
+                elif isinstance(self.backend, IBMBackend):
+                    if not self.backend.session.active:
+                        self._session_counts += 1
+                        print(f'New Session opened (#{self._session_counts})')
+                        self.backend.open_session()
+                elif isinstance(self.estimator, DynamicsBackendEstimator):
+                    def param_schedule():
+                        return schedule(training_circ, self.backend)
+                    self.backend.options.solver.set_macro(func=param_schedule)
                 job = self.estimator.run(
                     circuits=[training_circ] * self.batch_size,
                     observables=[observables] * self.batch_size,

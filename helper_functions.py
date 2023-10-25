@@ -7,10 +7,14 @@ from qiskit import pulse
 from qiskit.circuit import QuantumCircuit, Gate, Parameter
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
-from qiskit.providers import BackendV1, Backend, BackendV2
+from qiskit.primitives import BackendEstimator, Estimator
+from qiskit_aer.primitives import Estimator as AerEstimator
+from qiskit_aer.backends.aerbackend import AerBackend
+from qiskit.providers import BackendV1, Backend, BackendV2, Options
+from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
 from qiskit.pulse.transforms import block_to_schedule
 from qiskit.quantum_info import Operator
-from qiskit.transpiler import CouplingMap, InstructionDurations, InstructionProperties
+from qiskit.transpiler import CouplingMap, InstructionDurations, InstructionProperties, Layout
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import (
@@ -28,15 +32,20 @@ from qiskit_experiments.library import (
     RoughXSXAmplitudeCal,
     RoughDragCal,
 )
-from qiskit_ibm_runtime import Session, IBMBackend, Estimator as Runtime_Estimator
+from qiskit_ibm_runtime import (Session, IBMBackend as RuntimeBackend, Estimator as RuntimeEstimator,
+                                Options as RuntimeOptions)
+from qiskit_ibm_provider import IBMBackend
 from tensorflow.python.keras import Model
 from tensorflow.python.keras.layers import Input, Dense
 
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
-
+from qconfig import QiskitConfig
+from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
+from dataclasses import asdict
 
-
+Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator]
+Backend_type = Union[BackendV1, BackendV2]
 def constrain_mean_value(mu_var):
     return [tf.clip_by_value(m, -1.0, 1.0) for m in mu_var]
 
@@ -453,7 +462,7 @@ def gate_fidelity_from_process_tomography(
         flatten_results=True,
     )
 
-    if isinstance(backend, IBMBackend):
+    if isinstance(backend, RuntimeBackend):
         circuits = process_tomo._transpiled_circuits()
         jobs = run_jobs(session, circuits)
         exp_data = process_tomo._initialize_experiment_data()
@@ -486,6 +495,69 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
         if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
             control_channel_map[qubits] = control_channel_map_backend[qubits]
     return control_channel_map
+
+
+def retrieve_estimator(backend: Backend_type, layout: Layout,
+                       config: Union[Dict, QiskitConfig],
+                       abstraction_level: str = "circuit",
+                       estimator_options: Optional[Union[Dict, Options, RuntimeOptions]]=None) -> Estimator_type:
+
+    if isinstance(backend, RuntimeBackend):  # Real backend, or Simulation backend from Runtime Service
+        estimator: Estimator_type = RuntimeEstimator(
+            session=Session(backend.service, backend),
+            options=estimator_options,
+        )
+        if estimator.options.transpilation["initial_layout"] is None:
+            estimator.options.transpilation[
+                "initial_layout"
+            ] = layout.get_physical_bits()
+
+    else:
+        if isinstance(estimator_options, RuntimeOptions):
+            # estimator_options = asdict(estimator_options)
+            estimator_options = None
+        if isinstance(backend, (AerBackend, FakeBackend, FakeBackendV2)):
+            assert abstraction_level == "circuit", "AerSimulator only works at circuit level"
+            # Estimator taking noise model into consideration, have to provide an AerSimulator backend
+            estimator = AerEstimator(
+                backend_options=backend.options,
+                transpile_options={"initial_layout": layout},
+                approximation=True,
+            )
+        elif backend is None:  # No backend specified, ideal state-vector simulation
+            assert abstraction_level == "circuit", 'Statevector simulation only works at circuit level'
+            estimator = Estimator(
+                options={"initial_layout": layout}
+            )
+
+        elif isinstance(backend, DynamicsBackend):
+            assert abstraction_level == "pulse", "DynamicsBackend works only with pulse level abstraction"
+            if isinstance(backend.options.solver, JaxSolver):
+                estimator: Estimator_type = DynamicsBackendEstimator(backend, options=estimator_options,
+                                                                           skip_transpilation=False)
+            else:
+                estimator: Estimator_type = BackendEstimator(
+                    backend, options=estimator_options, skip_transpilation=False
+                )
+            estimator.set_transpile_options(initial_layout=layout)
+            if config.do_calibrations:
+                calibration_files: List[str] = config.calibration_files
+                (
+                    calibrations,
+                    exp_results,
+                ) = perform_standard_calibrations(
+                    backend, calibration_files
+                )
+
+        elif isinstance(backend, IBMBackend):
+            estimator: Estimator_type = BackendEstimator(
+                backend, options=estimator_options, skip_transpilation=False
+            )
+            estimator.set_transpile_options(initial_layout=layout)
+            backend.open_session()
+        else:
+            raise TypeError("Backend not recognized")
+    return estimator
 
 
 def get_solver_and_freq_from_backend(
@@ -596,7 +668,7 @@ def get_solver_and_freq_from_backend(
 
 
 def retrieve_backend_info(
-    backend: Backend, estimator: Optional[Runtime_Estimator] = None
+    backend: Backend, estimator: Optional[RuntimeEstimator] = None
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration

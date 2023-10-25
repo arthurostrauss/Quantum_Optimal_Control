@@ -60,8 +60,7 @@ class DynamicsBackendEstimator(BackendEstimator):
         self.backend.options.solver_options[
             "parameter_values"
         ] = parameter_values  # To be given as PyTree alternatively
-        self.backend.options.solver_options["num_observables"] = num_observables
-        self.backend.options.initial_state = self.options.initial_state
+        self.backend.options.solver_options["observables"] = self.preprocessed_circuits[1]
         bound_circuits = [
             transpiled_circuits[circuit_index]
             if len(p) == 0
@@ -70,7 +69,6 @@ class DynamicsBackendEstimator(BackendEstimator):
             for circuit_index in range(accum[i], accum[i] + n)
         ]
         bound_circuits = self._bound_pass_manager_run(bound_circuits)
-        print(len(bound_circuits))
         # Run
         result, metadata = _run_circuits(bound_circuits, self._backend, **run_options)
 

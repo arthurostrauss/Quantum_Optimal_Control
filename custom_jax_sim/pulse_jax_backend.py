@@ -5,6 +5,7 @@ import datetime
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_dynamics import DynamicsBackend, Solver, Signal, RotatingFrame
+from qiskit_dynamics.solvers.solver_classes import format_final_states, validate_and_format_initial_state
 from typing import Optional, List, Union, Callable, Tuple
 
 from qiskit_dynamics.array import wrap
@@ -51,9 +52,7 @@ class JaxSolver(Solver):
         rwa_cutoff_freq: Optional[float] = None,
         rwa_carrier_freqs: Optional[Union[Array, Tuple[Array, Array]]] = None,
         validate: bool = True,
-        jittable_func: Optional[
-            Union[List[Callable[[Array], Array]], Callable[[Array], Array]]
-        ] = None,
+        schedule_func: Optional[Callable[[], Schedule]] = None,
     ):
         """Initialize solver with model information.
 
@@ -114,19 +113,47 @@ class JaxSolver(Solver):
             rwa_carrier_freqs,
             validate,
         )
-        if isinstance(jittable_func, Callable):
-            jittable_func = [jittable_func]
-        self._jittable_func = jittable_func
-        self._jit_sims = [jit(func) for func in jittable_func]
+        self._schedule_func = schedule_func
+
 
     @property
     def circuit_macro(self):
-        return self._jittable_func
+        return self._schedule_func
 
     @circuit_macro.setter
     def set_macro(self, func):
         """
         This setter should be done each time one wants to switch the target circuit truncation
         """
-        self._jittable_func = func
-        self._jit_sim = jit(self._jittable_func)
+        self._schedule_func = func
+
+    def _solve_schedule_list_jax(
+        self,
+        t_span_list: List[Array],
+        y0_list: List[Union[Array, QuantumState, BaseOperator]],
+        schedule_list: List[Schedule],
+        convert_results: bool = True,
+        **kwargs,
+    ) -> List[OdeResult]:
+
+        param_dicts = kwargs["parameter_dicts"]
+        relevant_params = param_dicts[0].keys()
+        observables_circuits = kwargs["observables"]
+        param_values = kwargs["parameter_values"]
+        for key in ["parameter_dicts", "parameter_values", "parameter_values"]:
+            kwargs.pop(key)
+
+        def sim_function(params, t_span, y0_input, y0_cls):
+            parametrized_schedule = self.circuit_macro()
+
+            parametrized_schedule.assign_parameters({param_obj: param
+                                                     for (param_obj, param) in zip(relevant_params, params)})
+            signals = self._schedule_converter.get_signals(parametrized_schedule)
+            
+            # Perhaps replace below by solve_lmde
+            results = self.solve(t_span, y0_input, signals, **kwargs)
+            results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
+
+
+            return results.y
+

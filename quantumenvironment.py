@@ -19,10 +19,9 @@ from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruc
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
-
 # Qiskit backends
-from qiskit.providers import BackendV1, BackendV2, Options
-from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
+from qiskit.providers import Options, BackendV2, BackendV1
+
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
@@ -33,14 +32,15 @@ from qiskit.quantum_info.operators.measures import (
 )
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import Layout
-from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit_aer.primitives import Estimator as Aer_Estimator
+
+from qiskit_aer.primitives import Estimator as AerEstimator
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
-from qiskit_dynamics import DynamicsBackend, Solver
-from qiskit_dynamics.array import Array, wrap
-from qiskit_dynamics.models import HamiltonianModel
-from torch_contextual_gate_calibration.custom_jax_pulse_sim_backend import JaxSolver, DynamicsBackendEstimator
+from qiskit_dynamics import DynamicsBackend
+from qiskit_dynamics.array import Array
+from qiskit_ibm_provider import IBMBackend
+
+from custom_jax_sim import DynamicsBackendEstimator
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_experiments.framework import BatchExperiment
 from qiskit_experiments.library import ProcessTomography
@@ -48,16 +48,14 @@ from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
 )  # , Pauli6PreparationBasis
 from qiskit_ibm_runtime import (
-    Estimator as Runtime_Estimator,
-    IBMBackend as Runtime_Backend,
-    Options as Runtime_Options,
-    Session,
+    Estimator as RuntimeEstimator,
+    Options as RuntimeOptions,
 )
 
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
 
-from helper_functions import perform_standard_calibrations
+from helper_functions import retrieve_estimator
 from qconfig import QiskitConfig
 
 # QUA imports
@@ -65,7 +63,7 @@ from qconfig import QiskitConfig
 # from qm.qua import *
 # from qm.QuantumMachinesManager import QuantumMachinesManager
 
-Estimator_type = Union[Aer_Estimator, Runtime_Estimator, Estimator, BackendEstimator]
+Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator]
 Backend_type = Union[BackendV1, BackendV2]
 
 
@@ -232,7 +230,7 @@ class QuantumEnvironment:
         self.abstraction_level: str = abstraction_level
         if Qiskit_config is None and QUA_config is None:
             raise AttributeError(
-                "QuantumEnvironment requires one software configuration (can be Qiskit or QUA based)"
+                "QuantumEnvironment requires one hardware configuration (can be Qiskit or QUA based)"
             )
         if Qiskit_config is not None and QUA_config is not None:
             raise AttributeError(
@@ -265,61 +263,11 @@ class QuantumEnvironment:
                 Qiskit_config.parametrized_circuit
             )
             estimator_options: Optional[
-                Union[Options, Dict, Runtime_Options]
+                Union[Options, Dict, RuntimeOptions]
             ] = Qiskit_config.estimator_options
 
-            if (
-                self.abstraction_level == "circuit"
-            ):  # Either state-vector simulation (native) or AerBackend provided
-                if isinstance(self.backend, (AerBackend, FakeBackend, FakeBackendV2)):
-                    # Estimator taking noise model into consideration, have to provide an AerSimulator backend
-                    self._estimator: Estimator_type = Aer_Estimator(
-                        backend_options=self.backend.options,
-                        transpile_options={"initial_layout": self._layout},
-                        approximation=True,
-                    )
-                else:  # No backend specified, ideal state-vector simulation
-                    self._estimator: Estimator_type = Estimator(
-                        options={"initial_layout": self._layout}
-                    )
-
-            else:  # Pulse level abstraction
-                if not isinstance(self.backend, (Runtime_Backend, DynamicsBackend)):
-                    raise TypeError(
-                        "Backend must be either DynamicsBackend or Qiskit Runtime backend if pulse level"
-                        "abstraction is selected (Aer Pulse simulator deprecated)"
-                    )
-
-                if isinstance(self.backend, DynamicsBackend):
-                    if isinstance(self.backend.options.solver, JaxSolver):
-                        self._estimator: Estimator_type = DynamicsBackendEstimator(self.backend, options=estimator_options,
-                                                                                   skip_transpilation=False)
-                    else:
-                        self._estimator: Estimator_type = BackendEstimator(
-                            self.backend, options=estimator_options, skip_transpilation=False
-                        )
-                    self._estimator.set_transpile_options(initial_layout=self.layout)
-                    if self.config.do_calibrations:
-                        calibration_files: List[str] = Qiskit_config.calibration_files
-                        (
-                            self.calibrations,
-                            self.exp_results,
-                        ) = perform_standard_calibrations(
-                            self.backend, calibration_files
-                        )
-
-            if isinstance(
-                self.backend, Runtime_Backend
-            ):  # Real backend, or Simulation backend from Runtime Service
-                self._estimator: Estimator_type = Runtime_Estimator(
-                    session=Session(self.backend.service, self.backend),
-                    options=estimator_options,
-                )
-                if self.estimator.options.transpilation["initial_layout"] is None:
-                    self.estimator.options.transpilation[
-                        "initial_layout"
-                    ] = self._layout.get_physical_bits()
-                self._session_counts = 0
+            self._estimator = retrieve_estimator(self.backend, self.layout, self.config,
+                                                 self.abstraction_level, estimator_options)
 
         elif QUA_config is not None:
             raise AttributeError("QUA compatibility not yet implemented")
@@ -329,6 +277,7 @@ class QuantumEnvironment:
             # TODO: Add a QUA program
 
         # Data storage for TF-Agents or plotting
+        self._session_counts = 0
         self._step_tracker = 0
         self.action_history = []
         self.density_matrix_history = []
@@ -402,7 +351,7 @@ class QuantumEnvironment:
 
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.parametrized_circuit_func(qc)
-        if isinstance(self.estimator, Runtime_Estimator):
+        if isinstance(self.estimator, RuntimeEstimator):
             job = self.estimator.run(
                 circuits=[qc] * batch_size,
                 observables=[observables] * batch_size,
@@ -587,8 +536,10 @@ class QuantumEnvironment:
             self.density_matrix_history.clear()
 
     def close(self) -> None:
-        if isinstance(self.estimator, Runtime_Estimator):
+        if isinstance(self.estimator, RuntimeEstimator):
             self.estimator.session.close()
+        elif isinstance(self.backend, IBMBackend):
+            self.backend.cancel_session()
 
     def __repr__(self):
         string = f"QuantumEnvironment composed of {self._n_qubits} qubits, \n"
