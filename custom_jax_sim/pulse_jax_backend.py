@@ -154,6 +154,5 @@ class JaxSolver(Solver):
             results = self.solve(t_span, y0_input, signals, **kwargs)
             results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
 
-
-            return results.y
+            return Array(results.t).data, Array(results.y).data
 

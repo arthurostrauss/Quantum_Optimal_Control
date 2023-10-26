@@ -60,7 +60,7 @@ class DynamicsBackendEstimator(BackendEstimator):
         self.backend.options.solver_options[
             "parameter_values"
         ] = parameter_values  # To be given as PyTree alternatively
-        self.backend.options.solver_options["observables"] = self.preprocessed_circuits[1]
+        self.backend.options.solver_options["observables"] = self.preprocessed_circuits[0][1]
         bound_circuits = [
             transpiled_circuits[circuit_index]
             if len(p) == 0
