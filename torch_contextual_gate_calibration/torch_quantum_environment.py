@@ -10,8 +10,8 @@ from itertools import chain
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
-from gymnasium import Env
-from gymnasium.spaces import Space
+from gym import Env
+from gym.spaces import Space
 # Qiskit imports
 from qiskit import transpile, schedule
 from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector
@@ -24,14 +24,14 @@ from qiskit.quantum_info.states import Statevector, DensityMatrix
 from qiskit.transpiler import Layout, InstructionProperties, Target
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
-from qiskit_algorithms.state_fidelities import ComputeUncompute
+from qiskit.algorithms.state_fidelities import ComputeUncompute
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BackendData
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError
 from tensorflow_probability.python.distributions import Categorical
 
-from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
+from qiskit_experiments.calibration_management import EchoedCrossResonance, FixedFrequencyTransmon
 from helper_functions import gate_fidelity_from_process_tomography, retrieve_backend_info, determine_ecr_params
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 
