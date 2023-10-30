@@ -677,11 +677,13 @@ def retrieve_backend_info(
     dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
     coupling_map = CouplingMap(backend_data.coupling_map)
     if coupling_map.size() == 0 and backend_data.num_qubits > 1 and estimator is not None:
-        coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
-        if coupling_map is None:
-            raise ValueError(
-                "To build a local circuit context, backend needs a coupling map"
-            )
+        if isinstance(estimator, RuntimeEstimator):
+            coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
+            if coupling_map is None:
+                raise ValueError(
+                    "To build a local circuit context, backend needs a coupling map"
+                )
+
     # Check basis_gates and their respective durations of backend (for identifying timing context)
     if isinstance(backend, BackendV1):
         instruction_durations = InstructionDurations.from_backend(backend)
