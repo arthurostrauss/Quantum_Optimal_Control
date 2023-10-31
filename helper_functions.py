@@ -438,17 +438,30 @@ def get_solver_and_freq_from_backend(backend: BackendV1,
 
     return channel_freqs, solver
 
-def retrieve_backend_info(backend: Backend, estimator: Optional[Runtime_Estimator]=None):
+def retrieve_backend_info(backend: Backend, estimator: Optional[Runtime_Estimator]=None, fake_backend = None):
     """
     Retrieve useful Backend data to run context aware gate calibration
     """
     backend_data = BackendData(backend)
     dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
     coupling_map = CouplingMap(backend_data.coupling_map)
-    if coupling_map.size() == 0 and estimator is not None:
-        coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
-        if coupling_map is None:
-            raise ValueError("To build a local circuit context, backend needs a coupling map")
+    # coupling_map = CouplingMap(list(backend.coupling_map.get_edges()))
+    
+    if coupling_map.size() == 0 and backend_data.num_qubits > 1 and estimator is not None:
+        if isinstance(backend, Runtime_Estimator):
+            coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
+            if coupling_map is None:
+                raise ValueError("To build a local circuit context, backend needs a coupling map")
+
+        elif fake_backend is not None:
+            # If the DynamicsBackend was generated from a FakeBackend, then we need to manually populate the coupling_map of the DynamicsBackend based on the values of the FakeBackend
+            coupling_map_fake_backend = BackendData(fake_backend).coupling_map
+            for edge in coupling_map_fake_backend:
+                src, dst = edge
+                backend.coupling_map.add_edge(src, dst)
+                
+            coupling_map = backend.coupling_map
+
     # Check basis_gates and their respective durations of backend (for identifying timing context)
     if isinstance(backend, BackendV1):
         instruction_durations = InstructionDurations.from_backend(backend)
@@ -460,7 +473,8 @@ def retrieve_backend_info(backend: Backend, estimator: Optional[Runtime_Estimato
         raise AttributeError("TorchQuantumEnvironment requires a Backend argument")
     if not instruction_durations.duration_by_name_qubits:
         raise AttributeError("InstructionDurations not specified in provided Backend, required for transpilation")
-    return dt, coupling_map,  basis_gates, instruction_durations
+    return dt, coupling_map, basis_gates, instruction_durations
+
 def select_optimizer(lr: float, optimizer: str = "Adam", grad_clip: Optional[float] = None,
                      concurrent_optimization: bool = True, lr2: Optional[float] = None):
     if concurrent_optimization:

@@ -17,6 +17,7 @@ from qiskit import transpile, schedule
 from qiskit.circuit import QuantumCircuit, QuantumRegister, CircuitInstruction, ParameterVector
 from qiskit.circuit.library import ECRGate
 from qiskit.primitives import BackendEstimator, BackendSampler
+from qiskit.providers import Backend
 from qiskit.providers import Options as Aer_Options
 from qiskit.quantum_info.operators import SparsePauliOp, pauli_basis, Operator
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, process_fidelity, state_fidelity
@@ -49,7 +50,9 @@ def create_array(circ_trunc, batchsize, n_actions):
 class TorchQuantumEnvironment(QuantumEnvironment, Env):
     metadata = {"render_modes": ["human"]}
 
-    def __init__(self, q_env: QuantumEnvironment,
+    def __init__(self,
+                 fake_backend: Backend, # added fake_backend that will provide the information about the coupling_map since DynamicBackend.from_backend(fake_backend) leads to an empty coupling map
+                 q_env: QuantumEnvironment,
                  circuit_context: QuantumCircuit,
                  action_spec: Space,
                  observation_spec: Space,
@@ -95,7 +98,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         # Retrieve information on the backend for building circuit context workflow
         self.backend_data = BackendData(self.backend)
-        dt, coupling_map, basis_gates, instruction_durations = retrieve_backend_info(self.backend, self.estimator)
+        dt, coupling_map, basis_gates, instruction_durations = retrieve_backend_info(self.backend, self.estimator, fake_backend)
 
         # Retrieve qubits forming the local circuit context (target qubits + nearest neighbor qubits on the chip)
         self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
@@ -105,6 +108,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         if self.abstraction_level == 'pulse':
             if "ecr" not in basis_gates:
                 target: Target = self.backend.target
+                print('coupling_map', coupling_map)
                 target.add_instruction(ECRGate(), properties= {qubits: None for qubits in coupling_map.get_edges()})
                 cals = Calibrations.from_backend(self.backend, [FixedFrequencyTransmon(["x", "sx"]),
                                                                 EchoedCrossResonance(["cr45p", "cr45m", "ecr"])],
@@ -122,6 +126,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     if gate == "cx":
                         basis_gates.pop(i)
                 #raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the future")
+
+        print('backend:', self.backend)
+        print('coupling_map:', coupling_map)
+        print('instruction_durations:', instruction_durations)
+        print('time step dt', dt)
 
         self.circuit_context = transpile(circuit_context.remove_final_measurements(inplace=False),
                                          backend=self.backend,
