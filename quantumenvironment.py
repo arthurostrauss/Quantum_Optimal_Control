@@ -91,30 +91,29 @@ def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
 
 
 def _define_target(target: Dict):
-    if "register" in target:
-        assert isinstance(target["register"], (List, QuantumRegister)), (
-            "Register should be of type List[int] " "or Quantum Register"
-        )
+
     tgt_register = target.get("register", None)
-    if isinstance(tgt_register, List):
-        q_register = QuantumRegister(len(tgt_register))
-        layout = Layout(
-            {q_register[i]: tgt_register[i] for i in range(len(tgt_register))}
-        )
-    else:  # QuantumRegister or None
-        q_register = tgt_register
-        layout = None
+    q_register = None
+    layout = None
+    if tgt_register is not None:
+        if isinstance(tgt_register, List):
+            q_register = QuantumRegister(len(tgt_register))
+            layout = Layout(
+                {q_register[i]: tgt_register[i] for i in range(len(tgt_register))}
+            )
+        elif isinstance(tgt_register, QuantumRegister):  # QuantumRegister or None
+            q_register = tgt_register
+        else:
+            raise TypeError("Register should be of type List[int] or QuantumRegister")
 
     if "gate" not in target and "circuit" not in target and "dm" not in target:
         raise KeyError(
             "No target provided, need to have one of the following: 'gate' for gate calibration,"
             " 'circuit' or 'dm' for state preparation"
         )
-    if ("gate" in target and "circuit" in target) or (
-        "gate" in target and "dm" in target
-    ):
+    elif ("gate" in target and "circuit" in target) or ("gate" in target and "dm" in target):
         raise KeyError("Cannot have simultaneously a gate target and a state target")
-    if "circuit" in target or "dm" in target:
+    if "circuit" in target or "dm" in target:  # State preparation task
         target["target_type"] = "state"
         if "circuit" in target:
             assert isinstance(target["circuit"], QuantumCircuit), (
@@ -145,13 +144,13 @@ def _define_target(target: Dict):
             layout,
         )
 
-    elif "gate" in target:
+    elif "gate" in target:  # Gate calibration task
         target["target_type"] = "gate"
         assert isinstance(
             target["gate"], Gate
         ), "Provided gate is not a qiskit.circuit.Gate operation"
         gate: Gate = target["gate"]
-        n_qubits = target["gate"].num_qubits
+        n_qubits = gate.num_qubits
         if q_register is None:
             q_register = QuantumRegister(n_qubits)
         if layout is None:
@@ -159,7 +158,7 @@ def _define_target(target: Dict):
 
         assert gate.num_qubits == len(q_register), (
             f"Target gate number of qubits ({gate.num_qubits}) "
-            f"incompatible with indicated 'register' ({len(tgt_register)})"
+            f"incompatible with indicated 'register' ({len(q_register)})"
         )
         if "input_states" not in target:
             target["input_states"] = [

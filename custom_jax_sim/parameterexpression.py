@@ -119,22 +119,20 @@ class ParameterExpression:
             A new expression parameterized by any parameters which were not bound by
             parameter_values.
         """
+
+        jax_tracer = isinstance(jnp.array(0), core.Tracer)
         if not allow_unknown_parameters:
             self._raise_if_passed_unknown_parameters(parameter_values.keys())
-        if not isinstance(jnp.array(0), core.Tracer):
+        if not jax_tracer:
             self._raise_if_passed_nan(parameter_values)
 
-        symbol_values = {}
-        symbol_values2 = {}
-        jax_tracer = True
+        symbol_values, symbol_values2 = {}, {}
+
         for parameter, value in parameter_values.items():
             if parameter in self._parameters:
                 param_expr = self._parameter_symbols[parameter]
                 symbol_values[param_expr] = value
                 symbol_values2[param_expr.name] = value
-                if isinstance(value, (int, float, complex, np.float_, np.int_, str)):
-                    jax_tracer = False
-
 
         if not jax_tracer:
             bound_symbol_expr = self._symbol_expr.subs(symbol_values)
@@ -151,7 +149,7 @@ class ParameterExpression:
         free_parameter_symbols = {
             p: s for p, s in self._parameter_symbols.items() if p in free_parameters
         }
-        if not isinstance(jnp.array(0), core.Tracer):
+        if not jax_tracer:
             if (
                 hasattr(bound_symbol_expr, "is_infinite") and bound_symbol_expr.is_infinite
             ) or bound_symbol_expr == float("inf"):

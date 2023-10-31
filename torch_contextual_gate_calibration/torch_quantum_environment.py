@@ -6,7 +6,7 @@ Author: Arthur Strauss
 Created on 26/06/2023
 """
 
-from itertools import chain
+from itertools import chain, product
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
@@ -37,6 +37,7 @@ from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampl
 from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BackendData
+from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 from qiskit_ibm_provider import IBMBackend
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
@@ -223,6 +224,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 for j in range(len(self.nn_register))
             }
         )
+        self._input_circuits = [PauliPreparationBasis().circuit(s).decompose()
+                                for s in product(range(4), repeat=len(self.tgt_register+self.nn_register))]
         skip_transpilation = False
         if isinstance(self.estimator, Runtime_Estimator):
             # TODO: Could change resilience level
@@ -385,18 +388,20 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         :param input_state_index: Integer index indicating the PauliPreparationBasis vector
         :param iteration: Truncation index of the transpiled contextual circuit
         """
-        input_circuit: QuantumCircuit = self.target["input_states"][input_state_index][
-            "circuit"
-        ]
+        # input_circuit: QuantumCircuit = self.target["input_states"][input_state_index]["circuit"]
+        input_circuit = self._input_circuits[input_state_index]
         ref_circuit, custom_circuit = self.baseline_truncations[iteration], self.circuit_truncations[iteration]
         target_circuit = ref_circuit.copy_empty_like()
         custom_target_circuit = custom_circuit.copy_empty_like(name=f"qc_{input_state_index}_{ref_circuit.name[-1]}")
 
-        custom_target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
-        target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
-
+        # Build both theoretical and actual circuits
+        custom_target_circuit.compose(input_circuit, inplace=True)
         custom_target_circuit.compose(custom_circuit, inplace=True)
+        target_circuit.compose(input_circuit, inplace=True)
         target_circuit.compose(ref_circuit, inplace=True)
+
+        # custom_target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
+        # target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
 
         # for gate in ref_circuit.data:  # Append only gates that are applied on the target register
         #     if all([qubit in self.tgt_register for qubit in gate.qubits]):
