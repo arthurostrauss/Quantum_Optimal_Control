@@ -225,7 +225,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             }
         )
         self._input_circuits = [PauliPreparationBasis().circuit(s).decompose()
-                                for s in product(range(4), repeat=len(self.tgt_register+self.nn_register))]
+                                for s in product(range(4), repeat=self.tgt_register.size+self.nn_register.size)]
         skip_transpilation = False
         if isinstance(self.estimator, Runtime_Estimator):
             # TODO: Could change resilience level

@@ -147,7 +147,7 @@ def perform_standard_calibrations(
                 target.add_instruction(
                     standard_gates[gate], properties=two_qubit_properties
                 )
-            target.build_coupling_map(two_q_gate=two_qubit_gates[0])
+            backend._coupling_map = target.build_coupling_map(two_q_gate=two_qubit_gates[0])
 
     for qubit in qubits:  # Add calibrations for each qubit
         control_channels = list(
@@ -222,7 +222,6 @@ def perform_standard_calibrations(
     target.update_from_instruction_schedule_map(
         cals.get_inst_map(), error_dict=error_dict
     )
-    print(control_channel_map)
     # for qubit_pair in control_channel_map:
     #     print(qubit_pair)
     #     cr_ham_exp = CrossResonanceHamiltonian(physical_qubits=qubit_pair, flat_top_widths=np.linspace(0, 5000, 17),
@@ -494,6 +493,7 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     for qubits in control_channel_map_backend:
         if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
             control_channel_map[qubits] = control_channel_map_backend[qubits]
+    print(control_channel_map_backend)
     return control_channel_map
 
 
