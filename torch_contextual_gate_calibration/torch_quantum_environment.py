@@ -758,14 +758,10 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                         for i in range(len(self.avg_fidelity_history[0]))
                     ],
                     "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
-                    "arg max circuit fidelity": np.argmax(
-                        self.circuit_fidelity_history
-                    ),
+                    "arg max circuit fidelity": np.argmax(self.circuit_fidelity_history),
                     "best action": self._best_action,
                     "truncation_index": self._trunc_index,
-                    "input_state": self.target["input_states"][self._index_input_state][
-                        "circuit"
-                    ].name,
+                    "input_state": self._input_circuits[self._index_input_state].name,
                     "observable": self._punctual_observable,
                 }
             else:
@@ -777,9 +773,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "best action": self._best_action,
                     "truncation_index": self._trunc_index,
-                    "input_state": self.target["input_states"][self._index_input_state][
-                        "circuit"
-                    ].name,
+                    "input_state": self._input_circuits[self._index_input_state].name,
                     "observable": self._punctual_observable,
                 }
         else:
@@ -787,9 +781,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 "reset_stage": self._inside_trunc_tracker == 0,
                 "step": step,
                 "gate_index": self._inside_trunc_tracker,
-                "input_state": self.target["input_states"][self._index_input_state][
-                    "circuit"
-                ].name,
+                "input_state": self._input_circuits[self._index_input_state].name,
                 "truncation_index": self._trunc_index,
                 "observable": self._punctual_observable,
             }
@@ -911,11 +903,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._inside_trunc_tracker = 0
         self._episode_tracker += 1
         self._episode_ended = False
-        self._index_input_state = np.random.randint(len(self.target["input_states"]))
+        self._index_input_state = np.random.randint(len(self._input_circuits))
         if isinstance(self.estimator, Runtime_Estimator):
-            self.estimator.options.environment["job_tags"] = [
-                f"rl_qoc_step{self._step_tracker}"
-            ]
+            self.estimator.options.environment["job_tags"] = [f"rl_qoc_step{self._step_tracker}"]
 
         # TODO: Remove line below when it works for gate fidelity as well
         # self._index_input_state = 0
