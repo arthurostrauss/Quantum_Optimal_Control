@@ -86,8 +86,10 @@ def perform_standard_calibrations(
         if dim > 1:
             qubits.append(i)
     num_qubits = len(qubits)
-    single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
-    single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+    # single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
+    # single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+    single_qubit_properties = {(qubit,): None for qubit in range(backend.num_qubits)}
+    single_qubit_errors = {(qubit,): 0.0 for qubit in range(backend.num_qubits)}
 
     control_channel_map = backend.options.control_channel_map or {
         (qubits[0], qubits[1]): index
@@ -167,7 +169,8 @@ def perform_standard_calibrations(
         )  # Wait 20 cycles for identity gate
 
         delay_param = standard_gates["delay"].params[0]
-        delay_cal = pulse.Schedule(pulse.Delay(delay_param, pulse.DriveChannel(qubit)))
+        with pulse.build(backend, name=f"delay{qubit}") as delay_cal:
+            pulse.delay(delay_param, pulse.DriveChannel(qubit))
 
         # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
         target.update_instruction_properties(
@@ -220,6 +223,13 @@ def perform_standard_calibrations(
             (qubit,),
             properties=InstructionProperties(calibration=h_schedule, error=0.0),
         )
+    for qubit in range(backend.num_qubits):
+        if not target.has_calibration('delay', (qubit,)):
+            with pulse.build(backend, name=f"delay{qubit}") as delay_cal:
+                delay_param = standard_gates["delay"].params[0]
+                pulse.delay(delay_param, pulse.DriveChannel(qubit))
+            target.update_instruction_properties('delay', (qubit,),
+                                                 InstructionProperties(calibration=delay_cal, error=0.0))
 
     print("All single qubit calibrations are done")
     # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
