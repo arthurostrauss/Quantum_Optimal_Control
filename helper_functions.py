@@ -81,10 +81,10 @@ def perform_standard_calibrations(
 
     """
 
-    target, qubits = backend.target, []
-    for i, dim in enumerate(backend.options.subsystem_dims):
+    target, qubits = backend.target, range(backend.num_qubits) # []
+    """for i, dim in enumerate(backend.options.subsystem_dims):
         if dim > 1:
-            qubits.append(i)
+            qubits.append(i)"""
     num_qubits = len(qubits)
     # single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
     # single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
@@ -204,13 +204,15 @@ def perform_standard_calibrations(
                 [qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15)
             )
             drag_exp.set_experiment_options(reps=[3, 5, 7])
-            print(f"Starting Rabi experiment for qubit {qubit}...")
-            rabi_result = rabi_exp.run().block_for_results()
-            print(f"Rabi experiment for qubit {qubit} done.")
-            print(f"Starting Drag experiment for qubit {qubit}...")
-            drag_result = drag_exp.run().block_for_results()
-            print(f"Drag experiments done for qubit {qubit} done.")
-            exp_results[qubit] = [rabi_result, drag_result]
+
+            if backend.options.subsystem_dims[qubit] > 1:
+                print(f"Starting Rabi experiment for qubit {qubit}...")
+                rabi_result = rabi_exp.run().block_for_results()
+                print(f"Rabi experiment for qubit {qubit} done.")
+                print(f"Starting Drag experiment for qubit {qubit}...")
+                drag_result = drag_exp.run().block_for_results()
+                print(f"Drag experiments done for qubit {qubit} done.")
+                exp_results[qubit] = [rabi_result, drag_result]
 
         # Build Hadamard gate schedule from following equivalence: H = S @ SX @ S
 
@@ -243,7 +245,7 @@ def perform_standard_calibrations(
                 target.update_instruction_properties('delay', (qubit,),
                                                 InstructionProperties(calibration=delay_cal, error=0.0))
                 
-        print(f'Target delay calibration for qubit {qubit}:', target.has_calibration('delay', (qubit,)))
+        print(f'Delay calibration for qubit {qubit}:', target.has_calibration('delay', (qubit,)))
 
 
     print("All single qubit calibrations are done")
