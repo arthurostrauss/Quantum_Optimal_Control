@@ -166,7 +166,7 @@ def perform_standard_calibrations(
             pulse.Delay(20, pulse.DriveChannel(qubit))
         )  # Wait 20 cycles for identity gate
 
-        delay_param = Parameter("t")
+        delay_param = standard_gates["delay"].params[0]
         delay_cal = pulse.Schedule(pulse.Delay(delay_param, pulse.DriveChannel(qubit)))
 
         # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
