@@ -86,8 +86,12 @@ def perform_standard_calibrations(
         if dim > 1:
             qubits.append(i)
     num_qubits = len(qubits)
-    single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
-    single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+    # single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
+    # single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+    single_qubit_properties = {(qubit,): None for qubit in range(backend.num_qubits)}
+    single_qubit_errors = {(qubit,): 0.0 for qubit in range(backend.num_qubits)}
+    print(single_qubit_properties)
+    print(single_qubit_errors)
 
     control_channel_map = backend.options.control_channel_map or {
         (qubits[0], qubits[1]): index
@@ -115,7 +119,7 @@ def perform_standard_calibrations(
     fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array(
         [1, 0.5, -0.5, 0.25, -0.25]
     )
-    other_gates = ["rz", "id", "h", "x", "sx", "reset"]
+    other_gates = ["rz", "id", "h", "x", "sx", "reset", "delay"]
     single_qubit_gates = fixed_phase_gates + other_gates
     two_qubit_gates = ["ecr"]
     exp_results = {}
@@ -161,10 +165,15 @@ def perform_standard_calibrations(
             pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
+
         # Identity gate
         id_cal = pulse.Schedule(
             pulse.Delay(20, pulse.DriveChannel(qubit))
         )  # Wait 20 cycles for identity gate
+
+        delay_param = standard_gates['delay'].params[0]
+        with pulse.build(backend, name=f"delay{qubit}") as delay_cal:
+            pulse.delay(delay_param, pulse.DriveChannel(qubit))
 
         # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
         target.update_instruction_properties(
@@ -176,6 +185,11 @@ def perform_standard_calibrations(
         target.update_instruction_properties(
             "reset", (qubit,), InstructionProperties(calibration=id_cal, error=0.0)
         )
+        target.update_instruction_properties(
+            'delay', (qubit,), InstructionProperties(calibration=delay_cal, error=0.0))
+        
+
+
         for phase, gate in zip(fixed_phases, fixed_phase_gates):
             gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
             instruction_prop = InstructionProperties(calibration=gate_cal, error=0.0)
@@ -215,6 +229,22 @@ def perform_standard_calibrations(
             (qubit,),
             properties=InstructionProperties(calibration=h_schedule, error=0.0),
         )
+    
+    for qubit in range(backend.num_qubits):
+        # Use a try-except block that will add a delay calibration if it doesn't exist for a given qubit 
+        # The try-block statement would fail if the delay calibration does not yet exist for a given qubit
+        try:
+            if target.has_calibration('delay', (qubit,)):
+                pass
+        except:
+            with pulse.build(backend, name=f"delay{qubit}") as delay_cal:
+                delay_param = standard_gates["delay"].params[0]
+                pulse.delay(delay_param, pulse.DriveChannel(qubit))
+                target.update_instruction_properties('delay', (qubit,),
+                                                InstructionProperties(calibration=delay_cal, error=0.0))
+                
+        print(f'Target delay calibration for qubit {qubit}:', target.has_calibration('delay', (qubit,)))
+
 
     print("All single qubit calibrations are done")
     # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
