@@ -14,7 +14,12 @@ from qiskit.providers import BackendV1, Backend, BackendV2, Options
 from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
 from qiskit.pulse.transforms import block_to_schedule
 from qiskit.quantum_info import Operator
-from qiskit.transpiler import CouplingMap, InstructionDurations, InstructionProperties, Layout
+from qiskit.transpiler import (
+    CouplingMap,
+    InstructionDurations,
+    InstructionProperties,
+    Layout,
+)
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import (
@@ -32,8 +37,12 @@ from qiskit_experiments.library import (
     RoughXSXAmplitudeCal,
     RoughDragCal,
 )
-from qiskit_ibm_runtime import (Session, IBMBackend as RuntimeBackend, Estimator as RuntimeEstimator,
-                                Options as RuntimeOptions)
+from qiskit_ibm_runtime import (
+    Session,
+    IBMBackend as RuntimeBackend,
+    Estimator as RuntimeEstimator,
+    Options as RuntimeOptions,
+)
 from qiskit_ibm_provider import IBMBackend
 from tensorflow.python.keras import Model
 from tensorflow.python.keras.layers import Input, Dense
@@ -41,11 +50,14 @@ from tensorflow.python.keras.layers import Input, Dense
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from qconfig import QiskitConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
+
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from dataclasses import asdict
 
 Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator]
 Backend_type = Union[BackendV1, BackendV2]
+
+
 def constrain_mean_value(mu_var):
     return [tf.clip_by_value(m, -1.0, 1.0) for m in mu_var]
 
@@ -81,20 +93,23 @@ def perform_standard_calibrations(
 
     """
 
-    target, qubits = backend.target, []
-    for i, dim in enumerate(backend.options.subsystem_dims):
-        if dim > 1:
-            qubits.append(i)
+    target, qubits = backend.target, range(backend.num_qubits)
+    # for i, dim in enumerate(backend.options.subsystem_dims):
+    #     if dim > 1:
+    #         qubits.append(i)
     num_qubits = len(qubits)
     # single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
     # single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
     single_qubit_properties = {(qubit,): None for qubit in range(backend.num_qubits)}
     single_qubit_errors = {(qubit,): 0.0 for qubit in range(backend.num_qubits)}
 
-    control_channel_map = backend.options.control_channel_map or {
-        (qubits[0], qubits[1]): index
-        for index, qubits in enumerate(tuple(permutations(qubits, 2)))
-    }
+    control_channel_map = backend.options.control_channel_map
+    if not bool(control_channel_map):
+        control_channel_map = {
+            (qubits[0], qubits[1]): index
+            for index, qubits in enumerate(tuple(permutations(qubits, 2)))
+        }
+
     if backend.options.control_channel_map:
         physical_control_channel_map = {
             (qubit_pair[0], qubit_pair[1]): backend.control_channel(
@@ -149,7 +164,7 @@ def perform_standard_calibrations(
                 target.add_instruction(
                     standard_gates[gate], properties=two_qubit_properties
                 )
-            backend._coupling_map = target.build_coupling_map(two_q_gate=two_qubit_gates[0])
+            backend._coupling_map = target.build_coupling_map(two_qubit_gates[0])
 
     for qubit in qubits:  # Add calibrations for each qubit
         control_channels = list(
@@ -182,15 +197,16 @@ def perform_standard_calibrations(
         target.update_instruction_properties(
             "reset", (qubit,), InstructionProperties(calibration=id_cal, error=0.0)
         )
-        target.update_instruction_properties('delay', (qubit,),
-                                             InstructionProperties(calibration=delay_cal, error=0.0))
+        target.update_instruction_properties(
+            "delay", (qubit,), InstructionProperties(calibration=delay_cal, error=0.0)
+        )
         for phase, gate in zip(fixed_phases, fixed_phase_gates):
             gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
             instruction_prop = InstructionProperties(calibration=gate_cal, error=0.0)
             target.update_instruction_properties(gate, (qubit,), instruction_prop)
 
         # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
-        if not existing_cals:
+        if not existing_cals and backend.options.subsystem_dims[qubit] > 1:
             rabi_exp = RoughXSXAmplitudeCal(
                 [qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 100)
             )
@@ -223,13 +239,6 @@ def perform_standard_calibrations(
             (qubit,),
             properties=InstructionProperties(calibration=h_schedule, error=0.0),
         )
-    for qubit in range(backend.num_qubits):
-        if not target.has_calibration('delay', (qubit,)):
-            with pulse.build(backend, name=f"delay{qubit}") as delay_cal:
-                delay_param = standard_gates["delay"].params[0]
-                pulse.delay(delay_param, pulse.DriveChannel(qubit))
-            target.update_instruction_properties('delay', (qubit,),
-                                                 InstructionProperties(calibration=delay_cal, error=0.0))
 
     print("All single qubit calibrations are done")
     # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
@@ -508,16 +517,19 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     for qubits in control_channel_map_backend:
         if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
             control_channel_map[qubits] = control_channel_map_backend[qubits]
-    print(control_channel_map_backend)
     return control_channel_map
 
 
-def retrieve_estimator(backend: Backend_type, layout: Layout,
-                       config: Union[Dict, QiskitConfig],
-                       abstraction_level: str = "circuit",
-                       estimator_options: Optional[Union[Dict, Options, RuntimeOptions]]=None) -> Estimator_type:
-
-    if isinstance(backend, RuntimeBackend):  # Real backend, or Simulation backend from Runtime Service
+def retrieve_estimator(
+    backend: Backend_type,
+    layout: Layout,
+    config: Union[Dict, QiskitConfig],
+    abstraction_level: str = "circuit",
+    estimator_options: Optional[Union[Dict, Options, RuntimeOptions]] = None,
+) -> Estimator_type:
+    if isinstance(
+        backend, RuntimeBackend
+    ):  # Real backend, or Simulation backend from Runtime Service
         estimator: Estimator_type = RuntimeEstimator(
             session=Session(backend.service, backend),
             options=estimator_options,
@@ -532,7 +544,9 @@ def retrieve_estimator(backend: Backend_type, layout: Layout,
             # estimator_options = asdict(estimator_options)
             estimator_options = None
         if isinstance(backend, (AerBackend, FakeBackend, FakeBackendV2)):
-            assert abstraction_level == "circuit", "AerSimulator only works at circuit level"
+            assert (
+                abstraction_level == "circuit"
+            ), "AerSimulator only works at circuit level"
             # Estimator taking noise model into consideration, have to provide an AerSimulator backend
             estimator = AerEstimator(
                 backend_options=backend.options,
@@ -540,16 +554,19 @@ def retrieve_estimator(backend: Backend_type, layout: Layout,
                 approximation=True,
             )
         elif backend is None:  # No backend specified, ideal state-vector simulation
-            assert abstraction_level == "circuit", 'Statevector simulation only works at circuit level'
-            estimator = Estimator(
-                options={"initial_layout": layout}
-            )
+            assert (
+                abstraction_level == "circuit"
+            ), "Statevector simulation only works at circuit level"
+            estimator = Estimator(options={"initial_layout": layout})
 
         elif isinstance(backend, DynamicsBackend):
-            assert abstraction_level == "pulse", "DynamicsBackend works only with pulse level abstraction"
+            assert (
+                abstraction_level == "pulse"
+            ), "DynamicsBackend works only with pulse level abstraction"
             if isinstance(backend.options.solver, JaxSolver):
-                estimator: Estimator_type = DynamicsBackendEstimator(backend, options=estimator_options,
-                                                                           skip_transpilation=False)
+                estimator: Estimator_type = DynamicsBackendEstimator(
+                    backend, options=estimator_options, skip_transpilation=False
+                )
             else:
                 estimator: Estimator_type = BackendEstimator(
                     backend, options=estimator_options, skip_transpilation=False
@@ -560,9 +577,7 @@ def retrieve_estimator(backend: Backend_type, layout: Layout,
                 (
                     calibrations,
                     exp_results,
-                ) = perform_standard_calibrations(
-                    backend, calibration_files
-                )
+                ) = perform_standard_calibrations(backend, calibration_files)
 
         elif isinstance(backend, IBMBackend):
             estimator: Estimator_type = BackendEstimator(
@@ -691,7 +706,11 @@ def retrieve_backend_info(
     backend_data = BackendData(backend)
     dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
     coupling_map = CouplingMap(backend_data.coupling_map)
-    if coupling_map.size() == 0 and backend_data.num_qubits > 1 and estimator is not None:
+    if (
+        coupling_map.size() == 0
+        and backend_data.num_qubits > 1
+        and estimator is not None
+    ):
         if isinstance(estimator, RuntimeEstimator):
             coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
             if coupling_map is None:
