@@ -35,13 +35,19 @@ from qiskit.transpiler import Layout, InstructionProperties, Target
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_algorithms.state_fidelities import ComputeUncompute
+from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BackendData
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 from qiskit_ibm_provider import IBMBackend
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit_ibm_runtime import Estimator as Runtime_Estimator, Sampler, IBMRuntimeError, Session
+from qiskit_ibm_runtime import (
+    Estimator as Runtime_Estimator,
+    Sampler,
+    IBMRuntimeError,
+    Session,
+)
 from tensorflow_probability.python.distributions import Categorical
 
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
@@ -224,8 +230,12 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 for j in range(len(self.nn_register))
             }
         )
-        self._input_circuits = [PauliPreparationBasis().circuit(s).decompose()
-                                for s in product(range(4), repeat=self.tgt_register.size+self.nn_register.size)]
+        self._input_circuits = [
+            PauliPreparationBasis().circuit(s).decompose()
+            for s in product(
+                range(4), repeat=self.tgt_register.size + self.nn_register.size
+            )
+        ]
         skip_transpilation = False
         if isinstance(self.estimator, Runtime_Estimator):
             # TODO: Could change resilience level
@@ -390,9 +400,14 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         """
         # input_circuit: QuantumCircuit = self.target["input_states"][input_state_index]["circuit"]
         input_circuit = self._input_circuits[input_state_index]
-        ref_circuit, custom_circuit = self.baseline_truncations[iteration], self.circuit_truncations[iteration]
+        ref_circuit, custom_circuit = (
+            self.baseline_truncations[iteration],
+            self.circuit_truncations[iteration],
+        )
         target_circuit = ref_circuit.copy_empty_like()
-        custom_target_circuit = custom_circuit.copy_empty_like(name=f"qc_{input_state_index}_{ref_circuit.name[-1]}")
+        custom_target_circuit = custom_circuit.copy_empty_like(
+            name=f"qc_{input_state_index}_{ref_circuit.name[-1]}"
+        )
 
         # Build both theoretical and actual circuits
         custom_target_circuit.compose(input_circuit, inplace=True)
@@ -568,21 +583,19 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 #                           for gate in assigned_gates], self.backend, flatten_results=True)
                 # results = rb_exp.run().block_for_results().analysis_results()
                 # gate_fidelities = 1.- np.array([result.EPC for result in results])
-                if isinstance(self.estimator, Runtime_Estimator):
-                    avg_gate_fidelity = gate_fidelity_from_process_tomography(
-                        assigned_gates,
-                        self.backend,
-                        self.target["gate"],
-                        self.physical_target_qubits,
-                        session=self.estimator.session,
-                    )
-                else:
-                    avg_gate_fidelity = gate_fidelity_from_process_tomography(
-                        assigned_gates,
-                        self.backend,
-                        self.target["gate"],
-                        self.physical_target_qubits,
-                    )
+
+                session = None
+                if hasattr(self.estimator, "session"):
+                    session = self.estimator.session
+                elif hasattr(self.backend, "session"):
+                    session = self.backend.session
+                avg_gate_fidelity = gate_fidelity_from_process_tomography(
+                    assigned_gates,
+                    self.backend,
+                    self.target["gate"],
+                    self.physical_target_qubits,
+                    session=session,
+                )
 
                 avg_gate_fidelities.append(avg_gate_fidelity)
             self.avg_fidelity_history.append(avg_gate_fidelities)
@@ -663,6 +676,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 )  # Avg gate fidelity over action batch
 
             else:  # Pulse simulation
+                assert isinstance(self.backend, DynamicsBackend)
+
+                model_dim = self.backend.options.solver.model.dim % 2
                 qc_list = [
                     benchmark_circ.bind_parameters(param) for param in params
                 ]  # Bind each action of the batch to a circ
@@ -673,12 +689,12 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 unitaries = self._simulate_pulse_schedules(schedule_list)
 
                 unitaries = [Operator(np.array(unitary.y[0])) for unitary in unitaries]
-                if self.model_dim % 2 != 0:
+                if model_dim != 0:
                     # TODO: Line below yields an error if simulation is not done over a set of qubit
                     #  (fails if third level of
                     # TODO: transmon is simulated), project unitary in qubit subspace
                     dms = [
-                        DensityMatrix.from_int(0, self.model_dim).evolve(unitary)
+                        DensityMatrix.from_int(0, model_dim).evolve(unitary)
                         for unitary in unitaries
                     ]
                     qubitized_unitaries = [
@@ -758,7 +774,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                         for i in range(len(self.avg_fidelity_history[0]))
                     ],
                     "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
-                    "arg max circuit fidelity": np.argmax(self.circuit_fidelity_history),
+                    "arg max circuit fidelity": np.argmax(
+                        self.circuit_fidelity_history
+                    ),
                     "best action": self._best_action,
                     "truncation_index": self._trunc_index,
                     "input_state": self._input_circuits[self._index_input_state].name,
@@ -812,12 +830,23 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         k_samples = distribution.sample(self.sampling_Pauli_space)
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = np.round([self.c_factor * target_state["Chi"][p] / (self._d * distribution.prob(p))
-                                  for p in pauli_index], 5)
+        reward_factor = np.round(
+            [
+                self.c_factor
+                * target_state["Chi"][p]
+                / (self._d * distribution.prob(p))
+                for p in pauli_index
+            ],
+            5,
+        )
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        observables = SparsePauliOp.from_list([(pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
-                                               for i, p in enumerate(pauli_index)])
+        observables = SparsePauliOp.from_list(
+            [
+                (pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
+                for i, p in enumerate(pauli_index)
+            ]
+        )
 
         self._punctual_observable = observables
         # self.parametrized_circuit_func(training_circ, self._parameters[:iteration])
@@ -841,17 +870,24 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     if self.estimator.session.status() == "Closed":
                         old_session = self.estimator.session
                         self._session_counts += 1
-                        print(f'New Session opened (#{self._session_counts})')
-                        session, options = Session(old_session.service, self.backend), self.estimator.options
-                        self.estimator = Runtime_Estimator(session=session, options=dict(options))
+                        print(f"New Session opened (#{self._session_counts})")
+                        session, options = (
+                            Session(old_session.service, self.backend),
+                            self.estimator.options,
+                        )
+                        self.estimator = Runtime_Estimator(
+                            session=session, options=dict(options)
+                        )
                 elif isinstance(self.backend, IBMBackend):
                     if not self.backend.session.active:
                         self._session_counts += 1
-                        print(f'New Session opened (#{self._session_counts})')
+                        print(f"New Session opened (#{self._session_counts})")
                         self.backend.open_session()
                 elif isinstance(self.estimator, DynamicsBackendEstimator):
+
                     def param_schedule():
                         return schedule(training_circ, self.backend)
+
                     self.backend.options.solver.set_macro(func=param_schedule)
                 job = self.estimator.run(
                     circuits=[training_circ] * self.batch_size,
@@ -905,7 +941,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         self._episode_ended = False
         self._index_input_state = np.random.randint(len(self._input_circuits))
         if isinstance(self.estimator, Runtime_Estimator):
-            self.estimator.options.environment["job_tags"] = [f"rl_qoc_step{self._step_tracker}"]
+            self.estimator.options.environment["job_tags"] = [
+                f"rl_qoc_step{self._step_tracker}"
+            ]
 
         # TODO: Remove line below when it works for gate fidelity as well
         # self._index_input_state = 0
