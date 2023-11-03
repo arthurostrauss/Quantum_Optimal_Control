@@ -27,8 +27,25 @@ from qconfig import QiskitConfig
 
 n_actions = 7
 
-# Ansatz function
 def apply_parametrized_circuit(qc: QuantumCircuit):
+    """
+    Applies a parametrized quantum circuit to a given QuantumCircuit object.
+
+    This function is designed to add a specific set of parametrized gates to a quantum circuit,
+    which are intended to be optimized during the reinforcement learning process. The number of
+    parameters is determined by the global `n_actions` variable, which should be set before
+    this function is called.
+
+    Args:
+        qc (QuantumCircuit): The quantum circuit to which the parametrized gates will be added.
+
+    Returns:
+        None: The function modifies the QuantumCircuit object in place.
+    """
+
+    # TODO: Make this function adaptive to a parameter vector of arbitrary length to generate the circuit from
+    # Possible new argument that could be parsed
+
     global n_actions
     params = ParameterVector('theta', n_actions)
     qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
@@ -37,6 +54,19 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
 
 # Defining QuantumEnvironment
 def define_quantum_environment():
+    """
+    Defines and returns a quantum environment based on a given quantum gate target and backend configuration.
+
+    This function sets up the quantum environment including the quantum backend, estimator options,
+    and the specific target gate (CNOT gate in this case) that the RL agent aims to optimize.
+    The environment is configured with a set of global parameters like the qubit target register,
+    number of sampling Paulis, number of shots, and a random seed for the simulator.
+
+    Returns:
+        QuantumEnvironment: An instance of QuantumEnvironment configured with the target gate,
+                            quantum backend, and simulation parameters.
+    """
+    
     qubit_tgt_register = [0, 1] 
     sampling_Paulis = 100
     N_shots = 1  
@@ -66,6 +96,12 @@ def define_quantum_environment():
     return q_env
 
 def get_network():
+    """
+    Creates and returns the neural network model and initial measurement setup for the RL agent.
+
+    Returns:
+        tuple: A tuple containing the network model and the initial measurement.
+    """
     n_qubits = 2  
     N_in = n_qubits + 1  
     hidden_units = [20, 20, 30]  
@@ -78,6 +114,9 @@ def get_network():
     return network, init_msmt
    
 def plot_training_progress(avg_return, fidelities, n_epochs, visualization_steps):
+    """
+    Plots the training progress of the RL agent and prints the maximum fidelity reached so far.
+    """
     clear_output(wait=True)
     fig, ax = plt.subplots()
     ax.plot(np.arange(1, n_epochs, 20), avg_return[0:-1:visualization_steps], '-.', label='Average return')
@@ -90,6 +129,17 @@ def plot_training_progress(avg_return, fidelities, n_epochs, visualization_steps
 
 # Training the agent
 def train_agent(q_env, training_parameters):
+    """
+    Runs the training loop for the RL agent in the provided quantum environment.
+
+    Args:
+        q_env (QuantumEnvironment): The quantum environment in which to train the agent.
+        training_parameters (dict): A dictionary of training parameters such as batch size,
+                                    number of epochs, optimizer settings, etc.
+
+    Returns:
+        dict: A dictionary containing the training results, including fidelities and the final action vector.
+    """
     
     network = training_parameters['network']
     init_msmt = training_parameters['init_msmt']

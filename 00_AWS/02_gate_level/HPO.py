@@ -61,6 +61,20 @@ def positive_integer(value):
     return ivalue
 
 def objective(trial):
+    """
+    Objective function for hyperparameter optimization using Optuna.
+    
+    This function sets up the quantum environment, defines the training parameters,
+    and runs the training agent. It then calculates and returns the average of the
+    last 10% of fidelities achieved during training as the value to be optimized.
+
+    Args:
+        trial (optuna.trial.Trial): An individual trial object with methods to
+                                    suggest hyperparameters.
+
+    Returns:
+        float: The average of the last 10% of fidelities from the training results.
+    """
     
     q_env = define_quantum_environment()
 
@@ -96,7 +110,17 @@ def objective(trial):
 
 
 def hyperparameter_optimization(n_trials):
-    
+    """
+    Runs the hyperparameter optimization using Optuna to find the best set of
+    hyperparameters for the reinforcement learning training agent.
+
+    Args:
+        n_trials (int): The number of trials to run in the hyperparameter optimization.
+
+    Returns:
+        optuna.study.Study: The study object that contains all the information about
+                            the optimization session, including the best trial.
+    """
 
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=n_trials)
@@ -105,8 +129,8 @@ def hyperparameter_optimization(n_trials):
     print("Best trial:")
     trial = study.best_trial
 
-    print("Value: ", trial.value)
-    print("Params: ")
+    print("Gate Fidelity: ", trial.value)
+    print("Hyperparams: ")
     for key, value in trial.params.items():
         print(f"    {key}: {value}")
 
@@ -114,9 +138,11 @@ def hyperparameter_optimization(n_trials):
 
 
 if __name__ == "__main__":
+    # Parse command-line arguments to get the number of trials for optimization, ensure a meaningful value for num_trials (pos. int.)
     num_trials = positive_integer(parse_args().num_trials)
+    # Run hyperparameter optimization
     study = hyperparameter_optimization(n_trials=num_trials)
 
-    # Fetch the best trial's action vector
+    # Fetch and display the best trial's action vector
     best_action_vector = study.best_trial.user_attrs["action_vector"]
     print(f"The best action vector is: {best_action_vector}")
