@@ -28,7 +28,7 @@ def parse_args():
     Raises:
         None
     """
-    parser = argparse.ArgumentParser(description="Train QNN regression to predict time series")
+    parser = argparse.ArgumentParser(description="Train a RL agent to optimally calibrate gate parameters of a quantum gate")
 
     parser.add_argument(
         "-t",
