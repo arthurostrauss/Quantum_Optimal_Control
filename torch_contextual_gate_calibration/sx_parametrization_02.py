@@ -117,7 +117,7 @@ def custom_sx_schedule(backend: Backend, physical_qubits=Union[int, tuple, list]
     """
     
     # pulse_features = ["amp", "angle", "β", "σ"]
-    pulse_features = ['amp', 'β', 'σ'] # , 'duration']
+    pulse_features = ['amp', 'β', 'σ'] #, 'duration']
  
     global n_actions
     assert n_actions == len(params), f"Number of actions ({n_actions}) does not match length of ParameterVector {params.name} ({len(params)})" 
@@ -169,14 +169,16 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
 
 # %%
 def get_target_gate(gate: Gate, register: list[int]):
-    # SX gate as the target gat
-    sx_gate = {"gate": gate, "register": register}
+    # X gate as the target gate
+    sx_gate = {"gate": gate, 
+               "register": register}
     target = sx_gate
     print(target)
 
     return target
 
 target = get_target_gate(gate=XGate(), register=[0])
+physical_qubits = tuple(target["register"])
 
 # %%
 def get_circuit_context(num_total_qubits: int):
@@ -190,34 +192,22 @@ def get_circuit_context(num_total_qubits: int):
 target_circuit = get_circuit_context(num_total_qubits=1)
 
 # %%
-n_actions = 3
+## Currently, including duration as a parameter does not work due to ``qiskit.pulse.exceptions.UnassignedDurationError: 'All instruction durations should be assigned before creating `Schedule`.Please check `.parameters` to find unassigned parameter objects.'``
+n_actions = 4
+params = ParameterVector('theta', n_actions)
 add_parametrized_circuit(qc=QuantumCircuit(1), tgt_register=[0])
 
 # %% [markdown]
-# Transpile the (context) quantum circuit to the provided (Fake-) Backend
+def transpile_circuit(target_circuit, fake_backend):
+    # Transpile the (context) quantum circuit to the provided (Fake-) Backend
+    transpiled_circ = transpile(target_circuit, fake_backend, 
+                                initial_layout=[0],
+                                basis_gates=fake_backend.configuration().basis_gates, 
+                                # scheduling_method='asap',
+                                optimization_level=1)
+    return remove_unused_wires(transpiled_circ)
 
-# %%
-# target_circuit.measure_all()
-transpiled_circ = transpile(target_circuit, fake_backend, 
-                              initial_layout=[0],
-                              basis_gates=fake_backend.configuration().basis_gates, 
-                              # scheduling_method='asap',
-                              optimization_level=1)
-print('Transpiled Circuit')
-remove_unused_wires(transpiled_circ).draw("mpl")
-
-# %%
-
-n_actions = 4 # number of parameters for the SX gate : amplitude and angle
-print('Target gate:', target)
-
-params = ParameterVector('theta', n_actions)
-
-qubit = target["register"]
-physical_qubits = tuple(qubit)
-
-# %%
-default_params, instructions, pulses = get_sx_params(backend=fake_backend, physical_qubits=physical_qubits)
+transpiled_circ = transpile_circuit(target_circuit, fake_backend)
 
 # %%
 def get_estimator_options():
@@ -374,23 +364,6 @@ def get_torch_env():
     return torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed
 
 torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env()
-# %%
-target_circuit.draw('mpl')
-
-# %%
-transpiled_circ.draw('mpl')
-
-# %%
-torch_env.circuit_context.calibrations
-
-# %%
-torch_env.circuit_context.draw('mpl')
-
-# %%
-torch_env.circuit_truncations[0].draw("mpl")
-
-# %%
-torch_env.baseline_truncations[0].draw("mpl")
 
 # %% [markdown]
 def get_network(device):
@@ -418,10 +391,7 @@ Hyperparameters for RL agent
 """
 run_name = "test"
 writer = SummaryWriter(f"runs/{run_name}")
-# writer.add_text(
-#     "hyperparameters",
-#     "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-# )
+
 def get_hyperparams():
     # Hyperparameters for the agent
     n_epochs = 10  # Number of epochs : default 1500
