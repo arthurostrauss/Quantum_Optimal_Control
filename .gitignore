@@ -126,3 +126,24 @@ dmypy.json
 # Pyre type checker
 .pyre/
 .DS_Store
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699504348.MBP-von-Lukas-2.7677.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699504451.MBP-von-Lukas-2.7677.1
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699511220.MBP-von-Lukas-2.8800.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699511238.MBP-von-Lukas-2.8800.1
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699511245.MBP-von-Lukas-2.8800.2
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699511651.MBP-von-Lukas-2.9041.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699511728.MBP-von-Lukas-2.9093.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699511752.MBP-von-Lukas-2.9137.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699511891.MBP-von-Lukas-2.9199.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699512246.MBP-von-Lukas-2.9317.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699512520.MBP-von-Lukas-2.9433.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699512773.MBP-von-Lukas-2.9511.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699512934.MBP-von-Lukas-2.9593.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513251.MBP-von-Lukas-2.9720.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513451.MBP-von-Lukas-2.9804.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513506.MBP-von-Lukas-2.9839.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513577.MBP-von-Lukas-2.9894.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513619.MBP-von-Lukas-2.9920.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513890.MBP-von-Lukas-2.10017.0
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513898.MBP-von-Lukas-2.10017.1
+torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513975.MBP-von-Lukas-2.10081.0
