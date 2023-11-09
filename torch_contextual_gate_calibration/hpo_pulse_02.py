@@ -2,13 +2,13 @@
 from qiskit.circuit import Gate
 from qiskit.circuit.library import XGate
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
-import torch
 
+import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from sx_parametrization_03 import (
-   get_target_gate, get_circuit_context, transpile_circuit, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, get_hyperparams, clear_history
+   get_target_gate, get_circuit_context, transpile_circuit, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, get_hyperparams, clear_history, train_agent
 )
-
 
 
 fake_backend = FakeJakarta()
@@ -42,4 +42,7 @@ print(torch_env.episode_length)
 # %%
 global_step, obs, actions, logprobs, rewards, dones, values, train_obs, visualization_steps = clear_history(torch_env, tgt_instruction_counts, batchsize, device)
 # %%
+run_name = "test"
+writer = SummaryWriter(f"runs/{run_name}")
 training_results = train_agent(torch_env, global_step, num_updates, seed, device, batchsize, obs, agent, scale_factor, min_bound_actions, max_bound_actions, logprobs, actions, rewards, dones, values, n_epochs, optimizer, minibatch_size, gamma, gae_lambda, critic_loss_coeff, epsilon, clip_vloss, grad_clip, clip_coef, normalize_advantage, ent_coef, writer, visualization_steps)
+# %%
