@@ -394,8 +394,8 @@ writer = SummaryWriter(f"runs/{run_name}")
 
 def get_hyperparams():
     # Hyperparameters for the agent
-    n_epochs = 10  # Number of epochs : default 1500
-    num_updates = 700
+    n_epochs = 20  # Number of epochs : default 1500
+    num_updates = 10
     lr_actor = 0.001  # Learning rate for policy update step
     lr_critic = 0.001  # Learning rate for critic (value function) update step
 
@@ -590,5 +590,16 @@ def train_agent(global_step):
     torch_env.close()
     writer.close()
 
+    return {
+        'avg_return': np.mean(torch_env.reward_history, axis=1), # shape: (num_updates,)
+        'mean': mean_action[0],
+        'sigma': std_action[0],
+    }
+
 # %%    
-train_agent(global_step)
+training_results = train_agent(global_step)
+
+# %%
+print('avg_return:', training_results['avg_return'].shape)
+print('mean:', training_results['mean'])
+print('sigma:', training_results['sigma'])
