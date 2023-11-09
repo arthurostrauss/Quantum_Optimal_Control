@@ -567,8 +567,8 @@ def train_agent(torch_env, global_step, num_updates, seed, device, batchsize, ob
 
     return {
         'avg_return': np.mean(torch_env.reward_history, axis=1), # shape: (num_updates,)
-        'mean': mean_action[0],
-        'sigma': std_action[0],
+        'mean_action': mean_action[0],
+        'sigma_action': std_action[0],
     }
 
 # %%    
