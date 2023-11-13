@@ -25,6 +25,7 @@ from qiskit.circuit.library import ECRGate
 from qiskit.primitives import BackendEstimator, BackendSampler
 from qiskit.providers import Options as Aer_Options
 from qiskit.quantum_info.operators import SparsePauliOp, pauli_basis, Operator
+from qiskit.quantum_info.states import partial_trace
 from qiskit.quantum_info.operators.measures import (
     average_gate_fidelity,
     process_fidelity,
@@ -74,6 +75,7 @@ def create_array(circ_trunc, batchsize, n_actions):
 
 class TorchQuantumEnvironment(QuantumEnvironment, Env):
     metadata = {"render_modes": ["human"]}
+    check_on_exp = True  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
 
     def __init__(
         self,
@@ -424,12 +426,16 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         return _calculate_chi_target_state(
             {
-                "dm": DensityMatrix(target_circuit),
+                "dm": DensityMatrix(target_circuit)
+                if len(self.physical_neighbor_qubits) == 0
+                else partial_trace(
+                    Statevector(target_circuit), self.physical_neighbor_qubits
+                ),
                 "circuit": custom_target_circuit,
                 "target_type": "state",
                 "theoretical_circ": target_circuit,
             },
-            n_qubits=target_circuit.num_qubits,
+            n_qubits=len(self.tgt_register),
         )
 
     def _generate_circuit_truncations(
@@ -525,7 +531,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             custom_gate_circ,
         )
 
-    def _store_benchmarks(self, params: np.array, check_on_exp=True):
+    def store_benchmarks(self, params: np.array):
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: Batch of actions
@@ -552,7 +558,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             custom_gate_circuits.append(assigned_gate)
 
         if (
-            check_on_exp
+            self.check_on_exp
         ):  # Perform real experiments to retrieve from measurement data fidelities
             # Assess circuit fidelity with ComputeUncompute algo
             try:
@@ -563,7 +569,9 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 )
                 circuit_fidelities = job.result().fidelities
             except Exception as exc:
+                self.close()
                 raise IBMRuntimeError("ComputeUncompute failed") from exc
+
             self._punctual_circuit_fidelities = circuit_fidelities
             self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
 
@@ -572,7 +580,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             avg_gate_fidelities = []
             for i in range(n_custom_instructions):
                 assigned_gates = [
-                    self.custom_gates[i].bind_parameters(
+                    self.custom_gates[i].assign_parameters(
                         {self._parameters[i]: params[j]}
                     )
                     for j in range(len(params))
@@ -584,18 +592,21 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 # results = rb_exp.run().block_for_results().analysis_results()
                 # gate_fidelities = 1.- np.array([result.EPC for result in results])
 
-                session = None
                 if hasattr(self.estimator, "session"):
                     session = self.estimator.session
                 elif hasattr(self.backend, "session"):
                     session = self.backend.session
-                avg_gate_fidelity = gate_fidelity_from_process_tomography(
-                    assigned_gates,
-                    self.backend,
-                    self.target["gate"],
-                    self.physical_target_qubits,
-                    session=session,
-                )
+                else:
+                    session = None
+
+                avg_gate_fidelity = 0.0
+                # avg_gate_fidelity = gate_fidelity_from_process_tomography(
+                #     assigned_gates,
+                #     self.backend,
+                #     self.target["gate"],
+                #     self.physical_target_qubits,
+                #     session=session,
+                # )
 
                 avg_gate_fidelities.append(avg_gate_fidelity)
             self.avg_fidelity_history.append(avg_gate_fidelities)
@@ -680,7 +691,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
                 model_dim = self.backend.options.solver.model.dim % 2
                 qc_list = [
-                    benchmark_circ.bind_parameters(param) for param in params
+                    benchmark_circ.assign_parameters(param) for param in params
                 ]  # Bind each action of the batch to a circ
                 schedule_list = [
                     schedule(qc, backend=self.backend, dt=self.backend_data.dt)
@@ -858,7 +869,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         if self.do_benchmark():
             print("Starting benchmarking...")
-            self._store_benchmarks(reshaped_params)
+            self.store_benchmarks(reshaped_params)
             print("Finished benchmarking")
         if fidelity_access:
             reward_table = self._punctual_circuit_fidelities

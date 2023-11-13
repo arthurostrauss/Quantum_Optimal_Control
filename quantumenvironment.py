@@ -19,6 +19,7 @@ from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruc
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
+
 # Qiskit backends
 from qiskit.providers import Options, BackendV2, BackendV1
 
@@ -41,6 +42,7 @@ from qiskit_dynamics.array import Array
 from qiskit_ibm_provider import IBMBackend
 
 from custom_jax_sim import DynamicsBackendEstimator
+
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_experiments.framework import BatchExperiment
 from qiskit_experiments.library import ProcessTomography
@@ -91,7 +93,6 @@ def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
 
 
 def _define_target(target: Dict):
-
     tgt_register = target.get("register", None)
     q_register = None
     layout = None
@@ -111,7 +112,9 @@ def _define_target(target: Dict):
             "No target provided, need to have one of the following: 'gate' for gate calibration,"
             " 'circuit' or 'dm' for state preparation"
         )
-    elif ("gate" in target and "circuit" in target) or ("gate" in target and "dm" in target):
+    elif ("gate" in target and "circuit" in target) or (
+        "gate" in target and "dm" in target
+    ):
         raise KeyError("Cannot have simultaneously a gate target and a state target")
     if "circuit" in target or "dm" in target:  # State preparation task
         target["target_type"] = "state"
@@ -250,7 +253,6 @@ class QuantumEnvironment:
             self.c_factor = c_factor
             self.sampling_Pauli_space = sampling_Pauli_space
             self.n_shots = n_shots
-            self.Pauli_ops = pauli_basis(num_qubits=self._n_qubits)
 
             self.backend: Optional[Backend_type] = Qiskit_config.backend
             if self.backend is not None:
@@ -265,8 +267,13 @@ class QuantumEnvironment:
                 Union[Options, Dict, RuntimeOptions]
             ] = Qiskit_config.estimator_options
 
-            self._estimator = retrieve_estimator(self.backend, self.layout, self.config,
-                                                 self.abstraction_level, estimator_options)
+            self._estimator = retrieve_estimator(
+                self.backend,
+                self.layout,
+                self.config,
+                self.abstraction_level,
+                estimator_options,
+            )
 
         elif QUA_config is not None:
             raise AttributeError("QUA compatibility not yet implemented")
@@ -335,7 +342,7 @@ class QuantumEnvironment:
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
         observables = SparsePauliOp.from_list(
             [
-                (self.Pauli_ops[p].to_label(), reward_factor[i])
+                (pauli_basis(num_qubits=self._n_qubits)[p].to_label(), reward_factor[i])
                 for i, p in enumerate(pauli_index)
             ]
         )
@@ -343,10 +350,12 @@ class QuantumEnvironment:
         # Apply parametrized quantum circuit (action), for benchmarking only
 
         self.parametrized_circuit_func(parametrized_circ)
-        qc_list = [parametrized_circ.bind_parameters(angle_set) for angle_set in angles]
+        qc_list = [
+            parametrized_circ.assign_parameters(angle_set) for angle_set in angles
+        ]
         self.qc_history.append(qc_list)
         if do_benchmark:
-            self._store_benchmarks(qc_list)
+            self.store_benchmarks(qc_list)
 
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
         self.parametrized_circuit_func(qc)
@@ -372,7 +381,7 @@ class QuantumEnvironment:
         assert len(reward_table) == batch_size
         return reward_table  # Shape [batchsize]
 
-    def _store_benchmarks(self, qc_list: List[QuantumCircuit]):
+    def store_benchmarks(self, qc_list: List[QuantumCircuit]):
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         """
@@ -509,11 +518,14 @@ class QuantumEnvironment:
         """
         time_f = self.backend.target.dt * schedule_list[0].duration
         if not isinstance(self.backend, DynamicsBackend):
-            raise TypeError("Backend should be of type DynamicsBackend for this benchmark")
+            raise TypeError(
+                "Backend should be of type DynamicsBackend for this benchmark"
+            )
         unitaries = self.backend.options.solver.solve(
             t_span=Array([0.0, time_f]),
-            y0=self.backend.options.initial_state if self.backend.options.initial_state != "ground_state" else
-            Statevector(self.backend._dressed_states[:, 0]),
+            y0=self.backend.options.initial_state
+            if self.backend.options.initial_state != "ground_state"
+            else Statevector(self.backend._dressed_states[:, 0]),
             t_eval=[time_f],
             signals=schedule_list,
             method="jax_odeint",
