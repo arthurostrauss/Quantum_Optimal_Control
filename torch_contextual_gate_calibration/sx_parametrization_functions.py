@@ -12,6 +12,7 @@ if module_path not in sys.path:
 from basis_gate_library import FixedFrequencyTransmon
 from helper_functions import remove_unused_wires, get_control_channel_map, get_solver_and_freq_from_backend
 from quantumenvironment import QuantumEnvironment
+from torch_quantum_environment import TorchQuantumEnvironment
 
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -50,11 +51,6 @@ from gymnasium.spaces import Box, Space
 from IPython.display import clear_output
 
 from torch.distributions import Normal
-
-module_path = os.path.abspath(os.path.join('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control/torch_contextual_gate_calibration'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
-from torch_quantum_environment import TorchQuantumEnvironment
 
 
 fake_backend = FakeJakarta()
@@ -192,7 +188,7 @@ def get_circuit_context(num_total_qubits: int):
     target_circuit.y(0)
     return target_circuit
 
-# %% [markdown]
+# %%
 def transpile_circuit(target_circuit, fake_backend):
     # Transpile the (context) quantum circuit to the provided (Fake-) Backend
     transpiled_circ = transpile(target_circuit, fake_backend, 
@@ -206,10 +202,9 @@ def transpile_circuit(target_circuit, fake_backend):
 def get_estimator_options(physical_qubits):
     sampling_Paulis = 50
     N_shots = 200
-    # n_actions = 4  # Cf number of parameters in custom_schedule function above
     abstraction_level = 'pulse'
 
-    control_channel_map = get_control_channel_map(fake_backend, physical_qubits)
+    # control_channel_map = get_control_channel_map(fake_backend, physical_qubits)
     dt = fake_backend.configuration().dt
 
     dynamics_options = {
@@ -298,7 +293,6 @@ def get_own_solver(qubit_properties):
 
     custom_backend2 = DynamicsBackend(
         solver=solver,
-        #target = fake_backend_v2.target,
         subsystem_dims=[dim, dim], # for computing measurement data
         solver_options=solver_options, # to be used every time run is called
     )
@@ -307,7 +301,6 @@ def get_own_solver(qubit_properties):
 
 
 def get_db_qiskitconfig(target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
-    #qubit_properties, dynamics_options, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots = get_estimator_options()
     # subsystem_list takes the qubits indices that are the qubits with the parametrized gate AND its nearest neighbours
     dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=physical_qubits, **dynamics_options)
     dynamics_backend.target.qubit_properties = qubit_properties
@@ -352,8 +345,6 @@ def get_torch_env(q_env, target_circuit):
                                         seed=None,)
     return torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed
 
-# torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env()
-
 # %% [markdown]
 def get_network(device, observation_space):
     # Definition of the Agent
@@ -369,41 +360,6 @@ def get_network(device, observation_space):
 
     return actor_net, critic_net, agent
 
-# %%
-"""
------------------------------------------------------------------------------------------------------
-Hyperparameters for RL agent
------------------------------------------------------------------------------------------------------
-"""
-def get_hyperparams(agent, actor_net, critic_net):
-    # Hyperparameters for the agent
-    n_epochs = 20  # Number of epochs : default 1500
-    num_updates = 10
-    lr_actor = 0.001  # Learning rate for policy update step
-    lr_critic = 0.001  # Learning rate for critic (value function) update step
-
-    epsilon = 0.2  # Parameter for clipping value (PPO)
-    critic_loss_coeff = 0.5
-    optimizer = optim.Adam(agent.parameters(), lr=lr_actor, eps=1e-5)
-    actor_optimizer = optim.Adam(actor_net.parameters(), lr=lr_actor, eps=1e-5)
-    critic_optimizer = optim.Adam(critic_net.parameters(), lr=lr_critic, eps=1e-5)
-    minibatch_size = 40
-    gamma = 1.
-    gae_lambda = 0.95
-
-    # Clipping
-    clip_vloss = True
-    grad_clip = 0.5
-    clip_coef = 0.5
-    normalize_advantage = False
-
-    # other coefficients
-    ent_coef = 0.
-
-    return n_epochs, num_updates, lr_actor, lr_critic, epsilon, critic_loss_coeff, optimizer, actor_optimizer, critic_optimizer, minibatch_size, gamma, gae_lambda, clip_vloss, grad_clip, clip_coef, normalize_advantage, ent_coef
-
-# %%
-### Training ###
 # %%
 def clear_history(torch_env, tgt_instruction_counts, batchsize, device):
     global_step = 0
@@ -570,11 +526,3 @@ def train_agent(torch_env, global_step, num_updates, seed, device, batchsize, ob
         'mean_action': mean_action[0],
         'sigma_action': std_action[0],
     }
-
-# %%    
-# training_results = train_agent(global_step)
-
-# %%
-#print('avg_return:', training_results['avg_return'].shape)
-#print('mean:', training_results['mean'])
-#print('sigma:', training_results['sigma'])

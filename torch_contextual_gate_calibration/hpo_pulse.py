@@ -12,7 +12,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from sx_parametrization_functions import (
-   get_target_gate, get_circuit_context, transpile_circuit, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, get_hyperparams, clear_history, train_agent
+   get_target_gate, get_circuit_context, transpile_circuit, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
 )
 
 # Create a custom logger with the desired logging level
@@ -87,6 +87,11 @@ def objective(trial):
     device = torch.device("cpu")
     actor_net, critic_net, agent = get_network(device, observation_space)
 
+    """
+    -----------------------------------------------------------------------------------------------------
+    Hyperparameters for RL agent
+    -----------------------------------------------------------------------------------------------------
+    """
     training_parameters = {
         'n_epochs': trial.suggest_int('n_epochs', 10, 15), # Choose small values for debugging
         'num_updates': trial.suggest_int('num_updates', 5, 15), # Choose small values for debugging
@@ -109,12 +114,14 @@ def objective(trial):
     # critic_optimizer = optim.Adam(critic_net.parameters(), lr=training_parameters['lr_actor'], eps=1e-5)
 
     # %%
+    ### Training ###
     global_step, obs, actions, logprobs, rewards, dones, values, train_obs, visualization_steps = clear_history(torch_env, tgt_instruction_counts, batchsize, device)
-    # %%
     run_name = "test"
     writer = SummaryWriter(f"runs/{run_name}")
     training_results = train_agent(torch_env, global_step, training_parameters['num_updates'], seed, device, batchsize, obs, agent, scale_factor, min_bound_actions, max_bound_actions, logprobs, actions, rewards, dones, values, training_parameters['n_epochs'], optimizer, training_parameters['minibatch_size'], training_parameters['gamma'], training_parameters['gae_lambda'], training_parameters['critic_loss_coeff'], training_parameters['epsilon'], training_parameters['clip_vloss'], training_parameters['grad_clip'], training_parameters['clip_coef'], training_parameters['normalize_advantage'], training_parameters['ent_coef'], writer, visualization_steps)
 
+    # %%
+    ### Save results ###
     # Save the action vector associated with this trial's fidelity for future retrieval
     trial.set_user_attr('action vector', training_results['mean_action'])
     trial.set_user_attr('sigma', training_results['sigma_action'])
