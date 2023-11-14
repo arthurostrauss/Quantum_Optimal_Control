@@ -11,10 +11,17 @@ import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-from sx_parametrization_03 import (
+from sx_parametrization_functions import (
    get_target_gate, get_circuit_context, transpile_circuit, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, get_hyperparams, clear_history, train_agent
 )
 
+# Create a custom logger with the desired logging level
+"""logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)"""
 
 def parse_args():
     """
