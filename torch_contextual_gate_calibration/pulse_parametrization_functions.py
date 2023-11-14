@@ -46,12 +46,9 @@ from IPython.display import clear_output
 
 
 
-
-fake_backend = FakeJakarta()
-fake_backend_v2 = FakeJakartaV2()
-
-## Currently, including duration as a parameter does not work due to ``qiskit.pulse.exceptions.UnassignedDurationError: 'All instruction durations should be assigned before creating `Schedule`.Please check `.parameters` to find unassigned parameter objects.'``
-n_actions = 4
+### These are the variables I wan to pass as arguments to the functions below from the HPO script
+# fake_backend = FakeJakarta()
+n_actions = 4 ## Currently, including duration as a parameter does not work due to ``qiskit.pulse.exceptions.UnassignedDurationError: 'All instruction durations should be assigned before creating `Schedule`.Please check `.parameters` to find unassigned parameter objects.'``
 params = ParameterVector('theta', n_actions)
 
 
@@ -95,7 +92,7 @@ def get_sx_params(backend, physical_qubits):
 
     return default_params, basis_gate_instructions, instructions_array
 
-def custom_sx_schedule(backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None):
+def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None):
     """
     Generate a custom parameterized schedule for an SX gate.
 
@@ -125,14 +122,14 @@ def custom_sx_schedule(backend: Backend, physical_qubits=Union[int, tuple, list]
     for i, feature in enumerate(pulse_features):
         new_params[(feature, physical_qubits, "sx")] += params[i]
 
-    cals = Calibrations.from_backend(backend, [FixedFrequencyTransmon(["x", "sx"])],
+    cals = Calibrations.from_backend(fake_backend, [FixedFrequencyTransmon(["x", "sx"])],
                                         add_parameter_defaults=True)
     
     parametrized_schedule = cals.get_schedule("sx", physical_qubits, assign_params=new_params)
 
     return parametrized_schedule
 
-def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None):
+def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None, fake_backend: BackendV1 = FakeJakarta()):
     """
     Add a parametrized gate to a QuantumCircuit.
 
@@ -144,7 +141,7 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
     - tgt_register (QuantumRegister, optional): The target quantum register for applying the parametrized gate.
     """
     
-    global n_actions, fake_backend, target
+    global n_actions, target # ,fake_backend
 
     gate, physical_qubits = target["gate"], target["register"]
     physical_qubits = tuple(physical_qubits)
@@ -155,7 +152,7 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
         tgt_register = qc.qregs[0]
 
     parametrized_gate = Gate(name='sx_cal', num_qubits=1, params=params)
-    parametrized_schedule = custom_sx_schedule(backend=fake_backend, physical_qubits=physical_qubits, params=params)
+    parametrized_schedule = custom_sx_schedule(fake_backend=fake_backend, physical_qubits=physical_qubits, params=params)
     qc.add_calibration(parametrized_gate, physical_qubits, parametrized_schedule)
     qc.append(parametrized_gate, tgt_register)
 
@@ -181,27 +178,25 @@ def get_circuit_context(num_total_qubits: int):
     return target_circuit
 
 # %%
-def transpile_circuit(target_circuit, fake_backend):
+"""def transpile_circuit(target_circuit, fake_backend):
     # Transpile the (context) quantum circuit to the provided (Fake-) Backend
     transpiled_circ = transpile(target_circuit, fake_backend, 
                                 initial_layout=[0],
                                 basis_gates=fake_backend.configuration().basis_gates, 
                                 # scheduling_method='asap',
                                 optimization_level=1)
-    return remove_unused_wires(transpiled_circ)
+    return remove_unused_wires(transpiled_circ)"""
 
 # %%
-def get_estimator_options(physical_qubits):
+def get_estimator_options(physical_qubits, fake_backend, fake_backend_v2):
     sampling_Paulis = 50
     N_shots = 200
     abstraction_level = 'pulse'
 
-    # control_channel_map = get_control_channel_map(fake_backend, physical_qubits)
     dt = fake_backend.configuration().dt
 
     dynamics_options = {
-                        'seed_simulator': None, #"configuration": fake_backend.configuration(),
-                        # 'control_channel_map': control_channel_map, 
+                        'seed_simulator': None,
                         "solver_options": {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8, "hmax":dt}
                         }
     qubit_properties = fake_backend_v2.qubit_properties(physical_qubits)
@@ -292,10 +287,12 @@ def get_own_solver(qubit_properties):
     return custom_backend2
 
 
-def get_db_qiskitconfig(target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
+def get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
     # subsystem_list takes the qubits indices that are the qubits with the parametrized gate AND its nearest neighbours
     dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=physical_qubits, **dynamics_options)
     dynamics_backend.target.qubit_properties = qubit_properties
+
+    ### fake_backend necessary as parameter for this functin
 
     # Wrap all info in one QiskitConfig
     Qiskit_setup = QiskitConfig(parametrized_circuit=add_parametrized_circuit, backend=dynamics_backend,

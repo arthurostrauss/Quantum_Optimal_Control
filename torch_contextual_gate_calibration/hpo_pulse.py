@@ -77,9 +77,9 @@ def objective(trial):
     target_circuit = get_circuit_context(num_total_qubits=1)
     
     # %%
-    qubit_properties, dynamics_options, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots = get_estimator_options(physical_qubits)
+    qubit_properties, dynamics_options, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots = get_estimator_options(physical_qubits, fake_backend, fake_backend_v2)
     # %%
-    dynamics_backend, Qiskit_setup, q_env = get_db_qiskitconfig(target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options)
+    dynamics_backend, Qiskit_setup, q_env = get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options)
     # %%
     torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit)
 
