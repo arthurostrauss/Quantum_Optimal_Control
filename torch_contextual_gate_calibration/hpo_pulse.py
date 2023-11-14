@@ -8,6 +8,7 @@ import optuna
 import pickle
 import sys
 import logging
+import time
 
 import torch
 import torch.optim as optim
@@ -143,14 +144,16 @@ def hyperparameter_optimization(n_trials):
         optuna.study.Study: The study object that contains all the information about
                             the optimization session, including the best trial.
     """
-    logging.warning("--------------START HPO--------------")
+    logging.warning("----------------------------START HPO----------------------------")
+    start_time = time.time()
 
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=n_trials)
 
-    logging.warning("--------------FINISH HPO--------------")
+    logging.warning("----------------------------FINISH HPO----------------------------")
+    runtime = time.time() - start_time
 
-    return study
+    return study, runtime
 
 def save_pickle(best_trial, best_run):
     # Save the best run configuration as a hashed file (here pickle)
@@ -162,7 +165,9 @@ if __name__ == "__main__":
     # Parse command-line arguments to get the number of trials for optimization, ensure a meaningful value for num_trials (pos. int.)
     num_trials = positive_integer(parse_args().num_trials)
     # Run hyperparameter optimization
-    study = hyperparameter_optimization(n_trials=num_trials)
+    study, runtime = hyperparameter_optimization(n_trials=num_trials)
+
+    logging.warning(f"HPO RUNTIME: {int(runtime)} SEC")
 
     print("Number of finished trials: ", len(study.trials))
     print("Best trial:")
@@ -184,4 +189,4 @@ if __name__ == "__main__":
                 }
     save_pickle(best_trial, best_run)
     
-    print(f"The best action vector is: {best_action_vector}")
+    print(f"The best action vector is: {best_action_vector.numpy()}")

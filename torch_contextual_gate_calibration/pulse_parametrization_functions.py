@@ -3,14 +3,14 @@ import os
 import sys
 import numpy as np
 import tqdm
-from typing import Optional, Union, List
+from typing import Optional, Union
 
 module_path = os.path.abspath(os.path.join('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
 from basis_gate_library import FixedFrequencyTransmon
-from helper_functions import remove_unused_wires, get_control_channel_map, get_solver_and_freq_from_backend
+from helper_functions import remove_unused_wires, get_solver_and_freq_from_backend
 from quantumenvironment import QuantumEnvironment
 from torch_quantum_environment import TorchQuantumEnvironment
 
@@ -22,35 +22,29 @@ jax.config.update("jax_platform_name", "cpu")
 from qiskit_dynamics.array import Array
 Array.set_default_backend('jax')
 
-from qiskit import pulse, transpile, schedule
-from qiskit_dynamics.backend.dynamics_backend import _get_backend_channel_freqs, DynamicsBackend
+from qiskit import transpile
+from qiskit_dynamics.backend.dynamics_backend import DynamicsBackend
 from qiskit_dynamics import Solver
 from qiskit.circuit import QuantumCircuit, QuantumRegister, ParameterVector, Gate
 from qiskit.circuit.library.standard_gates import ECRGate, SXGate, XGate
-from qiskit.providers import Backend, BackendV1, BackendV2
-from qiskit.transpiler import CouplingMap
+from qiskit.providers import Backend, BackendV1
 from qiskit_experiments.calibration_management import Calibrations
-from qiskit.pulse.library import Gaussian
-from qiskit.providers.fake_provider import FakeValencia, FakeJakarta, FakeJakartaV2, FakeHanoi, FakeCairo, FakeCambridge
-from qiskit.visualization import plot_coupling_map, plot_circuit_layout, gate_map, plot_gate_map
-from qiskit.visualization.pulse_v2 import IQXStandard
-from qiskit_ibm_runtime.options import Options, ExecutionOptions, EnvironmentOptions
+from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
+# from qiskit.visualization import plot_coupling_map, plot_circuit_layout, gate_map, plot_gate_map
+from qiskit_ibm_runtime.options import Options, ExecutionOptions
 from qconfig import QiskitConfig
 
 import torch
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
-import torch.optim as optim
-
-from agent import ActorNetwork, CriticNetwork, Agent
+from torch.distributions import Normal
 
 # Circuit context and Reinforcement Learning libraries
-import gymnasium as gym
-from gymnasium.spaces import Box, Space
+from agent import ActorNetwork, CriticNetwork, Agent
+from gymnasium.spaces import Box
 
 from IPython.display import clear_output
 
-from torch.distributions import Normal
+
 
 
 fake_backend = FakeJakarta()
