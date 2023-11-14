@@ -2,6 +2,7 @@
 from qiskit.circuit import Gate
 from qiskit.circuit.library import XGate
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
+from qiskit.circuit import ParameterVector
 
 import argparse
 import optuna
@@ -66,9 +67,18 @@ def positive_integer(value):
     return ivalue
 
 def objective(trial):
-
+    
+    """
+    -----------------------------------------------------------------------------------------------------
+    General Settings
+    -----------------------------------------------------------------------------------------------------
+    """
     fake_backend = FakeJakarta()
     fake_backend_v2 = FakeJakartaV2()
+    n_actions = 4 ## Currently, including duration as a parameter does not work due to ``qiskit.pulse.exceptions.UnassignedDurationError: 'All instruction durations should be assigned before creating `Schedule`.Please check `.parameters` to find unassigned parameter objects.'``
+    sampling_Paulis = 50
+    N_shots = 200
+
     
     target = get_target_gate(gate=XGate(), register=[0])
     physical_qubits = tuple(target["register"])
@@ -77,15 +87,15 @@ def objective(trial):
     target_circuit = get_circuit_context(num_total_qubits=1)
     
     # %%
-    qubit_properties, dynamics_options, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots = get_estimator_options(physical_qubits, fake_backend, fake_backend_v2)
+    qubit_properties, dynamics_options, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots = get_estimator_options(sampling_Paulis, N_shots, physical_qubits, fake_backend, fake_backend_v2)
     # %%
-    dynamics_backend, Qiskit_setup, q_env = get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options)
+    _, _, q_env = get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options)
     # %%
-    torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit)
+    torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, n_actions)
 
     # %%
     device = torch.device("cpu")
-    actor_net, critic_net, agent = get_network(device, observation_space)
+    _, _, agent = get_network(device, observation_space, n_actions)
 
     """
     -----------------------------------------------------------------------------------------------------
@@ -115,7 +125,7 @@ def objective(trial):
 
     # %%
     ### Training ###
-    global_step, obs, actions, logprobs, rewards, dones, values, train_obs, visualization_steps = clear_history(torch_env, tgt_instruction_counts, batchsize, device)
+    global_step, obs, actions, logprobs, rewards, dones, values, _, visualization_steps = clear_history(torch_env, tgt_instruction_counts, batchsize, device)
     run_name = "test"
     writer = SummaryWriter(f"runs/{run_name}")
     training_results = train_agent(torch_env, global_step, training_parameters['num_updates'], seed, device, batchsize, obs, agent, scale_factor, min_bound_actions, max_bound_actions, logprobs, actions, rewards, dones, values, training_parameters['n_epochs'], optimizer, training_parameters['minibatch_size'], training_parameters['gamma'], training_parameters['gae_lambda'], training_parameters['critic_loss_coeff'], training_parameters['epsilon'], training_parameters['clip_vloss'], training_parameters['grad_clip'], training_parameters['clip_coef'], training_parameters['normalize_advantage'], training_parameters['ent_coef'], writer, visualization_steps)
@@ -178,7 +188,7 @@ if __name__ == "__main__":
     for key, value in best_trial.params.items():
         print(f"    {key}: {value}")
 
-    # TODO: Save best hyperparameters to hashed file (e.g., using pickle)
+    # Save best hyperparameters to hashed file (e.g., using pickle)
     best_hyperparams = best_trial.params
     # Fetch and display the best trial's action vector
     best_action_vector = study.best_trial.user_attrs["action vector"]

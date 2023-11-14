@@ -3,6 +3,7 @@ import os
 import sys
 import numpy as np
 import tqdm
+from functools import partial
 from typing import Optional, Union
 
 module_path = os.path.abspath(os.path.join('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control'))
@@ -46,10 +47,6 @@ from IPython.display import clear_output
 
 
 
-### These are the variables I wan to pass as arguments to the functions below from the HPO script
-# fake_backend = FakeJakarta()
-n_actions = 4 ## Currently, including duration as a parameter does not work due to ``qiskit.pulse.exceptions.UnassignedDurationError: 'All instruction durations should be assigned before creating `Schedule`.Please check `.parameters` to find unassigned parameter objects.'``
-params = ParameterVector('theta', n_actions)
 
 
 
@@ -92,7 +89,7 @@ def get_sx_params(backend, physical_qubits):
 
     return default_params, basis_gate_instructions, instructions_array
 
-def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None):
+def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None, n_actions: int=4):
     """
     Generate a custom parameterized schedule for an SX gate.
 
@@ -111,7 +108,6 @@ def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, 
     # pulse_features = ["amp", "angle", "β", "σ"]
     pulse_features = ['amp', 'β', 'σ'] #, 'duration']
  
-    global n_actions
     assert n_actions == len(params), f"Number of actions ({n_actions}) does not match length of ParameterVector {params.name} ({len(params)})" 
 
     if isinstance(physical_qubits, int):
@@ -129,7 +125,7 @@ def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, 
 
     return parametrized_schedule
 
-def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None, fake_backend: BackendV1 = FakeJakarta()):
+def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None, fake_backend: BackendV1 = FakeJakarta(), n_actions: int=4, target: dict=None):
     """
     Add a parametrized gate to a QuantumCircuit.
 
@@ -141,10 +137,7 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
     - tgt_register (QuantumRegister, optional): The target quantum register for applying the parametrized gate.
     """
     
-    global n_actions, target # ,fake_backend
-
-    gate, physical_qubits = target["gate"], target["register"]
-    physical_qubits = tuple(physical_qubits)
+    physical_qubits = tuple(target["register"])
 
     if params is None:
         params = ParameterVector('theta', n_actions)
@@ -166,7 +159,7 @@ def get_target_gate(gate: Gate, register: list[int]):
 
     return target
 
-target = get_target_gate(gate=XGate(), register=[0])
+# target = get_target_gate(gate=XGate(), register=[0])
 
 # %%
 def get_circuit_context(num_total_qubits: int):
@@ -178,21 +171,19 @@ def get_circuit_context(num_total_qubits: int):
     return target_circuit
 
 # %%
-"""def transpile_circuit(target_circuit, fake_backend):
+def transpile_circuit(target_circuit, fake_backend):
     # Transpile the (context) quantum circuit to the provided (Fake-) Backend
     transpiled_circ = transpile(target_circuit, fake_backend, 
                                 initial_layout=[0],
                                 basis_gates=fake_backend.configuration().basis_gates, 
                                 # scheduling_method='asap',
                                 optimization_level=1)
-    return remove_unused_wires(transpiled_circ)"""
+    return remove_unused_wires(transpiled_circ)
 
 # %%
-def get_estimator_options(physical_qubits, fake_backend, fake_backend_v2):
-    sampling_Paulis = 50
-    N_shots = 200
+def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, fake_backend, fake_backend_v2):
+    
     abstraction_level = 'pulse'
-
     dt = fake_backend.configuration().dt
 
     dynamics_options = {
@@ -213,7 +204,6 @@ def get_estimator_options(physical_qubits, fake_backend, fake_backend_v2):
         dissipator_channels=None,
         dissipator_operators=None
     )
-    calibration_files=None
 
     estimator_options = Options(resilience_level=0, optimization_level=0, 
                                 execution= ExecutionOptions(shots=N_shots*sampling_Paulis))
@@ -283,7 +273,6 @@ def get_own_solver(qubit_properties):
         subsystem_dims=[dim, dim], # for computing measurement data
         solver_options=solver_options, # to be used every time run is called
     )
-
     return custom_backend2
 
 
@@ -292,10 +281,10 @@ def get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties,
     dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=physical_qubits, **dynamics_options)
     dynamics_backend.target.qubit_properties = qubit_properties
 
-    ### fake_backend necessary as parameter for this functin
+    # Create a partial function with target passed
+    parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target)
 
-    # Wrap all info in one QiskitConfig
-    Qiskit_setup = QiskitConfig(parametrized_circuit=add_parametrized_circuit, backend=dynamics_backend,
+    Qiskit_setup = QiskitConfig(parametrized_circuit=parametrized_circuit_with_target, backend=dynamics_backend,
                                 estimator_options=estimator_options, channel_freq=channel_freq,
                                 solver=solver)
 
@@ -307,14 +296,12 @@ def get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties,
 
 
 # %%
-def get_torch_env(q_env, target_circuit):
+def get_torch_env(q_env, target_circuit, n_actions):
     seed = 10
     training_steps_per_gate = 2000
     benchmark_cycle = 100
-    # tgt_instruction_counts = target_circuit.data.count(CircuitInstruction(target_gate, tgt_qubits))
     tgt_instruction_counts = 2  # Number of times target Instruction is applied in Circuit
     batchsize = 200  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
-    n_actions = 4 # Choose how many control parameters in pulse/circuit parametrization
     min_bound_actions =  - 0.1
     max_bound_actions =  0.1
     scale_factor = 0.1
@@ -332,7 +319,7 @@ def get_torch_env(q_env, target_circuit):
     return torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed
 
 # %% [markdown]
-def get_network(device, observation_space):
+def get_network(device, observation_space, n_actions):
     # Definition of the Agent
     hidden_units = [64, 64]
     activation_functions = [nn.Tanh(), nn.Tanh(), nn.Tanh()]
