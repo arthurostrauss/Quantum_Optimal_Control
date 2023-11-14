@@ -131,8 +131,6 @@ def custom_sx_schedule(backend: Backend, physical_qubits=Union[int, tuple, list]
     for i, feature in enumerate(pulse_features):
         new_params[(feature, physical_qubits, "sx")] += params[i]
 
-    print('New Pulse Parameter', new_params)
-
     cals = Calibrations.from_backend(backend, [FixedFrequencyTransmon(["x", "sx"])],
                                         add_parameter_defaults=True)
     
@@ -173,7 +171,7 @@ def get_target_gate(gate: Gate, register: list[int]):
     sx_gate = {"gate": gate, 
                "register": register}
     target = sx_gate
-    print(target)
+    print('Target: ', target)
 
     return target
 
@@ -310,9 +308,6 @@ def get_db_qiskitconfig(target, physical_qubits, qubit_properties, estimator_opt
                                 estimator_options=estimator_options, channel_freq=channel_freq,
                                 solver=solver)
 
-    print('Physical Qubits:', physical_qubits)
-    print('dynamics_backend.num_qubits:', dynamics_backend.num_qubits)
-
     q_env = QuantumEnvironment(target=target, abstraction_level=abstraction_level,
                            Qiskit_config=Qiskit_setup,
                            sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
@@ -386,16 +381,12 @@ def train_agent(torch_env, global_step, num_updates, seed, device, batchsize, ob
         next_obs = torch.Tensor(np.array([next_obs] * batchsize)).to(device)
         next_done = torch.zeros(batchsize).to(device)
 
-        # print("episode length:", num_steps)
-
         for step in range(num_steps):
             global_step += 1
             obs[step] = next_obs
             dones[step] = next_done
 
             with torch.no_grad():
-                # print('next_obs', next_obs)
-                # print('agend(next_obs)', agent(next_obs))
                 mean_action, std_action, critic_value = agent(next_obs)
                 mean_action*=scale_factor
                 probs = Normal(mean_action, std_action)
@@ -413,7 +404,6 @@ def train_agent(torch_env, global_step, num_updates, seed, device, batchsize, ob
             next_done = torch.Tensor(np.array([int(done)] * batchsize)).to(device)
             # Only print when at least 1 env is done
 
-            # print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
             writer.add_scalar("charts/episodic_return", np.mean(reward), global_step)
             writer.add_scalar("charts/episodic_length", num_steps, global_step)
 
@@ -498,9 +488,6 @@ def train_agent(torch_env, global_step, num_updates, seed, device, batchsize, ob
         print("mean", mean_action[0])
         print("sigma", std_action[0])
         print("Average return:", np.mean(torch_env.reward_history, axis=1)[-1])
-        # print(np.mean(torch_env.reward_history, axis =1)[-1])
-        #print("Circuit fidelity:", torch_env.circuit_fidelity_history[-1])
-        #print("Avg gate fidelity:", torch_env.avg_fidelity_history[-1])   
         print(torch_env._get_info())
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)

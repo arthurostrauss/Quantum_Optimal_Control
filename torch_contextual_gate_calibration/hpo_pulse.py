@@ -5,23 +5,25 @@ from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 
 import argparse
 import optuna
+import pickle
+import sys
 import logging
 
 import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-from sx_parametrization_functions import (
-   get_target_gate, get_circuit_context, transpile_circuit, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
+from pulse_parametrization_functions import (
+   get_target_gate, get_circuit_context, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
 )
 
-# Create a custom logger with the desired logging level
-"""logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
+# Create a custom logger with the level WARNING because INFO would trigger too many log message by qiskit itself
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s INFO %(message)s", # hardcoded INFO level
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
-)"""
+)
 
 def parse_args():
     """
@@ -69,13 +71,10 @@ def objective(trial):
     
     target = get_target_gate(gate=XGate(), register=[0])
     physical_qubits = tuple(target["register"])
+
     # %%
     target_circuit = get_circuit_context(num_total_qubits=1)
-    target_circuit.draw(output="mpl")
-    # %%
-    transpiled_circ = transpile_circuit(target_circuit, fake_backend)
-    transpiled_circ.draw(output="mpl")
-
+    
     # %%
     qubit_properties, dynamics_options, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots = get_estimator_options(physical_qubits)
     # %%
@@ -144,21 +143,20 @@ def hyperparameter_optimization(n_trials):
         optuna.study.Study: The study object that contains all the information about
                             the optimization session, including the best trial.
     """
+    logging.warning("--------------START HPO--------------")
 
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=n_trials)
 
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial:")
-    trial = study.best_trial
-
-    print("Average Return: ", trial.value)
-    print("Hyperparams: ")
-    for key, value in trial.params.items():
-        print(f"    {key}: {value}")
+    logging.warning("--------------FINISH HPO--------------")
 
     return study
 
+def save_pickle(best_trial, best_run):
+    # Save the best run configuration as a hashed file (here pickle)
+    pickle_file_name = f"torch_contextual_gate_calibration/hpo_results/return_{best_trial.value}.pickle" 
+    with open(pickle_file_name, 'wb') as handle:
+        pickle.dump(best_run, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == "__main__":
     # Parse command-line arguments to get the number of trials for optimization, ensure a meaningful value for num_trials (pos. int.)
@@ -166,6 +164,24 @@ if __name__ == "__main__":
     # Run hyperparameter optimization
     study = hyperparameter_optimization(n_trials=num_trials)
 
+    print("Number of finished trials: ", len(study.trials))
+    print("Best trial:")
+    best_trial = study.best_trial
+
+    print("Average Return: ", best_trial.value)
+    print("Hyperparams: ")
+    for key, value in best_trial.params.items():
+        print(f"    {key}: {value}")
+
+    # TODO: Save best hyperparameters to hashed file (e.g., using pickle)
+    best_hyperparams = best_trial.params
     # Fetch and display the best trial's action vector
     best_action_vector = study.best_trial.user_attrs["action vector"]
+    
+    best_run = {'avg_return': best_trial.value,
+                'action_vector': best_action_vector.numpy(),
+                'hyperparams': best_hyperparams,
+                }
+    save_pickle(best_trial, best_run)
+    
     print(f"The best action vector is: {best_action_vector}")
