@@ -38,6 +38,7 @@ from qconfig import QiskitConfig
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+from torch.utils.tensorboard import SummaryWriter
 
 # Circuit context and Reinforcement Learning libraries
 from agent import ActorNetwork, CriticNetwork, Agent
@@ -57,14 +58,14 @@ def get_sx_params(backend, physical_qubits):
     This function retrieves the default parameters for an SX gate, including amplitude, beta, sigma, and duration,
     from a given quantum backend.
 
-    Parameters:
-    - backend (Backend): The quantum backend from which to retrieve the parameters.
-    - physical_qubits (Union[int, tuple, list]): The physical qubits on which the SX gate is applied.
+    Args:
+        - backend (Backend): The quantum backend from which to retrieve the parameters.
+        - physical_qubits (Union[int, tuple, list]): The physical qubits on which the SX gate is applied.
     
     Returns:
-    - default_params (dict): A dictionary containing default parameters for the SX gate.
-    - basis_gate_instructions (InstructionSchedule): The instruction schedule for the SX gate.
-    - instructions_array (numpy.ndarray): An array of instructions for the SX gate.
+        - default_params (dict): A dictionary containing default parameters for the SX gate.
+        - basis_gate_instructions (InstructionSchedule): The instruction schedule for the SX gate.
+        - instructions_array (numpy.ndarray): An array of instructions for the SX gate.
     """
 
 
@@ -96,13 +97,13 @@ def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, 
     This function generates a custom parameterized schedule for an SX gate on specified physical qubits
     with the given parameters.
 
-    Parameters:
-    - backend (Backend): The quantum backend used to obtain default SX gate parameters.
-    - physical_qubits (Union[int, tuple, list]): The physical qubits on which the SX gate is applied.
-    - params (ParameterVector, optional): The parameter vector specifying the custom parameters for the SX gate.
+    Args:
+        - backend (Backend): The quantum backend used to obtain default SX gate parameters.
+        - physical_qubits (Union[int, tuple, list]): The physical qubits on which the SX gate is applied.
+        - params (ParameterVector, optional): The parameter vector specifying the custom parameters for the SX gate.
 
     Returns:
-    - parametrized_schedule (Schedule): A parameterized schedule for the SX gate with custom parameters.
+        - parametrized_schedule (Schedule): A parameterized schedule for the SX gate with custom parameters.
     """
     
     # pulse_features = ["amp", "angle", "β", "σ"]
@@ -131,10 +132,10 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
 
     This function adds a parametrized gate to a given QuantumCircuit with optional custom parameters and target register.
 
-    Parameters:
-    - qc (QuantumCircuit): The QuantumCircuit to which the parametrized gate will be added.
-    - params (ParameterVector, optional): The parameter vector specifying the custom parameters for the gate.
-    - tgt_register (QuantumRegister, optional): The target quantum register for applying the parametrized gate.
+    Args:
+        - qc (QuantumCircuit): The QuantumCircuit to which the parametrized gate will be added.
+        - params (ParameterVector, optional): The parameter vector specifying the custom parameters for the gate.
+        - tgt_register (QuantumRegister, optional): The target quantum register for applying the parametrized gate.
     """
     
     physical_qubits = tuple(target["register"])
@@ -150,20 +151,48 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
     qc.append(parametrized_gate, tgt_register)
 
 
-def get_target_gate(gate: Gate, register: list[int]):
-    # X gate as the target gate
-    sx_gate = {"gate": gate, 
-               "register": register}
-    target = sx_gate
+def get_target_gate(gate: Gate, register: Union[tuple[int], list[int]]):
+    """
+    Constructs and returns a dictionary representing a target quantum gate with its associated register.
+
+    The function takes a quantum gate object and a either a tuple or a list of integers representing qubit indices specifying the target register (so the register the target gate is applied to),
+    and combines them into a dictionary. This dictionary can then be used to apply the gate to the specified qubits
+    in a quantum circuit.
+
+    Args:
+        - gate (Gate): A quantum gate object from qiskit
+        - register (list[int]): A list of integers representing the qubit indices the gate will be applied to.
+
+    Returns:
+        - dict: A dictionary with two keys: 'gate', holding the quantum gate object, and 'register', holding
+              the list of qubit indices.
+    """
+    target = {
+               "gate": gate, 
+               "register": register,
+              }
     print('Target: ', target)
 
     return target
 
-# target = get_target_gate(gate=XGate(), register=[0])
-
 # %%
 def get_circuit_context(num_total_qubits: int):
-    # Quantum Circuit context
+    """
+    TODO 
+        - Introduce another argument that provides a sequence of gates and the register that it is to be applied to
+        - E.g., list((register (int), operation (str))): [(0, 'x'), (0, 'h'), (0, 'y')]
+        - Write a helper function that maps the tuple's entries to qiskit commands
+
+    Creates and returns the ``context`` quantum circuit which will then later be transpiled. Within this later transpiled version,
+    the target gate will appear whose pulse parameters will then be parametrized and optimized.
+
+    Args:
+        - num_total_qubits (int): The total number of qubits in the quantum circuit.
+
+    Returns:
+        QuantumCircuit: A quantum circuit object with the specified number of qubits and a predefined
+                    sequence of gates applied to the first qubit.
+    """
     target_circuit = QuantumCircuit(num_total_qubits)
     target_circuit.x(0)
     target_circuit.h(0)
@@ -171,8 +200,20 @@ def get_circuit_context(num_total_qubits: int):
     return target_circuit
 
 # %%
-def transpile_circuit(target_circuit, fake_backend):
-    # Transpile the (context) quantum circuit to the provided (Fake-) Backend
+def transpile_circuit(target_circuit: QuantumCircuit, fake_backend: Backend):
+    """
+    This function takes a quantum circuit and transpiles it for a given backend (which can be a real
+    or a fake quantum computing backend). The transpilation process may include optimizing the circuit,
+    applying an initial layout, and conforming to the basis gates of the backend. The function also
+    removes any unused wires from the transpiled circuit.
+
+    Args:
+        - target_circuit (QuantumCircuit): The quantum circuit to be transpiled.
+        - fake_backend (Backend): The backend (real or simulated) for which the circuit is being transpiled.
+
+    Returns:
+        - QuantumCircuit: The transpiled quantum circuit, optimized and compatible with the specified backend.
+    """
     transpiled_circ = transpile(target_circuit, fake_backend, 
                                 initial_layout=[0],
                                 basis_gates=fake_backend.configuration().basis_gates, 
@@ -212,6 +253,18 @@ def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, fake_backen
 
 
 def get_own_solver(qubit_properties):
+    """
+    This function constructs a Hamiltonian representing two coupled qubits and their interaction dynamics.
+    It initializes the solver with this Hamiltonian and various operational parameters like channel frequencies
+    and time step (dt). The solver is configured for sparse matrix evaluation using JAX.
+
+    Args:
+        - qubit_properties (list): A list containing the properties of qubits, such as frequency.
+
+    Returns:
+        - DynamicsBackend: An object representing the custom quantum dynamics backend, configured with
+                           the static Hamiltonian, drive operations, rotating frame, and other solver options.
+    """
 
     qubit_properties, _, _, _, _ = get_estimator_options()
 
@@ -276,8 +329,35 @@ def get_own_solver(qubit_properties):
     return custom_backend2
 
 
-def get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
-    # subsystem_list takes the qubits indices that are the qubits with the parametrized gate AND its nearest neighbours
+def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tuple, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
+    """
+    Configures and returns a quantum environment setup for Qiskit simulations.
+
+    This function sets up a quantum environment using a given backend and target circuit configuration.
+    It includes the creation of a DynamicsBackend, configuring a Qiskit environment, and setting up
+    various simulation parameters like the number of shots, channel frequencies, and quantum environment options.
+
+    Args:
+        - fake_backend (Backend): The simulated backend for the quantum environment.
+        - target (dict): A dictionary specifying the target quantum gate and the register it acts on.
+        - physical_qubits (list[int]): List of qubits indices to be included in the subsystem.
+        - qubit_properties (list): Properties of the qubits used in the simulation.
+        - estimator_options (dict): Options for the quantum state estimator.
+        - channel_freq (dict): Dictionary mapping channels to their frequencies.
+        - solver (Solver): The solver for the quantum dynamics.
+        - sampling_Paulis (list): List of Pauli operators for sampling.
+        - abstraction_level (str): The level of abstraction for the quantum simulation.
+        - N_shots (int): Number of shots (repetitions) for each measurement.
+        - dynamics_options (dict): Configuration options for the dynamics backend.
+
+    Returns:
+        - Dynamics Backend
+        - Qiskit configuration setup
+        - Quantum environment object
+
+    Note:
+    This function assumes the availability of certain global variables and specific library imports.
+    """
     dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=physical_qubits, **dynamics_options)
     dynamics_backend.target.qubit_properties = qubit_properties
 
@@ -296,7 +376,23 @@ def get_db_qiskitconfig(fake_backend, target, physical_qubits, qubit_properties,
 
 
 # %%
-def get_torch_env(q_env, target_circuit, n_actions):
+def get_torch_env(q_env: QuantumEnvironment, target_circuit: QuantumCircuit, n_actions: int):
+    """
+    Initializes and returns a Torch-based quantum environment for RL application
+
+    This function sets up a quantum environment for use with PyTorch, including defining action and observation spaces.
+    It configures the environment for training quantum circuits with RL, specifying parameters
+    like the number of actions, batch size, and training steps per gate.
+
+    Args:
+        - q_env (QuantumEnvironment): The quantum environment setup, typically from Qiskit.
+        - target_circuit (QuantumCircuit): The quantum circuit to be used in the environment.
+        - n_actions (int): The number of actions available in the RL model.
+
+    Returns:
+        - Tuple containing the TorchQuantumEnvironment object and its configuration details like
+               observation space, action space, and other parameters relevant to the RL setup.
+    """
     seed = 10
     training_steps_per_gate = 2000
     benchmark_cycle = 100
@@ -318,9 +414,24 @@ def get_torch_env(q_env, target_circuit, n_actions):
                                         seed=None,)
     return torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed
 
-# %% [markdown]
-def get_network(device, observation_space, n_actions):
-    # Definition of the Agent
+# %%
+def get_network(device: torch.device, observation_space: Box, n_actions: int):
+    """
+    Initializes and returns the neural network models (actor and critic) and an agent for RL
+
+    This function creates an actor network and a critic network using the specified observation space and
+    number of actions. These networks are used in policy-based reinforcement learning methods. The function also
+    initializes an agent with these networks.
+
+    Args:
+        - device (torch.device): The device (e.g., CPU or GPU) on which the networks will be loaded.
+        - observation_space (space): The observation space of the environment.
+        - n_actions (int): The number of actions available in the reinforcement learning model.
+
+    Returns:
+        - A tuple containing the actor network, critic network, and the agent. These are used for
+               training and decision-making in reinforcement learning scenarios.
+    """
     hidden_units = [64, 64]
     activation_functions = [nn.Tanh(), nn.Tanh(), nn.Tanh()]
     include_critic = False
@@ -334,7 +445,24 @@ def get_network(device, observation_space, n_actions):
     return actor_net, critic_net, agent
 
 # %%
-def clear_history(torch_env, tgt_instruction_counts, batchsize, device):
+def clear_history(torch_env: TorchQuantumEnvironment, tgt_instruction_counts: int, batchsize: int, device: torch.device):
+    """
+    Clears the history of the TorchQuantumEnvironment and initializes training variables for reinforcement learning (RL)
+
+    This function resets the environment's history and initializes various tensors (like observations, actions,
+    log probabilities, rewards, dones, and values) used in the training loop of a RL algorithm.
+    These tensors are initialized to zeros and are configured to the specified batch size and instruction counts.
+
+    Args:
+        - torch_env (TorchQuantumEnvironment): The Torch-based quantum environment used in RL training.
+        - tgt_instruction_counts (int): The number of instruction counts used in the environment.
+        - batchsize (int): The batch size used for training.
+        - device (torch.device): The device (e.g., CPU or GPU) where the tensors will be stored.
+
+    Returns:
+        - A tuple containing initialized global step count, tensors for observations, actions, log probabilities,
+          rewards, dones, values, train observations, and the number of visualization steps.
+    """
     global_step = 0
     torch_env.clear_history()
     obs = torch.zeros((tgt_instruction_counts, batchsize) + torch_env.observation_space.shape).to(device)
@@ -350,7 +478,68 @@ def clear_history(torch_env, tgt_instruction_counts, batchsize, device):
     return global_step, obs, actions, logprobs, rewards, dones, values, train_obs, visualization_steps
 
 # %%
-def train_agent(torch_env, global_step, num_updates, seed, device, batchsize, obs, agent, scale_factor, min_bound_actions, max_bound_actions, logprobs, actions, rewards, dones, values, n_epochs, optimizer, minibatch_size, gamma, gae_lambda, critic_loss_coeff, epsilon, clip_vloss, grad_clip, clip_coef, normalize_advantage, ent_coef, writer, visualization_steps):
+def train_agent(torch_env: TorchQuantumEnvironment, 
+                global_step: int, 
+                num_updates: int, 
+                seed: int, 
+                device: torch.device, 
+                batchsize: int, 
+                obs: torch.tensor, 
+                agent: Agent, 
+                scale_factor: float, 
+                min_bound_actions: float, 
+                max_bound_actions: float, 
+                logprobs: torch.tensor, 
+                actions: torch.tensor, 
+                rewards: torch.tensor, 
+                dones: torch.tensor, 
+                values: torch.tensor, 
+                n_epochs: int, 
+                optimizer: torch.optim.Adam, 
+                minibatch_size: int, 
+                gamma: float, 
+                gae_lambda, 
+                critic_loss_coeff: float, 
+                epsilon: float, 
+                clip_vloss: bool, 
+                grad_clip: float, 
+                clip_coef: float, 
+                normalize_advantage: bool, 
+                ent_coef: float, 
+                writer: SummaryWriter, 
+                visualization_steps: int):
+    """
+    Trains an agent in a reinforcement learning environment using the Proximal Policy Optimization (PPO) algorithm.
+
+    This function performs training iterations on an agent within a specified quantum environment using PPO. It involves
+    collecting data by interacting with the environment, computing advantages, and optimizing both the policy (actor) and
+    value (critic) networks. Additionally, it logs various training metrics for analysis.
+
+    Args:
+        - torch_env (TorchQuantumEnvironment): The Torch-based quantum environment used for training.
+        - global_step (int): Global step count, used for tracking the training progress.
+        - num_updates (int): Number of training iterations to perform.
+        - seed (int): Seed for environment reset for consistency.
+        - device (torch.device): The device on which the tensors are stored and computations are performed.
+        - batchsize (int), obs, agent, scale_factor, min_bound_actions, max_bound_actions, logprobs,    actions, rewards, dones, values: Training-related parameters and tensors.
+        - n_epochs (int): Number of epochs for training.
+        - optimizer (torch.optim.Optimizer): The optimizer used for training.
+        - minibatch_size (int): Size of the minibatch for training.
+        - gamma (float): Discount factor for rewards.
+        - gae_lambda (float): Lambda parameter for Generalized Advantage Estimation (GAE).
+        - critic_loss_coeff (float): Coefficient for critic loss in the total loss calculation.
+        - epsilon (float): Clipping parameter for PPO.
+        - clip_vloss (bool): Whether to clip the value loss.
+        - grad_clip (float): Gradient clipping value.
+        - clip_coef (float): Coefficient for value loss clipping.
+        - normalize_advantage (bool): Flag to normalize advantage values.
+        - ent_coef (float): Coefficient for entropy in the total loss calculation.
+        - writer (torch.utils.tensorboard.SummaryWriter): Tensorboard writer for logging training metrics.
+        - visualization_steps (int): Number of steps for visualization.
+
+    Returns:
+        - dict: A dictionary containing the average return, mean action, and sigma (standard deviation) of the action.
+    """
     for update in tqdm.tqdm(range(1, num_updates + 1)):
         next_obs, _ = torch_env.reset(seed=seed)
         num_steps = torch_env.episode_length(global_step)
