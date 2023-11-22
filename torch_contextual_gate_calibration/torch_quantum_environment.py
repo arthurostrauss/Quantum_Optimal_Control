@@ -59,7 +59,7 @@ from helper_functions import (
 )
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 from custom_jax_sim import (
-    DynamicsBackendEstimator,
+    DynamicsBackendEstimator, JaxSolver,
 )
 
 ObsType = TypeVar("ObsType")
@@ -895,6 +895,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                         print(f"New Session opened (#{self._session_counts})")
                         self.backend.open_session()
                 elif isinstance(self.estimator, DynamicsBackendEstimator):
+                    assert isinstance(self.backend, DynamicsBackend), 'Backend is not a DynamicsBackend instance'
+                    assert isinstance(self.backend.options.solver, JaxSolver), 'Solver is not a JaxSolver instance'
 
                     def param_schedule():
                         return schedule(training_circ, self.backend)
@@ -912,7 +914,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 self.close()
                 raise exc
             scaling_reward_factor = len(observables) / 4 ** len(self.tgt_register)
-            reward_table /= scaling_reward_factor
+            reward_table *= scaling_reward_factor
             print("Job done")
 
         if np.mean(reward_table) > self._max_return:
