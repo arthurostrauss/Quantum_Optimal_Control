@@ -1,3 +1,11 @@
+"""
+This script contains a set of functions used in the HPO script hpo_pulse_01.py.
+NO interaction / input from the user is required.
+
+Author: Lukas Voss
+Created on 16/11/2023
+"""
+
 # %%
 import os
 import sys

@@ -1,8 +1,20 @@
-# %%
-from qiskit.circuit import QuantumCircuit
-from qiskit.circuit.library import XGate
-from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
+"""
+This script allows to run hyperparameter optimization (HPO) for the contextual gate calibration problem. 
+Simulation parameters can be set in the simulation_config.py file. 
+The HPO results are saved in the torch_contextual_gate_calibration/hpo_results folder.
 
+The workflow is divided into three parts:
+    1. Specify parameters for the gate calibration simulation in the simulation_config.py file
+    2. Run this file to perform HPO specifying the number of trials via argparse
+    3. This script orchestrates the workflow while pulse_parametrization_functions_v01.py contains the functions that are used in this script
+
+Example usage: python torch_contextual_gate_calibration/hpo_pulse_01.py -t 2
+
+Author: Lukas Voss
+Created on 16/11/2023
+"""
+
+# %%
 import argparse
 import optuna
 import pickle
@@ -17,7 +29,7 @@ from torch.utils.tensorboard import SummaryWriter
 from pulse_parametrization_functions_v01 import (
    get_target_gate, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
 )
-from qconfig import SimulationConfig
+from simulation_config import sim_config, get_circuit_context
 
 # Create a custom logger with the level WARNING because INFO would trigger too many log message by qiskit itself
 logging.basicConfig(
@@ -45,7 +57,7 @@ def parse_args():
         metavar="num_trials",
         type=int,
         default=2,
-        help="number of HPO trials; default: 20",
+        help="number of HPO trials; default: 2",
         required=False,
     )
 
@@ -66,59 +78,25 @@ def positive_integer(value):
         raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
     return ivalue
 
-# %%
-def get_circuit_context(num_total_qubits: int):
-    """
-    Creates and returns the ``context`` quantum circuit which will then later be transpiled. Within this later transpiled version,
-    the target gate will appear whose pulse parameters will then be parametrized and optimized.
-
-    Args:
-        - num_total_qubits (int): The total number of qubits in the quantum circuit.
-
-    Returns:
-        - QuantumCircuit: A quantum circuit object with the specified number of qubits and a predefined
-                        sequence of gates applied to the first qubit.
-    """
-    target_circuit = QuantumCircuit(num_total_qubits)
-    target_circuit.x(0)
-    target_circuit.h(0)
-    target_circuit.y(0)
-    return target_circuit
 
 def objective(trial):
     
-    """
-    -----------------------------------------------------------------------------------------------------
-        User Input: Simulation parameters
-    -----------------------------------------------------------------------------------------------------
-    """
-    simulation_config = SimulationConfig(abstraction_level="pulse",
-                                         target_gate=XGate(),
-                                         register=[0],
-                                         fake_backend=FakeJakarta(),
-                                         fake_backend_v2=FakeJakartaV2(),
-                                         n_actions=4,
-                                         sampling_Paulis=50,
-                                         n_shots=200,
-                                         device=torch.device("cpu")
-                                         )
-    
-    target = get_target_gate(gate=simulation_config.target_gate, register=simulation_config.register)
+    target = get_target_gate(gate=sim_config.target_gate, register=sim_config.register)
     physical_qubits = tuple(target["register"])
 
     # %%
     target_circuit = get_circuit_context(num_total_qubits=1)
     
     # %%
-    qubit_properties, dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(simulation_config.sampling_Paulis, simulation_config.n_shots, physical_qubits, simulation_config.fake_backend, simulation_config.fake_backend_v2)
+    qubit_properties, dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(sim_config.sampling_Paulis, sim_config.n_shots, physical_qubits, sim_config.fake_backend, sim_config.fake_backend_v2)
     # %%
-    _, _, q_env = get_db_qiskitconfig(simulation_config.fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, simulation_config.sampling_Paulis, simulation_config.abstraction_level, simulation_config.n_shots, dynamics_options)
+    _, _, q_env = get_db_qiskitconfig(sim_config.fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
     # %%
-    torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, simulation_config.n_actions)
+    torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)
 
     # %%
     # device = torch.device("cpu")
-    _, _, agent = get_network(simulation_config.device, observation_space, simulation_config.n_actions)
+    _, _, agent = get_network(sim_config.device, observation_space, sim_config.n_actions)
 
     """
     -----------------------------------------------------------------------------------------------------
@@ -148,10 +126,10 @@ def objective(trial):
 
     # %%
     ### Training ###
-    global_step, obs, actions, logprobs, rewards, dones, values, _, visualization_steps = clear_history(torch_env, tgt_instruction_counts, batchsize, simulation_config.device)
+    global_step, obs, actions, logprobs, rewards, dones, values, _, visualization_steps = clear_history(torch_env, tgt_instruction_counts, batchsize, sim_config.device)
     run_name = "test"
     writer = SummaryWriter(f"runs/{run_name}")
-    training_results = train_agent(torch_env, global_step, training_parameters['num_updates'], seed, simulation_config.device, batchsize, obs, agent, scale_factor, min_bound_actions, max_bound_actions, logprobs, actions, rewards, dones, values, training_parameters['n_epochs'], optimizer, training_parameters['minibatch_size'], training_parameters['gamma'], training_parameters['gae_lambda'], training_parameters['critic_loss_coeff'], training_parameters['epsilon'], training_parameters['clip_vloss'], training_parameters['grad_clip'], training_parameters['clip_coef'], training_parameters['normalize_advantage'], training_parameters['ent_coef'], writer, visualization_steps)
+    training_results = train_agent(torch_env, global_step, training_parameters['num_updates'], seed, sim_config.device, batchsize, obs, agent, scale_factor, min_bound_actions, max_bound_actions, logprobs, actions, rewards, dones, values, training_parameters['n_epochs'], optimizer, training_parameters['minibatch_size'], training_parameters['gamma'], training_parameters['gae_lambda'], training_parameters['critic_loss_coeff'], training_parameters['epsilon'], training_parameters['clip_vloss'], training_parameters['grad_clip'], training_parameters['clip_coef'], training_parameters['normalize_advantage'], training_parameters['ent_coef'], writer, visualization_steps)
 
     # %%
     ### Save results ###
@@ -194,12 +172,8 @@ def save_pickle(best_trial, best_run):
     with open(pickle_file_name, 'wb') as handle:
         pickle.dump(best_run, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-if __name__ == "__main__":
-    # Parse command-line arguments to get the number of trials for optimization, ensure a meaningful value for num_trials (pos. int.)
-    num_trials = positive_integer(parse_args().num_trials)
-    # Run hyperparameter optimization
-    study, runtime = hyperparameter_optimization(n_trials=num_trials)
-
+def log_results(runtime, study):
+    # Log the results of the HPO run
     logging.warning(f"HPO RUNTIME: {int(runtime)} SEC")
 
     print("Number of finished trials: ", len(study.trials))
@@ -211,14 +185,23 @@ if __name__ == "__main__":
     for key, value in best_trial.params.items():
         print(f"    {key}: {value}")
 
-    # Save best hyperparameters to hashed file (e.g., using pickle)
-    best_hyperparams = best_trial.params
+    return best_trial
+
+if __name__ == "__main__":
+    # Parse command-line arguments to get the number of trials for optimization, ensure a meaningful value for num_trials (pos. int.)
+    num_trials = positive_integer(parse_args().num_trials)
+    
+    # Run hyperparameter optimization
+    study, runtime = hyperparameter_optimization(n_trials=num_trials)
+    best_trial = log_results(runtime, study)
+
     # Fetch and display the best trial's action vector
     best_action_vector = study.best_trial.user_attrs["action vector"]
-    
+
+    # Save best hyperparameters to hashed file (e.g., using pickle)    
     best_run = {'avg_return': best_trial.value,
                 'action_vector': best_action_vector.numpy(),
-                'hyperparams': best_hyperparams,
+                'hyperparams': best_trial.params,
                 }
     save_pickle(best_trial, best_run)
     
