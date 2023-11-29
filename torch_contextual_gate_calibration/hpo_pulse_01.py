@@ -1,4 +1,5 @@
 # %%
+from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.library import XGate
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 
@@ -14,7 +15,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from pulse_parametrization_functions_v01 import (
-   get_target_gate, get_circuit_context, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
+   get_target_gate, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
 )
 from qconfig import SimulationConfig
 
@@ -64,6 +65,25 @@ def positive_integer(value):
     if ivalue <= 0:
         raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
     return ivalue
+
+# %%
+def get_circuit_context(num_total_qubits: int):
+    """
+    Creates and returns the ``context`` quantum circuit which will then later be transpiled. Within this later transpiled version,
+    the target gate will appear whose pulse parameters will then be parametrized and optimized.
+
+    Args:
+        - num_total_qubits (int): The total number of qubits in the quantum circuit.
+
+    Returns:
+        - QuantumCircuit: A quantum circuit object with the specified number of qubits and a predefined
+                        sequence of gates applied to the first qubit.
+    """
+    target_circuit = QuantumCircuit(num_total_qubits)
+    target_circuit.x(0)
+    target_circuit.h(0)
+    target_circuit.y(0)
+    return target_circuit
 
 def objective(trial):
     

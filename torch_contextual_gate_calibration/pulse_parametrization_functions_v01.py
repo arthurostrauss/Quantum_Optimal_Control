@@ -176,30 +176,6 @@ def get_target_gate(gate: Gate, register: Union[tuple[int], list[int]]):
     return target
 
 # %%
-def get_circuit_context(num_total_qubits: int):
-    """
-    TODO Move this function to input file
-        - Introduce another argument that provides a sequence of gates and the register that it is to be applied to
-        - E.g., list((register (int), operation (str))): [(0, 'x'), (0, 'h'), (0, 'y')]
-        - Write a helper function that maps the tuple's entries to qiskit commands
-
-    Creates and returns the ``context`` quantum circuit which will then later be transpiled. Within this later transpiled version,
-    the target gate will appear whose pulse parameters will then be parametrized and optimized.
-
-    Args:
-        - num_total_qubits (int): The total number of qubits in the quantum circuit.
-
-    Returns:
-        QuantumCircuit: A quantum circuit object with the specified number of qubits and a predefined
-                    sequence of gates applied to the first qubit.
-    """
-    target_circuit = QuantumCircuit(num_total_qubits)
-    target_circuit.x(0)
-    target_circuit.h(0)
-    target_circuit.y(0)
-    return target_circuit
-
-# %%
 def transpile_circuit(target_circuit: QuantumCircuit, fake_backend: Backend):
     """
     This function takes a quantum circuit and transpiles it for a given backend (which can be a real
