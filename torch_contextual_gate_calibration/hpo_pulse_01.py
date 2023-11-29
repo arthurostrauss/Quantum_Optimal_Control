@@ -173,7 +173,7 @@ def save_pickle(best_trial, best_run):
         pickle.dump(best_run, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 def log_results(runtime, study):
-    # Log the results of the HPO run
+    """ Log the results of the HPO run """
     logging.warning(f"HPO RUNTIME: {int(runtime)} SEC")
 
     print("Number of finished trials: ", len(study.trials))
