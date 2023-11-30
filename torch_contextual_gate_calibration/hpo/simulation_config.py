@@ -20,7 +20,7 @@ from qconfig import SimulationConfig
 -----------------------------------------------------------------------------------------------------
 """
 # Load the configuration from the JSON file
-with open('torch_contextual_gate_calibration/config.json', 'r') as file:
+with open('torch_contextual_gate_calibration/hpo/config.json', 'r') as file:
     config = json.load(file)
 
 config = map_json_inputs(config)

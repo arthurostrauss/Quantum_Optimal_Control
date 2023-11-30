@@ -168,7 +168,7 @@ def hyperparameter_optimization(n_trials):
 
 def save_pickle(best_trial, best_run):
     # Save the best run configuration as a hashed file (here pickle)
-    pickle_file_name = f"torch_contextual_gate_calibration/hpo_results/return_{best_trial.value}.pickle" 
+    pickle_file_name = f"torch_contextual_gate_calibration/hpo/hpo_results/return_{best_trial.value}.pickle" 
     with open(pickle_file_name, 'wb') as handle:
         pickle.dump(best_run, handle, protocol=pickle.HIGHEST_PROTOCOL)
 

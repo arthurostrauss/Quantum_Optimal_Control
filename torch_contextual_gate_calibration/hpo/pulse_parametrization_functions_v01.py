@@ -21,6 +21,9 @@ if module_path not in sys.path:
 from basis_gate_library import FixedFrequencyTransmon
 from helper_functions import remove_unused_wires, get_solver_and_freq_from_backend
 from quantumenvironment import QuantumEnvironment
+module_path = os.path.abspath(os.path.join('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control/torch_contextual_gate_calibration'))
+if module_path not in sys.path:
+    sys.path.append(module_path)
 from torch_quantum_environment import TorchQuantumEnvironment
 
 import jax
