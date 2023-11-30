@@ -26,16 +26,16 @@ with open('torch_contextual_gate_calibration/config.json', 'r') as file:
 config = map_json_inputs(config)
 
 sim_config = SimulationConfig(
-                              abstraction_level=config['abstraction_level'],
-                              target_gate=config['target_gate'],
-                              register=config['register'],
-                              fake_backend=config['fake_backend'],
-                              fake_backend_v2=config['fake_backend_v2'],
-                              n_actions=config['n_actions'],
-                              sampling_Paulis=config['sampling_Paulis'],
-                              n_shots=config['n_shots'],
-                              device=config['device'],
-                              )
+    abstraction_level=config['abstraction_level'],
+    target_gate=config['target_gate'],
+    register=config['register'],
+    fake_backend=config['fake_backend'],
+    fake_backend_v2=config['fake_backend_v2'],
+    n_actions=config['n_actions'],
+    sampling_Paulis=config['sampling_Paulis'],
+    n_shots=config['n_shots'],
+    device=config['device'],
+)
 
 # %%
 def get_circuit_context(num_total_qubits: int):

@@ -35,10 +35,10 @@ from qiskit import transpile
 from qiskit_dynamics.backend.dynamics_backend import DynamicsBackend
 from qiskit_dynamics import Solver
 from qiskit.circuit import QuantumCircuit, QuantumRegister, ParameterVector, Gate
-from qiskit.circuit.library.standard_gates import XGate, SXGate, YGate, ZGate, ECRGate
+from qiskit.circuit.library.standard_gates import XGate, SXGate, YGate, ZGate, HGate, CXGate, SGate, ECRGate
 from qiskit.providers import Backend, BackendV1
 from qiskit_experiments.calibration_management import Calibrations
-from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
+from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2, FakeMelbourne, FakeMelbourneV2, FakeRome, FakeRomeV2, FakeSydney, FakeSydneyV2, FakeValencia, FakeValenciaV2, FakeVigo, FakeVigoV2, FakeJakarta, FakeJakartaV2
 # from qiskit.visualization import plot_coupling_map, plot_circuit_layout, gate_map, plot_gate_map
 from qiskit_ibm_runtime.options import Options, ExecutionOptions
 from qconfig import QiskitConfig
@@ -54,37 +54,65 @@ from gymnasium.spaces import Box
 
 from IPython.display import clear_output
 
+import logging
+# Create a custom logger with the level WARNING because INFO would trigger too many log message by qiskit itself
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s INFO %(message)s", # hardcoded INFO level
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
 
 
 def map_json_inputs(config):
     """
     Map input parameters from a json file to the corresponding Python objects.
     """
-    
-    # Map 'target_gate'
-    target_gate = config['target_gate']
-    if target_gate in ['XGate', 'x', 'X', 'xgate', 'Xgate']:
-        config['target_gate'] = XGate()
-    elif target_gate in ['SXGate', 'sx', 'SX', 'sxgate', 'SXgate']:
-        config['target_gate'] = SXGate()
-    elif target_gate in ['yGate', 'y', 'Y', 'ygate', 'Ygate']:
-        config['target_gate'] = YGate()
-    elif target_gate in ['zGate', 'z', 'Z', 'zgate', 'Zgate']:
-        config['target_gate'] = ZGate()
 
-    # Map 'fake_backend'
-    if config['fake_backend'] == 'FakeJakarta':
-        config['fake_backend'] = FakeJakarta()
+    quantum_gates_mapping = {
+        'XGate': XGate(),
+        'YGate': YGate(),
+        'ZGate': ZGate(),
+        'HGate': HGate(),
+        'CXGate': CXGate(),
+        'SGate': SGate(),
+    }
+    try:
+        config['target_gate'] = quantum_gates_mapping[config['target_gate']]
+    except KeyError:
+        logging.warning(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling.")
+        raise KeyError(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling.")
 
-    # Map 'fake_backend_v2'
-    if config['fake_backend_v2'] == 'FakeJakartaV2':
-        config['fake_backend_v2'] = FakeJakartaV2()
+    fake_backends_mapping = {
+        'FakeMelbourne': FakeMelbourne(),
+        'FakeMelbourneV2': FakeMelbourneV2(),
+        'FakeRome': FakeRome(),
+        'FakeRomeV2': FakeRomeV2(),
+        'FakeSydney': FakeSydney(),
+        'FakeSydneyV2': FakeSydneyV2(),
+        'FakeValencia': FakeValencia(),
+        'FakeValenciaV2': FakeValenciaV2(),
+        'FakeVigo': FakeVigo(),
+        'FakeVigoV2': FakeVigoV2(),
+        'FakeJakarta': FakeJakarta(),
+        'FakeJakartaV2': FakeJakartaV2(),
+    }
+    try:
+        config['fake_backend'] = fake_backends_mapping[config['fake_backend']]
+        config['fake_backend_v2'] = fake_backends_mapping[config['fake_backend_v2']]
+    except KeyError:
+        logging.warning(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling.")
+        raise KeyError(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling.")
 
-    # Map 'device'
-    if config['device'] == 'cpu':
-        config['device'] = torch.device('cpu')
-    else:
-        config['device'] = torch.device('cuda')
+    torch_devices_mapping = {
+        'cpu': torch.device('cpu'),
+        'cuda': torch.device('cuda:0'),  # Assuming you have a CUDA-enabled GPU
+    }
+    try:
+        config['device'] = torch_devices_mapping[config['device']]
+    except KeyError:
+        logging.warning(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling.")
+        raise KeyError(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling.")
 
     return config
 
