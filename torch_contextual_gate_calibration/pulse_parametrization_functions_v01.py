@@ -35,7 +35,7 @@ from qiskit import transpile
 from qiskit_dynamics.backend.dynamics_backend import DynamicsBackend
 from qiskit_dynamics import Solver
 from qiskit.circuit import QuantumCircuit, QuantumRegister, ParameterVector, Gate
-from qiskit.circuit.library.standard_gates import ECRGate, SXGate, XGate
+from qiskit.circuit.library.standard_gates import XGate, SXGate, YGate, ZGate, ECRGate
 from qiskit.providers import Backend, BackendV1
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
@@ -56,7 +56,37 @@ from IPython.display import clear_output
 
 
 
+def map_json_inputs(config):
+    """
+    Map input parameters from a json file to the corresponding Python objects.
+    """
+    
+    # Map 'target_gate'
+    target_gate = config['target_gate']
+    if target_gate in ['XGate', 'x', 'X', 'xgate', 'Xgate']:
+        config['target_gate'] = XGate()
+    elif target_gate in ['SXGate', 'sx', 'SX', 'sxgate', 'SXgate']:
+        config['target_gate'] = SXGate()
+    elif target_gate in ['yGate', 'y', 'Y', 'ygate', 'Ygate']:
+        config['target_gate'] = YGate()
+    elif target_gate in ['zGate', 'z', 'Z', 'zgate', 'Zgate']:
+        config['target_gate'] = ZGate()
 
+    # Map 'fake_backend'
+    if config['fake_backend'] == 'FakeJakarta':
+        config['fake_backend'] = FakeJakarta()
+
+    # Map 'fake_backend_v2'
+    if config['fake_backend_v2'] == 'FakeJakartaV2':
+        config['fake_backend_v2'] = FakeJakartaV2()
+
+    # Map 'device'
+    if config['device'] == 'cpu':
+        config['device'] = torch.device('cpu')
+    else:
+        config['device'] = torch.device('cuda')
+
+    return config
 
 
 def get_sx_params(backend, physical_qubits):

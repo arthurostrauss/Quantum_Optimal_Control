@@ -1,0 +1,11 @@
+{
+    "abstraction_level": "pulse",
+    "target_gate": "XGate",
+    "register": [0],
+    "fake_backend": "FakeJakarta",
+    "fake_backend_v2": "FakeJakartaV2",
+    "n_actions": 4,
+    "sampling_Paulis": 50,
+    "n_shots": 200,
+    "device": "cpu"
+}

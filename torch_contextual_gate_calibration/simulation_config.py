@@ -10,25 +10,32 @@ from qiskit.circuit.library import XGate
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
 
 import torch
+import json
 
+from pulse_parametrization_functions_v01 import map_json_inputs
 from qconfig import SimulationConfig
 """
 -----------------------------------------------------------------------------------------------------
     User Input: Simulation parameters
 -----------------------------------------------------------------------------------------------------
 """
-sim_config = SimulationConfig(
-                              abstraction_level="pulse",
-                              target_gate=XGate(),
-                              register=[0],
-                              fake_backend=FakeJakarta(),
-                              fake_backend_v2=FakeJakartaV2(),
-                              n_actions=4,
-                              sampling_Paulis=50,
-                              n_shots=200,
-                              device=torch.device("cpu")
-                              )
+# Load the configuration from the JSON file
+with open('torch_contextual_gate_calibration/config.json', 'r') as file:
+    config = json.load(file)
 
+config = map_json_inputs(config)
+
+sim_config = SimulationConfig(
+                              abstraction_level=config['abstraction_level'],
+                              target_gate=config['target_gate'],
+                              register=config['register'],
+                              fake_backend=config['fake_backend'],
+                              fake_backend_v2=config['fake_backend_v2'],
+                              n_actions=config['n_actions'],
+                              sampling_Paulis=config['sampling_Paulis'],
+                              n_shots=config['n_shots'],
+                              device=config['device'],
+                              )
 
 # %%
 def get_circuit_context(num_total_qubits: int):
