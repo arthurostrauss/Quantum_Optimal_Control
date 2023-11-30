@@ -90,7 +90,8 @@ def objective(trial):
     # %%
     qubit_properties, dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(sim_config.sampling_Paulis, sim_config.n_shots, physical_qubits, sim_config.fake_backend, sim_config.fake_backend_v2)
     # %%
-    _, _, q_env = get_db_qiskitconfig(sim_config.fake_backend, target, physical_qubits, qubit_properties, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
+    gate_str = 'x'
+    _, _, q_env = get_db_qiskitconfig(sim_config.fake_backend, target, physical_qubits, gate_str, qubit_properties, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
     # %%
     torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)
 
@@ -121,8 +122,6 @@ def objective(trial):
     }
 
     optimizer = optim.Adam(agent.parameters(), lr=training_parameters['lr_actor'], eps=1e-5)
-    # actor_optimizer = optim.Adam(actor_net.parameters(), lr=training_parameters['lr_actor'], eps=1e-5)
-    # critic_optimizer = optim.Adam(critic_net.parameters(), lr=training_parameters['lr_actor'], eps=1e-5)
 
     # %%
     ### Training ###

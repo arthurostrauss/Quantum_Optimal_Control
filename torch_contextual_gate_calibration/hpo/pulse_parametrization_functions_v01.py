@@ -120,7 +120,7 @@ def map_json_inputs(config):
     return config
 
 
-def get_sx_params(backend, physical_qubits):
+def get_gate_params(backend, physical_qubits, gate_str):
     """
     Retrieve parameters for an SX gate from a quantum backend.
 
@@ -143,23 +143,23 @@ def get_sx_params(backend, physical_qubits):
     else:
         instruction_schedule_map = backend.target.instruction_schedule_map()
 
-    basis_gate_instructions = instruction_schedule_map.get('sx', qubits=physical_qubits)
+    basis_gate_instructions = instruction_schedule_map.get(gate_str, qubits=physical_qubits)
     
-    instructions_array = np.array(basis_gate_instructions.instructions)[:,1]
+    instructions_array = np.array(basis_gate_instructions.instructions)[:, 1]
 
-    sx_pulse = basis_gate_instructions.instructions[0][1].pulse 
+    gate_pulse = basis_gate_instructions.instructions[0][1].pulse 
 
     default_params = {
-        ("amp", physical_qubits, "sx"): sx_pulse.amp,
-        # ("angle", physical_qubits, "sx"): sx_pulse.angle,
-        ("β", physical_qubits, 'sx'): sx_pulse.beta,
-        ("σ", physical_qubits, "sx"): sx_pulse.sigma,
-        ("duration", physical_qubits, "sx"): sx_pulse.duration
+        ("amp", physical_qubits, gate_str): gate_pulse.amp,
+        # ("angle", physical_qubits, gate_str): gate_pulse.angle,
+        ("β", physical_qubits, gate_str): gate_pulse.beta,
+        ("σ", physical_qubits, gate_str): gate_pulse.sigma,
+        ("duration", physical_qubits, gate_str): gate_pulse.duration
     }
 
     return default_params, basis_gate_instructions, instructions_array
 
-def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None, n_actions: int=4):
+def custom_gate_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None, n_actions: int=4, gate_str: str=None):
     """
     Generate a custom parameterized schedule for an SX gate.
 
@@ -183,19 +183,19 @@ def custom_sx_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, 
     if isinstance(physical_qubits, int):
         physical_qubits = tuple(physical_qubits)
 
-    new_params, _, _ = get_sx_params(backend=fake_backend, physical_qubits=physical_qubits)
+    new_params, _, _ = get_gate_params(backend=fake_backend, physical_qubits=physical_qubits, gate_str=gate_str)
 
     for i, feature in enumerate(pulse_features):
-        new_params[(feature, physical_qubits, "sx")] += params[i]
+        new_params[(feature, physical_qubits, gate_str)] += params[i]
 
     cals = Calibrations.from_backend(fake_backend, [FixedFrequencyTransmon(["x", "sx"])],
                                         add_parameter_defaults=True)
     
-    parametrized_schedule = cals.get_schedule("sx", physical_qubits, assign_params=new_params)
+    parametrized_schedule = cals.get_schedule(gate_str, physical_qubits, assign_params=new_params)
 
     return parametrized_schedule
 
-def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None, fake_backend: BackendV1 = FakeJakarta(), n_actions: int=4, target: dict=None):
+def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None, fake_backend: BackendV1 = FakeJakarta(), n_actions: int=4, target: dict=None, gate_str: str=None):
     """
     Add a parametrized gate to a QuantumCircuit.
 
@@ -214,8 +214,9 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
     if tgt_register is None:
         tgt_register = qc.qregs[0]
 
-    parametrized_gate = Gate(name='sx_cal', num_qubits=1, params=params)
-    parametrized_schedule = custom_sx_schedule(fake_backend=fake_backend, physical_qubits=physical_qubits, params=params)
+    gate_name = gate_str + '_cal'
+    parametrized_gate = Gate(name=gate_name, num_qubits=1, params=params)
+    parametrized_schedule = custom_gate_schedule(fake_backend=fake_backend, physical_qubits=physical_qubits, params=params, gate_str=gate_str)
     qc.add_calibration(parametrized_gate, physical_qubits, parametrized_schedule)
     qc.append(parametrized_gate, tgt_register)
 
@@ -237,10 +238,10 @@ def get_target_gate(gate: Gate, register: Union[tuple[int], list[int]]):
               the list of qubit indices.
     """
     target = {
-               "gate": gate, 
-               "register": register,
-              }
-    print('Target: ', target)
+        "gate": gate, 
+        "register": register,
+    }
+    # logging.warning('Target: ', target['gate'])
 
     return target
 
@@ -374,7 +375,7 @@ def get_own_solver(qubit_properties):
     return custom_backend2
 
 
-def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tuple, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
+def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
     """
     Configures and returns a quantum environment setup for Qiskit simulations.
 
@@ -407,7 +408,7 @@ def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tu
     dynamics_backend.target.qubit_properties = qubit_properties
 
     # Create a partial function with target passed
-    parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target)
+    parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target, gate_str='sx')
 
     Qiskit_setup = QiskitConfig(parametrized_circuit=parametrized_circuit_with_target, backend=dynamics_backend,
                                 estimator_options=estimator_options, channel_freq=channel_freq,
