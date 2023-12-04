@@ -4,7 +4,7 @@ import datetime
 
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.states.quantum_state import QuantumState
-from qiskit_dynamics import DynamicsBackend, Solver, Signal, RotatingFrame
+from qiskit_dynamics import DynamicsBackend, Solver, Signal, RotatingFrame, solve_lmde
 from qiskit_dynamics.solvers.solver_classes import format_final_states, validate_and_format_initial_state
 from typing import Optional, List, Union, Callable, Tuple
 
@@ -16,7 +16,7 @@ from qiskit_dynamics.models.hamiltonian_model import is_hermitian
 from qiskit_dynamics.type_utils import to_numeric_matrix_type
 from qiskit import QuantumCircuit
 from qiskit.result import Result
-from qiskit.quantum_info import Statevector
+from qiskit.quantum_info import Statevector, Operator
 from qiskit.pulse import Schedule, ScheduleBlock
 from qiskit_dynamics.array import Array
 import jax
@@ -29,6 +29,39 @@ jit = wrap(jax.jit, decorator=True)
 qd_vmap = wrap(vmap, decorator=True)
 
 Runnable = Union[QuantumCircuit, Schedule, ScheduleBlock]
+
+I = jnp.array([[1.0, 0.0], [0.0, 1.0]])
+H = 1 / jnp.sqrt(2) * jnp.array([[1.0, 1.0], [1.0, -1.0]])
+S = jnp.array([[1.0, 0.0], [0.0, 1.0j]])
+SH = S.conj().T @ H
+
+base_gates_dict = {
+    "I": I,
+    "X": H,
+    "Y": SH,
+    "Z": I,
+}
+
+
+def PauliToQuditOperator(qubit_ops: List[Operator], qudit_dim_size: Optional[int] = 4):
+    """
+    This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
+    arbitrary dimension qudit operators that are the equivalent of the Qubit Operators desired.
+
+    This functionality is useful for qudit simulations of standard qubit workflows like state preparation
+    and choosing measurement observables, without losing any information from the simulation.
+
+    All operators produced remain as unitaries.
+    """
+    qudit_op_list = []
+    for op in qubit_ops:
+        qud_op = np.identity(qudit_dim_size, dtype=np.complex64)
+        qud_op[:2, :2] = op.to_matrix()
+        qudit_op_list.append(qud_op)
+    complete_op = qudit_op_list[0]
+    for i in range(1, len(qudit_op_list)):
+        complete_op = np.kron(complete_op, qudit_op_list[i])
+    return Operator(complete_op)
 
 
 class JaxSolver(Solver):
@@ -115,13 +148,12 @@ class JaxSolver(Solver):
         )
         self._schedule_func = schedule_func
 
-
     @property
     def circuit_macro(self):
         return self._schedule_func
 
     @circuit_macro.setter
-    def set_macro(self, func):
+    def circuit_macro(self, func):
         """
         This setter should be done each time one wants to switch the target circuit truncation
         """
@@ -137,22 +169,54 @@ class JaxSolver(Solver):
     ) -> List[OdeResult]:
 
         param_dicts = kwargs["parameter_dicts"]
-        relevant_params = param_dicts[0].keys()
-        observables_circuits = kwargs["observables"]
+        param_names = param_dicts[0].keys()
         param_values = kwargs["parameter_values"]
-        for key in ["parameter_dicts", "parameter_values", "parameter_values"]:
+        observables_circuits: List[QuantumCircuit] = [circ.remove_final_measurements(inplace=False)
+                                                      for circ in kwargs["observables"]]
+        pauli_rotations = [[Operator.from_label("I") for _ in range(circ.num_qubits)] for circ in observables_circuits]
+        for i, circuit in enumerate(observables_circuits):
+            qubit_counter = 0
+            qubit_list = []
+            for circuit_instruction in circuit.data:
+                if circuit_instruction.qubits not in qubit_list:
+                    qubit_list.append(circuit_instruction.qubits)
+                    qubit_counter += 1
+                pauli_rotations[i][qubit_counter - 1].compose(Operator(circuit_instruction.operation))
+        observables = [PauliToQuditOperator(pauli_rotations[i], self.model.dim) for i in range(len(pauli_rotations))]
+
+        for key in ["parameter_dicts", "parameter_values", "observables"]:
             kwargs.pop(key)
 
-        def sim_function(params, t_span, y0_input, y0_cls):
+        def sim_function(t_span, y0, params, y0_input, y0_cls):
             parametrized_schedule = self.circuit_macro()
+            model_sigs = self.model.signals
 
             parametrized_schedule.assign_parameters({param_obj: param
-                                                     for (param_obj, param) in zip(relevant_params, params)})
+                                                     for (param_obj, param) in zip(param_names, params)})
             signals = self._schedule_converter.get_signals(parametrized_schedule)
-            
-            # Perhaps replace below by solve_lmde
-            results = self.solve(t_span, y0_input, signals, **kwargs)
+            self._set_new_signals(signals)
+            results = solve_lmde(generator=self.model, t_span=t_span, y0=y0, **kwargs)
             results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
+            self.model.signals = model_sigs
 
             return Array(results.t).data, Array(results.y).data
+
+        jit_func = jit(sim_function)
+        all_results = []
+        for t_span, y0 in zip(t_span_list, y0_list):
+            # setup initial state
+            y0, y0_input, y0_cls, state_type_wrapper = validate_and_format_initial_state(
+                y0, self.model
+            )
+            results_t, results_y = jit_func(t_span, y0, param_values, y0_input, y0_cls)
+            for observable in observables:
+                final_results_y = observable @ results_y
+                results = OdeResult(t=results_t, y=Array(final_results_y, backend="jax", dtype=complex))
+
+                if y0_cls is not None and convert_results:
+                    results.y = [state_type_wrapper(yi) for yi in results.y]
+
+                all_results.append(results)
+
+        return all_results
 

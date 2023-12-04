@@ -901,7 +901,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     def param_schedule():
                         return schedule(training_circ, self.backend)
 
-                    self.backend.options.solver.set_macro(func=param_schedule)
+                    self.backend.options.solver.circuit_macro(func=param_schedule)
                 job = self.estimator.run(
                     circuits=[training_circ] * self.batch_size,
                     observables=[observables] * self.batch_size,
@@ -915,6 +915,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                 raise exc
             scaling_reward_factor = len(observables) / 4 ** len(self.tgt_register)
             reward_table *= scaling_reward_factor
+            reward_table = -np.log10(1-reward_table)
             print("Job done")
 
         if np.mean(reward_table) > self._max_return:
