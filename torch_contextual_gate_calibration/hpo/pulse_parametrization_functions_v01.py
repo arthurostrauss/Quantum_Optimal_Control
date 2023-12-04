@@ -83,8 +83,10 @@ def map_json_inputs(config):
     try:
         config['target_gate'] = quantum_gates_mapping[config['target_gate']]
     except KeyError:
-        logging.warning(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling.")
-        raise KeyError(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling.")
+        logging.warning(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling. Example: 'XGate'")
+        raise KeyError(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling. Example: 'XGate'")
+
+
 
     fake_backends_mapping = {
         'FakeMelbourne': FakeMelbourne(),
@@ -104,8 +106,8 @@ def map_json_inputs(config):
         config['fake_backend'] = fake_backends_mapping[config['fake_backend']]
         config['fake_backend_v2'] = fake_backends_mapping[config['fake_backend_v2']]
     except KeyError:
-        logging.warning(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling.")
-        raise KeyError(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling.")
+        logging.warning(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
+        raise KeyError(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
 
     torch_devices_mapping = {
         'cpu': torch.device('cpu'),
@@ -114,8 +116,8 @@ def map_json_inputs(config):
     try:
         config['device'] = torch_devices_mapping[config['device']]
     except KeyError:
-        logging.warning(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling.")
-        raise KeyError(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling.")
+        logging.warning(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling. Choose either: 'cpu' and 'cuda'")
+        raise KeyError(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling. Choose either: 'cpu' and 'cuda'")
 
     return config
 
@@ -241,8 +243,6 @@ def get_target_gate(gate: Gate, register: Union[tuple[int], list[int]]):
         "gate": gate, 
         "register": register,
     }
-    # logging.warning('Target: ', target['gate'])
-
     return target
 
 # %%
@@ -298,7 +298,7 @@ def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, fake_backen
     return qubit_properties, dynamics_options, estimator_options, channel_freq, solver
 
 
-def get_own_solver(qubit_properties):
+def get_own_solver():
     """
     This function constructs a Hamiltonian representing two coupled qubits and their interaction dynamics.
     It initializes the solver with this Hamiltonian and various operational parameters like channel frequencies
@@ -312,11 +312,7 @@ def get_own_solver(qubit_properties):
                            the static Hamiltonian, drive operations, rotating frame, and other solver options.
     """
 
-    qubit_properties, _, _, _, _ = get_estimator_options()
-
     dim = 3
-
-    v = [prop.frequency for prop in qubit_properties]
     v0 = 4.86e9
     anharm0 = -0.32e9
     r0 = 0.22e9
@@ -367,12 +363,12 @@ def get_own_solver(qubit_properties):
     # Consistent solver option to use throughout notebook
     solver_options = {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8}
 
-    custom_backend2 = DynamicsBackend(
+    custom_backend = DynamicsBackend(
         solver=solver,
         subsystem_dims=[dim, dim], # for computing measurement data
         solver_options=solver_options, # to be used every time run is called
     )
-    return custom_backend2
+    return custom_backend
 
 
 def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):

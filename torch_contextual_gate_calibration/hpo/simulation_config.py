@@ -4,13 +4,9 @@ Helper file that allows a user to specify the parameters for the gate calibratio
 Author: Lukas Voss
 Created on 29/11/2023
 """
-
-from qiskit.circuit import QuantumCircuit
-from qiskit.circuit.library import XGate
-from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2
-
-import torch
 import json
+from qiskit.circuit import QuantumCircuit
+
 
 from pulse_parametrization_functions_v01 import map_json_inputs
 from qconfig import SimulationConfig
@@ -22,7 +18,6 @@ from qconfig import SimulationConfig
 # Load the configuration from the JSON file
 with open('torch_contextual_gate_calibration/hpo/config.json', 'r') as file:
     config = json.load(file)
-
 config = map_json_inputs(config)
 
 sim_config = SimulationConfig(

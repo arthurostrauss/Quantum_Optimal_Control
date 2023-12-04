@@ -22,12 +22,11 @@ import sys
 import logging
 import time
 
-import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from pulse_parametrization_functions_v01 import (
-   get_target_gate, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
+   get_own_solver, get_target_gate, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
 )
 from simulation_config import sim_config, get_circuit_context
 
@@ -80,7 +79,7 @@ def positive_integer(value):
 
 
 def objective(trial):
-    
+
     target = get_target_gate(gate=sim_config.target_gate, register=sim_config.register)
     physical_qubits = tuple(target["register"])
 
@@ -194,7 +193,7 @@ if __name__ == "__main__":
     best_trial = log_results(runtime, study)
 
     # Fetch and display the best trial's action vector
-    best_action_vector = study.best_trial.user_attrs["action vector"]
+    best_action_vector = study.best_trial.user_attrs['action vector']
 
     # Save best hyperparameters to hashed file (e.g., using pickle)    
     best_run = {'avg_return': best_trial.value,
