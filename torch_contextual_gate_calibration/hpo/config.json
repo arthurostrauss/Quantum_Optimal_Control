@@ -1,6 +1,6 @@
 {
     "abstraction_level": "pulse",
-    "target_gate": "ZGate",
+    "target_gate": "XGate",
     "register": [0],
     "fake_backend": "FakeJakarta",
     "fake_backend_v2": "FakeJakartaV2",

@@ -408,7 +408,7 @@ def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tu
     dynamics_backend.target.qubit_properties = qubit_properties
 
     # Create a partial function with target passed
-    parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target, gate_str='sx')
+    parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target, gate_str=gate_str)
 
     Qiskit_setup = QiskitConfig(parametrized_circuit=parametrized_circuit_with_target, backend=dynamics_backend,
                                 estimator_options=estimator_options, channel_freq=channel_freq,

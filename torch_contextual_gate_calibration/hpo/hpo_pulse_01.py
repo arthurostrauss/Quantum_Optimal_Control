@@ -95,8 +95,7 @@ def objective(trial):
     # %%
     torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)
 
-    # %%
-    # device = torch.device("cpu")
+    # %
     _, _, agent = get_network(sim_config.device, observation_space, sim_config.n_actions)
 
     """
