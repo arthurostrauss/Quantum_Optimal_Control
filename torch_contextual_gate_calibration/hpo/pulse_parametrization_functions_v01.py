@@ -277,7 +277,7 @@ def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, fake_backen
                         'seed_simulator': None,
                         "solver_options": {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8, "hmax":dt}
                         }
-    qubit_properties = fake_backend_v2.qubit_properties(physical_qubits)
+    # qubit_properties = fake_backend_v2.qubit_properties(physical_qubits)
 
     # Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
     # fidelity benchmarking
@@ -295,7 +295,7 @@ def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, fake_backen
     estimator_options = Options(resilience_level=0, optimization_level=0, 
                                 execution= ExecutionOptions(shots=N_shots*sampling_Paulis))
     
-    return qubit_properties, dynamics_options, estimator_options, channel_freq, solver
+    return dynamics_options, estimator_options, channel_freq, solver
 
 
 def get_own_solver():
@@ -371,7 +371,7 @@ def get_own_solver():
     return custom_backend
 
 
-def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, qubit_properties, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
+def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
     """
     Configures and returns a quantum environment setup for Qiskit simulations.
 
@@ -401,7 +401,7 @@ def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tu
     This function assumes the availability of certain global variables and specific library imports.
     """
     dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=physical_qubits, **dynamics_options)
-    dynamics_backend.target.qubit_properties = qubit_properties
+    # dynamics_backend.target.qubit_properties = qubit_properties
 
     # Create a partial function with target passed
     parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target, gate_str=gate_str)
