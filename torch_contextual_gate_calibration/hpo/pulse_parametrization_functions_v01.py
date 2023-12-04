@@ -41,7 +41,8 @@ from qiskit.circuit import QuantumCircuit, QuantumRegister, ParameterVector, Gat
 from qiskit.circuit.library.standard_gates import XGate, SXGate, YGate, ZGate, HGate, CXGate, SGate, ECRGate
 from qiskit.providers import Backend, BackendV1
 from qiskit_experiments.calibration_management import Calibrations
-from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2, FakeMelbourne, FakeMelbourneV2, FakeRome, FakeRomeV2, FakeSydney, FakeSydneyV2, FakeValencia, FakeValenciaV2, FakeVigo, FakeVigoV2, FakeJakarta, FakeJakartaV2
+from qiskit.providers.fake_provider import FakeProvider, FakeJakarta, FakeJakartaV2, FakeMelbourne, FakeMelbourneV2, FakeRome, FakeRomeV2, FakeSydney, FakeSydneyV2, FakeValencia, FakeValenciaV2, FakeVigo, FakeVigoV2, FakeJakarta, FakeJakartaV2
+from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
 # from qiskit.visualization import plot_coupling_map, plot_circuit_layout, gate_map, plot_gate_map
 from qiskit_ibm_runtime.options import Options, ExecutionOptions
 from qconfig import QiskitConfig
@@ -65,60 +66,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
-
-
-def map_json_inputs(config):
-    """
-    Map input parameters from a json file to the corresponding Python objects.
-    """
-
-    quantum_gates_mapping = {
-        'XGate': XGate(),
-        'YGate': YGate(),
-        'ZGate': ZGate(),
-        'HGate': HGate(),
-        'CXGate': CXGate(),
-        'SGate': SGate(),
-    }
-    try:
-        config['target_gate'] = quantum_gates_mapping[config['target_gate']]
-    except KeyError:
-        logging.warning(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling. Example: 'XGate'")
-        raise KeyError(f"Target gate {config['target_gate']} not found in the quantum gates mapping. Please check the spelling. Example: 'XGate'")
-
-
-
-    fake_backends_mapping = {
-        'FakeMelbourne': FakeMelbourne(),
-        'FakeMelbourneV2': FakeMelbourneV2(),
-        'FakeRome': FakeRome(),
-        'FakeRomeV2': FakeRomeV2(),
-        'FakeSydney': FakeSydney(),
-        'FakeSydneyV2': FakeSydneyV2(),
-        'FakeValencia': FakeValencia(),
-        'FakeValenciaV2': FakeValenciaV2(),
-        'FakeVigo': FakeVigo(),
-        'FakeVigoV2': FakeVigoV2(),
-        'FakeJakarta': FakeJakarta(),
-        'FakeJakartaV2': FakeJakartaV2(),
-    }
-    try:
-        config['backend'] = fake_backends_mapping[config['backend']]
-    except KeyError:
-        logging.warning(f"Fake backend {config['backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
-        raise KeyError(f"Fake backend {config['backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
-
-    torch_devices_mapping = {
-        'cpu': torch.device('cpu'),
-        'cuda': torch.device('cuda:0'),  # Assuming you have a CUDA-enabled GPU
-    }
-    try:
-        config['device'] = torch_devices_mapping[config['device']]
-    except KeyError:
-        logging.warning(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling. Choose either: 'cpu' and 'cuda'")
-        raise KeyError(f"Torch device {config['device']} not found in the torch devices mapping. Please check the spelling. Choose either: 'cpu' and 'cuda'")
-
-    return config
 
 
 def get_gate_params(backend, physical_qubits, gate_str):
@@ -239,8 +186,8 @@ def get_target_gate(gate: Gate, register: Union[tuple[int], list[int]]):
               the list of qubit indices.
     """
     target = {
-        "gate": gate, 
-        "register": register,
+        'gate': gate, 
+        'register': register,
     }
     return target
 
@@ -273,9 +220,9 @@ def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, backend):
     dt = backend.configuration().dt
 
     dynamics_options = {
-                        'seed_simulator': None,
-                        "solver_options": {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8, "hmax":dt}
-                        }
+        'seed_simulator': None,
+        'solver_options': {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8, "hmax":dt}
+    }
 
     # Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
     # fidelity benchmarking
@@ -398,8 +345,12 @@ def get_db_qiskitconfig(backend: Backend, target: dict, physical_qubits: tuple, 
     Note:
     This function assumes the availability of certain global variables and specific library imports.
     """
-    dynamics_backend = DynamicsBackend.from_backend(backend, subsystem_list=physical_qubits, **dynamics_options)
-    # dynamics_backend.target.qubit_properties = qubit_properties
+    if isinstance(backend, (FakeBackend, FakeBackendV2)):
+        # Create a DynamicalBackend from the FakeProvider
+        dynamics_backend = DynamicsBackend.from_backend(backend, subsystem_list=physical_qubits, **dynamics_options)
+    else:
+        # Create a DynamicalBackend from the custom solver based on a Hamiltonian
+        dynamics_backend = get_own_solver()
 
     # Create a partial function with target passed
     parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target, gate_str=gate_str)

@@ -89,7 +89,7 @@ def objective(trial):
     # %%
     dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(sim_config.sampling_Paulis, sim_config.n_shots, physical_qubits, sim_config.backend)
     # %%
-    gate_str = 'x'
+    gate_str = sim_config.gate_str
     _, _, q_env = get_db_qiskitconfig(sim_config.backend, target, physical_qubits, gate_str, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
     # %%
     torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)

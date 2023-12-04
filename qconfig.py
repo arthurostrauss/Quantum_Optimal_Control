@@ -52,6 +52,7 @@ class SimulationConfig:
     
     Args:
         abstraction_level (str): The abstraction level of the simulation. Can be either ``'ideal'`` or ``'pulse'``.
+        gate_str (str): The string representation of the target gate.
         target_gate (Gate): The target gate to calibrate.
         register (List[int]): The register on which the target gate is applied.
         custum_backend (Backend): The custom backend to use for the simulation.
@@ -64,6 +65,7 @@ class SimulationConfig:
     """
 
     abstraction_level: str = None
+    gate_str: str = None
     target_gate: Gate = None
     register: List[int] = None
     custum_backend: Optional[Backend] = None
