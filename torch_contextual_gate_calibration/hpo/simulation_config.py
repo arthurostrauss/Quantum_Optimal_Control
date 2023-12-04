@@ -4,13 +4,9 @@ Helper file that allows a user to specify the parameters for the gate calibratio
 Author: Lukas Voss
 Created on 29/11/2023
 """
-import json
 from qiskit.circuit import QuantumCircuit, QuantumRegister, ParameterVector, Gate
 from qiskit.circuit.library.standard_gates import XGate, SXGate, YGate, ZGate, HGate, CXGate, SGate, ECRGate
-from qiskit.providers import Backend, BackendV1
-from qiskit_experiments.calibration_management import Calibrations
 from qiskit.providers.fake_provider import FakeJakarta, FakeJakartaV2, FakeMelbourne, FakeMelbourneV2, FakeRome, FakeRomeV2, FakeSydney, FakeSydneyV2, FakeValencia, FakeValenciaV2, FakeVigo, FakeVigoV2, FakeJakarta, FakeJakartaV2
-
 
 from pulse_parametrization_functions_v01 import map_json_inputs
 from qconfig import SimulationConfig
@@ -19,45 +15,44 @@ from qconfig import SimulationConfig
     User Input: Simulation parameters
 -----------------------------------------------------------------------------------------------------
 """
-# Load the configuration from the JSON file
-with open('torch_contextual_gate_calibration/hpo/config.json', 'r') as file:
-    config = json.load(file)
-config = map_json_inputs(config)
+def get_backend():
+    ### 
+    # TODO: Set Backend
+    ###
+    backend = None
+    backend = FakeJakarta()
+    return backend
 
 
-### 
-# Set Backend
-###
-backend = None
+def get_target():
+    ### 
+    # TODO: Set Target Gate and Register
+    ###
+    target_gate = XGate()
+    register = [0]
 
+    return {
+        'target_gate': target_gate, 
+        'register': register
+    }
 
+def get_sim_details():
+    ### 
+    # TODO: Set Smulation Details
+    ###
+    abstraction_level = 'pulse'
+    n_actions = 4
+    sampling_Paulis = 50
+    n_shots = 200
+    device = 'cpu'
 
-
-target_gate = XGate()
-register = [0]
-
-
-
-def get_estimator_options():
-
-    estimator_options = None
-
-    return estimator_options
-
-{
-    "abstraction_level": "pulse",
-    "target_gate": "XGate",
-    "register": [0],
-    "custom_backend_wanted": False,
-    "fake_backend": "FakeJakarta",
-    "fake_backend_v2": "FakeJakartaV2",
-    "n_actions": 4,
-    "sampling_Paulis": 50,
-    "n_shots": 200,
-    "device": "cpu"
-}
-
-
+    return {
+        'abstraction_level': abstraction_level,
+        'n_actions': n_actions,
+        'sampling_Paulis': sampling_Paulis,
+        'n_shots': n_shots,
+        'device': device
+    }
 
 # %%
 def get_circuit_context():
@@ -80,12 +75,12 @@ def get_circuit_context():
 
 
 sim_config = SimulationConfig(
-    abstraction_level=config['abstraction_level'],
-    target_gate=config['target_gate'],
-    register=config['register'],
-    backend=config['backend'],
-    n_actions=config['n_actions'],
-    sampling_Paulis=config['sampling_Paulis'],
-    n_shots=config['n_shots'],
-    device=config['device'],
+    abstraction_level=get_sim_details()['abstraction_level'],
+    target_gate=get_target()['target_gate'],
+    register=get_target()['register'],
+    backend=get_backend(),
+    n_actions=get_sim_details()['n_actions'],
+    sampling_Paulis=get_sim_details()['sampling_Paulis'],
+    n_shots=get_sim_details()['n_shots'],
+    device=get_sim_details()['device'],
 )
