@@ -87,10 +87,10 @@ def objective(trial):
     target_circuit = get_circuit_context() # circuit_context output to be specified in the simulation_config.py file by the user
     
     # %%
-    dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(sim_config.sampling_Paulis, sim_config.n_shots, physical_qubits, sim_config.fake_backend, sim_config.fake_backend_v2)
+    dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(sim_config.sampling_Paulis, sim_config.n_shots, physical_qubits, sim_config.backend)
     # %%
     gate_str = 'x'
-    _, _, q_env = get_db_qiskitconfig(sim_config.fake_backend, target, physical_qubits, gate_str, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
+    _, _, q_env = get_db_qiskitconfig(sim_config.backend, target, physical_qubits, gate_str, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
     # %%
     torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)
 

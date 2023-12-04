@@ -62,13 +62,12 @@ class SimulationConfig:
         n_shots (int): The number of shots to use for the estimation of the fidelity.
         device (torch.device): The device to use for the simulation.
     """
-    
+
     abstraction_level: str = None
     target_gate: Gate = None
     register: List[int] = None
     custum_backend: Optional[Backend] = None
-    fake_backend: Optional[Backend] = None
-    fake_backend_v2: Optional[Backend] = None
+    backend: Optional[Backend] = None
     n_actions: int = None
     sampling_Paulis: int = None
     n_shots: int = None

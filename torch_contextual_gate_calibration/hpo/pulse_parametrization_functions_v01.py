@@ -103,11 +103,10 @@ def map_json_inputs(config):
         'FakeJakartaV2': FakeJakartaV2(),
     }
     try:
-        config['fake_backend'] = fake_backends_mapping[config['fake_backend']]
-        config['fake_backend_v2'] = fake_backends_mapping[config['fake_backend_v2']]
+        config['backend'] = fake_backends_mapping[config['backend']]
     except KeyError:
-        logging.warning(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
-        raise KeyError(f"Fake backend {config['fake_backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
+        logging.warning(f"Fake backend {config['backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
+        raise KeyError(f"Fake backend {config['backend']} not found in the fake backends mapping. Please check the spelling. Example: 'FakeMelbourne' and 'FakeMelbourneV2'")
 
     torch_devices_mapping = {
         'cpu': torch.device('cpu'),
@@ -161,7 +160,7 @@ def get_gate_params(backend, physical_qubits, gate_str):
 
     return default_params, basis_gate_instructions, instructions_array
 
-def custom_gate_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None, n_actions: int=4, gate_str: str=None):
+def custom_gate_schedule(backend: Backend, physical_qubits=Union[int, tuple, list], params: ParameterVector=None, n_actions: int=4, gate_str: str=None):
     """
     Generate a custom parameterized schedule for an SX gate.
 
@@ -185,19 +184,19 @@ def custom_gate_schedule(fake_backend: Backend, physical_qubits=Union[int, tuple
     if isinstance(physical_qubits, int):
         physical_qubits = tuple(physical_qubits)
 
-    new_params, _, _ = get_gate_params(backend=fake_backend, physical_qubits=physical_qubits, gate_str=gate_str)
+    new_params, _, _ = get_gate_params(backend=backend, physical_qubits=physical_qubits, gate_str=gate_str)
 
     for i, feature in enumerate(pulse_features):
         new_params[(feature, physical_qubits, gate_str)] += params[i]
 
-    cals = Calibrations.from_backend(fake_backend, [FixedFrequencyTransmon(["x", "sx"])],
+    cals = Calibrations.from_backend(backend, [FixedFrequencyTransmon(["x", "sx"])],
                                         add_parameter_defaults=True)
     
     parametrized_schedule = cals.get_schedule(gate_str, physical_qubits, assign_params=new_params)
 
     return parametrized_schedule
 
-def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None, fake_backend: BackendV1 = FakeJakarta(), n_actions: int=4, target: dict=None, gate_str: str=None):
+def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector]=None, tgt_register: Optional[QuantumRegister]=None, backend: BackendV1 = FakeJakarta(), n_actions: int=4, target: dict=None, gate_str: str=None):
     """
     Add a parametrized gate to a QuantumCircuit.
 
@@ -218,7 +217,7 @@ def add_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVecto
 
     gate_name = gate_str + '_cal'
     parametrized_gate = Gate(name=gate_name, num_qubits=1, params=params)
-    parametrized_schedule = custom_gate_schedule(fake_backend=fake_backend, physical_qubits=physical_qubits, params=params, gate_str=gate_str)
+    parametrized_schedule = custom_gate_schedule(backend=backend, physical_qubits=physical_qubits, params=params, gate_str=gate_str)
     qc.add_calibration(parametrized_gate, physical_qubits, parametrized_schedule)
     qc.append(parametrized_gate, tgt_register)
 
@@ -246,7 +245,7 @@ def get_target_gate(gate: Gate, register: Union[tuple[int], list[int]]):
     return target
 
 # %%
-def transpile_circuit(target_circuit: QuantumCircuit, fake_backend: Backend):
+def transpile_circuit(target_circuit: QuantumCircuit, backend: Backend):
     """
     This function takes a quantum circuit and transpiles it for a given backend (which can be a real
     or a fake quantum computing backend). The transpilation process may include optimizing the circuit,
@@ -255,34 +254,33 @@ def transpile_circuit(target_circuit: QuantumCircuit, fake_backend: Backend):
 
     Args:
         - target_circuit (QuantumCircuit): The quantum circuit to be transpiled.
-        - fake_backend (Backend): The backend (real or simulated) for which the circuit is being transpiled.
+        - backend (Backend): The backend (real or simulated) for which the circuit is being transpiled.
 
     Returns:
         - QuantumCircuit: The transpiled quantum circuit, optimized and compatible with the specified backend.
     """
-    transpiled_circ = transpile(target_circuit, fake_backend, 
+    transpiled_circ = transpile(target_circuit, backend, 
                                 initial_layout=[0],
-                                basis_gates=fake_backend.configuration().basis_gates, 
+                                basis_gates=backend.configuration().basis_gates, 
                                 # scheduling_method='asap',
                                 optimization_level=1)
     return remove_unused_wires(transpiled_circ)
 
 # %%
-def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, fake_backend, fake_backend_v2):
+def get_estimator_options(sampling_Paulis, N_shots, physical_qubits, backend):
     
     # abstraction_level = 'pulse'
-    dt = fake_backend.configuration().dt
+    dt = backend.configuration().dt
 
     dynamics_options = {
                         'seed_simulator': None,
                         "solver_options": {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8, "hmax":dt}
                         }
-    # qubit_properties = fake_backend_v2.qubit_properties(physical_qubits)
 
     # Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
     # fidelity benchmarking
     channel_freq, solver = get_solver_and_freq_from_backend(
-        backend=fake_backend,
+        backend=backend,
         subsystem_list=physical_qubits,
         rotating_frame="auto",
         evaluation_mode="dense",
@@ -371,7 +369,7 @@ def get_own_solver():
     return custom_backend
 
 
-def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
+def get_db_qiskitconfig(backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
     """
     Configures and returns a quantum environment setup for Qiskit simulations.
 
@@ -380,7 +378,7 @@ def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tu
     various simulation parameters like the number of shots, channel frequencies, and quantum environment options.
 
     Args:
-        - fake_backend (Backend): The simulated backend for the quantum environment.
+        - backend (Backend): The simulated backend for the quantum environment.
         - target (dict): A dictionary specifying the target quantum gate and the register it acts on.
         - physical_qubits (list[int]): List of qubits indices to be included in the subsystem.
         - qubit_properties (list): Properties of the qubits used in the simulation.
@@ -400,7 +398,7 @@ def get_db_qiskitconfig(fake_backend: Backend, target: dict, physical_qubits: tu
     Note:
     This function assumes the availability of certain global variables and specific library imports.
     """
-    dynamics_backend = DynamicsBackend.from_backend(fake_backend, subsystem_list=physical_qubits, **dynamics_options)
+    dynamics_backend = DynamicsBackend.from_backend(backend, subsystem_list=physical_qubits, **dynamics_options)
     # dynamics_backend.target.qubit_properties = qubit_properties
 
     # Create a partial function with target passed
