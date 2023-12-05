@@ -122,10 +122,13 @@ class ParameterExpression:
             A new expression parameterized by any parameters which were not bound by
             parameter_values.
         """
-        jax_tracer = isinstance(jnp.array(0), core.Tracer)
+
         if not allow_unknown_parameters:
             self._raise_if_passed_unknown_parameters(parameter_values.keys())
-        self._raise_if_passed_nan(parameter_values)
+
+        jax_tracer = isinstance(jnp.array(0), core.Tracer)
+        if not jax_tracer:
+            self._raise_if_passed_nan(parameter_values)
 
         symbol_values, symbol_values2 = {}, {}
         for parameter, value in parameter_values.items():

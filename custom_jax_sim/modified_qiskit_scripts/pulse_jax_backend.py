@@ -1,47 +1,23 @@
-import copy
-import uuid
-import datetime
 
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.states.quantum_state import QuantumState
-from qiskit_dynamics import DynamicsBackend, Solver, Signal, RotatingFrame, solve_lmde
+from qiskit_dynamics import Solver, RotatingFrame, solve_lmde
 from qiskit_dynamics.solvers.solver_classes import format_final_states, validate_and_format_initial_state
 from typing import Optional, List, Union, Callable, Tuple
 
 from qiskit_dynamics.array import wrap
-from qiskit import pulse
-
-from qiskit_dynamics.models import HamiltonianModel, LindbladModel
-from qiskit_dynamics.models.hamiltonian_model import is_hermitian
-from qiskit_dynamics.type_utils import to_numeric_matrix_type
 from qiskit import QuantumCircuit
-from qiskit.result import Result
-from qiskit.quantum_info import Statevector, Operator
-from qiskit.pulse import Schedule, ScheduleBlock
+
+from qiskit.quantum_info import Operator
+from qiskit.pulse import Schedule
 from qiskit_dynamics.array import Array
 import jax
-import jax.numpy as jnp
-from jax import block_until_ready, vmap
+from jax import vmap
 import numpy as np
 from scipy.integrate._ivp.ivp import OdeResult
 
 jit = wrap(jax.jit, decorator=True)
 qd_vmap = wrap(vmap, decorator=True)
-
-Runnable = Union[QuantumCircuit, Schedule, ScheduleBlock]
-
-I = jnp.array([[1.0, 0.0], [0.0, 1.0]])
-H = 1 / jnp.sqrt(2) * jnp.array([[1.0, 1.0], [1.0, -1.0]])
-S = jnp.array([[1.0, 0.0], [0.0, 1.0j]])
-SH = S.conj().T @ H
-
-base_gates_dict = {
-    "I": I,
-    "X": H,
-    "Y": SH,
-    "Z": I,
-}
-
 
 def PauliToQuditOperator(qubit_ops: List[Operator], qudit_dim_size: Optional[int] = 4):
     """
@@ -201,22 +177,23 @@ class JaxSolver(Solver):
 
             return Array(results.t).data, Array(results.y).data
 
-        jit_func = jit(sim_function)
+        jit_func = jit(qd_vmap(sim_function, in_axes=(None, None, 0, None, None)))
         all_results = []
         for t_span, y0 in zip(t_span_list, y0_list):
             # setup initial state
             y0, y0_input, y0_cls, state_type_wrapper = validate_and_format_initial_state(
                 y0, self.model
             )
-            results_t, results_y = jit_func(t_span, y0, param_values, y0_input, y0_cls)
-            for observable in observables:
-                final_results_y = observable @ results_y
-                results = OdeResult(t=results_t, y=Array(final_results_y, backend="jax", dtype=complex))
+            batch_results_t, batch_results_y = jit_func(t_span, y0, param_values, y0_input, y0_cls)
+            for results_t, results_y in zip(batch_results_t, batch_results_y):
+                for observable in observables:
+                    final_results_y = observable @ results_y
+                    results = OdeResult(t=results_t, y=Array(final_results_y, backend="jax", dtype=complex))
 
-                if y0_cls is not None and convert_results:
-                    results.y = [state_type_wrapper(yi) for yi in results.y]
+                    if y0_cls is not None and convert_results:
+                        results.y = [state_type_wrapper(yi) for yi in results.y]
 
-                all_results.append(results)
+                    all_results.append(results)
 
         return all_results
 
