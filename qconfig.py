@@ -88,7 +88,6 @@ class SimulationConfig:
     register: List[int] = None
     custum_backend: Optional[Backend] = None
     backend: Optional[Backend] = None
-    estimator_options: Optional[Options] = None 
     n_actions: int = None
     sampling_Paulis: int = None
     n_shots: int = None
