@@ -23,7 +23,6 @@ def get_backend():
     ###
     backend = FakeJakarta()
 
-
     ### IBM Runtime
     # QiskitRuntimeService.save_account(channel='ibm_quantum', token='MY_IBM_QUANTUM_TOKEN') # Save an IBM Quantum account
     # QiskitRuntimeService.save_account(channel='ibm_cloud', token='MY_IBM_CLOUD_API_KEY', instance='MY_IBM_CLOUD_CRN') # Save an IBM Cloud account
@@ -63,6 +62,7 @@ def get_sim_details():
     n_actions = 4
     sampling_Paulis = 50
     n_shots = 200
+    c_factor = 0.5
     device = 'cpu'
 
     return {
@@ -70,6 +70,7 @@ def get_sim_details():
         'n_actions': n_actions,
         'sampling_Paulis': sampling_Paulis,
         'n_shots': n_shots,
+        'c_factor': c_factor,
         'device': device
     }
 
@@ -97,5 +98,6 @@ sim_config = SimulationConfig(
     n_actions=get_sim_details()['n_actions'],
     sampling_Paulis=get_sim_details()['sampling_Paulis'],
     n_shots=get_sim_details()['n_shots'],
+    c_factor=get_sim_details()['c_factor'],
     device=get_sim_details()['device'],
 )

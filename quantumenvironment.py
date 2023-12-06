@@ -56,7 +56,7 @@ from qiskit_ibm_runtime import (
 from tensorflow_probability.python.distributions import Categorical
 
 from helper_functions import retrieve_estimator
-from qconfig import QiskitConfig
+from qconfig import SimulationConfig
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -201,12 +201,7 @@ class QuantumEnvironment:
     def __init__(
         self,
         target: Dict,
-        abstraction_level: str = "circuit",
-        Qiskit_config: Optional[QiskitConfig] = None,
-        QUA_config: Optional[Dict] = None,
-        sampling_Pauli_space: int = 10,
-        n_shots: int = 1,
-        c_factor: float = 0.5,
+        simulation_config: Optional[SimulationConfig] = None,
     ):
         """
         Class for building quantum environment for RL agent aiming to perform a state preparation task.
@@ -214,30 +209,22 @@ class QuantumEnvironment:
         :param target: control target of interest (can be either a gate to be calibrated or a state to be prepared)
             Target should be a Dict containing target type ('gate' or 'state') as well as necessary fields to initiate
             the calibration (cf. example)
-        :param abstraction_level: Circuit or pulse level parametrization of action space
-        :param Qiskit_config: Dictionary containing all info for running Qiskit program (i.e. service, backend,
-            options, parametrized_circuit)
-        :param QUA_config: Dictionary containing all infor for running a QUA program
-        :param sampling_Pauli_space: Number of samples to build fidelity estimator for one action
-        :param n_shots: Number of shots to sample for one specific computation (action/Pauli expectation sampling)
-        :param c_factor: Scaling factor for reward normalization
+        :param simulation_config: Configuration object containing all necessary information to build the environment
+                                  (backend, abstraction level, number of shots, fidelity estimation options, etc.)
         """
 
-        assert abstraction_level == "circuit" or abstraction_level == "pulse", (
-            "Abstraction layer can be either pulse" " or circuit"
+        assert simulation_config.abstraction_level == "circuit" or simulation_config.abstraction_level == "pulse", (
+            "Abstraction layer can be either pulse or circuit"
         )
-        self.abstraction_level: str = abstraction_level
-        if Qiskit_config is None and QUA_config is None:
+        self.abstraction_level: str = simulation_config.abstraction_level
+        if simulation_config is None:
             raise AttributeError(
-                "QuantumEnvironment requires one hardware configuration (can be Qiskit or QUA based)"
+                "QuantumEnvironment requires one hardware configuration."
             )
-        if Qiskit_config is not None and QUA_config is not None:
-            raise AttributeError(
-                "Cannot provide simultaneously a QUA setup and a Qiskit config "
-            )
-        elif Qiskit_config is not None:
-            self._config_type = "Qiskit"
-            self._config: Qiskit_config = Qiskit_config
+        elif simulation_config is not None:
+            self._config_type = simulation_config.config_type
+            self._config = simulation_config
+            
             (
                 self.target,
                 self.target_type,
@@ -247,35 +234,28 @@ class QuantumEnvironment:
             ) = _define_target(target)
 
             self._d = 2**self.n_qubits
-            self.c_factor = c_factor
-            self.sampling_Pauli_space = sampling_Pauli_space
-            self.n_shots = n_shots
+            self.c_factor = simulation_config.c_factor
+            self.sampling_Pauli_space = simulation_config.sampling_Paulis
+            self.n_shots = simulation_config.n_shots
             self.Pauli_ops = pauli_basis(num_qubits=self._n_qubits)
 
-            self.backend: Optional[Backend_type] = Qiskit_config.backend
+            self.backend: Optional[Backend_type] = simulation_config.backend
             if self.backend is not None:
                 if self.n_qubits > self.backend.num_qubits:
                     raise ValueError(
                         f"Target contains more qubits ({self._n_qubits}) than backend ({self.backend.num_qubits})"
                     )
             self.parametrized_circuit_func: Callable = (
-                Qiskit_config.parametrized_circuit
+                simulation_config.parametrized_circuit
             )
             estimator_options: Optional[
                 Union[Options, Dict, RuntimeOptions]
-            ] = Qiskit_config.estimator_options
+            ] = simulation_config.estimator_options
 
             self._estimator = retrieve_estimator(self.backend, self.layout, self.config,
                                                  self.abstraction_level, estimator_options)
-
-        elif QUA_config is not None:
-            raise AttributeError("QUA compatibility not yet implemented")
-            # self._config_type = "QUA"
-            # self._config = QUA_config
-
-            # TODO: Add a QUA program
-
-        # Data storage for TF-Agents or plotting
+            
+        # Data storage for Agents or plotting
         self._session_counts = 0
         self._step_tracker = 0
         self.action_history = []
@@ -570,10 +550,6 @@ class QuantumEnvironment:
     @layout.setter
     def layout(self, layout: Layout):
         self._layout = layout
-
-    @property
-    def config_type(self):
-        return self._config_type
 
     @property
     def config(self):

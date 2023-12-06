@@ -105,26 +105,15 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
         # TODO: Redeclare everything instead of reinitializing (loss of time especially for DynamicsBackend declaration)
 
-        if q_env.config_type == "Qiskit":
+        if q_env._config_type == "Qiskit":
             q_env.config.do_calibrations = False
-            super().__init__(
+            super().__init__( # Initialize QuantumEnvironment as the parent class from which this class inherits
                 q_env.target,
-                q_env.abstraction_level,
-                q_env.config,
-                None,
-                q_env.sampling_Pauli_space,
-                q_env.n_shots,
-                q_env.c_factor,
+                q_env.config
             )
         else:
-            super().__init__(
-                q_env.target,
-                q_env.abstraction_level,
-                None,
-                q_env.config,
-                q_env.sampling_Pauli_space,
-                q_env.n_shots,
-                q_env.c_factor,
+            raise AttributeError(
+                "Only Qiskit configuration is supported for now"
             )
 
         Env.__init__(self)

@@ -80,6 +80,7 @@ def positive_integer(value):
 
 def objective(trial):
 
+    # %%
     target = get_target_gate(gate=sim_config.target_gate, register=sim_config.register)
     physical_qubits = tuple(target["register"])
 
@@ -90,12 +91,12 @@ def objective(trial):
     dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(sim_config.sampling_Paulis, sim_config.n_shots, physical_qubits, sim_config.backend)
     # %%
     gate_str = sim_config.gate_str
-    _, _, q_env = get_db_qiskitconfig(sim_config.backend, target, physical_qubits, gate_str, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
+    q_env = get_db_qiskitconfig(sim_config.backend, target, physical_qubits, gate_str, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
     # %%
-    torch_env, observation_space, _, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)
+    torch_env, observation_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)
 
-    # %
-    _, _, agent = get_network(sim_config.device, observation_space, sim_config.n_actions)
+    # %%
+    agent = get_network(sim_config.device, observation_space, sim_config.n_actions)
 
     """
     -----------------------------------------------------------------------------------------------------
@@ -104,7 +105,7 @@ def objective(trial):
     """
     training_parameters = {
         'n_epochs': trial.suggest_int('n_epochs', 10, 15), # Choose small values for debugging
-        'num_updates': trial.suggest_int('num_updates', 5, 15), # Choose small values for debugging
+        'num_updates': trial.suggest_int('num_updates', 10, 25), # Choose small values for debugging
         'lr_actor': trial.suggest_float('lr_actor', 1e-4, 1e-2, log=True),
         'lr_critic': trial.suggest_float('lr_critic', 1e-4, 1e-2, log=True),
         'epsilon': trial.suggest_float('epsilon', 0.1, 0.3),

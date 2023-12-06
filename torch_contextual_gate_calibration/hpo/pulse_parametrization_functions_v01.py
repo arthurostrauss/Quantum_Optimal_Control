@@ -58,6 +58,8 @@ from gymnasium.spaces import Box
 
 from IPython.display import clear_output
 
+from simulation_config import sim_config
+
 import logging
 # Create a custom logger with the level WARNING because INFO would trigger too many log message by qiskit itself
 logging.basicConfig(
@@ -355,15 +357,21 @@ def get_db_qiskitconfig(backend: Backend, target: dict, physical_qubits: tuple, 
     # Create a partial function with target passed
     parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target, gate_str=gate_str)
 
-    Qiskit_setup = QiskitConfig(parametrized_circuit=parametrized_circuit_with_target, backend=dynamics_backend,
-                                estimator_options=estimator_options, channel_freq=channel_freq,
-                                solver=solver)
+    # Qiskit_setup = QiskitConfig(parametrized_circuit=parametrized_circuit_with_target, 
+    #                             backend=dynamics_backend,
+    #                             estimator_options=estimator_options,
+    #                             channel_freq=channel_freq,
+    #                             solver=solver)
 
-    q_env = QuantumEnvironment(target=target, abstraction_level=abstraction_level,
-                           Qiskit_config=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.5)
+    sim_config.parametrized_circuit = parametrized_circuit_with_target
+    sim_config.backend = dynamics_backend
+    sim_config.estimator_options = estimator_options
+    sim_config.channel_freq = channel_freq
+    sim_config.solver = solver
+
+    q_env = QuantumEnvironment(target=target, simulation_config=sim_config)
     
-    return dynamics_backend, Qiskit_setup, q_env
+    return q_env
 
 
 # %%
@@ -403,7 +411,7 @@ def get_torch_env(q_env: QuantumEnvironment, target_circuit: QuantumCircuit, n_a
                                         benchmark_cycle = benchmark_cycle,
                                         intermediate_rewards=False,
                                         seed=None,)
-    return torch_env, observation_space, action_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed
+    return torch_env, observation_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed
 
 # %%
 def get_network(device: torch.device, observation_space: Box, n_actions: int):
@@ -433,7 +441,7 @@ def get_network(device: torch.device, observation_space: Box, n_actions: int):
     critic_net = CriticNetwork(observation_space, hidden_units, activation_functions, chkpt_dir_critic).to(device)
     agent = Agent(actor_net, critic_net=critic_net).to(device)
 
-    return actor_net, critic_net, agent
+    return agent
 
 # %%
 def clear_history(torch_env: TorchQuantumEnvironment, tgt_instruction_counts: int, batchsize: int, device: torch.device):
