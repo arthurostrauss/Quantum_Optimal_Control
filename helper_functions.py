@@ -54,7 +54,7 @@ from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from dataclasses import asdict
 
-Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator]
+Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator, DynamicsBackendEstimator]
 Backend_type = Union[BackendV1, BackendV2]
 
 
@@ -560,9 +560,7 @@ def retrieve_estimator(
             estimator = Estimator(options={"initial_layout": layout})
 
         elif isinstance(backend, DynamicsBackend):
-            assert (
-                abstraction_level == "pulse"
-            ), "DynamicsBackend works only with pulse level abstraction"
+            assert abstraction_level == "pulse", "DynamicsBackend works only with pulse level abstraction"
             if isinstance(backend.options.solver, JaxSolver):
                 estimator: Estimator_type = DynamicsBackendEstimator(
                     backend, options=estimator_options, skip_transpilation=False

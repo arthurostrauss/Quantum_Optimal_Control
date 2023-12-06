@@ -5,19 +5,19 @@ from qiskit_dynamics import Solver, RotatingFrame, solve_lmde
 from qiskit_dynamics.solvers.solver_classes import format_final_states, validate_and_format_initial_state
 from typing import Optional, List, Union, Callable, Tuple
 
-from qiskit_dynamics.array import wrap
 from qiskit import QuantumCircuit
 
 from qiskit.quantum_info import Operator
-from qiskit.pulse import Schedule
+from qiskit.pulse import Schedule, SymbolicPulse
 from qiskit_dynamics.array import Array
-import jax
-from jax import vmap
+from qiskit_dynamics.array import wrap
+from jax import vmap, jit
 import numpy as np
 from scipy.integrate._ivp.ivp import OdeResult
 
-jit = wrap(jax.jit, decorator=True)
-qd_vmap = wrap(vmap, decorator=True)
+jit_wrap = wrap(jit, decorator=True)
+# qd_vmap = wrap(vmap, decorator=True)
+
 
 def PauliToQuditOperator(qubit_ops: List[Operator], qudit_dim_size: Optional[int] = 4):
     """
@@ -123,6 +123,7 @@ class JaxSolver(Solver):
             validate,
         )
         self._schedule_func = schedule_func
+        SymbolicPulse.disable_validation = True
 
     @property
     def circuit_macro(self):
@@ -144,56 +145,66 @@ class JaxSolver(Solver):
         **kwargs,
     ) -> List[OdeResult]:
 
-        param_dicts = kwargs["parameter_dicts"]
-        param_names = param_dicts[0].keys()
-        param_values = kwargs["parameter_values"]
-        observables_circuits: List[QuantumCircuit] = [circ.remove_final_measurements(inplace=False)
-                                                      for circ in kwargs["observables"]]
-        pauli_rotations = [[Operator.from_label("I") for _ in range(circ.num_qubits)] for circ in observables_circuits]
-        for i, circuit in enumerate(observables_circuits):
-            qubit_counter = 0
-            qubit_list = []
-            for circuit_instruction in circuit.data:
-                if circuit_instruction.qubits not in qubit_list:
-                    qubit_list.append(circuit_instruction.qubits)
-                    qubit_counter += 1
-                pauli_rotations[i][qubit_counter - 1].compose(Operator(circuit_instruction.operation))
-        observables = [PauliToQuditOperator(pauli_rotations[i], self.model.dim) for i in range(len(pauli_rotations))]
+        if "parameter_dicts" not in kwargs or "parameter_values" not in kwargs or "observables" not in kwargs:
+            # If the user is not using the estimator, then we can just use the original solver method
+            return super()._solve_schedule_list_jax(t_span_list, y0_list, schedule_list, convert_results, **kwargs)
+        else:
+            # Otherwise, we need to load the parameters and observables from the solver options
+            param_dicts = kwargs["parameter_dicts"]
+            param_names = param_dicts[0].keys()
+            param_values = kwargs["parameter_values"]
+            observables_circuits: List[QuantumCircuit] = [circ.remove_final_measurements(inplace=False)
+                                                          for circ in kwargs["observables"]]
+            pauli_rotations = [[Operator.from_label("I") for _ in range(circ.num_qubits)] for circ in observables_circuits]
+            for i, circuit in enumerate(observables_circuits):
+                qubit_counter = 0
+                qubit_list = []
+                for circuit_instruction in circuit.data:
+                    if circuit_instruction.qubits not in qubit_list:
+                        qubit_list.append(circuit_instruction.qubits)
+                        qubit_counter += 1
+                    pauli_rotations[i][qubit_counter - 1].compose(Operator(circuit_instruction.operation))
+            for i in range(len(pauli_rotations)):
+                print(observables_circuits[i].data)
+                print(pauli_rotations[i])
+            observables = [PauliToQuditOperator(pauli_rotations[i], self.model.dim) for i in range(len(pauli_rotations))]
 
-        for key in ["parameter_dicts", "parameter_values", "observables"]:
-            kwargs.pop(key)
+            for key in ["parameter_dicts", "parameter_values", "observables"]:
+                kwargs.pop(key)
 
-        def sim_function(t_span, y0, params, y0_input, y0_cls):
-            parametrized_schedule = self.circuit_macro()
-            model_sigs = self.model.signals
+            def sim_function(t_span, y0, params, y0_input, y0_cls):
+                parametrized_schedule = self.circuit_macro()
+                model_sigs = self.model.signals
 
-            parametrized_schedule.assign_parameters({param_obj: param
-                                                     for (param_obj, param) in zip(param_names, params)})
-            signals = self._schedule_converter.get_signals(parametrized_schedule)
-            self._set_new_signals(signals)
-            results = solve_lmde(generator=self.model, t_span=t_span, y0=y0, **kwargs)
-            results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
-            self.model.signals = model_sigs
+                parametrized_schedule.assign_parameters({param_obj: param
+                                                         for (param_obj, param) in zip(param_names, params)})
+                signals = self._schedule_to_signals(parametrized_schedule)
+                self._set_new_signals(signals)
+                results = solve_lmde(generator=self.model, t_span=t_span, y0=y0, **kwargs)
+                results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
+                self.model.signals = model_sigs
 
-            return Array(results.t).data, Array(results.y).data
+                return Array(results.t).data, Array(results.y).data
 
-        jit_func = jit(qd_vmap(sim_function, in_axes=(None, None, 0, None, None)))
-        all_results = []
-        for t_span, y0 in zip(t_span_list, y0_list):
+            jit_func = jit(vmap(sim_function, in_axes=(None, None, 0, None, None)), static_argnums=(4,))
+            all_results = []
+
             # setup initial state
-            y0, y0_input, y0_cls, state_type_wrapper = validate_and_format_initial_state(
-                y0, self.model
-            )
-            batch_results_t, batch_results_y = jit_func(t_span, y0, param_values, y0_input, y0_cls)
+            y0, y0_input, y0_cls, state_type_wrapper = validate_and_format_initial_state(y0_list[0], self.model)
+            t_span = t_span_list[0]
+
+            batch_results_t, batch_results_y = jit_func(Array(t_span).data, Array(y0).data,
+                                                        np.array(param_values),
+                                                        Array(y0_input).data, y0_cls)
+
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:
-                    final_results_y = observable @ results_y
-                    results = OdeResult(t=results_t, y=Array(final_results_y, backend="jax", dtype=complex))
-
+                    results = OdeResult(t=results_t, y=Array(results_y, backend="jax", dtype=complex))
                     if y0_cls is not None and convert_results:
                         results.y = [state_type_wrapper(yi) for yi in results.y]
-
+                        # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables
+                        results.y = [observable @ yi for yi in results.y]
                     all_results.append(results)
 
-        return all_results
+            return all_results
 

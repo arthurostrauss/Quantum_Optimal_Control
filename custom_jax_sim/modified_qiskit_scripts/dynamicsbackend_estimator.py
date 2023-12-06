@@ -57,6 +57,7 @@ class DynamicsBackendEstimator(BackendEstimator):
         self.backend.options.solver_options[
             "parameter_dicts"
         ] = parameter_dicts  # To be given as PyTree
+
         self.backend.options.solver_options[
             "parameter_values"
         ] = parameter_values  # To be given as PyTree alternatively

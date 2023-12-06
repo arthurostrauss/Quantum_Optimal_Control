@@ -22,6 +22,7 @@ import operator
 import numpy
 import sympy2jax
 import sympy
+
 from jax import core, numpy as jnp
 from qiskit.circuit.exceptions import CircuitError
 from qiskit.utils import optionals as _optionals

@@ -41,8 +41,6 @@ from qiskit_dynamics import DynamicsBackend
 from qiskit_dynamics.array import Array
 from qiskit_ibm_provider import IBMBackend
 
-from custom_jax_sim import DynamicsBackendEstimator
-
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_experiments.framework import BatchExperiment
 from qiskit_experiments.library import ProcessTomography
@@ -321,8 +319,6 @@ class QuantumEnvironment:
             ]  # Ideal output state associated to input (Gate |input>=|output>)
             # Append input state circuit to full quantum circuit for gate calibration
             qc.append(input_state["circuit"].to_instruction(), self.tgt_register)
-            if isinstance(self.estimator, DynamicsBackendEstimator):
-                self.estimator.set_options(initial_state=Statevector(qc))
         else:  # State preparation task
             target_state = self.target
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)

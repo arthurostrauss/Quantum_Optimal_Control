@@ -901,7 +901,8 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
                     def param_schedule():
                         return schedule(training_circ, self.backend)
 
-                    self.backend.options.solver.circuit_macro(func=param_schedule)
+                    self.backend.options.solver.circuit_macro = param_schedule
+                print(observables)
                 job = self.estimator.run(
                     circuits=[training_circ] * self.batch_size,
                     observables=[observables] * self.batch_size,
