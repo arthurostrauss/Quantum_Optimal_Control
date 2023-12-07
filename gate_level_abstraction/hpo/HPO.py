@@ -1,18 +1,32 @@
 import numpy as np
 import argparse
+import time
+import pickle
 import os
 import sys
 
-from rl_training import train_agent, define_quantum_environment, get_network
+from rl_training import (
+    train_agent, 
+    get_network, 
+    apply_parametrized_circuit
+)
 
-import tensorflow as tf
-from tensorflow_probability.python.distributions import MultivariateNormalDiag
 import optuna
 
 module_path = os.path.abspath(os.path.join('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from helper_functions import select_optimizer
+from quantumenvironment import QuantumEnvironment
+from simulation_config import sim_config
+
+import logging
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s INFO %(message)s", # hardcoded INFO level
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
 
 
 def parse_args():
@@ -35,7 +49,7 @@ def parse_args():
         "--num_trials",
         metavar="num_trials",
         type=int,
-        default=5,
+        default=20,
         help="number of HPO trials; default: 20",
         required=False,
     )
@@ -75,13 +89,13 @@ def objective(trial):
     Returns:
         float: The average of the last 10% of fidelities from the training results.
     """
-    
-    q_env = define_quantum_environment()
+    sim_config.parametrized_circuit = apply_parametrized_circuit
+    q_env = QuantumEnvironment(simulation_config=sim_config)
 
     training_parameters = {
         'use_PPO': True,
-        'n_epochs': trial.suggest_int('epochs', 250, 500),
-        'batchsize': trial.suggest_int('batchsize', 50, 100),
+        'n_epochs': trial.suggest_int('epochs', 400, 200),
+        'batchsize': trial.suggest_int('batchsize', 50, 500),
         'opti_choice': trial.suggest_categorical('opti', ['Adam', 'SGD']),
         'eta': trial.suggest_float('eta', 1e-5, 5*1e-2, log=True),
         'eta_2': trial.suggest_float('eta_2', 1e-4, 1e-1, log=True) if trial.suggest_int("use_eta_2", 0, 1) else None,
@@ -108,6 +122,11 @@ def objective(trial):
 
     return training_results['fidelities'][-last_ten_percent]
 
+def save_pickle(best_trial, best_run):
+    # Save the best run configuration as a hashed file (here pickle)
+    pickle_file_name = f"gate_level_abstraction/hpo/hpo_results/fidelity_{best_trial.value}.pickle" 
+    with open(pickle_file_name, 'wb') as handle:
+        pickle.dump(best_run, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 def hyperparameter_optimization(n_trials):
     """
@@ -121,28 +140,49 @@ def hyperparameter_optimization(n_trials):
         optuna.study.Study: The study object that contains all the information about
                             the optimization session, including the best trial.
     """
+    logging.warning("----------------------------START HPO----------------------------")
+    start_time = time.time()
 
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=n_trials)
 
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial:")
-    trial = study.best_trial
+    logging.warning("----------------------------FINISH HPO----------------------------")
+    runtime = time.time() - start_time
+    
+    return study, runtime
 
-    print("Gate Fidelity: ", trial.value)
+def log_results(study, runtime):
+    """ Log the results of the HPO run """
+    logging.warning(f"HPO RUNTIME: {int(runtime)} SEC")
+
+    print("Number of finished trials: ", len(study.trials))
+    print("\nBest trial:")
+    print("-------------------------------------------- ")
+    best_trial = study.best_trial
+
+    print("Gate Fidelity: ", best_trial.value)
     print("Hyperparams: ")
-    for key, value in trial.params.items():
+    for key, value in best_trial.params.items():
         print(f"    {key}: {value}")
 
-    return study
+    return best_trial
 
 
 if __name__ == "__main__":
     # Parse command-line arguments to get the number of trials for optimization, ensure a meaningful value for num_trials (pos. int.)
     num_trials = positive_integer(parse_args().num_trials)
     # Run hyperparameter optimization
-    study = hyperparameter_optimization(n_trials=num_trials)
+    study, runtime = hyperparameter_optimization(n_trials=num_trials)
+    best_trial = log_results(study, runtime)
 
     # Fetch and display the best trial's action vector
-    best_action_vector = study.best_trial.user_attrs["action_vector"]
-    print(f"The best action vector is: {best_action_vector}")
+    best_action_vector = study.best_trial.user_attrs['action_vector']
+    print(f'The best action vector is: {best_action_vector}')
+    
+    # Save best hyperparameters to hashed file (e.g., using pickle)    
+    best_run = {
+        'fidelity': best_trial.value,
+        'action_vector': best_action_vector,
+        'hyperparams': best_trial.params,
+    }
+    save_pickle(best_trial, best_run)

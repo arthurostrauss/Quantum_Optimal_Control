@@ -15,15 +15,9 @@ from IPython.display import clear_output
 module_path = os.path.abspath(os.path.join('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control'))
 if module_path not in sys.path:
     sys.path.append(module_path)
-from quantumenvironment import QuantumEnvironment
-from helper_functions import select_optimizer, generate_model
-from qconfig import QiskitConfig
+from helper_functions import generate_model
 
-"""from HPO import (
-    QuantumEnvironment, 
-    QiskitConfig, 
-    generate_model
-)"""
+
 
 n_actions = 7
 
@@ -52,48 +46,6 @@ def apply_parametrized_circuit(qc: QuantumCircuit):
     qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
     qc.rzx(2 * np.pi * params[6], 0, 1)
 
-# Defining QuantumEnvironment
-def define_quantum_environment():
-    """
-    Defines and returns a quantum environment based on a given quantum gate target and backend configuration.
-
-    This function sets up the quantum environment including the quantum backend, estimator options,
-    and the specific target gate (CNOT gate in this case) that the RL agent aims to optimize.
-    The environment is configured with a set of global parameters like the qubit target register,
-    number of sampling Paulis, number of shots, and a random seed for the simulator.
-
-    Returns:
-        QuantumEnvironment: An instance of QuantumEnvironment configured with the target gate,
-                            quantum backend, and simulation parameters.
-    """
-    
-    qubit_tgt_register = [0, 1] 
-    sampling_Paulis = 100
-    N_shots = 1  
-    seed = 4000
-    estimator_options = {'seed_simulator': seed, 'resilience_level': 0}
-
-    backend = None  # or setup real backend if needed
-    # backend = BraketLocalBackend()  # or setup real backend if needed
-
-    # Wrap all info in one dict Qiskit_setup
-    Qiskit_setup = QiskitConfig(parametrized_circuit=apply_parametrized_circuit, backend=backend,
-                                estimator_options=estimator_options)
-
-    # Target gate: CNOT gate
-    cnot_target = {
-        "target_type": "gate",
-        "gate": CXGate("CNOT"),
-        "register": qubit_tgt_register
-    }
-
-    target = cnot_target
-
-    q_env = QuantumEnvironment(target=target, abstraction_level="circuit",
-                               Qiskit_config=Qiskit_setup,
-                               sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.25)
-
-    return q_env
 
 def get_network():
     """
@@ -107,7 +59,6 @@ def get_network():
     hidden_units = [20, 20, 30]  
     # Set up Reinforcement Learning Model
     network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)
-    # network.summary()
 
     init_msmt = np.zeros((1, N_in))
 
@@ -118,7 +69,7 @@ def plot_training_progress(avg_return, fidelities, n_epochs, visualization_steps
     Plots the training progress of the RL agent and prints the maximum fidelity reached so far.
     """
     clear_output(wait=True)
-    fig, ax = plt.subplots()
+    _, ax = plt.subplots()
     ax.plot(np.arange(1, n_epochs, 20), avg_return[0:-1:visualization_steps], '-.', label='Average return')
     ax.plot(np.arange(1, n_epochs, 20), fidelities[0:-1:visualization_steps], label='Average Gate Fidelity')
     ax.set_xlabel("Epoch")
@@ -190,10 +141,8 @@ def train_agent(q_env, training_parameters):
             mu_old.assign(mu)
             sigma_old.assign(sigma)
 
-        #print('shape of q_env.reward_history:', np.shape(q_env.reward_history))
         avg_return[i] = np.mean(q_env.reward_history, axis=1)[i]
         fidelities[i] = q_env.avg_fidelity_history[i]
-        #print("Gate Fidelity", fidelities[i])
 
         if show_plot and i % visualization_steps == 0:
             plot_training_progress(avg_return, fidelities, n_epochs, visualization_steps)
@@ -202,9 +151,6 @@ def train_agent(q_env, training_parameters):
 
     if isinstance(q_env.estimator, Estimator):
         q_env.estimator.session.close()
-
-    #print("Maximum fidelity reached:", np.max(fidelities), 'at Epoch', np.argmax(fidelities))
-    #print("Actions yielding optimal fidelity:", np.mean(q_env.action_history[np.argmax(fidelities)], axis=0))
 
     return {
         'avg_return': avg_return,

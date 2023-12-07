@@ -26,7 +26,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from pulse_parametrization_functions_v01 import (
-   get_own_solver, get_target_gate, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
+   get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
 )
 from simulation_config import sim_config, get_circuit_context
 # %%
@@ -195,12 +195,12 @@ if __name__ == "__main__":
 
     # Fetch and display the best trial's action vector
     best_action_vector = study.best_trial.user_attrs['action vector']
+    print(f"The best action vector is: {best_action_vector.numpy()}")
 
     # Save best hyperparameters to hashed file (e.g., using pickle)    
-    best_run = {'avg_return': best_trial.value,
-                'action_vector': best_action_vector.numpy(),
-                'hyperparams': best_trial.params,
-                }
+    best_run = {
+        'avg_return': best_trial.value,
+        'action_vector': best_action_vector.numpy(),
+        'hyperparams': best_trial.params,
+    }
     save_pickle(best_trial, best_run)
-    
-    print(f"The best action vector is: {best_action_vector.numpy()}")
