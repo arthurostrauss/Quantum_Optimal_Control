@@ -43,14 +43,12 @@ def set_target():
     # TODO: Set Target Gate and Register
     ###
     abstraction_level = 'pulse'
-    target_type = 'gate'
     gate_str = 'x'
     target_gate = XGate()
     register = [0]
 
     target = {
         'abstraction_level': abstraction_level,
-        'target_type': target_type,
         'gate_str': gate_str,
         'gate': target_gate, 
         'register': register
