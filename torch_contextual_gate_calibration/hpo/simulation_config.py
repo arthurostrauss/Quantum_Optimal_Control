@@ -42,15 +42,21 @@ def set_target():
     ### 
     # TODO: Set Target Gate and Register
     ###
+    abstraction_level = 'pulse'
+    target_type = 'gate'
     gate_str = 'x'
     target_gate = XGate()
     register = [0]
 
-    return {
+    target = {
+        'abstraction_level': abstraction_level,
+        'target_type': target_type,
         'gate_str': gate_str,
-        'target_gate': target_gate, 
+        'gate': target_gate, 
         'register': register
     }
+
+    return target
 
 ########################################
 
@@ -58,7 +64,6 @@ def get_sim_details():
     ### 
     # TODO: Set Simulation Details
     ###
-    abstraction_level = 'pulse'
     n_actions = 4
     sampling_Paulis = 50
     n_shots = 200
@@ -66,7 +71,6 @@ def get_sim_details():
     device = 'cpu'
 
     return {
-        'abstraction_level': abstraction_level,
         'n_actions': n_actions,
         'sampling_Paulis': sampling_Paulis,
         'n_shots': n_shots,
@@ -90,10 +94,7 @@ def get_circuit_context():
 
 # Create a configutration object for the simulation
 sim_config = SimulationConfig(
-    abstraction_level=get_sim_details()['abstraction_level'],
-    gate_str=set_target()['gate_str'],
-    target_gate=set_target()['target_gate'],
-    register=set_target()['register'],
+    target=set_target(),
     backend=get_backend(),
     n_actions=get_sim_details()['n_actions'],
     sampling_Paulis=get_sim_details()['sampling_Paulis'],

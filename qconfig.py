@@ -60,10 +60,7 @@ class SimulationConfig:
         the channels and the qubit frequencies
         calibration_files: Feature not available yet, load existing gate calibrations from csv files for DynamicsBackend
         baseline gate calibrations for running algorithm
-        abstraction_level: Level of abstraction of the simulation, either 'statevector' or 'pulse'
-        gate_str: String representation of the target gate
-        target_gate: Target gate to calibrate
-        register: Register on which the target gate is applied
+        gate: Target gate to calibrate
         custum_backend: Custom backend for the simulation
         backend: Backend for the simulation
         estimator_options: Options for the Estimator primitive
@@ -82,10 +79,7 @@ class SimulationConfig:
     do_calibrations: Optional[bool] = True
     calibration_files: Optional[List[str]] = None
     config_type: str = 'Qiskit'
-    abstraction_level: str = None
-    gate_str: str = None
-    target_gate: Gate = None
-    register: List[int] = None
+    target: dict = None
     custum_backend: Optional[Backend] = None
     backend: Optional[Backend] = None
     n_actions: int = None

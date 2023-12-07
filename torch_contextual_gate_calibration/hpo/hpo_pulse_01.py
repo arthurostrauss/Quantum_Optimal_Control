@@ -29,7 +29,7 @@ from pulse_parametrization_functions_v01 import (
    get_own_solver, get_target_gate, get_estimator_options, get_db_qiskitconfig, get_torch_env, get_network, clear_history, train_agent
 )
 from simulation_config import sim_config, get_circuit_context
-
+# %%
 # Create a custom logger with the level WARNING because INFO would trigger too many log message by qiskit itself
 logging.basicConfig(
     level=logging.WARNING,
@@ -81,19 +81,19 @@ def positive_integer(value):
 def objective(trial):
 
     # %%
-    target = get_target_gate(gate=sim_config.target_gate, register=sim_config.register)
-    physical_qubits = tuple(target["register"])
+    target = sim_config.target # get_target_gate(gate=sim_config.target, register=sim_config.register)
+    physical_qubits = tuple(target.get('register', None))
 
     # %%
-    target_circuit = get_circuit_context() # circuit_context output to be specified in the simulation_config.py file by the user
+    circuit_context = get_circuit_context() # circuit_context output to be specified in the simulation_config.py file by the user
     
     # %%
     dynamics_options, estimator_options, channel_freq, solver = get_estimator_options(sim_config.sampling_Paulis, sim_config.n_shots, physical_qubits, sim_config.backend)
     # %%
-    gate_str = sim_config.gate_str
-    q_env = get_db_qiskitconfig(sim_config.backend, target, physical_qubits, gate_str, estimator_options, channel_freq, solver, sim_config.sampling_Paulis, sim_config.abstraction_level, sim_config.n_shots, dynamics_options)
+    gate_str = target.get('gate_str', None)
+    q_env = get_db_qiskitconfig(sim_config.backend, target, physical_qubits, gate_str, estimator_options, channel_freq, solver, dynamics_options)
     # %%
-    torch_env, observation_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, target_circuit, sim_config.n_actions)
+    torch_env, observation_space, tgt_instruction_counts, batchsize, min_bound_actions, max_bound_actions, scale_factor, seed = get_torch_env(q_env, circuit_context, sim_config.n_actions)
 
     # %%
     agent = get_network(sim_config.device, observation_space, sim_config.n_actions)

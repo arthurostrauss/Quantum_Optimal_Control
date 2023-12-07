@@ -318,7 +318,7 @@ def get_own_solver():
     return custom_backend
 
 
-def get_db_qiskitconfig(backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, estimator_options, channel_freq, solver, sampling_Paulis, abstraction_level, N_shots, dynamics_options):
+def get_db_qiskitconfig(backend: Backend, target: dict, physical_qubits: tuple, gate_str: str, estimator_options, channel_freq, solver, dynamics_options):
     """
     Configures and returns a quantum environment setup for Qiskit simulations.
 
@@ -357,19 +357,13 @@ def get_db_qiskitconfig(backend: Backend, target: dict, physical_qubits: tuple, 
     # Create a partial function with target passed
     parametrized_circuit_with_target = partial(add_parametrized_circuit, target=target, gate_str=gate_str)
 
-    # Qiskit_setup = QiskitConfig(parametrized_circuit=parametrized_circuit_with_target, 
-    #                             backend=dynamics_backend,
-    #                             estimator_options=estimator_options,
-    #                             channel_freq=channel_freq,
-    #                             solver=solver)
-
     sim_config.parametrized_circuit = parametrized_circuit_with_target
     sim_config.backend = dynamics_backend
     sim_config.estimator_options = estimator_options
     sim_config.channel_freq = channel_freq
     sim_config.solver = solver
 
-    q_env = QuantumEnvironment(target=target, simulation_config=sim_config)
+    q_env = QuantumEnvironment(simulation_config=sim_config)
     
     return q_env
 

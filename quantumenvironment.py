@@ -200,7 +200,7 @@ def _define_target(target: Dict):
 class QuantumEnvironment:
     def __init__(
         self,
-        target: Dict,
+        # target: Dict,
         simulation_config: Optional[SimulationConfig] = None,
     ):
         """
@@ -213,10 +213,10 @@ class QuantumEnvironment:
                                   (backend, abstraction level, number of shots, fidelity estimation options, etc.)
         """
 
-        assert simulation_config.abstraction_level == "circuit" or simulation_config.abstraction_level == "pulse", (
+        assert simulation_config.target.get('abstraction_level', None) == "circuit" or simulation_config.target.get('abstraction_level', None) == "pulse", (
             "Abstraction layer can be either pulse or circuit"
         )
-        self.abstraction_level: str = simulation_config.abstraction_level
+        self.abstraction_level: str = simulation_config.target.get('abstraction_level', None)
         if simulation_config is None:
             raise AttributeError(
                 "QuantumEnvironment requires one hardware configuration."
@@ -231,7 +231,7 @@ class QuantumEnvironment:
                 self.tgt_register,
                 self._n_qubits,
                 self._layout,
-            ) = _define_target(target)
+            ) = _define_target(simulation_config.target)
 
             self._d = 2**self.n_qubits
             self.c_factor = simulation_config.c_factor

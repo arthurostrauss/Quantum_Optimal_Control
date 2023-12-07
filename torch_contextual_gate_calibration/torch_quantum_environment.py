@@ -108,7 +108,6 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         if q_env._config_type == "Qiskit":
             q_env.config.do_calibrations = False
             super().__init__( # Initialize QuantumEnvironment as the parent class from which this class inherits
-                q_env.target,
                 q_env.config
             )
         else:
