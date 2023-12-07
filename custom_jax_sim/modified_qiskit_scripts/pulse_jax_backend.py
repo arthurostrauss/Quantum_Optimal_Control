@@ -19,7 +19,7 @@ jit_wrap = wrap(jit, decorator=True)
 # qd_vmap = wrap(vmap, decorator=True)
 
 
-def PauliToQuditOperator(qubit_ops: List[Operator], qudit_dim_size: Optional[int] = 4):
+def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: Optional[List[int]] = [2, 2]):
     """
     This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
     arbitrary dimension qudit operators that are the equivalent of the Qubit Operators desired.
@@ -30,8 +30,8 @@ def PauliToQuditOperator(qubit_ops: List[Operator], qudit_dim_size: Optional[int
     All operators produced remain as unitaries.
     """
     qudit_op_list = []
-    for op in qubit_ops:
-        qud_op = np.identity(qudit_dim_size, dtype=np.complex64)
+    for op, dim in zip(qubit_ops, subsystem_dims):
+        qud_op = np.identity(dim, dtype=np.complex64)
         qud_op[:2, :2] = op.to_matrix()
         qudit_op_list.append(qud_op)
     complete_op = qudit_op_list[0]
@@ -153,23 +153,27 @@ class JaxSolver(Solver):
             param_dicts = kwargs["parameter_dicts"]
             param_names = param_dicts[0].keys()
             param_values = kwargs["parameter_values"]
+            subsystem_dims = kwargs["subsystem_dims"]
+
+            # print(kwargs["observables"])
             observables_circuits: List[QuantumCircuit] = [circ.remove_final_measurements(inplace=False)
                                                           for circ in kwargs["observables"]]
+            # print(observables_circuits)
             pauli_rotations = [[Operator.from_label("I") for _ in range(circ.num_qubits)] for circ in observables_circuits]
             for i, circuit in enumerate(observables_circuits):
                 qubit_counter = 0
                 qubit_list = []
                 for circuit_instruction in circuit.data:
-                    if circuit_instruction.qubits not in qubit_list:
-                        qubit_list.append(circuit_instruction.qubits)
+                    assert len(circuit_instruction.qubits) == 1, "Operation non local, need local rotations"
+                    if circuit_instruction.qubits[0] not in qubit_list:
+                        qubit_list.append(circuit_instruction.qubits[0])
                         qubit_counter += 1
-                    pauli_rotations[i][qubit_counter - 1].compose(Operator(circuit_instruction.operation))
-            for i in range(len(pauli_rotations)):
-                print(observables_circuits[i].data)
-                print(pauli_rotations[i])
-            observables = [PauliToQuditOperator(pauli_rotations[i], self.model.dim) for i in range(len(pauli_rotations))]
 
-            for key in ["parameter_dicts", "parameter_values", "observables"]:
+                    pauli_rotations[i][qubit_counter - 1] = pauli_rotations[i][qubit_counter - 1].compose(Operator(circuit_instruction.operation))
+
+            observables = [PauliToQuditOperator(pauli_rotations[i], subsystem_dims) for i in range(len(pauli_rotations))]
+
+            for key in ["parameter_dicts", "parameter_values", "observables", "subsystem_dims"]:
                 kwargs.pop(key)
 
             def sim_function(t_span, y0, params, y0_input, y0_cls):
@@ -203,7 +207,7 @@ class JaxSolver(Solver):
                     if y0_cls is not None and convert_results:
                         results.y = [state_type_wrapper(yi) for yi in results.y]
                         # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables
-                        results.y = [observable @ yi for yi in results.y]
+                        results.y = [yi.evolve(observable) for yi in results.y]
                     all_results.append(results)
 
             return all_results
