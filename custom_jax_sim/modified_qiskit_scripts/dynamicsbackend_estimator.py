@@ -3,8 +3,12 @@ from __future__ import annotations
 from itertools import accumulate
 from typing import Sequence
 
+from qiskit import QuantumCircuit
 from qiskit.primitives import BackendEstimator, EstimatorResult
 from qiskit.primitives.backend_estimator import _run_circuits
+from qiskit.primitives.primitive_job import PrimitiveJob
+from qiskit.primitives.utils import _circuit_key, init_observable, _observable_key
+from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit_dynamics.backend import DynamicsBackend
 from qiskit.transpiler import PassManager
 
@@ -68,7 +72,22 @@ class DynamicsBackendEstimator(BackendEstimator):
             for circuit_index in range(accum[i], accum[i] + n)
         ]
         bound_circuits = self._bound_pass_manager_run(bound_circuits)
+        new_bound_circuits = []
+        for _ in range(len(parameter_values)):
+            for circ in bound_circuits:
+                new_bound_circuits.append(circ.copy())
+        accum = [0] + list(accumulate([num_observables[0]] * len(parameter_values)))
         # Run
         result, metadata = _run_circuits(bound_circuits, self._backend, **run_options)
-
         return self._postprocessing(result, accum, metadata)
+
+    def _run(
+        self,
+        circuits: tuple[QuantumCircuit, ...],
+        observables: tuple[BaseOperator, ...],
+        parameter_values: tuple[tuple[float, ...], ...],
+        **run_options,
+    ):
+        custom_circuit_list = (circuits[0],)
+        custom_observation_list = (observables[0],)
+        return super()._run(custom_circuit_list, custom_observation_list, parameter_values, **run_options)

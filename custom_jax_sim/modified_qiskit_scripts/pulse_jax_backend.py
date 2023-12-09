@@ -19,7 +19,7 @@ jit_wrap = wrap(jit, decorator=True)
 # qd_vmap = wrap(vmap, decorator=True)
 
 
-def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: Optional[List[int]] = [2, 2]):
+def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
     """
     This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
     arbitrary dimension qudit operators that are the equivalent of the Qubit Operators desired.
