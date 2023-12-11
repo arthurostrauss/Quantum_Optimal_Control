@@ -9,8 +9,8 @@ Code for arbitrary state preparation based on scheme described in Appendix D.2b 
 import numpy as np
 from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
-from qconfig import QiskitConfig
-
+from qconfig import QiskitConfig, TrainingConfig
+from typing import Optional
 # Qiskit imports for building RL environment (circuit level)
 from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister
 from qiskit.quantum_info import DensityMatrix, Statevector
@@ -20,6 +20,7 @@ from qiskit_ibm_runtime.options import SimulatorOptions, TranspilationOptions, E
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
 from tensorflow_probability.python.distributions import MultivariateNormalDiag
+from gymnasium.spaces import Box
 
 # Additional imports
 from tqdm import tqdm
@@ -34,21 +35,25 @@ In there, we design classes for the environment (Quantum Circuit simulated on IB
 """
 
 
-def apply_parametrized_circuit(qc: QuantumCircuit):
+def apply_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector], qr: Optional[QuantumRegister],
+                               n_actions):
     """
     Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
     :param qc: Quantum Circuit instance to add the gates on
+    :param params: Parameters of the custom Gate
+    :param qr: Quantum Register formed of target qubits
+    :param n_actions: Number of parameters in the parametrized circuit
     :return:
     """
-    # qc.num_qubits
-    global n_actions
-    params = ParameterVector('theta', n_actions)
-    qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
-    qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    qc.rzx(2 * np.pi * params[6], 0, 1)
-
-
-# action_spec = array_spec.BoundedArraySpec(shape=(1,), dtype=tf.float32, minimum=-1., maximum=1.)
+    if params is None:
+        params = ParameterVector('theta', n_actions)
+    if qr is None:
+        qr = qc.qregs[0]
+    param_circ = QuantumCircuit(qr)
+    param_circ.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], qr[0])
+    param_circ.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], qr[1])
+    param_circ.rzx(2 * np.pi * params[6], 0, qr[1])
+    qc.append(param_circ.to_instruction(), qr)
 
 
 """
@@ -99,12 +104,18 @@ bell_state = Statevector((ket00 + ket11) / np.sqrt(2))
 bell_tgt["dm"] = DensityMatrix(bell_state)
 
 Qiskit_setup = QiskitConfig(parametrized_circuit=apply_parametrized_circuit, backend=backend,
+                            parametrized_circuit_kwargs={"n_actions": n_actions},
                             estimator_options=estimator_options)
+action_space = Box(low=-1, high=1, shape=(n_actions,), dtype=np.float32)
+obs_space = Box(low=0, high=1, shape=(1,), dtype=np.float32)
 
+training_config = TrainingConfig(target=bell_tgt, backend_config=Qiskit_setup, action_space=action_space,
+                                 observation_space=obs_space,
+                                 batch_size=batchsize, sampling_Paulis=sampling_Paulis,
+                                 n_shots=N_shots, c_factor=0.125, benchmark_cycle=5, seed=seed, device=None)
 
-q_env = QuantumEnvironment(target=bell_tgt, abstraction_level="circuit",
-                           Qiskit_config=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.125)
+q_env = QuantumEnvironment(training_config=training_config)
+
 
 """
 -----------------------------------------------------------------------------------------------------
@@ -130,7 +141,7 @@ Policy parameters
 -----------------------------------------------------------------------------------------------------
 """
 # Policy parameters
-N_in = n_qubits + 1  # One input for each measured qubit state (0 or 1 input for each neuron)
+N_in = obs_space.shape[-1]  # One input for each measured qubit state (0 or 1 input for each neuron)
 hidden_units = [82, 82]  # List containing number of units in each hidden layer
 
 network = generate_model((N_in,), hidden_units, n_actions, actor_critic_together=True)

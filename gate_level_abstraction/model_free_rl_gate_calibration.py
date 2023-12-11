@@ -7,20 +7,20 @@ Code for arbitrary gate calibration using model-free reinforcement learning
 
 import numpy as np
 from qiskit_ibm_runtime.options import SimulatorOptions, EnvironmentOptions
-
+from typing import Optional
 from quantumenvironment import QuantumEnvironment
 from helper_functions import select_optimizer, generate_model
-from qconfig import QiskitConfig
+from qconfig import QiskitConfig, TrainingConfig
 
 # Qiskit imports for building RL environment (circuit level)
 from qiskit_ibm_runtime import QiskitRuntimeService, Estimator, Options
-from qiskit.circuit import ParameterVector, QuantumCircuit
+from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister
 from qiskit.extensions import CXGate, XGate
 from qconfig import QiskitConfig
 # Tensorflow imports for building RL agent and framework
 import tensorflow as tf
 from tensorflow_probability.python.distributions import MultivariateNormalDiag
-
+from gymnasium.spaces import Box
 # Additional imports
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -34,18 +34,25 @@ Here, we use a class object for the QuantumEnvironment (Quantum Circuit simulate
 """
 
 
-def apply_parametrized_circuit(qc: QuantumCircuit):
+def apply_parametrized_circuit(qc: QuantumCircuit, params: Optional[ParameterVector], qr: Optional[QuantumRegister],
+                               **kwargs):
     """
-    Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
-    :param qc: Quantum Circuit instance to add the gates on
-    :return:
-    """
-    # qc.num_qubits
-    global n_actions
-    params = ParameterVector('theta', n_actions)
-    qc.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], 0)
-    qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    qc.rzx(2 * np.pi * params[6], 0, 1)
+     Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
+     :param qc: Quantum Circuit instance to add the gates on
+     :param params: Parameters of the custom Gate
+     :param qr: Quantum Register formed of target qubits
+     :param kwargs: Additional arguments to feed the parametrized_circuit function body
+     :return:
+     """
+    if params is None:
+        params = ParameterVector('theta', kwargs["n_actions"])
+    if qr is None:
+        qr = qc.qregs[0]
+    param_circ = QuantumCircuit(qr)
+    param_circ.u(2 * np.pi * params[0], 2 * np.pi * params[1], 2 * np.pi * params[2], qr[0])
+    param_circ.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], qr[1])
+    param_circ.rzx(2 * np.pi * params[6], 0, qr[1])
+    qc.append(param_circ.to_instruction(), qr)
 
 
 """
@@ -58,7 +65,9 @@ sampling_Paulis = 50
 N_shots = 10  # Number of shots for sampling the quantum computer for each action vector
 n_epochs = 600  # Number of epochs
 batchsize = 50  # Batch size (iterate over a bunch of actions per policy to estimate expected return)
-
+n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
+action_space = Box(low=-1, high=1, shape=(n_actions,), dtype=np.float32)
+obs_space = Box(low=0, high=1, shape=(1,), dtype=np.float32)
 service = QiskitRuntimeService(channel='ibm_quantum')
 backend = service.backends(simulator=True)[0]  # Simulation backend (mock quantum computer)
 
@@ -76,14 +85,17 @@ cnot_target = {
 }
 
 Qiskit_setup = QiskitConfig(parametrized_circuit=apply_parametrized_circuit, backend=backend,
+                            parametrized_circuit_kwargs={"n_actions": n_actions},
                             estimator_options=estimator_options)
+training_config = TrainingConfig(target=cnot_target, backend_config=Qiskit_setup, action_space=action_space,
+                                 observation_space=obs_space,
+                                 batch_size=batchsize, sampling_Paulis=sampling_Paulis,
+                                 n_shots=N_shots, c_factor=0.125, benchmark_cycle=5, seed=seed, device=None)
+
 
 target = cnot_target
-n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
 
-q_env = QuantumEnvironment(target=target, abstraction_level="circuit",
-                           Qiskit_config=Qiskit_setup,
-                           sampling_Pauli_space=sampling_Paulis, n_shots=N_shots, c_factor=0.25)
+q_env = QuantumEnvironment(training_config=training_config)
 
 """
 -----------------------------------------------------------------------------------------------------

@@ -1,2 +1,2 @@
-from .modified_qiskit_scripts.pulse_jax_backend import JaxSolver
-from .modified_qiskit_scripts.dynamicsbackend_estimator import DynamicsBackendEstimator
+from custom_jax_sim.jax_solver import JaxSolver
+from custom_jax_sim.dynamicsbackend_estimator import DynamicsBackendEstimator

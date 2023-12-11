@@ -10,8 +10,6 @@ from itertools import chain, product
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
-from gymnasium import Env
-from gymnasium.spaces import Space
 
 # Qiskit imports
 from qiskit import transpile, schedule
@@ -57,6 +55,7 @@ from helper_functions import (
     retrieve_backend_info,
     determine_ecr_params,
 )
+from qconfig import TrainingConfig
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 from custom_jax_sim import (
     DynamicsBackendEstimator, JaxSolver,
@@ -73,21 +72,16 @@ def create_array(circ_trunc, batchsize, n_actions):
     return arr
 
 
-class TorchQuantumEnvironment(QuantumEnvironment, Env):
+class ContextAwareQuantumEnvironment(QuantumEnvironment):
     metadata = {"render_modes": ["human"]}
     check_on_exp = True  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
 
     def __init__(
         self,
-        q_env: QuantumEnvironment,
+        training_config: TrainingConfig,
         circuit_context: QuantumCircuit,
-        action_spec: Space,
-        observation_spec: Space,
-        batch_size: int,
         training_steps_per_gate: Union[List[int], int] = 1500,
-        benchmark_cycle: int = 100,
         intermediate_rewards: bool = False,
-        seed: Optional[int] = None,
     ):
         """
         Class for wrapping a quantum environment in a Gym environment able to tackle
@@ -96,46 +90,18 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         This class will look for the locations of the target gates in the circuit context and will enable the
         writing of new parametrized circuits, where each gate instance is replaced by a custom gate defined by the Callable parametrized_circuit_func in QuantumEnvironment.
 
-        :param q_env: Existing QuantumEnvironment object, containing a target and a configuration.
+        :param training_config: Training configuration containing all hyperparameters characterizing the environment
+            for the RL training
         :param circuit_context: QuantumCircuit where target gate is located to perform context aware gate
             calibration.
-        :param action_spec: Gym Space specifying the shape of the action vector at each step
-        :param observation_spec: Gym Space specifying the shape of the observations that should be retrieved
-        :param batch_size: Number of parametrized circuits to be sent in each job (or equivalently in RL, number of
-           different trajectories to collect for average return empirical estimation
         :param training_steps_per_gate: Number of calibration steps per gate instance in circuit context
            (for sequential calibration mode)
-        :param benchmark_cycle: Step interval to perform fidelity benchmarking on top of RL based calibration
         :param intermediate_rewards: Specify if calibration within circuit should be sequential (False)
          or across circuit context (True). For now, sequential mode is preferred.
-        :param seed: Seed to provide the Gym environment
         """
 
-        # TODO: Redeclare everything instead of reinitializing (loss of time especially for DynamicsBackend declaration)
+        super().__init__(training_config)
 
-        if q_env.config_type == "Qiskit":
-            q_env.config.do_calibrations = False
-            super().__init__(
-                q_env.target,
-                q_env.abstraction_level,
-                q_env.config,
-                None,
-                q_env.sampling_Pauli_space,
-                q_env.n_shots,
-                q_env.c_factor,
-            )
-        else:
-            super().__init__(
-                q_env.target,
-                q_env.abstraction_level,
-                None,
-                q_env.config,
-                q_env.sampling_Pauli_space,
-                q_env.n_shots,
-                q_env.c_factor,
-            )
-
-        Env.__init__(self)
         assert (
             self.target_type == "gate"
         ), "This class is made for gate calibration only"
@@ -292,11 +258,11 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
         )
 
         self._parameters = [
-            ParameterVector(f"a_{j}", action_spec.shape[-1])
+            ParameterVector(f"a_{j}", self.action_space.shape[-1])
             for j in range(self.tgt_instruction_counts)
         ]
         self._param_values = create_array(
-            self.tgt_instruction_counts, batch_size, action_spec.shape[-1]
+            self.tgt_instruction_counts, self.batch_size, self.action_space.shape[-1]
         )
 
         # Store time and instruction indices where target gate is played in circuit
@@ -314,26 +280,18 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self.baseline_truncations,
             self.custom_gates,
         ) = self._generate_circuit_truncations()
-        self._batch_size = batch_size
-        self._punctual_avg_fidelities = np.zeros(batch_size)
-        self._punctual_circuit_fidelities = np.zeros(batch_size)
+        self._punctual_avg_fidelities = np.zeros(self.batch_size)
+        self._punctual_circuit_fidelities = np.zeros(self.batch_size)
         self._punctual_observable: SparsePauliOp = SparsePauliOp("X")
         self.circuit_fidelity_history = []
-        self.action_space = action_spec
-        self.observation_space = observation_spec
-        self._seed = seed
-        if isinstance(seed, int):
-            self.np_random = seed
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
         self._training_steps_per_gate = training_steps_per_gate
         self._inside_trunc_tracker = 0
         self._trunc_index = 0
-        self._episode_ended = False
-        self._episode_tracker = 0
-        self._benchmark_cycle = benchmark_cycle
+
         self._intermediate_rewards = intermediate_rewards
         self._max_return = 0
-        self._best_action = np.zeros((batch_size, action_spec.shape[-1]))
+        self._best_action = np.zeros((self.batch_size, self.action_space.shape[-1]))
 
     @property
     def physical_target_qubits(self):
@@ -342,18 +300,6 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
     @property
     def physical_neighbor_qubits(self):
         return self._physical_neighbor_qubits
-
-    @property
-    def batch_size(self) -> Optional[int]:
-        return self._batch_size
-
-    @batch_size.setter
-    def batch_size(self, size: int):
-        try:
-            assert size > 0 and isinstance(size, int)
-            self._batch_size = size
-        except AssertionError:
-            raise ValueError("Batch size should be positive integer.")
 
     @property
     def done(self):
@@ -370,28 +316,6 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self._training_steps_per_gate = nb_of_steps
         except AssertionError:
             raise ValueError("Training steps number should be positive integer.")
-
-    @property
-    def benchmark_cycle(self) -> int:
-        return self._benchmark_cycle
-
-    @benchmark_cycle.setter
-    def benchmark_cycle(self, step) -> None:
-        assert step >= 0, "Cycle needs to be a positive integer"
-        self._benchmark_cycle = step
-
-    def do_benchmark(self) -> bool:
-        if self.benchmark_cycle == 0:
-            return False
-        else:
-            return (
-                self._episode_tracker % self.benchmark_cycle == 0
-                and self._episode_tracker > 1
-            )
-        # if isinstance(self.estimator, Runtime_Estimator) or self.abstraction_level == 'circuit':
-        #     return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
-        # else:
-        #     return False
 
     def _retrieve_target_state(self, input_state_index: int, iteration: int) -> Dict:
         """
@@ -923,7 +847,7 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
             self._max_return = np.mean(reward_table)
             self._best_action = np.mean(reshaped_params, axis=0)
         self.reward_history.append(reward_table)
-        assert len(reward_table) == self.batch_size
+        assert len(reward_table) == self.batch_size, f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
 
         return reward_table
 
@@ -1033,6 +957,5 @@ class TorchQuantumEnvironment(QuantumEnvironment, Env):
 
     def __repr__(self):
         string = QuantumEnvironment.__repr__(self)
-        string += f"Batchsize: {self.batch_size}, \n"
         string += f"Number of target gates in circuit context: {self.tgt_instruction_counts}\n"
         return string

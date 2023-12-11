@@ -1,86 +1,41 @@
 import os
 
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 # Qiskit imports
-from qiskit import pulse, transpile
-from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister, Gate, \
-    ParameterExpression, CircuitInstruction
+from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister, CircuitInstruction
 # from qiskit.circuit.random import random_circuit
 # from qiskit_ibm_provider import IBMProvider
-from qiskit_ibm_runtime import QiskitRuntimeService
-from qiskit.providers import Backend
 from qiskit.providers.fake_provider import FakeJakartaV2
 from qiskit_aer import AerSimulator
-from qiskit.circuit.library import XGate, CXGate
+from qiskit.circuit.library import CXGate
 
-from qconfig import QiskitConfig
-from quantumenvironment import QuantumEnvironment
-from torch_quantum_environment import TorchQuantumEnvironment
-from gymnasium.spaces import Box, Space
+from agent import ActorNetwork, CriticNetwork, Agent
+from qconfig import QiskitConfig, TrainingConfig
+from context_aware_quantum_environment import ContextAwareQuantumEnvironment
+from gymnasium.spaces import Box
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 from torch.distributions import Normal
-
 import numpy as np
 import tqdm
 import time
-from typing import Union, Optional, List, Sequence
+from typing import Optional
 
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 # Save your credentials on disk.
 # IBMProvider.save_account(token='<IBM Quantum API key>')
 
 
-# def custom_pulse_schedule(backend: Backend, qubit_tgt_register: Union[List[int], QuantumRegister],
-#                           params: Union[Sequence[ParameterExpression], ParameterVector],
-#                           default_schedule: Optional[Union[pulse.ScheduleBlock, pulse.Schedule]] = None):
-#     """
-#     Define parametrization of the pulse schedule characterizing the target gate
-#         :param backend: IBM Backend on which schedule shall be added
-#         :param qubit_tgt_register: Qubit register on which
-#         :param params: Parameters of the Schedule
-#         :param default_schedule:  baseline from which one can customize the pulse parameters
-#
-#         :return: Parametrized Schedule
-#     """
-#
-#     if default_schedule is None:  # No baseline pulse, full waveform builder
-#         pass
-#     else:
-#
-#         # Look here for the pulse features to specifically optimize upon, for the x gate here, simply retrieve relevant
-#         # parameters for the Drag pulse
-#         pulse_ref = default_schedule.instructions[0][1].pulse
-#
-#         with pulse.build(backend=backend, name='param_schedule') as parametrized_schedule:
-#
-#             pulse.play(pulse.Drag(duration=pulse_ref.duration, amp=params[0], sigma=pulse_ref.sigma,
-#                                   beta=pulse_ref.beta, angle=pulse_ref.angle),
-#                        channel=pulse.DriveChannel(qubit_tgt_register[0]))
-#
-#         return parametrized_schedule
-#         pass
-
-
 def param_circuit(qc: QuantumCircuit,
-                  params: Optional[ParameterVector]=None, q_reg: Optional[QuantumRegister] = None):
-    # To build a unique gate identifier, choose the name based on the input circuit name (by default and if used
-    # with TFQuantumEnvironment class, this circuit name is of the form c_circ_trunc_{i})
-    # custom_gate_name = f"{target['gate'].name}_{qc.name[-1]}"
-    # custom_gate = Gate(custom_gate_name, len(target["register"]), params=params.params)
-    # custom_sched = custom_pulse_schedule(backend=backend, qubit_tgt_register=physical_qubits, params=params,
-    #                                      default_schedule=backend.target.get_calibration(target["gate"].name,
-    #                                                                                      tuple(physical_qubits)))
-    # qc.add_calibration(custom_gate, physical_qubits, custom_sched)
-    # qc.append(custom_gate, physical_qubits)
-    my_qc = QuantumCircuit(2)
-    my_qc.u(np.pi * params[0], np.pi * params[1], np.pi * params[2], 0)
-    my_qc.u(np.pi * params[3], np.pi * params[4], np.pi * params[5], 1)
-    my_qc.rzx(np.pi * params[6], 0, 1)
-    qc.append(my_qc.to_instruction(), physical_qubits)
-    # qc.rx(2 * np.pi * params[0], physical_qubits)
+                  params: Optional[ParameterVector] = None, q_reg: Optional[QuantumRegister] = None):
+
+    my_qc = QuantumCircuit(q_reg)
+    my_qc.u(np.pi * params[0], np.pi * params[1], np.pi * params[2], q_reg[0])
+    my_qc.u(np.pi * params[3], np.pi * params[4], np.pi * params[5], q_reg[1])
+    my_qc.rzx(np.pi * params[6], q_reg[0], q_reg[1])
+    qc.append(my_qc.to_instruction(), q_reg)
 
 
 """
@@ -101,9 +56,7 @@ target_gate = CXGate()
 physical_qubits = [0, 1]
 n_qubits = len(physical_qubits)
 target = {"gate": target_gate, 'register': physical_qubits}
-config = QiskitConfig(parametrized_circuit=param_circuit, backend=backend)
-
-q_env = QuantumEnvironment(target, "circuit", config)
+backend_config = QiskitConfig(parametrized_circuit=param_circuit, backend=backend)
 
 # Circuit context
 seed = 10
@@ -123,153 +76,12 @@ observation_space = Box(low=np.array([0, 0]), high=np.array([4 ** n_qubits, tgt_
                         seed=seed)
 action_space = Box(low=min_bound_actions, high=max_bound_actions, shape=(n_actions,), seed=seed)
 
-torch_env = TorchQuantumEnvironment(q_env, target_circuit, action_space, observation_space, batch_size=batchsize,
-                                    training_steps_per_gate=training_steps_per_gate, intermediate_rewards=False,
-                                    seed=None)
-
-
-class ActorNetwork(nn.Module):
-    def __init__(self, observation_space: Space, hidden_layers: Sequence[int],
-                 n_actions: int,
-                 hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
-                 include_critic=True,
-                 chkpt_dir: str = 'tmp/ppo'):
-        super(ActorNetwork, self).__init__()
-
-        self.checkpoint_dir = chkpt_dir
-        # Define a list to hold the layer sizes including input and output sizes
-        layer_sizes = [observation_space.shape[0]] + list(hidden_layers)
-        if hidden_activation_functions is None:
-            hidden_activation_functions = [nn.ReLU() for _ in range(len(layer_sizes))]
-
-        assert len(hidden_activation_functions) == len(layer_sizes)
-        # Define a list to hold the layers of the network
-        layers = []
-
-        # Iterate over the layer sizes to create the network layers
-        for i in range(len(layer_sizes) - 1):
-            # Add a linear layer with the current and next layer sizes
-            layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
-
-            layers.append(hidden_activation_functions[i])
-
-        # Create the actor network using Sequential container
-        self.layers = layers
-        self.mean_action = nn.Linear(hidden_layers[-1], n_actions)
-        self.std_action = nn.Linear(hidden_layers[-1], n_actions)
-        self.std_activation = nn.Sigmoid()
-
-        self.include_critic = include_critic
-        self.critic_output = nn.Linear(hidden_layers[-1], 1)
-
-        self.base_network = nn.Sequential(*layers)
-
-        # Initialize the weights of the network
-        for layer in self.base_network.modules():
-            if isinstance(layer, nn.Linear):
-                nn.init.orthogonal_(layer.weight)
-                nn.init.constant_(layer.bias, 0.)
-
-    def forward(self, x):
-        x = self.base_network(x)
-        mean_action = self.mean_action(x)
-        std_action = self.std_action(x)
-        std_action = self.std_activation(std_action)
-        critic_output = self.critic_output(x)
-
-        if self.critic_output:
-            return mean_action, std_action, critic_output
-        else:
-            return mean_action, std_action
-
-    def get_value(self, x):
-        x = self.base_network(x)
-        x = self.critic_output(x)
-        return x
-
-    def save_checkpoint(self):
-        torch.save(self, self.checkpoint_dir)
-
-    def load_checkpoint(self):
-        torch.load(self.checkpoint_dir)
-
-
-class CriticNetwork(nn.Module):
-    def __init__(self, observation_space: Space, hidden_layers: Sequence[int],
-                 hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
-                 chkpt_dir: str = 'tmp/critic_ppo'):
-        super(CriticNetwork, self).__init__()
-        self.checkpoint_dir = chkpt_dir
-        # Define a list to hold the layer sizes including input and output sizes
-        layer_sizes = [observation_space.shape[0]] + list(hidden_layers)
-        if hidden_activation_functions is None:
-            hidden_activation_functions = [nn.ReLU() for _ in range(len(layer_sizes))]
-
-        assert len(hidden_activation_functions) == len(layer_sizes)
-        # Define a list to hold the layers of the network
-        layers = []
-
-        # Iterate over the layer sizes to create the network layers
-        for i in range(len(layer_sizes) - 1):
-            # Add a linear layer with the current and next layer sizes
-            layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
-
-            # Add a ReLU activation function for all layers except the output layer
-
-            layers.append(hidden_activation_functions[i])
-
-        # Create the actor network using Sequential container
-        self.layers = layers
-        self.critic_output = nn.Linear(hidden_layers[-1], 1)
-        self.layers.append(self.critic_output)
-        self.critic_network = nn.Sequential(*self.layers)
-
-        # Initialize the weights of the network
-        for layer in self.critic_network.modules():
-            if isinstance(layer, nn.Linear):
-                nn.init.orthogonal_(layer.weight)
-                nn.init.constant_(layer.bias, 0.)
-
-    def forward(self, x):
-        return self.critic_network(x)
-
-    def save_checkpoint(self):
-        torch.save(self, self.checkpoint_dir)
-
-    def load_checkpoint(self):
-        torch.load(self.checkpoint_dir)
-
-
-class Agent(nn.Module):
-    def __init__(self, actor_net: ActorNetwork, critic_net: Optional[CriticNetwork]):
-        super().__init__()
-
-        self.actor_net = actor_net
-        self.critic_net = critic_net
-
-        if self.critic_net is not None:
-            assert not self.actor_net.include_critic, "Critic already included in Actor Network"
-
-    def forward(self, x):
-        if self.actor_net.include_critic:
-            return self.actor_net(x)
-        else:
-            assert self.critic_net is not None, 'Critic Network not provided and not included in ActorNetwork'
-            mean_action, std_action = self.actor_net(x)
-            value = self.critic_net(x)
-            return mean_action, std_action, value
-
-    def get_value(self, x):
-        if self.actor_net.include_critic:
-            return self.actor_net.get_value(x)
-        else:
-            assert self.critic_net is not None, 'Critic Network not provided and not included in ActorNetwork'
-            return self.critic_net(x)
-
-    def save_checkpoint(self):
-        self.actor_net.save_checkpoint()
-        if self.critic_net is not None:
-            self.critic_net.save_checkpoint()
+config = TrainingConfig(target, backend_config, action_space, observation_space, batch_size=batchsize,
+                        sampling_Paulis=sampling_Paulis, n_shots=N_shots, c_factor=0.125, benchmark_cycle=5,
+                        seed=seed, device=device)
+torch_env = ContextAwareQuantumEnvironment(training_config=config, circuit_context=target_circuit,
+                                           training_steps_per_gate=training_steps_per_gate, intermediate_rewards=False,
+                                           )
 
 
 actor_net = ActorNetwork(observation_space, [128, 128], n_actions, [nn.ELU(), nn.ELU(), nn.ELU()]).to(device)
@@ -459,8 +271,8 @@ try:
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
 
 except Exception as e:
-    torch_env.close()
     writer.close()
+    raise e
 
 torch_env.close()
 writer.close()
