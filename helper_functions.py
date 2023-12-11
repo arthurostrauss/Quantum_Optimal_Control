@@ -1,8 +1,10 @@
 from itertools import permutations
-from typing import Optional, Tuple, List, Union, Dict, Sequence
+from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable
 
 import numpy as np
 import tensorflow as tf
+import yaml
+from gymnasium.spaces import Box
 from qiskit import pulse
 from qiskit.circuit import QuantumCircuit, Gate, Parameter
 from qiskit.circuit.library import get_standard_gate_name_mapping
@@ -349,85 +351,6 @@ def determine_ecr_params(
     return default_params, basis_gate_instructions, instructions_array
 
 
-def get_schedule_dict(sched: Union[pulse.Schedule, pulse.ScheduleBlock]):
-    """
-    To be used for custom Qiskit Dynamics simulation with DynamicsBackend, format pulse Schedule in a Jax Pytree structure to
-    speed up simulations by jitting the schedule to samples conversion
-
-    """
-    new_sched = (
-        block_to_schedule(sched) if isinstance(sched, pulse.ScheduleBlock) else sched
-    )
-    assert new_sched.is_parameterized()
-    instructions_array = np.array(new_sched.instructions)[:, 1]
-    instructions_info = []
-    for instruction in instructions_array:
-        if isinstance(instruction, pulse.Play):
-            if isinstance(instruction.pulse, pulse.ScalableSymbolicPulse):
-                info = {
-                    "type": "Play",
-                    "channel": instruction.channel,
-                    "pulse_type": instruction.pulse.pulse_type,
-                    "parameters": instruction.pulse.parameters,
-                }
-                instructions_info.append(info)
-            else:
-                raise QiskitError(f"{instruction.pulse} not JAX compatible")
-        elif isinstance(instruction, pulse.ShiftPhase):
-            info = {
-                "type": "ShiftPhase",
-                "channel": instruction.channel,
-                "parameters": instruction.phase,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.ShiftFrequency):
-            info = {
-                "type": "ShiftFrequency",
-                "channel": instruction.channel,
-                "parameters": instruction.frequency,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.SetPhase):
-            info = {
-                "type": "SetPhase",
-                "channel": instruction.channel,
-                "parameters": instruction.phase,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.SetFrequency):
-            info = {
-                "type": "SetFrequency",
-                "channel": instruction.channel,
-                "parameters": instruction.frequency,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.RelativeBarrier):
-            info = {"type": "RelativeBarrier", "channel": instruction.channels}
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.Acquire):
-            info = {
-                "type": "Acquire",
-                "channel": instruction.channel,
-                "parameters": [
-                    instruction.duration,
-                    instruction.reg_slot,
-                    instruction.mem_slot,
-                ],
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.Delay):
-            info = {
-                "type": "Delay",
-                "channel": instruction.channel,
-                "parameters": instruction.duration,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.Reference):
-            pass
-
-    return instructions_info
-
-
 def state_fidelity_from_state_tomography(
     qc_list: List[QuantumCircuit],
     backend: Backend,
@@ -693,6 +616,29 @@ def get_solver_and_freq_from_backend(
     )
 
     return channel_freqs, solver
+
+
+def load_from_yaml_file(file_path: str, param_circuit: Callable, param_circuit_kwargs):
+    with open("q_env_config.yml", "r") as f:
+        config = yaml.safe_load(f)
+
+
+    low: np.array(config["ENV"]["ACTION_SPACE"]["LOW"])
+    high: np.array(config["ENV"]["ACTION_SPACE"]["HIGH"])
+    params = {
+        "action_space": Box(low=low, high=high, shape=config["ENV"]["N_ACTIONS"],dtype=np.float32),
+        "observation_space": Box(low=-1, high=1, shape=config["ENV"]["OBS_SPACE"], dtype=np.float32),
+        "batch_size": config["ENV"]["BATCH_SIZE"],
+        "sampling_Paulis": config["ENV"]["SAMPLING_PAULIS"],
+        "n_shots": config["ENV"]["N_SHOTS"],
+        "c_factor": config["ENV"]["C_FACTOR"],
+        "seed": config["OPTIONS"]["SEED_SIMULATOR"],
+        "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
+        "target": {"gate": get_standard_gate_name_mapping()[config["TARGET"]["GATE"].lower()],
+                   "register": config["TARGET"]["PHYSICAL_QUBITS"]}
+    }
+
+    return params
 
 
 def retrieve_backend_info(

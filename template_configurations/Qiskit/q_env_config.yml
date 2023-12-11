@@ -1,0 +1,46 @@
+CREDENTIALS:
+  TOKEN: "4c8ba089b15930777fc8d5501ed739bccaee58f5d9c3b13541776638606834593af6e9b1467ab224ffca2022914cea2e0782958a62c5eb4f2a84d008e12c42e2"
+
+PROVIDER:
+  HUB: "ibm-q"
+  GROUP: "open"
+  PROJECT: "main"
+
+SERVICE:
+  CHANNEL: "ibm_quantum"
+
+RUNTIME_OPTIONS:
+  SEED_SIMULATOR: 100
+  RESILIENCE_LEVEL: None
+  NOISE_MODEL: None
+  SHOTS: 1024
+  JOB_TAG: "rl_qoc"
+
+
+
+BACKEND:
+  SIMULATOR: True
+  NAME: "ibmq_qasm_simulator"
+  CUSTOM: TRUE
+  FILE: "backend_config.py"
+
+ENV:
+  N_QUBITS: 2 # Number of qubits
+  SAMPLING_PAULIS: 100 # Number of Pauli strings to sample
+  N_SHOTS: 1
+  C_FACTOR: 1. # Cost factor for the reward function
+  N_ACTIONS: 7
+  BATCH_SIZE: 1 # Number of actions to evaluate per policy iteration
+  ACTION_SPACE:
+    LOW: [ -1., -1., -1., -1., -1., -1., -1. ]
+    HIGH: [ 1., 1., 1., 1., 1., 1., 1. ]
+  OBSERVATION_SPACE: (2, )  # Shape of the observation space
+  BENCHMARK_CYCLES: 1
+
+
+TARGET:
+  GATE: "X"
+  PHYSICAL_QUBITS: [ 0 ]
+
+CIRCUIT_CONTEXT:
+  FILE: "circuit_context.py"
