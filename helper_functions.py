@@ -618,27 +618,33 @@ def get_solver_and_freq_from_backend(
     return channel_freqs, solver
 
 
-def load_from_yaml_file(file_path: str, param_circuit: Callable, param_circuit_kwargs):
-    with open("q_env_config.yml", "r") as f:
+def load_env_params_from_yaml_file(file_path: str):
+    with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
-
-    low: np.array(config["ENV"]["ACTION_SPACE"]["LOW"])
-    high: np.array(config["ENV"]["ACTION_SPACE"]["HIGH"])
+    low = np.array(config["ENV"]["ACTION_SPACE"]["LOW"])
+    high = np.array(config["ENV"]["ACTION_SPACE"]["HIGH"])
     params = {
-        "action_space": Box(low=low, high=high, shape=config["ENV"]["N_ACTIONS"],dtype=np.float32),
-        "observation_space": Box(low=-1, high=1, shape=config["ENV"]["OBS_SPACE"], dtype=np.float32),
+        "action_space": Box(low=low, high=high, shape=(config["ENV"]["N_ACTIONS"],),dtype=np.float32),
+        "observation_space": Box(low=0., high=1., shape=(config["ENV"]["OBSERVATION_SPACE"],), dtype=np.float32),
         "batch_size": config["ENV"]["BATCH_SIZE"],
         "sampling_Paulis": config["ENV"]["SAMPLING_PAULIS"],
         "n_shots": config["ENV"]["N_SHOTS"],
         "c_factor": config["ENV"]["C_FACTOR"],
-        "seed": config["OPTIONS"]["SEED_SIMULATOR"],
+        "seed": config["ENV"]["SEED"],
         "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
         "target": {"gate": get_standard_gate_name_mapping()[config["TARGET"]["GATE"].lower()],
                    "register": config["TARGET"]["PHYSICAL_QUBITS"]}
     }
+    backend_params = {
+        "real_backend": config["BACKEND"]["REAL_BACKEND"],
+        "backend_name": config["BACKEND"]["NAME"],
+        "channel": config["SERVICE"]["CHANNEL"],
+        "instance": config["SERVICE"]["INSTANCE"],
+    }
+    runtime_options = config["RUNTIME_OPTIONS"]
 
-    return params
+    return params, backend_params, RuntimeOptions(**runtime_options)
 
 
 def retrieve_backend_info(

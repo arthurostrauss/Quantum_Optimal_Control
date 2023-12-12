@@ -6,16 +6,17 @@ import yaml
 from gymnasium.spaces import Box
 import numpy as np
 from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
-from helper_functions import determine_ecr_params, load_from_yaml_file
-from qiskit import pulse, QuantumCircuit, QuantumRegister
+from helper_functions import determine_ecr_params, load_env_params_from_yaml_file
+from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
 from qiskit_dynamics import Solver, DynamicsBackend
 from custom_jax_sim import JaxSolver
-from qiskit_ibm_runtime import QiskitRuntimeService
-from qiskit_ibm_runtime.fake_provider import FakeJakarta, FakeProvider
+from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
+from qiskit_ibm_runtime.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, TrainingConfig
+
 
 def custom_schedule(backend: BackendV1 | BackendV2, physical_qubits: list, params: ParameterVector,
                     keep_symmetry: bool = True):
@@ -91,21 +92,34 @@ def apply_parametrized_circuit(qc: QuantumCircuit, params: ParameterVector, tgt_
     qc.append(parametrized_gate, tgt_register)
 
 
-def retrieve_backend(backend_name: str, real_backend: bool = False):
+def get_backend(real_backend: Optional[bool] = None, backend_name:Optional[str] = None,
+                channel: Optional[str] = None, instance: Optional[str] = None):
 
     """
-    Real backend initialization:
-    Run this cell only if intending to use a real backend, where Qiskit Runtime is enabled
+    Define backend on which the calibration is performed
+    :return: Backend instance
     """
-    if real_backend:
-        service = QiskitRuntimeService(channel='ibm_quantum', instance='ibm-q-nus/default/default')
-        runtime_backend = service.get_backend(backend_name)
-        # Specify options below if needed
-        return runtime_backend
-    elif not real_backend:
-        backend = FakeProvider().get_backend(backend_name)
-        return backend
-    else:
+    # Real backend initialization
+
+    if real_backend is not None:
+        if real_backend:
+            service = QiskitRuntimeService(channel=channel, instance=instance)
+            if backend_name is None:
+                runtime_backend = service.least_busy(min_num_qubits=2)
+            else:
+                runtime_backend = service.get_backend(backend_name)
+
+            # Specify options below if needed
+            # runtime_backend.set_options(**options)
+            return runtime_backend
+        else:
+            # Fake backend initialization (Aer Simulator)
+            if backend_name is None:
+                backend_name = "fake_jakarta"
+            fake_backend = FakeProvider().get_backend(backend_name)
+            return fake_backend
+    else:  # Define here your custom backend, for example (DynamicsBackend / None):
+
         from qiskit_dynamics.array import Array
         import jax
         jax.config.update("jax_enable_x64", True)
@@ -153,7 +167,7 @@ def retrieve_backend(backend_name: str, real_backend: bool = False):
         # build solver
         dt = 1/4.5e9
 
-        solver = Solver(
+        solver = JaxSolver(
             static_hamiltonian=static_ham_full,
             hamiltonian_operators=[drive_op0, drive_op1, drive_op0, drive_op1, drive_op1, drive_op0],
             rotating_frame=static_ham_full,
@@ -174,7 +188,22 @@ def retrieve_backend(backend_name: str, real_backend: bool = False):
 
         return custom_backend
 
-params = load_from_yaml_file("q_env_config.yml")
-backend_config = QiskitConfig(retrieve_backend("fake_jakarta", real_backend=False),
-                               apply_parametrized_circuit,
-                                parametrized_circuit_kwargs={"target": target, "backend": backend},
+
+def get_circuit_context(backend: BackendV1 | BackendV2):
+    circuit = QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+
+    transpiled_circ = transpile(circuit, backend)
+
+    return transpiled_circ
+
+
+params, backend_params, estimator_options= load_env_params_from_yaml_file("/Users/arthurostrauss/Library/CloudStorage/OneDrive-NationalUniversityofSingapore/Coding_projects/Quantum_Optimal_Control/template_configurations/Qiskit/q_env_config.yml")
+backend = get_backend(**backend_params)
+backend_config = QiskitConfig(apply_parametrized_circuit, backend,
+                              estimator_options=estimator_options if isinstance(backend, RuntimeBackend) else None,
+                              parametrized_circuit_kwargs={"target": params["target"], "backend": backend})
+training_config = TrainingConfig(backend_config=backend_config, **params)
+
+circuit_context = get_circuit_context(backend)
