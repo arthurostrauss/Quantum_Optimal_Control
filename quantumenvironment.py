@@ -18,7 +18,13 @@ from gymnasium.core import ObsType, ActType
 
 # Qiskit imports
 from qiskit import pulse, schedule
-from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruction, ParameterVector
+from qiskit.circuit import (
+    QuantumCircuit,
+    QuantumRegister,
+    Gate,
+    CircuitInstruction,
+    ParameterVector,
+)
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
@@ -59,7 +65,7 @@ from qiskit_ibm_runtime import (
 from tensorflow_probability.python.distributions import Categorical
 
 from helper_functions import retrieve_estimator
-from qconfig import QiskitConfig, TrainingConfig, QuaConfig
+from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -216,10 +222,7 @@ class QuantumEnvironment(Env):
     metadata = {"render_modes": ["human"]}
     check_on_exp = True  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
 
-    def __init__(
-        self,
-        training_config: TrainingConfig
-    ):
+    def __init__(self, training_config: QEnvConfig):
         """
         Class for building quantum environment for RL agent aiming to perform a state preparation task.
 
@@ -257,12 +260,17 @@ class QuantumEnvironment(Env):
                     raise ValueError(
                         f"Target contains more qubits ({self._n_qubits}) than backend ({self.backend.num_qubits})"
                     )
-            self.parametrized_circuit_func: Callable = training_config.backend_config.parametrized_circuit
+            self.parametrized_circuit_func: Callable = (
+                training_config.backend_config.parametrized_circuit
+            )
 
             self._func_args = training_config.backend_config.parametrized_circuit_kwargs
-            abstraction_level = retrieve_abstraction_level(self.parametrized_circuit_func, self._parameters,
-                                                           self.tgt_register, **self._func_args)
-
+            abstraction_level = retrieve_abstraction_level(
+                self.parametrized_circuit_func,
+                self._parameters,
+                self.tgt_register,
+                **self._func_args,
+            )
 
             estimator_options = training_config.backend_config.estimator_options
 
@@ -293,7 +301,9 @@ class QuantumEnvironment(Env):
         self.reward_history = []
         self.qc_history = []
         if self.target_type == "gate":
-            self._index_input_state = np.random.randint(len(self.target["input_states"]))
+            self._index_input_state = np.random.randint(
+                len(self.target["input_states"])
+            )
             self.process_fidelity_history = []
             self.avg_fidelity_history = []
             self.built_unitaries = []
@@ -306,7 +316,6 @@ class QuantumEnvironment(Env):
         seed: int | None = None,
         options: dict[str, Any] | None = None,
     ) -> tuple[ObsType, dict[str, Any]]:
-
         """
         Reset the environment to its initial state
         :param seed: Seed for random number generator
@@ -320,8 +329,10 @@ class QuantumEnvironment(Env):
                 f"rl_qoc_step{self._step_tracker}"
             ]
 
-        if self.target_type == 'gate':
-            self._index_input_state = np.random.randint(len(self.target["input_states"]))
+        if self.target_type == "gate":
+            self._index_input_state = np.random.randint(
+                len(self.target["input_states"])
+            )
 
         return self._get_obs(), self._get_info()
 
@@ -337,7 +348,13 @@ class QuantumEnvironment(Env):
         self._step_tracker += 1
         if self._episode_ended:
             terminated = True
-            return self.reset()[0], np.zeros(self.batch_size), terminated, False, self._get_info()
+            return (
+                self.reset()[0],
+                np.zeros(self.batch_size),
+                terminated,
+                False,
+                self._get_info(),
+            )
         params = np.array(action)
         terminated = self._episode_ended = True
         reward = self.perform_action(params, self.do_benchmark())
@@ -363,8 +380,8 @@ class QuantumEnvironment(Env):
             return False
         else:
             return (
-                    self._episode_tracker % self.benchmark_cycle == 0
-                    and self._episode_tracker > 1
+                self._episode_tracker % self.benchmark_cycle == 0
+                and self._episode_tracker > 1
             )
         # if isinstance(self.estimator, Runtime_Estimator) or self.abstraction_level == 'circuit':
         #     return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
@@ -422,7 +439,9 @@ class QuantumEnvironment(Env):
         # Benchmarking block: not part of reward calculation
         # Apply parametrized quantum circuit (action), for benchmarking only
 
-        self.parametrized_circuit_func(parametrized_circ, self._parameters, self.tgt_register, **self._func_args)
+        self.parametrized_circuit_func(
+            parametrized_circ, self._parameters, self.tgt_register, **self._func_args
+        )
         qc_list = [
             parametrized_circ.assign_parameters(angle_set) for angle_set in angles
         ]
@@ -431,7 +450,9 @@ class QuantumEnvironment(Env):
             self.store_benchmarks(qc_list)
 
         # Build full quantum circuit: concatenate input state prep and parametrized unitary
-        self.parametrized_circuit_func(qc, self._parameters, self.tgt_register, **self._func_args)
+        self.parametrized_circuit_func(
+            qc, self._parameters, self.tgt_register, **self._func_args
+        )
         if isinstance(self.estimator, RuntimeEstimator):
             job = self.estimator.run(
                 circuits=[qc] * batch_size,
@@ -599,7 +620,7 @@ class QuantumEnvironment(Env):
         string += f"Batchsize: {self.batch_size}, \n"
         return string
 
-# Properties
+    # Properties
 
     @property
     def batch_size(self) -> Optional[int]:
@@ -612,6 +633,7 @@ class QuantumEnvironment(Env):
             self._batch_size = size
         except AssertionError:
             raise ValueError("Batch size should be positive integer.")
+
     @property
     def n_qubits(self):
         return self._n_qubits
@@ -686,7 +708,7 @@ class QuantumEnvironment(Env):
         c_factor = class_info["c_factor"]
         sampling_Pauli_space = class_info["sampling_Pauli_space"]
         config = class_info["config"]
-        q_env = cls(target,config)
+        q_env = cls(target, config)
         q_env.reward_history = class_info["reward_history"]
         q_env.action_history = class_info["action_history"]
         if class_info["target_type"] == "gate":

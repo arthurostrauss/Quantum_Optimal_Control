@@ -146,7 +146,9 @@ class ParameterSetter(NodeVisitor):
         """Visit ``Schedule``. Recursively visit schedule children and overwrite."""
         # accessing to private member
         # TODO: consider updating Schedule to handle this more gracefully
-        node._Schedule__children = [(t0, self.visit(sched)) for t0, sched in node.instructions]
+        node._Schedule__children = [
+            (t0, self.visit(sched)) for t0, sched in node.instructions
+        ]
         node._renew_timeslots()
 
         self._update_parameter_manager(node)
@@ -263,7 +265,9 @@ class ParameterSetter(NodeVisitor):
     def _update_parameter_manager(self, node: Union[Schedule, ScheduleBlock]):
         """A helper function to update parameter manager of pulse program."""
         if not hasattr(node, "_parameter_manager"):
-            raise PulseError(f"Node type {node.__class__.__name__} has no parameter manager.")
+            raise PulseError(
+                f"Node type {node.__class__.__name__} has no parameter manager."
+            )
 
         param_manager = node._parameter_manager
         updated = param_manager.parameters & self._param_map.keys()

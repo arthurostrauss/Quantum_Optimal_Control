@@ -59,11 +59,15 @@ class DynamicsBackendEstimator(BackendEstimator):
         self.backend.options.solver_options[
             "parameter_dicts"
         ] = parameter_dicts  # To be given as PyTree
-        self.backend.options.solver_options["subsystem_dims"] = self.backend.options.subsystem_dims
+        self.backend.options.solver_options[
+            "subsystem_dims"
+        ] = self.backend.options.subsystem_dims
         self.backend.options.solver_options[
             "parameter_values"
         ] = parameter_values  # To be given as PyTree alternatively
-        self.backend.options.solver_options["observables"] = self.preprocessed_circuits[0][1]
+        self.backend.options.solver_options["observables"] = self.preprocessed_circuits[
+            0
+        ][1]
         bound_circuits = [
             transpiled_circuits[circuit_index]
             if len(p) == 0
@@ -90,4 +94,9 @@ class DynamicsBackendEstimator(BackendEstimator):
     ):
         custom_circuit_list = (circuits[0],)
         custom_observation_list = (observables[0],)
-        return super()._run(custom_circuit_list, custom_observation_list, parameter_values, **run_options)
+        return super()._run(
+            custom_circuit_list,
+            custom_observation_list,
+            parameter_values,
+            **run_options,
+        )

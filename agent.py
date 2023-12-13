@@ -3,14 +3,19 @@ from typing import Sequence, Optional
 import torch
 import torch.nn as nn
 from gymnasium import Space
+from stable_baselines3.common.policies import ActorCriticPolicy
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, observation_space: Space, hidden_layers: Sequence[int],
-                 n_actions: int,
-                 hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
-                 include_critic=True,
-                 chkpt_dir: str = 'tmp/ppo'):
+    def __init__(
+        self,
+        observation_space: Space,
+        hidden_layers: Sequence[int],
+        n_actions: int,
+        hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
+        include_critic=True,
+        chkpt_dir: str = "tmp/ppo",
+    ):
         super(ActorNetwork, self).__init__()
 
         self.checkpoint_dir = chkpt_dir
@@ -46,7 +51,7 @@ class ActorNetwork(nn.Module):
         for layer in self.base_network.modules():
             if isinstance(layer, nn.Linear):
                 nn.init.orthogonal_(layer.weight)
-                nn.init.constant_(layer.bias, 0.)
+                nn.init.constant_(layer.bias, 0.0)
 
     def forward(self, x):
         x = self.base_network(x)
@@ -74,9 +79,13 @@ class ActorNetwork(nn.Module):
 
 
 class CriticNetwork(nn.Module):
-    def __init__(self, observation_space: Space, hidden_layers: Sequence[int],
-                 hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
-                 chkpt_dir: str = 'tmp/critic_ppo'):
+    def __init__(
+        self,
+        observation_space: Space,
+        hidden_layers: Sequence[int],
+        hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
+        chkpt_dir: str = "tmp/critic_ppo",
+    ):
         super(CriticNetwork, self).__init__()
         self.checkpoint_dir = chkpt_dir
         # Define a list to hold the layer sizes including input and output sizes
@@ -107,7 +116,7 @@ class CriticNetwork(nn.Module):
         for layer in self.critic_network.modules():
             if isinstance(layer, nn.Linear):
                 nn.init.orthogonal_(layer.weight)
-                nn.init.constant_(layer.bias, 0.)
+                nn.init.constant_(layer.bias, 0.0)
 
     def forward(self, x):
         return self.critic_network(x)
@@ -120,20 +129,26 @@ class CriticNetwork(nn.Module):
 
 
 class Agent(nn.Module):
-    def __init__(self, actor_net: ActorNetwork, critic_net: Optional[CriticNetwork]=None):
+    def __init__(
+        self, actor_net: ActorNetwork, critic_net: Optional[CriticNetwork] = None
+    ):
         super().__init__()
 
         self.actor_net = actor_net
         self.critic_net = critic_net
 
         if self.critic_net is not None:
-            assert not self.actor_net.include_critic, "Critic already included in Actor Network"
+            assert (
+                not self.actor_net.include_critic
+            ), "Critic already included in Actor Network"
 
     def forward(self, x):
         if self.actor_net.include_critic:
             return self.actor_net(x)
         else:
-            assert self.critic_net is not None, 'Critic Network not provided and not included in ActorNetwork'
+            assert (
+                self.critic_net is not None
+            ), "Critic Network not provided and not included in ActorNetwork"
             mean_action, std_action = self.actor_net(x)
             value = self.critic_net(x)
             return mean_action, std_action, value
@@ -142,7 +157,9 @@ class Agent(nn.Module):
         if self.actor_net.include_critic:
             return self.actor_net.get_value(x)
         else:
-            assert self.critic_net is not None, 'Critic Network not provided and not included in ActorNetwork'
+            assert (
+                self.critic_net is not None
+            ), "Critic Network not provided and not included in ActorNetwork"
             return self.critic_net(x)
 
     def save_checkpoint(self):

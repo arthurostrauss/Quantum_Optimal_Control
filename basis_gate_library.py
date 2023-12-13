@@ -22,8 +22,12 @@ import numpy as np
 from qiskit import pulse
 from qiskit.circuit import Parameter
 from qiskit.pulse import ScheduleBlock
-from qiskit_experiments.calibration_management.basis_gate_library import BasisGateLibrary
-from qiskit_experiments.calibration_management.calibration_key_types import DefaultCalValue
+from qiskit_experiments.calibration_management.basis_gate_library import (
+    BasisGateLibrary,
+)
+from qiskit_experiments.calibration_management.calibration_key_types import (
+    DefaultCalValue,
+)
 
 
 class FixedFrequencyTransmon(BasisGateLibrary):
@@ -95,20 +99,32 @@ class FixedFrequencyTransmon(BasisGateLibrary):
         if self._link_parameters:
             y_amp, y_beta, y_angle = x_amp, x_beta, x_angle + np.pi / 2
         else:
-            y_amp, y_beta, y_angle = Parameter("amp"), Parameter("β"), Parameter("angle")
+            y_amp, y_beta, y_angle = (
+                Parameter("amp"),
+                Parameter("β"),
+                Parameter("angle"),
+            )
 
         sx_amp, sx_beta, sx_angle = Parameter("amp"), Parameter("β"), Parameter("angle")
 
         if self._link_parameters:
             sy_amp, sy_beta, sy_angle = sx_amp, sx_beta, sx_angle + np.pi / 2
         else:
-            sy_amp, sy_beta, sy_angle = Parameter("amp"), Parameter("β"), Parameter("angle")
+            sy_amp, sy_beta, sy_angle = (
+                Parameter("amp"),
+                Parameter("β"),
+                Parameter("angle"),
+            )
 
         # Create the schedules for the gates
         sched_x = self._single_qubit_schedule("x", dur, x_amp, sigma, x_beta, x_angle)
         sched_y = self._single_qubit_schedule("y", dur, y_amp, sigma, y_beta, y_angle)
-        sched_sx = self._single_qubit_schedule("sx", dur, sx_amp, sigma, sx_beta, sx_angle)
-        sched_sy = self._single_qubit_schedule("sy", dur, sy_amp, sigma, sy_beta, sy_angle)
+        sched_sx = self._single_qubit_schedule(
+            "sx", dur, sx_amp, sigma, sx_beta, sx_angle
+        )
+        sched_sy = self._single_qubit_schedule(
+            "sy", dur, sy_amp, sigma, sy_beta, sy_angle
+        )
 
         schedules = {}
         for sched in [sched_x, sched_y, sched_sx, sched_sy]:
@@ -131,7 +147,10 @@ class FixedFrequencyTransmon(BasisGateLibrary):
         chan = pulse.DriveChannel(Parameter("ch0"))
 
         with pulse.build(name=name) as sched:
-            pulse.play(pulse.Drag(duration=dur, amp=amp, sigma=sigma, beta=beta, angle=angle), chan)
+            pulse.play(
+                pulse.Drag(duration=dur, amp=amp, sigma=sigma, beta=beta, angle=angle),
+                chan,
+            )
 
         return sched
 
@@ -253,7 +272,11 @@ class EchoedCrossResonance(BasisGateLibrary):
             with pulse.build(name="cr45p") as cr45p:
                 pulse.play(
                     pulse.GaussianSquare(
-                        cr_dur, cr_amp, angle=cr_angle, risefall_sigma_ratio=cr_rf, sigma=sigma
+                        cr_dur,
+                        cr_amp,
+                        angle=cr_angle,
+                        risefall_sigma_ratio=cr_rf,
+                        sigma=sigma,
                     ),
                     u_chan,
                 )

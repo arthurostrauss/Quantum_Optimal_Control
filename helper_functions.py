@@ -6,7 +6,7 @@ import tensorflow as tf
 import yaml
 from gymnasium.spaces import Box
 from qiskit import pulse
-from qiskit.circuit import QuantumCircuit, Gate, Parameter
+from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import BackendEstimator, Estimator
@@ -31,6 +31,7 @@ from qiskit_dynamics.backend.dynamics_backend import (
     _get_backend_channel_freqs,
     DynamicsBackend,
 )
+
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BatchExperiment, BaseAnalysis, BackendData
 from qiskit_experiments.library import (
@@ -39,15 +40,16 @@ from qiskit_experiments.library import (
     RoughXSXAmplitudeCal,
     RoughDragCal,
 )
+
 from qiskit_ibm_runtime import (
     Session,
     IBMBackend as RuntimeBackend,
     Estimator as RuntimeEstimator,
     Options as RuntimeOptions,
 )
-from qiskit_ibm_provider import IBMBackend
-from tensorflow.python.keras import Model
-from tensorflow.python.keras.layers import Input, Dense
+
+from tensorflow.keras import Model
+from tensorflow.keras.layers import Input, Dense
 
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from qconfig import QiskitConfig
@@ -56,7 +58,13 @@ from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from dataclasses import asdict
 
-Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator, DynamicsBackendEstimator]
+Estimator_type = Union[
+    AerEstimator,
+    RuntimeEstimator,
+    Estimator,
+    BackendEstimator,
+    DynamicsBackendEstimator,
+]
 Backend_type = Union[BackendV1, BackendV2]
 
 
@@ -483,7 +491,9 @@ def retrieve_estimator(
             estimator = Estimator(options={"initial_layout": layout})
 
         elif isinstance(backend, DynamicsBackend):
-            assert abstraction_level == "pulse", "DynamicsBackend works only with pulse level abstraction"
+            assert (
+                abstraction_level == "pulse"
+            ), "DynamicsBackend works only with pulse level abstraction"
             if isinstance(backend.options.solver, JaxSolver):
                 estimator: Estimator_type = DynamicsBackendEstimator(
                     backend, options=estimator_options, skip_transpilation=False
@@ -493,19 +503,13 @@ def retrieve_estimator(
                     backend, options=estimator_options, skip_transpilation=False
                 )
             estimator.set_transpile_options(initial_layout=layout)
-            if config.do_calibrations:
+            if config.do_calibrations and "x" not in backend.operation_names:
                 calibration_files: List[str] = config.calibration_files
                 (
                     calibrations,
                     exp_results,
                 ) = perform_standard_calibrations(backend, calibration_files)
 
-        elif isinstance(backend, IBMBackend):
-            estimator: Estimator_type = BackendEstimator(
-                backend, options=estimator_options, skip_transpilation=False
-            )
-            estimator.set_transpile_options(initial_layout=layout)
-            backend.open_session()
         else:
             raise TypeError("Backend not recognized")
     return estimator
@@ -618,23 +622,32 @@ def get_solver_and_freq_from_backend(
     return channel_freqs, solver
 
 
-def load_env_params_from_yaml_file(file_path: str):
+def load_hyperparams_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
     low = np.array(config["ENV"]["ACTION_SPACE"]["LOW"])
     high = np.array(config["ENV"]["ACTION_SPACE"]["HIGH"])
     params = {
-        "action_space": Box(low=low, high=high, shape=(config["ENV"]["N_ACTIONS"],),dtype=np.float32),
-        "observation_space": Box(low=0., high=1., shape=(config["ENV"]["OBSERVATION_SPACE"],), dtype=np.float32),
+        "action_space": Box(
+            low=low, high=high, shape=(config["ENV"]["N_ACTIONS"],), dtype=np.float32
+        ),
+        "observation_space": Box(
+            low=0.0,
+            high=1.0,
+            shape=(config["ENV"]["OBSERVATION_SPACE"],),
+            dtype=np.float32,
+        ),
         "batch_size": config["ENV"]["BATCH_SIZE"],
         "sampling_Paulis": config["ENV"]["SAMPLING_PAULIS"],
         "n_shots": config["ENV"]["N_SHOTS"],
         "c_factor": config["ENV"]["C_FACTOR"],
         "seed": config["ENV"]["SEED"],
         "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
-        "target": {"gate": get_standard_gate_name_mapping()[config["TARGET"]["GATE"].lower()],
-                   "register": config["TARGET"]["PHYSICAL_QUBITS"]}
+        "target": {
+            "gate": get_standard_gate_name_mapping()[config["TARGET"]["GATE"].lower()],
+            "register": config["TARGET"]["PHYSICAL_QUBITS"],
+        },
     }
     backend_params = {
         "real_backend": config["BACKEND"]["REAL_BACKEND"],
@@ -644,7 +657,9 @@ def load_env_params_from_yaml_file(file_path: str):
     }
     runtime_options = config["RUNTIME_OPTIONS"]
 
-    return params, backend_params, RuntimeOptions(**runtime_options)
+    agent_params = config["AGENT"]
+
+    return params, backend_params, RuntimeOptions(**runtime_options), agent_params
 
 
 def retrieve_backend_info(
@@ -682,6 +697,13 @@ def retrieve_backend_info(
             "InstructionDurations not specified in provided Backend, required for transpilation"
         )
     return dt, coupling_map, basis_gates, instruction_durations
+
+
+def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
+    tgt_instruction = CircuitInstruction(
+        target["gate"], [qc.qubits[i] for i in target["register"]]
+    )
+    return qc.data.count(tgt_instruction)
 
 
 def select_optimizer(

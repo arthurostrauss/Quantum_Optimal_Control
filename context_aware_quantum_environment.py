@@ -55,10 +55,11 @@ from helper_functions import (
     retrieve_backend_info,
     determine_ecr_params,
 )
-from qconfig import TrainingConfig
+from qconfig import QEnvConfig
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
 from custom_jax_sim import (
-    DynamicsBackendEstimator, JaxSolver,
+    DynamicsBackendEstimator,
+    JaxSolver,
 )
 
 ObsType = TypeVar("ObsType")
@@ -78,7 +79,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
     def __init__(
         self,
-        training_config: TrainingConfig,
+        training_config: QEnvConfig,
         circuit_context: QuantumCircuit,
         training_steps_per_gate: Union[List[int], int] = 1500,
         intermediate_rewards: bool = False,
@@ -819,8 +820,12 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                         print(f"New Session opened (#{self._session_counts})")
                         self.backend.open_session()
                 elif isinstance(self.estimator, DynamicsBackendEstimator):
-                    assert isinstance(self.backend, DynamicsBackend), 'Backend is not a DynamicsBackend instance'
-                    assert isinstance(self.backend.options.solver, JaxSolver), 'Solver is not a JaxSolver instance'
+                    assert isinstance(
+                        self.backend, DynamicsBackend
+                    ), "Backend is not a DynamicsBackend instance"
+                    assert isinstance(
+                        self.backend.options.solver, JaxSolver
+                    ), "Solver is not a JaxSolver instance"
 
                     def param_schedule():
                         return schedule(training_circ, self.backend)
@@ -840,14 +845,16 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 raise exc
             scaling_reward_factor = len(observables) / 4 ** len(self.tgt_register)
             reward_table *= scaling_reward_factor
-            reward_table = -np.log10(1-reward_table)
+            reward_table = -np.log10(1 - reward_table)
             print("Job done")
 
         if np.mean(reward_table) > self._max_return:
             self._max_return = np.mean(reward_table)
             self._best_action = np.mean(reshaped_params, axis=0)
         self.reward_history.append(reward_table)
-        assert len(reward_table) == self.batch_size, f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
+        assert (
+            len(reward_table) == self.batch_size
+        ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
 
         return reward_table
 
