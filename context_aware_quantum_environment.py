@@ -254,7 +254,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self.target_instruction = CircuitInstruction(
             self.target["gate"], self.tgt_register
         )
-        self.tgt_instruction_counts = self.circuit_context.data.count(
+        self._tgt_instruction_counts = self.circuit_context.data.count(
             self.target_instruction
         )
 

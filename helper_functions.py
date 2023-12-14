@@ -269,9 +269,9 @@ def perform_standard_calibrations(
     return cals, exp_results
 
 
-def determine_ecr_params(
-    backend: Union[BackendV1, BackendV2], physical_qubits: List[int]
-):
+def determine_ecr_params(backend: Backend_type, physical_qubits: List[int]):
+    if not isinstance(backend, (BackendV1, BackendV2)):
+        raise TypeError("Backend must be defined")
     basis_gates = (
         backend.configuration().basis_gates
         if isinstance(backend, BackendV1)
@@ -622,7 +622,7 @@ def get_solver_and_freq_from_backend(
     return channel_freqs, solver
 
 
-def load_hyperparams_from_yaml_file(file_path: str):
+def load_q_env_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
@@ -652,14 +652,43 @@ def load_hyperparams_from_yaml_file(file_path: str):
     backend_params = {
         "real_backend": config["BACKEND"]["REAL_BACKEND"],
         "backend_name": config["BACKEND"]["NAME"],
+        "use_dynamics": config["BACKEND"]["DYNAMICS"]["USE_DYNAMICS"],
+        "physical_qubits": config["BACKEND"]["DYNAMICS"]["PHYSICAL_QUBITS"],
         "channel": config["SERVICE"]["CHANNEL"],
         "instance": config["SERVICE"]["INSTANCE"],
     }
     runtime_options = config["RUNTIME_OPTIONS"]
 
-    agent_params = config["AGENT"]
+    return params, backend_params, RuntimeOptions(**runtime_options)
 
-    return params, backend_params, RuntimeOptions(**runtime_options), agent_params
+
+def load_agent_from_yaml_file(file_path: str):
+    with open(file_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    ppo_params = {
+        "n_steps": config["AGENT"]["NUM_UPDATES"],
+        "n_epochs": config["AGENT"]["N_EPOCHS"],
+        "batch_size": config["AGENT"]["MINIBATCH_SIZE"],
+        "learning_rate": config["AGENT"]["LR_ACTOR"],
+        # "lr_critic": config["AGENT"]["LR_CRITIC"],
+        "gamma": config["AGENT"]["GAMMA"],
+        "gae_lambda": config["AGENT"]["GAE_LAMBDA"],
+        "ent_coef": config["AGENT"]["ENT_COEF"],
+        "vf_coef": config["AGENT"]["V_COEF"],
+        "max_grad_norm": config["AGENT"]["GRADIENT_CLIP"],
+        "clip_range_vf": config["AGENT"]["CLIP_VALUE_LOSS"],
+        "clip_range": config["AGENT"]["CLIP_RATIO"],
+    }
+    network_params = {
+        "optimizer": config["AGENT"]["OPTIMIZER"],
+        "n_units": config["AGENT"]["N_UNITS"],
+        "activation": config["AGENT"]["ACTIVATION"],
+        "include_critic": config["AGENT"]["INCLUDE_CRITIC"],
+        "checkpoint_dir": config["AGENT"]["CHKPT_DIR"],
+    }
+
+    return ppo_params, network_params
 
 
 def retrieve_backend_info(

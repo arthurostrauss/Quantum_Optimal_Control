@@ -212,7 +212,6 @@ def retrieve_abstraction_level(parametrized_circuit_func, params, reg, **args):
     parametrized_circuit_func(qc, params, reg, **args)
 
     if qc.calibrations:
-        print(qc.calibrations)
         return "pulse"
     else:
         return "circuit"
@@ -238,9 +237,9 @@ class QuantumEnvironment(Env):
         self.c_factor = training_config.c_factor
         self.batch_size = training_config.batch_size
         self._parameters = ParameterVector("a", training_config.action_space.shape[-1])
-
+        self._tgt_instruction_counts = 1  # Number of instructions to calibrate
         if isinstance(self.training_config.backend_config, QiskitConfig):
-            self._config_type = "Qiskit"
+            self._config_type = "qiskit"
             assert isinstance(
                 self.training_config.backend_config, QiskitConfig
             ), "QiskitConfig type not recognized"
@@ -340,7 +339,11 @@ class QuantumEnvironment(Env):
         return {"episode": self._episode_tracker, "step": self._step_tracker}
 
     def _get_obs(self):
-        return self._index_input_state / len(self.target["input_states"])
+        return np.array(
+            [
+                self._index_input_state / len(self.target["input_states"]),
+            ]
+        )
 
     def step(
         self, action: ActType
@@ -589,6 +592,7 @@ class QuantumEnvironment(Env):
         return unitaries
 
     def clear_history(self):
+        self._step_tracker = 0
         self.qc_history.clear()
         self.action_history.clear()
         self.reward_history.clear()
@@ -621,6 +625,14 @@ class QuantumEnvironment(Env):
         return string
 
     # Properties
+
+    @property
+    def seed(self):
+        return self._seed
+
+    @seed.setter
+    def seed(self, seed):
+        self._seed = seed
 
     @property
     def batch_size(self) -> Optional[int]:
@@ -668,6 +680,10 @@ class QuantumEnvironment(Env):
     @estimator.setter
     def estimator(self, estimator: BaseEstimator):
         self._estimator = estimator
+
+    @property
+    def tgt_instruction_counts(self):
+        return self._tgt_instruction_counts
 
     @property
     def step_tracker(self):

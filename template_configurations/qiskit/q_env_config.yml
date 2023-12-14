@@ -24,12 +24,18 @@ RUNTIME_OPTIONS: # Relevant only when using the Qiskit runtime service
     coupling_map: null
     basis_gates: null
 
-BACKEND: # Backend configuration (If all set to None, the user needs to specify its own backend in qiskit_user_config.py's get_backend() function)
-  REAL_BACKEND: null  # Choose either real or fake backend
+BACKEND: # Backend configuration (If all set to None, the user needs to specify its own backend in q_env_config.py's get_backend() function)
+  REAL_BACKEND: null  # True: real or False: fake Aer backend
   NAME: null  # Name of the backend
+  DYNAMICS: # Use a DynamicsBackend (if fields above are not null, build a DynamicsBackend.from_backend() with the specified backend)
+    USE_DYNAMICS: True # Whether to use a DynamicsBackend
+    PHYSICAL_QUBITS: null  # Number of qubits characterizing the environment (i.e. the full quantum circuit dimension)
 
-ENV:
-  N_QUBITS: 2 # Number of qubits
+TARGET: # Target Gate configuration
+  GATE: "CX"
+  PHYSICAL_QUBITS: [ 0, 1 ]
+
+ENV: # Environment configuration
   SAMPLING_PAULIS: 100 # Number of Pauli strings to sample
   N_SHOTS: 1
   C_FACTOR: 1. # Cost factor for the reward function
@@ -43,6 +49,11 @@ ENV:
   SEED: 100
 
 
-TARGET:
-  GATE: "X"
-  PHYSICAL_QUBITS: [ 0 ]
+
+
+
+
+
+
+
+

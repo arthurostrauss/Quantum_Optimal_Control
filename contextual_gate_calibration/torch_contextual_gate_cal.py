@@ -1,7 +1,13 @@
 import os
 
-# Qiskit imports
-from qiskit.circuit import ParameterVector, QuantumCircuit, QuantumRegister, CircuitInstruction
+# qiskit imports
+from qiskit.circuit import (
+    ParameterVector,
+    QuantumCircuit,
+    QuantumRegister,
+    CircuitInstruction,
+)
+
 # from qiskit.circuit.random import random_circuit
 # from qiskit_ibm_provider import IBMProvider
 from qiskit.providers.fake_provider import FakeJakartaV2
@@ -9,7 +15,7 @@ from qiskit_aer import AerSimulator
 from qiskit.circuit.library import CXGate
 
 from agent import ActorNetwork, CriticNetwork, Agent
-from qconfig import QiskitConfig, TrainingConfig
+from qconfig import QiskitConfig, QEnvConfig
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from gymnasium.spaces import Box
 import torch
@@ -22,15 +28,17 @@ import tqdm
 import time
 from typing import Optional
 
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
 # Save your credentials on disk.
 # IBMProvider.save_account(token='<IBM Quantum API key>')
 
 
-def param_circuit(qc: QuantumCircuit,
-                  params: Optional[ParameterVector] = None, q_reg: Optional[QuantumRegister] = None):
-
+def param_circuit(
+    qc: QuantumCircuit,
+    params: Optional[ParameterVector] = None,
+    q_reg: Optional[QuantumRegister] = None,
+):
     my_qc = QuantumCircuit(q_reg)
     my_qc.u(np.pi * params[0], np.pi * params[1], np.pi * params[2], q_reg[0])
     my_qc.u(np.pi * params[3], np.pi * params[4], np.pi * params[5], q_reg[1])
@@ -55,7 +63,7 @@ backend = aer_backend
 target_gate = CXGate()
 physical_qubits = [0, 1]
 n_qubits = len(physical_qubits)
-target = {"gate": target_gate, 'register': physical_qubits}
+target = {"gate": target_gate, "register": physical_qubits}
 backend_config = QiskitConfig(parametrized_circuit=param_circuit, backend=backend)
 
 # Circuit context
@@ -66,26 +74,51 @@ target_circuit = QuantumCircuit(2)
 target_circuit.cx(0, 1)
 tgt_qubits = [target_circuit.qubits[i] for i in physical_qubits]
 
-tgt_instruction_counts = target_circuit.data.count(CircuitInstruction(target_gate, tgt_qubits))
+tgt_instruction_counts = target_circuit.data.count(
+    CircuitInstruction(target_gate, tgt_qubits)
+)
 
 batchsize = 500  # Batch size (iterate over a bunch of actions per policy to estimate expected return) default 100
 n_actions = 7  # Choose how many control parameters in pulse/circuit parametrization
-min_bound_actions = 0.
-max_bound_actions = 1.
-observation_space = Box(low=np.array([0, 0]), high=np.array([4 ** n_qubits, tgt_instruction_counts]), shape=(2,),
-                        seed=seed)
-action_space = Box(low=min_bound_actions, high=max_bound_actions, shape=(n_actions,), seed=seed)
+min_bound_actions = 0.0
+max_bound_actions = 1.0
+observation_space = Box(
+    low=np.array([0, 0]),
+    high=np.array([4**n_qubits, tgt_instruction_counts]),
+    shape=(2,),
+    seed=seed,
+)
+action_space = Box(
+    low=min_bound_actions, high=max_bound_actions, shape=(n_actions,), seed=seed
+)
 
-config = TrainingConfig(target, backend_config, action_space, observation_space, batch_size=batchsize,
-                        sampling_Paulis=sampling_Paulis, n_shots=N_shots, c_factor=0.125, benchmark_cycle=5,
-                        seed=seed, device=device)
-torch_env = ContextAwareQuantumEnvironment(training_config=config, circuit_context=target_circuit,
-                                           training_steps_per_gate=training_steps_per_gate, intermediate_rewards=False,
-                                           )
+config = QEnvConfig(
+    target,
+    backend_config,
+    action_space,
+    observation_space,
+    batch_size=batchsize,
+    sampling_Paulis=sampling_Paulis,
+    n_shots=N_shots,
+    c_factor=0.125,
+    benchmark_cycle=5,
+    seed=seed,
+    device=device,
+)
+torch_env = ContextAwareQuantumEnvironment(
+    training_config=config,
+    circuit_context=target_circuit,
+    training_steps_per_gate=training_steps_per_gate,
+    intermediate_rewards=False,
+)
 
 
-actor_net = ActorNetwork(observation_space, [128, 128], n_actions, [nn.ELU(), nn.ELU(), nn.ELU()]).to(device)
-critic_net = CriticNetwork(observation_space, [128, 128], [nn.ELU(), nn.ELU(), nn.ELU()]).to(device)
+actor_net = ActorNetwork(
+    observation_space, [128, 128], n_actions, [nn.ELU(), nn.ELU(), nn.ELU()]
+).to(device)
+critic_net = CriticNetwork(
+    observation_space, [128, 128], [nn.ELU(), nn.ELU(), nn.ELU()]
+).to(device)
 agent = Agent(actor_net, critic_net=None).to(device)
 """
 -----------------------------------------------------------------------------------------------------
@@ -111,7 +144,7 @@ optimizer = optim.Adam(agent.parameters(), lr=lr_actor, eps=1e-5)
 actor_optimizer = optim.Adam(actor_net.parameters(), lr=lr_actor, eps=1e-5)
 critic_optimizer = optim.Adam(critic_net.parameters(), lr=lr_critic, eps=1e-5)
 minibatch_size = 40
-gamma = 1.
+gamma = 1.0
 gae_lambda = 0.95
 
 # Clipping
@@ -121,17 +154,23 @@ clip_coef = 0.5
 normalize_advantage = False
 
 # other coefficients
-ent_coef = 0.
+ent_coef = 0.0
 # ALGO Logic: Storage setup
 global_step = 0
-obs = torch.zeros((tgt_instruction_counts, batchsize) + torch_env.observation_space.shape).to(device)
-actions = torch.zeros((tgt_instruction_counts, batchsize) + torch_env.action_space.shape).to(device)
+obs = torch.zeros(
+    (tgt_instruction_counts, batchsize) + torch_env.observation_space.shape
+).to(device)
+actions = torch.zeros(
+    (tgt_instruction_counts, batchsize) + torch_env.action_space.shape
+).to(device)
 logprobs = torch.zeros((tgt_instruction_counts, batchsize)).to(device)
 rewards = torch.zeros((tgt_instruction_counts, batchsize)).to(device)
 dones = torch.zeros((tgt_instruction_counts, batchsize)).to(device)
 values = torch.zeros((tgt_instruction_counts, batchsize)).to(device)
 
-train_obs = torch.zeros((batchsize,) + torch_env.observation_space.shape, requires_grad=True).to(device)
+train_obs = torch.zeros(
+    (batchsize,) + torch_env.observation_space.shape, requires_grad=True
+).to(device)
 # Start the Environment
 start_time = time.time()
 
@@ -152,14 +191,18 @@ try:
             with torch.no_grad():
                 mean_action, std_action, critic_value = agent(next_obs)
                 probs = Normal(mean_action, std_action)
-                action = torch.clip(probs.sample(), min_bound_actions, max_bound_actions)
+                action = torch.clip(
+                    probs.sample(), min_bound_actions, max_bound_actions
+                )
                 logprob = probs.log_prob(action).sum(1)
                 values[step] = critic_value.flatten()
 
             actions[step] = action
             logprobs[step] = logprob
             # next_obs, reward, terminated, truncated, infos = torch_env.step(action.cpu().numpy())
-            next_obs, reward, terminated, truncated, infos = torch_env.step(action.cpu().numpy())
+            next_obs, reward, terminated, truncated, infos = torch_env.step(
+                action.cpu().numpy()
+            )
             done = np.logical_or(terminated, truncated)
             rewards[step] = torch.tensor(reward).to(device)
             next_obs = torch.Tensor(np.array([next_obs] * batchsize)).to(device)
@@ -183,7 +226,9 @@ try:
                     nextnonterminal = 1.0 - dones[t + 1]
                     nextvalues = values[t + 1]
                 delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
-                advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+                advantages[t] = lastgaelam = (
+                    delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+                )
             returns = advantages + values
 
         # flatten the batch
@@ -204,13 +249,15 @@ try:
                 mb_inds = b_inds[start:end]
                 new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
                 new_dist = Normal(new_mean, new_sigma)
-                new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(1), new_dist.entropy().sum(1)
+                new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(
+                    1
+                ), new_dist.entropy().sum(1)
                 logratio = new_logprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
-                print('new_logprob', new_logprob)
-                print('b_logprobs[mb_inds]', b_logprobs[mb_inds])
+                print("new_logprob", new_logprob)
+                print("b_logprobs[mb_inds]", b_logprobs[mb_inds])
                 print("logratio", logratio)
-                print('ratio', ratio)
+                print("ratio", ratio)
                 with torch.no_grad():
                     # calculate approx_kl http://joschu.net/blog/kl-approx.html
                     old_approx_kl = (-logratio).mean()
@@ -219,7 +266,9 @@ try:
 
                 mb_advantages = b_advantages[mb_inds]
                 if normalize_advantage:  # Normalize advantage
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (
+                        mb_advantages.std() + 1e-8
+                    )
 
                 # Policy loss
                 pg_loss1 = -mb_advantages * ratio
@@ -258,11 +307,21 @@ try:
         # print(np.mean(torch_env.reward_history, axis =1)[-1])
         print("Circuit fidelity:", torch_env.circuit_fidelity_history[-1])
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+        writer.add_scalar(
+            "charts/learning_rate", optimizer.param_groups[0]["lr"], global_step
+        )
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/avg_return", np.mean(torch_env.reward_history, axis=1)[-1], global_step)
+        writer.add_scalar(
+            "losses/avg_return",
+            np.mean(torch_env.reward_history, axis=1)[-1],
+            global_step,
+        )
         # writer.add_scalar("losses/avg_gate_fidelity", torch_env.avg_fidelity_history[-1], global_step)
-        writer.add_scalar("losses/circuit_fidelity", torch_env.circuit_fidelity_history[-1], global_step)
+        writer.add_scalar(
+            "losses/circuit_fidelity",
+            torch_env.circuit_fidelity_history[-1],
+            global_step,
+        )
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
         writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
