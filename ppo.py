@@ -72,7 +72,7 @@ def make_train_ppo(
     seed = env.seed
     n_actions = env.action_space.shape[-1]
     batchsize = env.batch_size
-    tgt_instruction_counts = env.tgt_instruction_counts
+    num_time_steps = env.tgt_instruction_counts
     min_action = env.action_space.low
     max_action = env.action_space.high
 
@@ -135,41 +135,35 @@ def make_train_ppo(
         start = time.time()
         global_step = 0
 
-        obs = torch.zeros(
-            (tgt_instruction_counts, batchsize) + env.observation_space.shape
-        )
-        actions = torch.zeros(
-            (tgt_instruction_counts, batchsize) + env.action_space.shape
-        )
-        logprobs = torch.zeros((tgt_instruction_counts, batchsize))
-        rewards = torch.zeros((tgt_instruction_counts, batchsize))
-        dones = torch.zeros((tgt_instruction_counts, batchsize))
-        values = torch.zeros((tgt_instruction_counts, batchsize))
+        obs = torch.zeros((num_time_steps, batchsize) + env.observation_space.shape)
+        actions = torch.zeros((num_time_steps, batchsize) + env.action_space.shape)
+        logprobs = torch.zeros((num_time_steps, batchsize))
+        rewards = torch.zeros((num_time_steps, batchsize))
+        dones = torch.zeros((num_time_steps, batchsize))
+        values = torch.zeros((num_time_steps, batchsize))
 
         ### Starting Learning ###
-        for update in tqdm.tqdm(range(1, total_updates + 1)):
+        for _ in tqdm.tqdm(range(1, total_updates + 1)):
             next_obs, _ = env.reset(seed=seed)
-            num_steps = tgt_instruction_counts  # env.episode_length(global_step)
-            next_obs = torch.Tensor(np.tile(next_obs, (1, batchsize)))
-            next_done = torch.zeros(batchsize)
+            num_steps = num_time_steps  # env.episode_length(global_step)
+            batch_obs = torch.tile(torch.Tensor(next_obs), (batchsize, 1))
+            batch_done = torch.zeros_like(dones[0])
 
             # print("episode length:", num_steps)
 
             for step in range(num_steps):
                 global_step += 1
-                obs[step] = next_obs
-                dones[step] = next_done
+                obs[step] = batch_obs
+                dones[step] = batch_done
 
                 with torch.no_grad():
-                    mean_action, std_action, critic_value = agent(
-                        next_obs.reshape(-1, 1)[0]
-                    )
+                    mean_action, std_action, critic_value = agent(batch_obs)
                     probs = Normal(mean_action, std_action)
                     action = torch.clip(
-                        probs.sample(torch.Size((batchsize, n_actions))),
-                        min_action,
-                        max_action,
-                    )[0]
+                        probs.sample(),
+                        torch.Tensor(min_action),
+                        torch.Tensor(max_action),
+                    )
                     logprob = probs.log_prob(action).sum(1)
                     values[step] = critic_value.flatten()
 
@@ -179,11 +173,13 @@ def make_train_ppo(
                 next_obs, reward, terminated, truncated, infos = env.step(
                     action.cpu().numpy()
                 )
-                done = np.logical_or(terminated, truncated)
+                next_obs = torch.Tensor(next_obs)
+                done = int(np.logical_or(terminated, truncated))
 
-                rewards[step] = torch.tensor(reward)
-                next_obs = torch.Tensor(np.tile(next_obs, (1, batchsize)))
-                next_done = torch.Tensor(np.array([int(done)] * batchsize))
+                batch_obs = torch.tile(next_obs, (batchsize, 1))
+                next_done = done * torch.ones_like(dones[0])
+                obs[step] = batch_obs
+                dones[step] = next_done
 
                 # print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
                 writer.add_scalar(
@@ -193,7 +189,7 @@ def make_train_ppo(
 
             # bootstrap value if not done
             with torch.no_grad():
-                next_value = agent.get_value(next_obs.reshape(-1, 1)[0]).reshape(1, -1)
+                next_value = agent.get_value(next_obs).reshape(1, -1)
                 advantages = torch.zeros_like(rewards)
                 lastgaelam = 0
                 for t in reversed(range(num_steps)):

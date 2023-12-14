@@ -59,11 +59,13 @@ from qiskit_experiments.library.tomography.basis import (
 from qiskit_ibm_runtime import (
     Estimator as RuntimeEstimator,
     Options as RuntimeOptions,
+    Session,
 )
 
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
 
+from custom_jax_sim import DynamicsBackendEstimator, JaxSolver
 from helper_functions import retrieve_estimator
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
@@ -415,7 +417,7 @@ class QuantumEnvironment(Env):
                 "target_state"
             ]  # Ideal output state associated to input (Gate |input>=|output>)
             # Append input state circuit to full quantum circuit for gate calibration
-            qc.append(input_state["circuit"].to_instruction(), self.tgt_register)
+            qc.compose(input_state["circuit"])
         else:  # State preparation task
             target_state = self.target
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
@@ -457,20 +459,42 @@ class QuantumEnvironment(Env):
             qc, self._parameters, self.tgt_register, **self._func_args
         )
         if isinstance(self.estimator, RuntimeEstimator):
-            job = self.estimator.run(
-                circuits=[qc] * batch_size,
-                observables=[observables] * batch_size,
-                parameter_values=angles,
-                shots=self.sampling_Pauli_space * self.n_shots,
-                job_tags=[f"rl_qoc_step{self._step_tracker}"],
-            )
-        else:
-            job = self.estimator.run(
-                circuits=[qc] * batch_size,
-                observables=[observables] * batch_size,
-                parameter_values=angles,
-                shots=self.sampling_Pauli_space * self.n_shots,
-            )
+            """Open a new Session if time limit of the ongoing one is reached"""
+            if self.estimator.session.status() == "Closed":
+                old_session = self.estimator.session
+                self._session_counts += 1
+                print(f"New Session opened (#{self._session_counts})")
+                session, options = (
+                    Session(old_session.service, self.backend),
+                    self.estimator.options,
+                )
+                self.estimator = RuntimeEstimator(
+                    session=session, options=dict(options)
+                )
+        elif isinstance(self.backend, IBMBackend):
+            if not self.backend.session.active:
+                self._session_counts += 1
+                print(f"New Session opened (#{self._session_counts})")
+                self.backend.open_session()
+        elif isinstance(self.estimator, DynamicsBackendEstimator):
+            assert isinstance(
+                self.backend, DynamicsBackend
+            ), "Backend is not a DynamicsBackend instance"
+            assert isinstance(
+                self.backend.options.solver, JaxSolver
+            ), "Solver is not a JaxSolver instance"
+
+            def param_schedule():
+                return schedule(qc, self.backend)
+
+            self.backend.options.solver.circuit_macro = param_schedule
+
+        job = self.estimator.run(
+            circuits=[qc] * batch_size,
+            observables=[observables] * batch_size,
+            parameter_values=angles,
+            shots=self.sampling_Pauli_space * self.n_shots,
+        )
 
         self._step_tracker += 1
         reward_table = job.result().values
