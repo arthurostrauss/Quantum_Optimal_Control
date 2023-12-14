@@ -15,6 +15,26 @@ from agent import ActorNetwork, CriticNetwork, Agent
 from quantumenvironment import QuantumEnvironment
 
 
+def get_module_from_str(module_str):
+    module_dict = {
+        "tanh": nn.Tanh,
+        "relu": nn.ReLU,
+        "sigmoid": nn.Sigmoid,
+        "elu": nn.ELU,
+        "selu": nn.SELU,
+        "leaky_relu": nn.LeakyReLU,
+        "none": nn.ReLU,
+        "softmax": nn.Softmax,
+        "log_softmax": nn.LogSoftmax,
+        "gelu": nn.GELU,
+    }
+    if module_str not in module_dict:
+        raise ValueError(
+            f"Agent Config `ACTIVATION` needs to be one of {module_dict.keys()}"
+        )
+    return module_dict[module_str]
+
+
 def get_optimizer_from_str(optim_str):
     optim_dict = {
         "adam": optim.Adam,
@@ -29,7 +49,7 @@ def get_optimizer_from_str(optim_str):
     }
     if optim_str not in optim_dict:
         raise ValueError(
-            f"RL Config `OPTIMIZER` needs to be one of {optim_dict.keys()}"
+            f"Agent Config `OPTIMIZER` needs to be one of {optim_dict.keys()}"
         )
 
     return optim_dict[optim_str]
@@ -58,7 +78,9 @@ def make_train_ppo(
 
     hidden_units = agent_config["N_UNITS"]
     activation_fn = agent_config["ACTIVATION"]
-    activation_functions = [activation_fn] * (len(hidden_units) + 1)
+    activation_functions = [
+        get_module_from_str(activation_fn)() for _ in range(len(hidden_units) + 1)
+    ]
     include_critic = agent_config["INCLUDE_CRITIC"]
     minibatch_size = agent_config["MINIBATCH_SIZE"]
     if batchsize % minibatch_size != 0:
@@ -66,7 +88,7 @@ def make_train_ppo(
             f"The current minibatch size of {minibatch_size} does not evenly divide the batchsize of {batchsize}"
         )
 
-    run_name = agent_config["RUN NAME"]
+    run_name = agent_config["RUN_NAME"]
     writer = SummaryWriter(f"runs/{run_name}")
 
     # General RL Params
@@ -97,7 +119,7 @@ def make_train_ppo(
     critic_net = CriticNetwork(
         env.observation_space, hidden_units, activation_functions, chkpt_dir_critic
     )
-    if include_critic:
+    if not include_critic:
         agent = Agent(actor_net, critic_net=critic_net)
     else:
         agent = Agent(actor_net, critic_net=None)
