@@ -16,12 +16,9 @@ from qiskit import transpile, schedule
 from qiskit.circuit import (
     QuantumCircuit,
     QuantumRegister,
-    CircuitInstruction,
     ParameterVector,
 )
 from qiskit.circuit.library import ECRGate
-from qiskit.primitives import BackendEstimator, BackendSampler
-from qiskit.providers import Options as Aer_Options
 from qiskit.quantum_info.operators import SparsePauliOp, pauli_basis, Operator
 from qiskit.quantum_info.states import partial_trace
 from qiskit.quantum_info.operators.measures import (
@@ -42,7 +39,7 @@ from qiskit_ibm_provider import IBMBackend
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit_ibm_runtime import (
-    Estimator as Runtime_Estimator,
+    Estimator as RuntimeEstimator,
     Sampler,
     IBMRuntimeError,
     Session,
@@ -54,6 +51,8 @@ from helper_functions import (
     gate_fidelity_from_process_tomography,
     retrieve_backend_info,
     determine_ecr_params,
+    set_primitives_transpile_options,
+    handle_session,
 )
 from qconfig import QEnvConfig
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
@@ -74,7 +73,6 @@ def create_array(circ_trunc, batchsize, n_actions):
 
 
 class ContextAwareQuantumEnvironment(QuantumEnvironment):
-
     def __init__(
         self,
         training_config: QEnvConfig,
@@ -204,54 +202,21 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             )
         ]
         skip_transpilation = False
-        if isinstance(self.estimator, Runtime_Estimator):
-            # TODO: Could change resilience level
-            self.estimator.set_options(
-                optimization_level=0,
-                resilience_level=0,
-                skip_transpilation=skip_transpilation,
-            )
-            self.estimator.options.transpilation["initial_layout"] = (
-                self.physical_target_qubits + self.physical_neighbor_qubits
-            )
-            self._sampler = Sampler(
-                session=self.estimator.session, options=dict(self.estimator.options)
-            )
 
-        elif isinstance(self.estimator, AerEstimator):
-            self.estimator._transpile_options = Aer_Options(
-                initial_layout=self.layout, optimization_level=0
-            )
-            self._sampler = AerSampler(
-                backend_options=self.backend.options,
-                transpile_options={
-                    "initial_layout": self.layout,
-                    "optimization_level": 0,
-                },
-                skip_transpilation=skip_transpilation,
-            )
-        elif isinstance(self.estimator, BackendEstimator):
-            self.estimator.set_transpile_options(
-                initial_layout=self.layout, optimization_level=0
-            )
-            self._sampler = BackendSampler(
-                self.backend,
-                dict(self.estimator.options),
-                skip_transpilation=skip_transpilation,
-            )
-            self._sampler.set_transpile_options(
-                initial_layout=self.layout, optimization_level=0
-            )
-
-        else:
-            raise TypeError(
-                "Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime"
-            )
-        self.fidelity_checker = ComputeUncompute(self._sampler)
-        self._d = 2**self.tgt_register.size
-        self.target_instruction = CircuitInstruction(
-            self.target["gate"], self.tgt_register
+        set_primitives_transpile_options(
+            self.estimator,
+            self.sampler,
+            self.layout,
+            skip_transpilation,
+            self.physical_target_qubits + self.physical_neighbor_qubits,
         )
+
+        self.fidelity_checker._sampler = self.sampler
+        self._d = 2**self.tgt_register.size
+
+        # Adjust target register to match it with circuit context
+        self.target_instruction.qubits = tuple(self.tgt_register)
+
         self._tgt_instruction_counts = self.circuit_context.data.count(
             self.target_instruction
         )
@@ -799,36 +764,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         else:
             print("Sending job...")
             try:
-                if isinstance(self.estimator, Runtime_Estimator):
-                    """Open a new Session if time limit of the ongoing one is reached"""
-                    if self.estimator.session.status() == "Closed":
-                        old_session = self.estimator.session
-                        self._session_counts += 1
-                        print(f"New Session opened (#{self._session_counts})")
-                        session, options = (
-                            Session(old_session.service, self.backend),
-                            self.estimator.options,
-                        )
-                        self.estimator = Runtime_Estimator(
-                            session=session, options=dict(options)
-                        )
-                elif isinstance(self.backend, IBMBackend):
-                    if not self.backend.session.active:
-                        self._session_counts += 1
-                        print(f"New Session opened (#{self._session_counts})")
-                        self.backend.open_session()
-                elif isinstance(self.estimator, DynamicsBackendEstimator):
-                    assert isinstance(
-                        self.backend, DynamicsBackend
-                    ), "Backend is not a DynamicsBackend instance"
-                    assert isinstance(
-                        self.backend.options.solver, JaxSolver
-                    ), "Solver is not a JaxSolver instance"
-
-                    def param_schedule():
-                        return schedule(training_circ, self.backend)
-
-                    self.backend.options.solver.circuit_macro = param_schedule
+                handle_session(
+                    training_circ, self.estimator, self.backend, self._session_counts
+                )
                 print(observables)
                 job = self.estimator.run(
                     circuits=[training_circ] * self.batch_size,
@@ -884,7 +822,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self._episode_tracker += 1
         self._episode_ended = False
         self._index_input_state = np.random.randint(len(self._input_circuits))
-        if isinstance(self.estimator, Runtime_Estimator):
+        if isinstance(self.estimator, RuntimeEstimator):
             self.estimator.options.environment["job_tags"] = [
                 f"rl_qoc_step{self._step_tracker}"
             ]

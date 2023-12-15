@@ -44,6 +44,7 @@ from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import Layout
 
 from qiskit_aer.primitives import Estimator as AerEstimator
+from qiskit_algorithms.state_fidelities import ComputeUncompute
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
@@ -66,16 +67,19 @@ from qiskit_ibm_runtime import (
 from tensorflow_probability.python.distributions import Categorical
 
 from custom_jax_sim import DynamicsBackendEstimator, JaxSolver
-from helper_functions import retrieve_estimator
+from helper_functions import (
+    retrieve_primitives,
+    Estimator_type,
+    Backend_type,
+    Sampler_type,
+    handle_session,
+)
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
 # from qm.qua import *
 # from qm.QuantumMachinesManager import QuantumMachinesManager
-
-Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator]
-Backend_type = Union[BackendV1, BackendV2]
 
 
 def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
@@ -242,9 +246,8 @@ class QuantumEnvironment(Env):
         self._tgt_instruction_counts = 1  # Number of instructions to calibrate
         if isinstance(self.training_config.backend_config, QiskitConfig):
             self._config_type = "qiskit"
-            assert isinstance(
-                self.training_config.backend_config, QiskitConfig
-            ), "QiskitConfig type not recognized"
+            if not isinstance(self.training_config.backend_config, QiskitConfig):
+                raise ValueError("Config should be of type QiskitConfig")
 
             (
                 self.target,
@@ -255,6 +258,10 @@ class QuantumEnvironment(Env):
             ) = _define_target(training_config.target)
 
             self._d = 2**self.n_qubits
+            self.target_instruction = CircuitInstruction(
+                self.target["gate"], self.tgt_register
+            )
+
             self.backend = training_config.backend_config.backend
             if self.backend is not None:
                 if self.n_qubits > self.backend.num_qubits:
@@ -276,14 +283,14 @@ class QuantumEnvironment(Env):
             estimator_options = training_config.backend_config.estimator_options
 
             self.abstraction_level: str = abstraction_level
-            self._estimator = retrieve_estimator(
+            self._estimator, self._sampler = retrieve_primitives(
                 self.backend,
                 self.layout,
                 self.config.backend_config,
                 self.abstraction_level,
                 estimator_options,
             )
-
+            self.fidelity_checker = ComputeUncompute(self.sampler)
         elif isinstance(self.training_config.backend_config, QuaConfig):
             raise AttributeError("QUA compatibility not yet implemented")
 
@@ -405,7 +412,10 @@ class QuantumEnvironment(Env):
             self.tgt_register
         )  # Reset the QuantumCircuit instance for next iteration
         parametrized_circ = QuantumCircuit(self.tgt_register)
-        angles, batch_size = np.array(actions), len(np.array(actions))
+        angles, batch_size = np.array(actions), self.batch_size
+        assert (
+            len(angles) == batch_size
+        ), f"Action size mismatch {len(angles)} != {batch_size} "
         self.action_history.append(angles)
 
         if self.target_type == "gate":
@@ -420,6 +430,7 @@ class QuantumEnvironment(Env):
             qc.compose(input_state["circuit"])
         else:  # State preparation task
             target_state = self.target
+
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         distribution = Categorical(probs=target_state["Chi"] ** 2)
         k_samples = distribution.sample(self.sampling_Pauli_space)
@@ -458,48 +469,24 @@ class QuantumEnvironment(Env):
         self.parametrized_circuit_func(
             qc, self._parameters, self.tgt_register, **self._func_args
         )
-        if isinstance(self.estimator, RuntimeEstimator):
-            """Open a new Session if time limit of the ongoing one is reached"""
-            if self.estimator.session.status() == "Closed":
-                old_session = self.estimator.session
-                self._session_counts += 1
-                print(f"New Session opened (#{self._session_counts})")
-                session, options = (
-                    Session(old_session.service, self.backend),
-                    self.estimator.options,
-                )
-                self.estimator = RuntimeEstimator(
-                    session=session, options=dict(options)
-                )
-        elif isinstance(self.backend, IBMBackend):
-            if not self.backend.session.active:
-                self._session_counts += 1
-                print(f"New Session opened (#{self._session_counts})")
-                self.backend.open_session()
-        elif isinstance(self.estimator, DynamicsBackendEstimator):
-            assert isinstance(
-                self.backend, DynamicsBackend
-            ), "Backend is not a DynamicsBackend instance"
-            assert isinstance(
-                self.backend.options.solver, JaxSolver
-            ), "Solver is not a JaxSolver instance"
+        try:
+            handle_session(qc, self.estimator, self.backend, self._session_counts)
+            print(observables)
+            job = self.estimator.run(
+                circuits=[qc] * batch_size,
+                observables=[observables] * batch_size,
+                parameter_values=angles,
+                shots=self.sampling_Pauli_space * self.n_shots,
+            )
 
-            def param_schedule():
-                return schedule(qc, self.backend)
-
-            self.backend.options.solver.circuit_macro = param_schedule
-
-        job = self.estimator.run(
-            circuits=[qc] * batch_size,
-            observables=[observables] * batch_size,
-            parameter_values=angles,
-            shots=self.sampling_Pauli_space * self.n_shots,
-        )
-
-        self._step_tracker += 1
-        reward_table = job.result().values
+            reward_table = job.result().values
+        except Exception as e:
+            self.close()
+            raise e
         self.reward_history.append(reward_table)
-        assert len(reward_table) == batch_size
+        assert (
+            len(reward_table) == self.batch_size
+        ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
         return reward_table  # Shape [batchsize]
 
     def store_benchmarks(self, qc_list: List[QuantumCircuit]):
@@ -704,6 +691,14 @@ class QuantumEnvironment(Env):
     @estimator.setter
     def estimator(self, estimator: BaseEstimator):
         self._estimator = estimator
+
+    @property
+    def sampler(self) -> Sampler_type:
+        return self._sampler
+
+    @estimator.setter
+    def estimator(self, sampler: Sampler_type):
+        self._sampler = sampler
 
     @property
     def tgt_instruction_counts(self):

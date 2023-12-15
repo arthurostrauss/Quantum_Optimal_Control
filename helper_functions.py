@@ -1,20 +1,20 @@
 from itertools import permutations
-from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable
+from typing import Optional, Tuple, List, Union, Dict, Sequence
 
 import numpy as np
 import tensorflow as tf
 import yaml
 from gymnasium.spaces import Box
-from qiskit import pulse
+from qiskit import pulse, schedule
 from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
-from qiskit.primitives import BackendEstimator, Estimator
-from qiskit_aer.primitives import Estimator as AerEstimator
+from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
+from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit.providers import BackendV1, Backend, BackendV2, Options
+
+from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
 from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
-from qiskit.pulse.transforms import block_to_schedule
 from qiskit.quantum_info import Operator
 from qiskit.transpiler import (
     CouplingMap,
@@ -40,12 +40,14 @@ from qiskit_experiments.library import (
     RoughXSXAmplitudeCal,
     RoughDragCal,
 )
+from qiskit_ibm_provider import IBMBackend
 
 from qiskit_ibm_runtime import (
     Session,
     IBMBackend as RuntimeBackend,
     Estimator as RuntimeEstimator,
     Options as RuntimeOptions,
+    Sampler as RuntimeSampler,
 )
 
 from tensorflow.keras import Model
@@ -56,7 +58,6 @@ from qconfig import QiskitConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
-from dataclasses import asdict
 
 Estimator_type = Union[
     AerEstimator,
@@ -65,6 +66,7 @@ Estimator_type = Union[
     BackendEstimator,
     DynamicsBackendEstimator,
 ]
+Sampler_type = Union[AerSampler, RuntimeSampler, Sampler, BackendSampler]
 Backend_type = Union[BackendV1, BackendV2]
 
 
@@ -451,13 +453,13 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     return control_channel_map
 
 
-def retrieve_estimator(
+def retrieve_primitives(
     backend: Backend_type,
     layout: Layout,
     config: Union[Dict, QiskitConfig],
     abstraction_level: str = "circuit",
-    estimator_options: Optional[Union[Dict, Options, RuntimeOptions]] = None,
-) -> Estimator_type:
+    estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
+) -> (Estimator_type, Sampler_type):
     if isinstance(
         backend, RuntimeBackend
     ):  # Real backend, or Simulation backend from Runtime Service
@@ -465,30 +467,40 @@ def retrieve_estimator(
             session=Session(backend.service, backend),
             options=estimator_options,
         )
+        sampler: Sampler_type = RuntimeSampler(
+            session=estimator.session, options=estimator_options
+        )
+
         if estimator.options.transpilation["initial_layout"] is None:
             estimator.options.transpilation[
                 "initial_layout"
             ] = layout.get_physical_bits()
+            sampler.options.transpilation["initial_layout"] = layout.get_physical_bits()
 
     else:
         if isinstance(estimator_options, RuntimeOptions):
             # estimator_options = asdict(estimator_options)
             estimator_options = None
         if isinstance(backend, (AerBackend, FakeBackend, FakeBackendV2)):
-            assert (
-                abstraction_level == "circuit"
-            ), "AerSimulator only works at circuit level"
+            if abstraction_level != "circuit":
+                raise ValueError(
+                    "AerSimulator only works at circuit level, and a pulse gate calibration is provided"
+                )
             # Estimator taking noise model into consideration, have to provide an AerSimulator backend
             estimator = AerEstimator(
                 backend_options=backend.options,
                 transpile_options={"initial_layout": layout},
                 approximation=True,
             )
+            sampler = AerSampler(
+                backend_options=backend.options,
+                transpile_options={"initial_layout": layout},
+            )
         elif backend is None:  # No backend specified, ideal state-vector simulation
-            assert (
-                abstraction_level == "circuit"
-            ), "Statevector simulation only works at circuit level"
+            if abstraction_level != "circuit":
+                raise ValueError("Statevector simulation only works at circuit level")
             estimator = Estimator(options={"initial_layout": layout})
+            sampler = Sampler(options={"initial_layout": layout})
 
         elif isinstance(backend, DynamicsBackend):
             assert (
@@ -503,16 +515,82 @@ def retrieve_estimator(
                     backend, options=estimator_options, skip_transpilation=False
                 )
             estimator.set_transpile_options(initial_layout=layout)
+            sampler = BackendSampler(
+                backend, options=estimator_options, skip_transpilation=False
+            )
             if config.do_calibrations and "x" not in backend.operation_names:
                 calibration_files: List[str] = config.calibration_files
-                (
-                    calibrations,
-                    exp_results,
-                ) = perform_standard_calibrations(backend, calibration_files)
+                _, _ = perform_standard_calibrations(backend, calibration_files)
 
         else:
             raise TypeError("Backend not recognized")
-    return estimator
+    return estimator, sampler
+
+
+def set_primitives_transpile_options(
+    estimator, sampler, layout, skip_transpilation, physical_qubits
+):
+    if isinstance(estimator, RuntimeEstimator):
+        # TODO: Could change resilience level
+        estimator.set_options(
+            optimization_level=0,
+            resilience_level=0,
+            skip_transpilation=skip_transpilation,
+        )
+        estimator.options.transpilation["initial_layout"] = physical_qubits
+        sampler.set_options(**estimator.options)
+
+    elif isinstance(estimator, AerEstimator):
+        estimator._transpile_options = AerOptions(
+            initial_layout=layout, optimization_level=0
+        )
+        estimator._skip_transpilation = skip_transpilation
+        sampler_transpile_options = AerOptions(
+            initial_layout=layout, optimization_level=0
+        )
+        sampler._skip_transpilation = skip_transpilation
+
+    elif isinstance(estimator, BackendEstimator):
+        estimator.set_transpile_options(initial_layout=layout, optimization_level=0)
+        estimator._skip_transpilation = skip_transpilation
+        sampler.set_transpile_options(initial_layout=layout, optimization_level=0)
+        sampler._skip_transpilation = skip_transpilation
+
+    else:
+        raise TypeError(
+            "Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime"
+        )
+
+
+def handle_session(qc, estimator, backend, session_count):
+    if isinstance(estimator, RuntimeEstimator):
+        """Open a new Session if time limit of the ongoing one is reached"""
+        if estimator.session.status() == "Closed":
+            old_session = estimator.session
+            session_count += 1
+            print(f"New Session opened (#{session_count})")
+            session, options = (
+                Session(old_session.service, backend),
+                estimator.options,
+            )
+            estimator = RuntimeEstimator(session=session, options=dict(options))
+    elif isinstance(backend, IBMBackend):
+        if not backend.session.active:
+            session_count += 1
+            print(f"New Session opened (#{session_count})")
+            backend.open_session()
+    elif isinstance(estimator, DynamicsBackendEstimator):
+        if not isinstance(backend, DynamicsBackend) or not isinstance(
+            backend.options.solver, JaxSolver
+        ):
+            raise TypeError(
+                "DynamicsBackendEstimator can only be used with DynamicsBackend and JaxSolver"
+            )
+
+        def param_schedule():
+            return schedule(qc, backend)
+
+        backend.options.solver.circuit_macro = param_schedule
 
 
 def get_solver_and_freq_from_backend(
