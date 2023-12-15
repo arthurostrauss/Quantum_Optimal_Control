@@ -47,6 +47,7 @@ ENV: # Environment configuration
   OBSERVATION_SPACE: 1  # Shape of the observation space
   BENCHMARK_CYCLE: 1  # Number of steps between two fidelity benchmarks
   SEED: 100
+  CHECK_ON_EXP: True # Whether to perform fidelity benchmarking with tomographic experiments or just using simulation
 
 
 

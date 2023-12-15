@@ -10,6 +10,7 @@ from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
+from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
 
@@ -364,24 +365,37 @@ def determine_ecr_params(backend: Backend_type, physical_qubits: List[int]):
 def state_fidelity_from_state_tomography(
     qc_list: List[QuantumCircuit],
     backend: Backend,
-    measurement_indices: Optional[Sequence[int]],
+    physical_qubits: Optional[Sequence[int]],
     analysis: Union[BaseAnalysis, None, str] = "default",
+    target_state: Optional[QuantumState] = None,
+    session: Optional[Session] = None,
 ):
     state_tomo = BatchExperiment(
         [
             StateTomography(
-                qc, measurement_indices=measurement_indices, analysis=analysis
+                qc,
+                physical_qubits=physical_qubits,
+                analysis=analysis,
+                target=target_state,
             )
             for qc in qc_list
         ],
         backend=backend,
+        flatten_results=True,
     )
-    exp_data = state_tomo.run().block_for_results()
-    child_data = exp_data.child_data()
-    exp_results = [data.analysis_result() for data in child_data]
-    fidelities = [data.analysis_result("state_fidelity").value for data in child_data]
+    if isinstance(backend, RuntimeBackend):
+        jobs = run_jobs(session, state_tomo._transpiled_circuits())
+        exp_data = state_tomo._initialize_experiment_data()
+        exp_data.add_jobs(jobs)
+        results = state_tomo.analysis.run(exp_data).block_for_results()
+    else:
+        exp_data = state_tomo.run().block_for_results()
 
-    return fidelities, exp_results
+    fidelities = [
+        exp_data.analysis_result("state_fidelity")[i].value for i in range(len(qc_list))
+    ]
+    avg_fidelity = np.mean(fidelities)
+    return avg_fidelity
 
 
 def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options=None):
@@ -736,8 +750,8 @@ def load_q_env_from_yaml_file(file_path: str):
         "instance": config["SERVICE"]["INSTANCE"],
     }
     runtime_options = config["RUNTIME_OPTIONS"]
-
-    return params, backend_params, RuntimeOptions(**runtime_options)
+    check_on_exp = config["ENV"]["CHECK_ON_EXP"]
+    return params, backend_params, RuntimeOptions(**runtime_options), check_on_exp
 
 
 def load_agent_from_yaml_file(file_path: str):

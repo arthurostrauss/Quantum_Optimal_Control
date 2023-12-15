@@ -20,6 +20,8 @@ from qiskit_ibm_runtime.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
+from quantumenvironment import QuantumEnvironment
+from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from dynamics_config import dynamics_backend
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
@@ -130,7 +132,7 @@ def get_circuit_context(backend: BackendV1 | BackendV2):
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
-(params, backend_params, estimator_options) = load_q_env_from_yaml_file(
+(params, backend_params, estimator_options, check_on_exp) = load_q_env_from_yaml_file(
     config_file_address
 )
 backend = get_backend(**backend_params)
@@ -142,5 +144,8 @@ backend_config = QiskitConfig(
     else None,
     parametrized_circuit_kwargs={"target": params["target"], "backend": backend},
 )
+QuantumEnvironment.check_on_exp = (
+    ContextAwareQuantumEnvironment.check_on_exp
+) = check_on_exp
 q_env_config = QEnvConfig(backend_config=backend_config, **params)
 circuit_context = get_circuit_context(backend)

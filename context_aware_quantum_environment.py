@@ -458,46 +458,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 circuit_fidelities = job.result().fidelities
             except Exception as exc:
                 self.close()
-                raise IBMRuntimeError("ComputeUncompute failed") from exc
+                raise exc
 
             self._punctual_circuit_fidelities = circuit_fidelities
             self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
-
-            # Calculate average gate fidelities for each gate instance within circuit truncation
-
-            avg_gate_fidelities = []
-            for i in range(n_custom_instructions):
-                assigned_gates = [
-                    self.custom_gates[i].assign_parameters(
-                        {self._parameters[i]: params[j]}
-                    )
-                    for j in range(len(params))
-                ]
-
-                # rb_exp = BatchExperiment([InterleavedRB(gate, self.physical_target_qubits,
-                #                                         np.arange(1, 600, 50))
-                #                           for gate in assigned_gates], self.backend, flatten_results=True)
-                # results = rb_exp.run().block_for_results().analysis_results()
-                # gate_fidelities = 1.- np.array([result.EPC for result in results])
-
-                if hasattr(self.estimator, "session"):
-                    session = self.estimator.session
-                elif hasattr(self.backend, "session"):
-                    session = self.backend.session
-                else:
-                    session = None
-
-                avg_gate_fidelity = 0.0
-                # avg_gate_fidelity = gate_fidelity_from_process_tomography(
-                #     assigned_gates,
-                #     self.backend,
-                #     self.target["gate"],
-                #     self.physical_target_qubits,
-                #     session=session,
-                # )
-
-                avg_gate_fidelities.append(avg_gate_fidelity)
-            self.avg_fidelity_history.append(avg_gate_fidelities)
 
         else:  # Perform ideal simulation at circuit or pulse level
             if self.abstraction_level == "circuit":
