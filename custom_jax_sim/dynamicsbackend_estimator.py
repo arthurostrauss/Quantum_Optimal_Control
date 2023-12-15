@@ -82,7 +82,9 @@ class DynamicsBackendEstimator(BackendEstimator):
                 new_bound_circuits.append(circ.copy())
         accum = [0] + list(accumulate([num_observables[0]] * len(parameter_values)))
         # Run
-        result, metadata = _run_circuits(bound_circuits, self._backend, **run_options)
+        result, metadata = _run_circuits(
+            new_bound_circuits, self._backend, **run_options
+        )
         return self._postprocessing(result, accum, metadata)
 
     def _run(

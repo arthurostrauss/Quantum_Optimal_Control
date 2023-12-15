@@ -40,11 +40,11 @@ ENV: # Environment configuration
   N_SHOTS: 1
   C_FACTOR: 1. # Cost factor for the reward function
   N_ACTIONS: 7
-  BATCH_SIZE: 1 # Number of actions to evaluate per policy iteration
+  BATCH_SIZE: 256 # Number of actions to evaluate per policy iteration
   ACTION_SPACE:
     LOW: [ -1., -1., -1., -1., -1., -1., -1. ]
     HIGH: [ 1., 1., 1., 1., 1., 1., 1. ]
-  OBSERVATION_SPACE: 2  # Shape of the observation space
+  OBSERVATION_SPACE: 1  # Shape of the observation space
   BENCHMARK_CYCLE: 1  # Number of steps between two fidelity benchmarks
   SEED: 100
 

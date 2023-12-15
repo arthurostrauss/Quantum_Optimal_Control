@@ -2,7 +2,7 @@ RUN_NAME: "test" # Name of the run
 OPTIMIZER: "adam" # Optimizer for the policy network
 NUM_UPDATES: 1 # Number of policy updates
 N_EPOCHS: 10 # Number of epochs for each policy update
-MINIBATCH_SIZE: 1 # Number of samples per mini-batch
+MINIBATCH_SIZE: 32 # Number of samples per mini-batch
 LR: 0.01 # Learning rate
 GAMMA: 0.99 # Discount factor
 GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation

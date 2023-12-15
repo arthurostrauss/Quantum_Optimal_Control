@@ -161,6 +161,10 @@ class JaxSolver(Solver):
             param_names = param_dicts[0].keys()
             param_values = kwargs["parameter_values"]
             subsystem_dims = kwargs["subsystem_dims"]
+            if self.circuit_macro is None:
+                raise ValueError(
+                    "No circuit macro has been provided, please provide a circuit macro"
+                )
 
             # print(kwargs["observables"])
             observables_circuits: List[QuantumCircuit] = [

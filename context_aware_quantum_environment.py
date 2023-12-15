@@ -74,8 +74,6 @@ def create_array(circ_trunc, batchsize, n_actions):
 
 
 class ContextAwareQuantumEnvironment(QuantumEnvironment):
-    metadata = {"render_modes": ["human"]}
-    check_on_exp = True  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
 
     def __init__(
         self,
