@@ -320,6 +320,14 @@ class QuantumEnvironment(Env):
         else:
             self.state_fidelity_history = []
 
+        # Check the training_config observation space matches that returned by _get_obs
+        example_obs = self._get_obs()
+        if example_obs.shape != self.observation_space.shape:
+            raise ValueError(
+                f"The Training Config observation space: {self.observation_space.shape} does not "
+                f"match the Environment observation shape: {example_obs.shape}"
+            )
+
     def reset(
         self,
         *,
@@ -372,6 +380,13 @@ class QuantumEnvironment(Env):
         params = np.array(action)
         terminated = self._episode_ended = True
         reward = self.perform_action(params, self.do_benchmark())
+
+        # Using Negative Log Error as the Reward
+        optimal_error_precision = 1e-6
+        max_fidelity = 1.0 - optimal_error_precision
+        reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
+        reward = -np.log(1.0 - reward)
+
         return self._get_obs(), reward, terminated, False, self._get_info()
 
     def episode_length(self, global_step: int):
