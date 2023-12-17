@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 import yaml
 from gymnasium.spaces import Box
-from qiskit import pulse, schedule
+from qiskit import pulse, schedule, transpile
 from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
@@ -16,7 +16,7 @@ from qiskit_aer.backends.aerbackend import AerBackend
 
 from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
 from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
-from qiskit.quantum_info import Operator
+from qiskit.quantum_info import Operator, Statevector
 from qiskit.transpiler import (
     CouplingMap,
     InstructionDurations,
@@ -55,6 +55,7 @@ from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
 
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
+from custom_jax_sim.jax_solver import PauliToQuditOperator
 from qconfig import QiskitConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 
@@ -80,6 +81,9 @@ def constrain_std_value(std_var):
 
 
 def count_gates(qc: QuantumCircuit):
+    """
+    Count number of gates in a Quantum Circuit
+    """
     gate_count = {qubit: 0 for qubit in qc.qubits}
     for gate in qc.data:
         for qubit in gate.qubits:
@@ -88,6 +92,9 @@ def count_gates(qc: QuantumCircuit):
 
 
 def remove_unused_wires(qc: QuantumCircuit):
+    """
+    Remove unused wires from a Quantum Circuit
+    """
     gate_count = count_gates(qc)
     for qubit, count in gate_count.items():
         if count == 0:
@@ -272,7 +279,10 @@ def perform_standard_calibrations(
     return cals, exp_results
 
 
-def determine_ecr_params(backend: Backend_type, physical_qubits: List[int]):
+def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
+    """
+    Determine default parameters for ECR gate on provided backend (works even if basis gate of the IBM Backend is CX)
+    """
     if not isinstance(backend, (BackendV1, BackendV2)):
         raise TypeError("Backend must be defined")
     basis_gates = (
@@ -358,8 +368,41 @@ def determine_ecr_params(backend: Backend_type, physical_qubits: List[int]):
                 / (2 * control_pulse.sigma),
             }
         )
+    pulse_features = [
+        "amp",
+        "angle",
+        "duration",
+        "σ",
+        "β",
+        "risefall",
+        "tgt_amp",
+        "tgt_angle",
+    ]
+    return default_params, pulse_features, basis_gate_instructions, instructions_array
 
-    return default_params, basis_gate_instructions, instructions_array
+
+def get_x_params(backend: Backend_type, physical_qubit: Sequence[int]):
+    """
+    Determine default parameters for SX gate on provided backend
+    """
+    if not isinstance(backend, (BackendV1, BackendV2)):
+        raise TypeError("Backend must be defined")
+    if isinstance(backend, BackendV1):
+        instruction_schedule_map = backend.defaults().instruction_schedule_map
+    else:
+        instruction_schedule_map = backend.target.instruction_schedule_map()
+    basis_gate_inst = instruction_schedule_map.get("x", physical_qubit)
+    basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
+    sx_pulse = basis_gate_inst.instructions[0][1].pulse
+    default_params = {
+        ("amp", physical_qubit, "x"): sx_pulse.amp,
+        ("σ", physical_qubit, "x"): sx_pulse.sigma,
+        ("β", physical_qubit, "x"): sx_pulse.beta,
+        ("duration", physical_qubit, "x"): sx_pulse.duration,
+        ("angle", physical_qubit, "x"): sx_pulse.angle,
+    }
+    pulse_features = ["amp", "angle", "duration", "σ", "β"]
+    return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
 
 
 def state_fidelity_from_state_tomography(
@@ -576,7 +619,10 @@ def set_primitives_transpile_options(
         )
 
 
-def handle_session(qc, estimator, backend, session_count):
+def handle_session(qc, input_state_circ, estimator, backend, session_count):
+    """
+    Handle session reopening for RuntimeEstimator and load necessary data for DynamicsBackendEstimator
+    """
     if isinstance(estimator, RuntimeEstimator):
         """Open a new Session if time limit of the ongoing one is reached"""
         if estimator.session.status() == "Closed":
@@ -604,7 +650,29 @@ def handle_session(qc, estimator, backend, session_count):
         def param_schedule():
             return schedule(qc, backend)
 
+        new_circ = transpile(input_state_circ, backend)
         backend.options.solver.circuit_macro = param_schedule
+        subsystem_dims = backend.options.subsystem_dims
+        initial_state = Statevector.from_int(0, dims=subsystem_dims)
+        initial_rotations = [
+            Operator.from_label("I") for i in range(new_circ.num_qubits)
+        ]
+        qubit_counter = 0
+        qubit_list = []
+        for instruction in new_circ.data:
+            assert (
+                len(instruction.qubits) == 1
+            ), "Input state circuit must be in a tensor product form"
+            if instruction.qubits[0] not in qubit_list:
+                qubit_list.append(instruction.qubits[0])
+                qubit_counter += 1
+            initial_rotations[qubit_counter - 1] = initial_rotations[
+                qubit_counter - 1
+            ].compose(Operator(instruction.operation))
+
+        operation = PauliToQuditOperator(initial_rotations, subsystem_dims)
+        initial_state = initial_state.evolve(operation)
+        backend.set_options(initial_state=initial_state)
 
 
 def get_solver_and_freq_from_backend(

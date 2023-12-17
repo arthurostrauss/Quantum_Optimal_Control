@@ -58,9 +58,9 @@ class QiskitConfig(BackendConfig):
     parametrized_circuit: Callable[
         [
             QuantumCircuit,
-            Optional[Sequence[Parameter] | ParameterVector],
-            Optional[QuantumRegister],
-            Dict[str, Any],
+            ParameterVector,
+            QuantumRegister,
+            Any,
         ],
         None,
     ]

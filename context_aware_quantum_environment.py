@@ -50,7 +50,7 @@ from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from helper_functions import (
     gate_fidelity_from_process_tomography,
     retrieve_backend_info,
-    determine_ecr_params,
+    get_ecr_params,
     set_primitives_transpile_options,
     handle_session,
 )
@@ -143,9 +143,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
                 for qubit_pair in coupling_map.get_edges():
                     if target.has_calibration("cx", qubit_pair):
-                        default_params, _, _ = determine_ecr_params(
-                            self.backend, qubit_pair
-                        )
+                        default_params, _, _ = get_ecr_params(self.backend, qubit_pair)
                         error = self.backend.target["cx"][qubit_pair].error
                         target.update_instruction_properties(
                             "ecr",
@@ -294,16 +292,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             self.baseline_truncations[iteration],
             self.circuit_truncations[iteration],
         )
-        target_circuit = ref_circuit.copy_empty_like()
-        custom_target_circuit = custom_circuit.copy_empty_like(
-            name=f"qc_{input_state_index}_{ref_circuit.name[-1]}"
-        )
-
-        # Build both theoretical and actual circuits
-        custom_target_circuit.compose(input_circuit, inplace=True)
-        custom_target_circuit.compose(custom_circuit, inplace=True)
-        target_circuit.compose(input_circuit, inplace=True)
-        target_circuit.compose(ref_circuit, inplace=True)
+        target_circuit = ref_circuit.compose(input_circuit, inplace=False, front=True)
 
         # custom_target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
         # target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
@@ -319,9 +308,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 else partial_trace(
                     Statevector(target_circuit), self.physical_neighbor_qubits
                 ),
-                "circuit": custom_target_circuit,
+                "circuit": custom_circuit,
                 "target_type": "state",
-                "theoretical_circ": target_circuit,
+                "input_state_circ": input_circuit,
             },
             n_qubits=len(self.tgt_register),
         )
@@ -686,30 +675,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
     def compute_reward(self, fidelity_access=False) -> np.ndarray:
         trunc_index = self._inside_trunc_tracker
         target_state = self._retrieve_target_state(self._index_input_state, trunc_index)
-        training_circ: QuantumCircuit = target_state["circuit"]
-        # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        distribution = Categorical(probs=target_state["Chi"] ** 2)
-
-        k_samples = distribution.sample(self.sampling_Pauli_space)
-
-        pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = np.round(
-            [
-                self.c_factor
-                * target_state["Chi"][p]
-                / (self._d * distribution.prob(p))
-                for p in pauli_index
-            ],
-            5,
-        )
+        qc: QuantumCircuit = self.circuit_truncations[trunc_index].copy()
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        observables = SparsePauliOp.from_list(
-            [
-                (pauli_basis(training_circ.num_qubits)[p].to_label(), reward_factor[i])
-                for i, p in enumerate(pauli_index)
-            ]
-        )
+        observables, pauli_shots = self.retrieve_observables(target_state, qc)
 
         self._punctual_observable = observables
         # self.parametrized_circuit_func(training_circ, self._parameters[:iteration])
@@ -729,11 +698,18 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             print("Sending job...")
             try:
                 handle_session(
-                    training_circ, self.estimator, self.backend, self._session_counts
+                    qc,
+                    target_state["input_circuit"],
+                    self.estimator,
+                    self.backend,
+                    self._session_counts,
                 )
+
+                qc.compose(target_state["input_circuit"], inplace=True, front=True)
                 print(observables)
+
                 job = self.estimator.run(
-                    circuits=[training_circ] * self.batch_size,
+                    circuits=[qc] * self.batch_size,
                     observables=[observables] * self.batch_size,
                     parameter_values=reshaped_params,
                     shots=int(np.max(pauli_shots) * self.n_shots),

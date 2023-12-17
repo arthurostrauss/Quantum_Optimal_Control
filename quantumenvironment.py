@@ -260,8 +260,8 @@ class QuantumEnvironment(Env):
             ) = _define_target(training_config.target)
 
             self._d = 2**self.n_qubits
-
             self.backend = training_config.backend_config.backend
+
             if self.backend is not None:
                 if self.n_qubits > self.backend.num_qubits:
                     raise ValueError(
@@ -272,6 +272,7 @@ class QuantumEnvironment(Env):
             )
 
             self._func_args = training_config.backend_config.parametrized_circuit_kwargs
+
             abstraction_level = retrieve_abstraction_level(
                 self.parametrized_circuit_func,
                 self._parameters,
@@ -320,6 +321,10 @@ class QuantumEnvironment(Env):
         else:
             self.state_fidelity_history = []
 
+        (
+            self.circuit_truncations,
+            self.baseline_truncations,
+        ) = self._generate_circuit_truncations()
         # Check the training_config observation space matches that returned by _get_obs
         example_obs = self._get_obs()
         if example_obs.shape != self.observation_space.shape:
@@ -425,9 +430,8 @@ class QuantumEnvironment(Env):
         :return: Reward table (reward for each run in the batch)
         """
 
-        qc = QuantumCircuit(
-            self.tgt_register
-        )  # Reset the QuantumCircuit instance for next iteration
+        qc = self.circuit_truncations[0].copy()
+        input_state_circ = QuantumCircuit(self.tgt_register)
 
         params, batch_size = np.array(actions), self.batch_size
         assert (
@@ -439,60 +443,36 @@ class QuantumEnvironment(Env):
             # Pick random input state from the list of possible input states (forming a tomographically complete set)
             index = self._index_input_state
             input_state = self.target["input_states"][index]
-
-            target_state = input_state[
-                "target_state"
-            ]  # Ideal output state associated to input (Gate |input>=|output>)
-            # Append input state circuit to full quantum circuit for gate calibration
-            qc.compose(input_state["circuit"])
+            input_state_circ = input_state["circuit"]
+            target_state = input_state["target_state"]  # (Gate |input>=|target>)
         else:  # State preparation task
             target_state = self.target
 
-        # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        distribution = Categorical(probs=target_state["Chi"] ** 2)
-        k_samples = distribution.sample(self.sampling_Pauli_space)
-        pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = np.round(
-            [
-                self.c_factor
-                * target_state["Chi"][p]
-                / (self._d * distribution.prob(p))
-                for p in pauli_index
-            ],
-            5,
-        )
-
-        # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        observables = SparsePauliOp.from_list(
-            [
-                (pauli_basis(num_qubits=self._n_qubits)[p].to_label(), reward_factor[i])
-                for i, p in enumerate(pauli_index)
-            ]
-        )
-        # Benchmarking block: not part of reward calculation
-        # Apply parametrized quantum circuit (action), for benchmarking only
+        observables, pauli_shots = self.retrieve_observables(target_state, qc)
 
         if do_benchmark:
+            print("Starting benchmarking...")
             self.store_benchmarks(params)
+            print("Finished benchmarking")
 
-        # Build full quantum circuit: concatenate input state prep and parametrized unitary
-        self.parametrized_circuit_func(
-            qc, self._parameters, self.tgt_register, **self._func_args
-        )
         try:
-            handle_session(qc, self.estimator, self.backend, self._session_counts)
+            handle_session(
+                qc, input_state_circ, self.estimator, self.backend, self._session_counts
+            )
+            # Add initial state prep in front of parametrized circuit
+            qc.compose(input_state_circ, inplace=True, front=True)
             print(observables)
             job = self.estimator.run(
                 circuits=[qc] * batch_size,
                 observables=[observables] * batch_size,
                 parameter_values=params,
-                shots=self.sampling_Pauli_space * self.n_shots,
+                shots=int(np.max(pauli_shots) * self.n_shots),
             )
 
             reward_table = job.result().values
         except Exception as e:
             self.close()
-            raise e
+            raise
         self.reward_history.append(reward_table)
         assert (
             len(reward_table) == self.batch_size
@@ -724,6 +704,10 @@ class QuantumEnvironment(Env):
         self._layout = layout
 
     @property
+    def parameters(self):
+        return self._parameters
+
+    @property
     def config_type(self):
         return self._config_type
 
@@ -798,3 +782,40 @@ class QuantumEnvironment(Env):
         else:
             q_env.state_fidelity_history = class_info["fidelity_history"]
         return q_env
+
+    def retrieve_observables(self, target_state, qc):
+        # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
+        distribution = Categorical(probs=target_state["Chi"] ** 2)
+        k_samples = distribution.sample(self.sampling_Pauli_space)
+        pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
+        reward_factor = np.round(
+            [
+                self.c_factor
+                * target_state["Chi"][p]
+                / (self._d * distribution.prob(p))
+                for p in pauli_index
+            ],
+            5,
+        )
+
+        # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
+        observables = SparsePauliOp.from_list(
+            [
+                (pauli_basis(num_qubits=qc.num_qubits)[p].to_label(), reward_factor[i])
+                for i, p in enumerate(pauli_index)
+            ]
+        )
+
+        return observables, pauli_shots
+
+    def _generate_circuit_truncations(self):
+        custom_circuit = QuantumCircuit(self.tgt_register)
+        ref_circuit = QuantumCircuit(self.tgt_register)
+        self.parametrized_circuit_func(
+            custom_circuit, self._parameters, self.tgt_register, **self._func_args
+        )
+        if self.target_type == "gate":
+            ref_circuit.append(self.target_instruction)
+        else:
+            ref_circuit = self.target["dm"]
+        return [custom_circuit], [ref_circuit]

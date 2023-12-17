@@ -3,11 +3,9 @@ from __future__ import annotations
 from itertools import accumulate
 from typing import Sequence
 
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, transpile
 from qiskit.primitives import BackendEstimator, EstimatorResult
 from qiskit.primitives.backend_estimator import _run_circuits
-from qiskit.primitives.primitive_job import PrimitiveJob
-from qiskit.primitives.utils import _circuit_key, init_observable, _observable_key
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit_dynamics.backend import DynamicsBackend
 from qiskit.transpiler import PassManager
@@ -65,9 +63,9 @@ class DynamicsBackendEstimator(BackendEstimator):
         self.backend.options.solver_options[
             "parameter_values"
         ] = parameter_values  # To be given as PyTree alternatively
-        self.backend.options.solver_options["observables"] = self.preprocessed_circuits[
-            0
-        ][1]
+        self.backend.options.solver_options["observables"] = transpile(
+            self.preprocessed_circuits[0][1], self.backend
+        )
         bound_circuits = [
             transpiled_circuits[circuit_index]
             if len(p) == 0

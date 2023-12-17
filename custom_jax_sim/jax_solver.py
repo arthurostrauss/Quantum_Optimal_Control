@@ -24,7 +24,7 @@ jit_wrap = wrap(jit, decorator=True)
 def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
     """
     This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
-    arbitrary dimension qudit operators that are the equivalent of the Qubit Operators desired.
+    arbitrary dimension qudit operators that are the equivalent to the Qubit Operators desired.
 
     This functionality is useful for qudit simulations of standard qubit workflows like state preparation
     and choosing measurement observables, without losing any information from the simulation.
@@ -39,7 +39,9 @@ def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
     complete_op = qudit_op_list[0]
     for i in range(1, len(qudit_op_list)):
         complete_op = np.kron(complete_op, qudit_op_list[i])
-    return Operator(complete_op)
+    return Operator(
+        complete_op, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
+    )
 
 
 class JaxSolver(Solver):
@@ -125,6 +127,7 @@ class JaxSolver(Solver):
             validate,
         )
         self._schedule_func = schedule_func
+        self._batched_sims = None
         SymbolicPulse.disable_validation = True
 
     @property
@@ -137,6 +140,10 @@ class JaxSolver(Solver):
         This setter should be done each time one wants to switch the target circuit truncation
         """
         self._schedule_func = func
+
+    @property
+    def batched_sims(self):
+        return self._batched_sims
 
     def _solve_schedule_list_jax(
         self,
@@ -247,6 +254,7 @@ class JaxSolver(Solver):
                 y0_cls,
             )
 
+            self._batched_sims = batch_results_y
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:
                     results = OdeResult(

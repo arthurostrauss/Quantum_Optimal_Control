@@ -309,6 +309,4 @@ def make_train_ppo(
         env.close()
         writer.close()
 
-        pass
-
     return train
