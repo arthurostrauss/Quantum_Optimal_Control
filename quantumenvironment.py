@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from itertools import product
-from typing import Dict, Union, Optional, List, Callable, Any, SupportsFloat
-from gymnasium import Env, Space
+from typing import Dict, Optional, List, Callable, Any, SupportsFloat
+from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
 
@@ -27,11 +27,7 @@ from qiskit.circuit import (
 )
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
-from qiskit.primitives import BaseEstimator, Estimator, BackendEstimator
-
-# Qiskit backends
-from qiskit.providers import Options, BackendV2, BackendV1
-
+from qiskit.primitives import BaseEstimator
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
@@ -52,25 +48,18 @@ from qiskit_dynamics.array import Array
 from qiskit_ibm_provider import IBMBackend
 
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
-from qiskit_experiments.framework import BatchExperiment
-from qiskit_experiments.library import ProcessTomography
 from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
 )  # , Pauli6PreparationBasis
-from qiskit_ibm_runtime import (
-    Estimator as RuntimeEstimator,
-    Options as RuntimeOptions,
-    Session,
-)
+from qiskit_ibm_runtime import Estimator as RuntimeEstimator
 
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
 
-from custom_jax_sim import DynamicsBackendEstimator, JaxSolver
+from custom_jax_sim import JaxSolver
 from helper_functions import (
     retrieve_primitives,
     Estimator_type,
-    Backend_type,
     Sampler_type,
     handle_session,
     state_fidelity_from_state_tomography,
@@ -296,7 +285,8 @@ class QuantumEnvironment(Env):
 
             # TODO: Add a QUA program
 
-        # Data storage for TF-Agents or plotting
+        self._param_values = np.zeros((self.batch_size, self.action_space.shape[-1]))
+        # Data storage for plotting
         self._seed = self.training_config.seed
 
         self._session_counts = 0
@@ -382,9 +372,13 @@ class QuantumEnvironment(Env):
                 False,
                 self._get_info(),
             )
-        params = np.array(action)
+        params, batch_size = np.array(action), action.shape[0]
+        if batch_size != self.batch_size:
+            raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
+
+        self._param_values = params
         terminated = self._episode_ended = True
-        reward = self.perform_action(params, self.do_benchmark())
+        reward = self.perform_action(self._param_values)
 
         # Using Negative Log Error as the Reward
         optimal_error_precision = 1e-6
@@ -417,20 +411,15 @@ class QuantumEnvironment(Env):
                 self._episode_tracker % self.benchmark_cycle == 0
                 and self._episode_tracker > 1
             )
-        # if isinstance(self.estimator, Runtime_Estimator) or self.abstraction_level == 'circuit':
-        #     return self._episode_tracker % self.benchmark_cycle == 0 and self._episode_tracker > 0
-        # else:
-        #     return False
 
-    def perform_action(self, actions: np.array, do_benchmark: bool = True):
+    def perform_action(self, actions: np.array):
         """
         Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
         :param actions: action vector to execute on quantum system
-        :param do_benchmark: Indicates if actual fidelity computation should be done on top of reward computation
         :return: Reward table (reward for each run in the batch)
         """
 
-        qc = self.circuit_truncations[0].copy()
+        qc = self.circuit_truncations[0]
         input_state_circ = QuantumCircuit(self.tgt_register)
 
         params, batch_size = np.array(actions), self.batch_size
@@ -450,7 +439,7 @@ class QuantumEnvironment(Env):
 
         observables, pauli_shots = self.retrieve_observables(target_state, qc)
 
-        if do_benchmark:
+        if self.do_benchmark():
             print("Starting benchmarking...")
             self.store_benchmarks(params)
             print("Finished benchmarking")
@@ -459,11 +448,11 @@ class QuantumEnvironment(Env):
             handle_session(
                 qc, input_state_circ, self.estimator, self.backend, self._session_counts
             )
-            # Add initial state prep in front of parametrized circuit
-            qc.compose(input_state_circ, inplace=True, front=True)
+            # Append input state prep circuit to the custom circuit with front composition
+            full_circ = qc.compose(input_state_circ, inplace=False, front=True)
             print(observables)
             job = self.estimator.run(
-                circuits=[qc] * batch_size,
+                circuits=[full_circ] * batch_size,
                 observables=[observables] * batch_size,
                 parameter_values=params,
                 shots=int(np.max(pauli_shots) * self.n_shots),
@@ -566,12 +555,15 @@ class QuantumEnvironment(Env):
 
             elif self.abstraction_level == "pulse":
                 # Pulse simulation
-                unitaries = self._simulate_pulse_schedules(
-                    schedule(qc, self.backend), params
-                )
-                # TODO: Line below yields an error if simulation is not done over a set of qubit (fails if third level of
-                # TODO: transmon is simulated), adapt the target gate operator accordingly.
-                unitaries = [Operator(np.array(unitary.y[0])) for unitary in unitaries]
+                if isinstance(self.backend, DynamicsBackend) and isinstance(self.backend.options.solver, JaxSolver):
+                    # Jax compatible pulse simulation
+                    unitaries = self.backend.options.solver.batched_sims
+
+                    for unitary in unitaries:
+                        unitary = np.array(unitary)
+                        extended_tgt_gate = np.zeros_like(unitary)
+                        
+
 
                 if self.target_type == "state":
                     density_matrix = DensityMatrix(
@@ -617,7 +609,7 @@ class QuantumEnvironment(Env):
             )
         else:
             backend = self.backend
-        unitaries = self.backend.options.solver.solve(
+        unitaries = backend.options.solver.solve(
             t_span=Array([0.0, time_f]),
             y0=self.backend.options.initial_state
             if self.backend.options.initial_state != "ground_state"

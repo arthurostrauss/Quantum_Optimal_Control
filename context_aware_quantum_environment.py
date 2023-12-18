@@ -675,7 +675,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
     def compute_reward(self, fidelity_access=False) -> np.ndarray:
         trunc_index = self._inside_trunc_tracker
         target_state = self._retrieve_target_state(self._index_input_state, trunc_index)
-        qc: QuantumCircuit = self.circuit_truncations[trunc_index].copy()
+        qc: QuantumCircuit = self.circuit_truncations[trunc_index]
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
         observables, pauli_shots = self.retrieve_observables(target_state, qc)
@@ -705,11 +705,14 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     self._session_counts,
                 )
 
-                qc.compose(target_state["input_circuit"], inplace=True, front=True)
+                # Append input state prep circuit to the custom circuit with front composition
+                full_circ = qc.compose(
+                    target_state["input_circuit"], inplace=False, front=True
+                )
                 print(observables)
 
                 job = self.estimator.run(
-                    circuits=[qc] * self.batch_size,
+                    circuits=[full_circ] * self.batch_size,
                     observables=[observables] * self.batch_size,
                     parameter_values=reshaped_params,
                     shots=int(np.max(pauli_shots) * self.n_shots),
@@ -806,8 +809,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
         params, batch_size = np.array(action), len(np.array(action))
         if batch_size != self.batch_size:
-            print("Batchsize changed")
-            self.batch_size = batch_size
+            raise ValueError(
+                f"Action batch size {batch_size} does not match environment batch size {self.batch_size}"
+            )
         self._param_values[trunc_index][step_status] = params
 
         if step_status < trunc_index:  # Intermediate step within the circuit truncation

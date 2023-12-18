@@ -634,7 +634,9 @@ def handle_session(qc, input_state_circ, estimator, backend, session_count):
                 estimator.options,
             )
             estimator = RuntimeEstimator(session=session, options=dict(options))
-    elif isinstance(backend, IBMBackend):
+    elif isinstance(
+        backend, IBMBackend
+    ):  # Soon deprecated (backend.run also available in Qiskit Runtime)
         if not backend.session.active:
             session_count += 1
             print(f"New Session opened (#{session_count})")
@@ -646,19 +648,17 @@ def handle_session(qc, input_state_circ, estimator, backend, session_count):
             raise TypeError(
                 "DynamicsBackendEstimator can only be used with DynamicsBackend and JaxSolver"
             )
-
-        def param_schedule():
-            return schedule(qc, backend)
-
+        # Update callable within the jit compiled function
+        backend.options.solver.circuit_macro = lambda: schedule(qc, backend)
+        # Update initial state of DynamicsBackend with input state circuit
+        # The initial state is adapted to match the dimensions of the HamiltonianModel
         new_circ = transpile(input_state_circ, backend)
-        backend.options.solver.circuit_macro = param_schedule
         subsystem_dims = backend.options.subsystem_dims
         initial_state = Statevector.from_int(0, dims=subsystem_dims)
         initial_rotations = [
             Operator.from_label("I") for i in range(new_circ.num_qubits)
         ]
-        qubit_counter = 0
-        qubit_list = []
+        qubit_counter, qubit_list = 0, []
         for instruction in new_circ.data:
             assert (
                 len(instruction.qubits) == 1
