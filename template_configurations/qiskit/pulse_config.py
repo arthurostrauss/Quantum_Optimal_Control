@@ -7,7 +7,8 @@ from gymnasium.spaces import Box
 import numpy as np
 from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from helper_functions import (
-    determine_ecr_params,
+    get_ecr_params,
+    get_x_params,
     load_q_env_from_yaml_file,
     perform_standard_calibrations,
 )
@@ -23,10 +24,79 @@ from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from dynamics_config import dynamics_backend
+from typing import List, Sequence
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
+
+
+def new_params_ecr(
+    params: ParameterVector,
+    qubits: Sequence[int],
+    backend: BackendV1 | BackendV2,
+    pulse_features: List[str],
+    keep_symmetry: bool = True,
+    duration_window: float = 0.1,
+):
+    new_params, available_features, _, _ = get_ecr_params(backend, qubits)
+
+    if keep_symmetry:  # Maintain symmetry between the two GaussianSquare pulses
+        if len(pulse_features) != len(params):
+            raise ValueError(
+                f"Number of pulse features ({len(pulse_features)} and number of parameters ({len(params)}"
+                f"do not match"
+            )
+        for sched in ["cr45p", "cr45m"]:
+            for i, feature in enumerate(pulse_features):
+                if feature != "duration" and feature in available_features:
+                    new_params[(feature, qubits, sched)] += params[i]
+                else:
+                    new_params[
+                        (feature, qubits, sched)
+                    ] += pulse.builder.seconds_to_samples(duration_window * params[i])
+    else:
+        if 2 * len(pulse_features) != len(params):
+            raise ValueError(
+                f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)} do not "
+                f"match"
+            )
+        num_features = len(pulse_features)
+        for i, sched in enumerate(["cr45p", "cr45m"]):
+            for j, feature in enumerate(pulse_features):
+                if feature != "duration" and feature in available_features:
+                    new_params[(feature, qubits, sched)] += params[i * num_features + j]
+                else:
+                    new_params[
+                        (feature, qubits, sched)
+                    ] += pulse.builder.seconds_to_samples(
+                        duration_window * params[i * num_features + j]
+                    )
+
+    return new_params
+
+
+def new_params_x(
+    params: ParameterVector,
+    qubits: Sequence[int],
+    backend: BackendV1 | BackendV2,
+    pulse_features: List[str],
+    duration_window: float,
+):
+    new_params, available_features, _, _ = get_x_params(backend, qubits)
+    if len(pulse_features) != len(params):
+        raise ValueError(
+            f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)}"
+            f" do not match"
+        )
+    for i, feature in enumerate(pulse_features):
+        if feature != "duration" and feature in available_features:
+            new_params[(feature, qubits, "x")] += params[i]
+        else:
+            new_params[(feature, qubits, "x")] += pulse.builder.seconds_to_samples(
+                duration_window * params[i]
+            )
+    return new_params
 
 
 def custom_schedule(
@@ -34,7 +104,7 @@ def custom_schedule(
     physical_qubits: list,
     params: ParameterVector,
     keep_symmetry: bool = True,
-):
+) -> pulse.ScheduleBlock:
     """
     Define parametrization of the pulse schedule characterizing the target gate.
     This function can be customized at will, however one shall recall to make sure that number of actions match the
@@ -50,38 +120,32 @@ def custom_schedule(
 
     # Load here all pulse parameters names that should be tuned during model-free calibration.
     # Here we focus on real time tunable pulse parameters (amp, angle, duration)
-    pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]
-
+    ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]
+    x_pulse_features = ["amp", "angle"]
     # Uncomment line below to include pulse duration as tunable parameter
-    # pulse_features.append("duration")
+    # ecr_pulse_features.append("duration")
+    # x_pulse_features.append("duration")
+
     duration_window = 0
-
-    new_params, _, _ = determine_ecr_params(backend, physical_qubits)
-
     qubits = tuple(physical_qubits)
 
-    if keep_symmetry:  # Maintain symmetry between the two GaussianSquare pulses
-        for sched in ["cr45p", "cr45m"]:
-            for i, feature in enumerate(pulse_features):
-                if feature != "duration":
-                    new_params[(feature, qubits, sched)] += params[i]
-                else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(duration_window * params[i])
+    if len(qubits) == 2:  # Retrieve schedule for ECR gate
+        new_params = new_params_ecr(
+            params, qubits, backend, ecr_pulse_features, keep_symmetry, duration_window
+        )
+    elif len(qubits) == 1:  # Retrieve schedule for X gate
+        new_params = new_params_x(
+            params,
+            qubits,
+            backend,
+            x_pulse_features,
+            duration_window,
+        )
     else:
-        num_features = len(pulse_features)
-        for i, sched in enumerate(["cr45p", "cr45m"]):
-            for j, feature in enumerate(pulse_features):
-                if feature != "duration":
-                    new_params[(feature, qubits, sched)] += params[i * num_features + j]
-                else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(
-                        duration_window * params[i * num_features + j]
-                    )
-
+        raise ValueError(
+            f"Number of physical qubits ({len(physical_qubits)}) not supported by current pulse macro, "
+            f"adapt it to your needs"
+        )
     cals = Calibrations.from_backend(
         backend,
         [
@@ -91,9 +155,10 @@ def custom_schedule(
         add_parameter_defaults=True,
     )
 
+    gate_name = "ecr" if len(physical_qubits) == 2 else "x"
     # Retrieve schedule (for now, works only with ECRGate(), as no library yet available for CX)
-    parametrized_schedule = cals.get_schedule("ecr", qubits, assign_params=new_params)
-    return parametrized_schedule
+
+    return cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
 
 def apply_parametrized_circuit(
@@ -111,7 +176,9 @@ def apply_parametrized_circuit(
     backend = kwargs["backend"]
 
     gate, physical_qubits = target["gate"], target["register"]
-    parametrized_gate = Gate("custom_ecr", 2, params=params.params)
+    parametrized_gate = Gate(
+        f"custom_{gate.name}", len(tgt_register), params=params.params
+    )
     parametrized_schedule = custom_schedule(
         backend=backend, physical_qubits=physical_qubits, params=params
     )
@@ -190,20 +257,26 @@ def get_circuit_context(backend: BackendV1 | BackendV2):
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
-(params, backend_params, estimator_options, check_on_exp) = load_q_env_from_yaml_file(
-    config_file_address
-)
-backend = get_backend(**backend_params)
+(
+    env_params,
+    backend_params,
+    estimator_options,
+    check_on_exp,
+) = load_q_env_from_yaml_file(config_file_address)
+env_backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
     apply_parametrized_circuit,
-    backend,
+    env_backend,
     estimator_options=estimator_options
-    if isinstance(backend, RuntimeBackend)
+    if isinstance(env_backend, RuntimeBackend)
     else None,
-    parametrized_circuit_kwargs={"target": params["target"], "backend": backend},
+    parametrized_circuit_kwargs={
+        "target": env_params["target"],
+        "backend": env_backend,
+    },
 )
 QuantumEnvironment.check_on_exp = (
     ContextAwareQuantumEnvironment.check_on_exp
 ) = check_on_exp
-q_env_config = QEnvConfig(backend_config=backend_config, **params)
-circuit_context = get_circuit_context(backend)
+q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
+circuit_context = get_circuit_context(env_backend)

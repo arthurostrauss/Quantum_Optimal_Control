@@ -127,7 +127,7 @@ class JaxSolver(Solver):
             validate,
         )
         self._schedule_func = schedule_func
-        self._batched_sims = None
+        self._batched_sims = []
         SymbolicPulse.disable_validation = True
 
     @property
@@ -254,7 +254,8 @@ class JaxSolver(Solver):
                 y0_cls,
             )
 
-            self._batched_sims = batch_results_y
+            self._batched_sims.append(batch_results_y)
+        
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:
                     results = OdeResult(

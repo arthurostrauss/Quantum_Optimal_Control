@@ -7,7 +7,7 @@ from gymnasium.spaces import Box
 import numpy as np
 from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from helper_functions import (
-    determine_ecr_params,
+    get_ecr_params,
     load_q_env_from_yaml_file,
     perform_standard_calibrations,
 )
