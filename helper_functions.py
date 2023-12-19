@@ -16,7 +16,7 @@ from qiskit_aer.backends.aerbackend import AerBackend
 
 from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
 from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
-from qiskit.quantum_info import Operator, Statevector
+from qiskit.quantum_info import Operator, Statevector, DensityMatrix
 from qiskit.transpiler import (
     CouplingMap,
     InstructionDurations,
@@ -805,10 +805,16 @@ def load_q_env_from_yaml_file(file_path: str):
         "seed": config["ENV"]["SEED"],
         "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
         "target": {
-            "gate": get_standard_gate_name_mapping()[config["TARGET"]["GATE"].lower()],
             "register": config["TARGET"]["PHYSICAL_QUBITS"],
         },
     }
+    if "GATE" in config["TARGET"]:
+        params["target"]["gate"] = get_standard_gate_name_mapping()[
+            config["TARGET"]["GATE"].lower()
+        ]
+    else:
+        params["target"]["dm"] = DensityMatrix.from_label(config["TARGET"]["STATE"])
+
     backend_params = {
         "real_backend": config["BACKEND"]["REAL_BACKEND"],
         "backend_name": config["BACKEND"]["NAME"],
