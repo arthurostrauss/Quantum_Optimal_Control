@@ -225,7 +225,7 @@ def get_backend(
                 backend_name = "fake_jakarta"
             backend = FakeProvider().get_backend(backend_name)
 
-        if use_dynamics:
+        if use_dynamics is not None and use_dynamics:
             if backend is not None:
                 backend = DynamicsBackend.from_backend(
                     backend, subsystem_list=list(physical_qubits)
@@ -239,6 +239,8 @@ def get_backend(
         else:
             # TODO: Add here your custom backend
             pass
+    if backend is None:
+        Warning("No backend was provided, Statevector simulation will be used")
 
     return backend
 

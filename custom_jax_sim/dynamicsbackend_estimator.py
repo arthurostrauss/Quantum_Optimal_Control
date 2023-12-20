@@ -31,6 +31,10 @@ class DynamicsBackendEstimator(BackendEstimator):
         bound_pass_manager: PassManager | None = None,
         skip_transpilation: bool = False,
     ):
+        if not isinstance(backend, DynamicsBackend):
+            raise TypeError(
+                "DynamicsBackendEstimator can only be used with a DynamicsBackend."
+            )
         super().__init__(
             backend, options, abelian_grouping, bound_pass_manager, skip_transpilation
         )
@@ -66,6 +70,8 @@ class DynamicsBackendEstimator(BackendEstimator):
         self.backend.options.solver_options["observables"] = transpile(
             self.preprocessed_circuits[0][1], self.backend
         )
+        self.backend.set_options(**run_options)
+        run_options = {}
         bound_circuits = [
             transpiled_circuits[circuit_index]
             if len(p) == 0

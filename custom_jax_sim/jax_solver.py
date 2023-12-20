@@ -255,7 +255,7 @@ class JaxSolver(Solver):
             )
 
             self._batched_sims.append(batch_results_y)
-        
+
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:
                     results = OdeResult(
