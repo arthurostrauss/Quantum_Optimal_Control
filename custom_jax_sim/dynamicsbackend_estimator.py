@@ -89,6 +89,13 @@ class DynamicsBackendEstimator(BackendEstimator):
         result, metadata = _run_circuits(
             new_bound_circuits, self._backend, **run_options
         )
+        for option in [
+            "parameter_dicts",
+            "subsystem_dims",
+            "parameter_values",
+            "observables",
+        ]:
+            self.backend.options.solver_options.pop(option)
         return self._postprocessing(result, accum, metadata)
 
     def _run(

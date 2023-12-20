@@ -49,7 +49,7 @@ drive_op0 = 2 * np.pi * r0 * (a0 + a0dag)
 drive_op1 = 2 * np.pi * r1 * (a1 + a1dag)
 
 # build solver
-dt = 1 / 4.5e9
+dt = 2.2222e-10
 
 solver = JaxSolver(
     static_hamiltonian=static_ham_full,
@@ -71,7 +71,7 @@ solver = JaxSolver(
     evaluation_mode="dense",
 )
 # Consistent solver option to use throughout notebook
-solver_options = {"method": "jax_odeint", "atol": 1e-4, "rtol": 1e-6}
+solver_options = {"method": "jax_odeint", "atol": 1e-5, "rtol": 1e-7, "hmax": dt}
 
 dynamics_backend = DynamicsBackend(
     solver=solver,
