@@ -18,6 +18,7 @@ from custom_jax_sim import JaxSolver
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
 from qiskit_ibm_runtime.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
+from qiskit.providers.fake_provider import FakeJakartaV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
@@ -116,7 +117,8 @@ def get_backend(
             _, _ = perform_standard_calibrations(backend)
         else:
             # TODO: Add here your custom backend
-            pass
+            # For now use FakeJakartaV2 as a safe working custom backend
+            backend = FakeJakartaV2()
 
     if backend is None:
         Warning("No backend was provided, Statevector simulation will be used")

@@ -3,6 +3,7 @@ import numpy as np
 from typing import Optional, Dict
 import tqdm
 import warnings
+from IPython.display import clear_output
 
 # Torch imports for building RL agent and framework
 from gymnasium.spaces import Box
@@ -130,7 +131,11 @@ def make_train_ppo(
         agent.parameters(), lr=lr, eps=optim_eps
     )
 
-    def train(total_updates: int, print_debug: Optional[bool] = True):
+    def train(
+        total_updates: int,
+        print_debug: Optional[bool] = True,
+        num_prints: Optional[int] = 40,
+    ):
         env.clear_history()
         start = time.time()
         global_step = 0
@@ -286,6 +291,9 @@ def make_train_ppo(
                 print("Average return:", np.mean(env.reward_history, axis=1)[-1])
                 # print(np.mean(env.reward_history, axis =1)[-1])
                 # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
+
+                if global_step % num_prints == 0:
+                    clear_output(wait=True)
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             writer.add_scalar(
