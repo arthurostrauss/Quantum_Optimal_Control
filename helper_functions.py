@@ -3,17 +3,20 @@ from typing import Optional, Tuple, List, Union, Dict, Sequence
 
 import numpy as np
 import tensorflow as tf
-from qiskit import pulse
-from qiskit.circuit import QuantumCircuit, Gate, Parameter
+import yaml
+from gymnasium.spaces import Box
+from qiskit import pulse, schedule, transpile
+from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
-from qiskit.primitives import BackendEstimator, Estimator
-from qiskit_aer.primitives import Estimator as AerEstimator
+from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
+from qiskit.quantum_info.states.quantum_state import QuantumState
+from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit.providers import BackendV1, Backend, BackendV2, Options
+
+from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
 from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
-from qiskit.pulse.transforms import block_to_schedule
-from qiskit.quantum_info import Operator
+from qiskit.quantum_info import Operator, Statevector, DensityMatrix
 from qiskit.transpiler import (
     CouplingMap,
     InstructionDurations,
@@ -29,6 +32,7 @@ from qiskit_dynamics.backend.dynamics_backend import (
     _get_backend_channel_freqs,
     DynamicsBackend,
 )
+
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BatchExperiment, BaseAnalysis, BackendData
 from qiskit_experiments.library import (
@@ -37,24 +41,34 @@ from qiskit_experiments.library import (
     RoughXSXAmplitudeCal,
     RoughDragCal,
 )
+from qiskit_ibm_provider import IBMBackend
+
 from qiskit_ibm_runtime import (
     Session,
     IBMBackend as RuntimeBackend,
     Estimator as RuntimeEstimator,
     Options as RuntimeOptions,
+    Sampler as RuntimeSampler,
 )
-from qiskit_ibm_provider import IBMBackend
-from tensorflow.python.keras import Model
-from tensorflow.python.keras.layers import Input, Dense
+
+from tensorflow.keras import Model
+from tensorflow.keras.layers import Input, Dense
 
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
+from custom_jax_sim.jax_solver import PauliToQuditOperator
 from qconfig import QiskitConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
-from dataclasses import asdict
 
-Estimator_type = Union[AerEstimator, RuntimeEstimator, Estimator, BackendEstimator]
+Estimator_type = Union[
+    AerEstimator,
+    RuntimeEstimator,
+    Estimator,
+    BackendEstimator,
+    DynamicsBackendEstimator,
+]
+Sampler_type = Union[AerSampler, RuntimeSampler, Sampler, BackendSampler]
 Backend_type = Union[BackendV1, BackendV2]
 
 
@@ -67,6 +81,9 @@ def constrain_std_value(std_var):
 
 
 def count_gates(qc: QuantumCircuit):
+    """
+    Count number of gates in a Quantum Circuit
+    """
     gate_count = {qubit: 0 for qubit in qc.qubits}
     for gate in qc.data:
         for qubit in gate.qubits:
@@ -75,6 +92,9 @@ def count_gates(qc: QuantumCircuit):
 
 
 def remove_unused_wires(qc: QuantumCircuit):
+    """
+    Remove unused wires from a Quantum Circuit
+    """
     gate_count = count_gates(qc)
     for qubit, count in gate_count.items():
         if count == 0:
@@ -259,9 +279,12 @@ def perform_standard_calibrations(
     return cals, exp_results
 
 
-def determine_ecr_params(
-    backend: Union[BackendV1, BackendV2], physical_qubits: List[int]
-):
+def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
+    """
+    Determine default parameters for ECR gate on provided backend (works even if basis gate of the IBM Backend is CX)
+    """
+    if not isinstance(backend, (BackendV1, BackendV2)):
+        raise TypeError("Backend must be defined")
     basis_gates = (
         backend.configuration().basis_gates
         if isinstance(backend, BackendV1)
@@ -345,110 +368,77 @@ def determine_ecr_params(
                 / (2 * control_pulse.sigma),
             }
         )
+    pulse_features = [
+        "amp",
+        "angle",
+        "duration",
+        "σ",
+        "β",
+        "risefall",
+        "tgt_amp",
+        "tgt_angle",
+    ]
+    return default_params, pulse_features, basis_gate_instructions, instructions_array
 
-    return default_params, basis_gate_instructions, instructions_array
 
-
-def get_schedule_dict(sched: Union[pulse.Schedule, pulse.ScheduleBlock]):
+def get_x_params(backend: Backend_type, physical_qubit: Sequence[int]):
     """
-    To be used for custom Qiskit Dynamics simulation with DynamicsBackend, format pulse Schedule in a Jax Pytree structure to
-    speed up simulations by jitting the schedule to samples conversion
-
+    Determine default parameters for SX gate on provided backend
     """
-    new_sched = (
-        block_to_schedule(sched) if isinstance(sched, pulse.ScheduleBlock) else sched
-    )
-    assert new_sched.is_parameterized()
-    instructions_array = np.array(new_sched.instructions)[:, 1]
-    instructions_info = []
-    for instruction in instructions_array:
-        if isinstance(instruction, pulse.Play):
-            if isinstance(instruction.pulse, pulse.ScalableSymbolicPulse):
-                info = {
-                    "type": "Play",
-                    "channel": instruction.channel,
-                    "pulse_type": instruction.pulse.pulse_type,
-                    "parameters": instruction.pulse.parameters,
-                }
-                instructions_info.append(info)
-            else:
-                raise QiskitError(f"{instruction.pulse} not JAX compatible")
-        elif isinstance(instruction, pulse.ShiftPhase):
-            info = {
-                "type": "ShiftPhase",
-                "channel": instruction.channel,
-                "parameters": instruction.phase,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.ShiftFrequency):
-            info = {
-                "type": "ShiftFrequency",
-                "channel": instruction.channel,
-                "parameters": instruction.frequency,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.SetPhase):
-            info = {
-                "type": "SetPhase",
-                "channel": instruction.channel,
-                "parameters": instruction.phase,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.SetFrequency):
-            info = {
-                "type": "SetFrequency",
-                "channel": instruction.channel,
-                "parameters": instruction.frequency,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.RelativeBarrier):
-            info = {"type": "RelativeBarrier", "channel": instruction.channels}
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.Acquire):
-            info = {
-                "type": "Acquire",
-                "channel": instruction.channel,
-                "parameters": [
-                    instruction.duration,
-                    instruction.reg_slot,
-                    instruction.mem_slot,
-                ],
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.Delay):
-            info = {
-                "type": "Delay",
-                "channel": instruction.channel,
-                "parameters": instruction.duration,
-            }
-            instructions_info.append(info)
-        elif isinstance(instruction, pulse.instructions.Reference):
-            pass
-
-    return instructions_info
+    if not isinstance(backend, (BackendV1, BackendV2)):
+        raise TypeError("Backend must be defined")
+    if isinstance(backend, BackendV1):
+        instruction_schedule_map = backend.defaults().instruction_schedule_map
+    else:
+        instruction_schedule_map = backend.target.instruction_schedule_map()
+    basis_gate_inst = instruction_schedule_map.get("x", physical_qubit)
+    basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
+    sx_pulse = basis_gate_inst.instructions[0][1].pulse
+    default_params = {
+        ("amp", physical_qubit, "x"): sx_pulse.amp,
+        ("σ", physical_qubit, "x"): sx_pulse.sigma,
+        ("β", physical_qubit, "x"): sx_pulse.beta,
+        ("duration", physical_qubit, "x"): sx_pulse.duration,
+        ("angle", physical_qubit, "x"): sx_pulse.angle,
+    }
+    pulse_features = ["amp", "angle", "duration", "σ", "β"]
+    return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
 
 
 def state_fidelity_from_state_tomography(
     qc_list: List[QuantumCircuit],
     backend: Backend,
-    measurement_indices: Optional[Sequence[int]],
+    physical_qubits: Optional[Sequence[int]],
     analysis: Union[BaseAnalysis, None, str] = "default",
+    target_state: Optional[QuantumState] = None,
+    session: Optional[Session] = None,
 ):
     state_tomo = BatchExperiment(
         [
             StateTomography(
-                qc, measurement_indices=measurement_indices, analysis=analysis
+                qc,
+                physical_qubits=physical_qubits,
+                analysis=analysis,
+                target=target_state,
             )
             for qc in qc_list
         ],
         backend=backend,
+        flatten_results=True,
     )
-    exp_data = state_tomo.run().block_for_results()
-    child_data = exp_data.child_data()
-    exp_results = [data.analysis_result() for data in child_data]
-    fidelities = [data.analysis_result("state_fidelity").value for data in child_data]
+    if isinstance(backend, RuntimeBackend):
+        jobs = run_jobs(session, state_tomo._transpiled_circuits())
+        exp_data = state_tomo._initialize_experiment_data()
+        exp_data.add_jobs(jobs)
+        results = state_tomo.analysis.run(exp_data).block_for_results()
+    else:
+        exp_data = state_tomo.run().block_for_results()
 
-    return fidelities, exp_results
+    fidelities = [
+        exp_data.analysis_result("state_fidelity")[i].value for i in range(len(qc_list))
+    ]
+    avg_fidelity = np.mean(fidelities)
+    return avg_fidelity
 
 
 def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options=None):
@@ -520,13 +510,13 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     return control_channel_map
 
 
-def retrieve_estimator(
+def retrieve_primitives(
     backend: Backend_type,
     layout: Layout,
     config: Union[Dict, QiskitConfig],
     abstraction_level: str = "circuit",
-    estimator_options: Optional[Union[Dict, Options, RuntimeOptions]] = None,
-) -> Estimator_type:
+    estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
+) -> (Estimator_type, Sampler_type):
     if isinstance(
         backend, RuntimeBackend
     ):  # Real backend, or Simulation backend from Runtime Service
@@ -534,30 +524,40 @@ def retrieve_estimator(
             session=Session(backend.service, backend),
             options=estimator_options,
         )
+        sampler: Sampler_type = RuntimeSampler(
+            session=estimator.session, options=estimator_options
+        )
+
         if estimator.options.transpilation["initial_layout"] is None:
             estimator.options.transpilation[
                 "initial_layout"
             ] = layout.get_physical_bits()
+            sampler.options.transpilation["initial_layout"] = layout.get_physical_bits()
 
     else:
         if isinstance(estimator_options, RuntimeOptions):
             # estimator_options = asdict(estimator_options)
             estimator_options = None
         if isinstance(backend, (AerBackend, FakeBackend, FakeBackendV2)):
-            assert (
-                abstraction_level == "circuit"
-            ), "AerSimulator only works at circuit level"
+            if abstraction_level != "circuit":
+                raise ValueError(
+                    "AerSimulator only works at circuit level, and a pulse gate calibration is provided"
+                )
             # Estimator taking noise model into consideration, have to provide an AerSimulator backend
             estimator = AerEstimator(
                 backend_options=backend.options,
                 transpile_options={"initial_layout": layout},
                 approximation=True,
             )
+            sampler = AerSampler(
+                backend_options=backend.options,
+                transpile_options={"initial_layout": layout},
+            )
         elif backend is None:  # No backend specified, ideal state-vector simulation
-            assert (
-                abstraction_level == "circuit"
-            ), "Statevector simulation only works at circuit level"
+            if abstraction_level != "circuit":
+                raise ValueError("Statevector simulation only works at circuit level")
             estimator = Estimator(options={"initial_layout": layout})
+            sampler = Sampler(options={"initial_layout": layout})
 
         elif isinstance(backend, DynamicsBackend):
             assert (
@@ -572,22 +572,107 @@ def retrieve_estimator(
                     backend, options=estimator_options, skip_transpilation=False
                 )
             estimator.set_transpile_options(initial_layout=layout)
-            if config.do_calibrations:
-                calibration_files: List[str] = config.calibration_files
-                (
-                    calibrations,
-                    exp_results,
-                ) = perform_standard_calibrations(backend, calibration_files)
-
-        elif isinstance(backend, IBMBackend):
-            estimator: Estimator_type = BackendEstimator(
+            sampler = BackendSampler(
                 backend, options=estimator_options, skip_transpilation=False
             )
-            estimator.set_transpile_options(initial_layout=layout)
-            backend.open_session()
+            if config.do_calibrations and "x" not in backend.operation_names:
+                calibration_files: List[str] = config.calibration_files
+                _, _ = perform_standard_calibrations(backend, calibration_files)
+
         else:
             raise TypeError("Backend not recognized")
-    return estimator
+    return estimator, sampler
+
+
+def set_primitives_transpile_options(
+    estimator, sampler, layout, skip_transpilation, physical_qubits
+):
+    if isinstance(estimator, RuntimeEstimator):
+        # TODO: Could change resilience level
+        estimator.set_options(
+            optimization_level=0,
+            resilience_level=0,
+            skip_transpilation=skip_transpilation,
+        )
+        estimator.options.transpilation["initial_layout"] = physical_qubits
+        sampler.set_options(**estimator.options)
+
+    elif isinstance(estimator, AerEstimator):
+        estimator._transpile_options = AerOptions(
+            initial_layout=layout, optimization_level=0
+        )
+        estimator._skip_transpilation = skip_transpilation
+        sampler_transpile_options = AerOptions(
+            initial_layout=layout, optimization_level=0
+        )
+        sampler._skip_transpilation = skip_transpilation
+
+    elif isinstance(estimator, BackendEstimator):
+        estimator.set_transpile_options(initial_layout=layout, optimization_level=0)
+        estimator._skip_transpilation = skip_transpilation
+        sampler.set_transpile_options(initial_layout=layout, optimization_level=0)
+        sampler._skip_transpilation = skip_transpilation
+
+    else:
+        raise TypeError(
+            "Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime"
+        )
+
+
+def handle_session(qc, input_state_circ, estimator, backend, session_count):
+    """
+    Handle session reopening for RuntimeEstimator and load necessary data for DynamicsBackendEstimator
+    """
+    if isinstance(estimator, RuntimeEstimator):
+        """Open a new Session if time limit of the ongoing one is reached"""
+        if estimator.session.status() == "Closed":
+            old_session = estimator.session
+            session_count += 1
+            print(f"New Session opened (#{session_count})")
+            session, options = (
+                Session(old_session.service, backend),
+                estimator.options,
+            )
+            estimator = RuntimeEstimator(session=session, options=dict(options))
+    elif isinstance(
+        backend, IBMBackend
+    ):  # Soon deprecated (backend.run also available in Qiskit Runtime)
+        if not backend.session.active:
+            session_count += 1
+            print(f"New Session opened (#{session_count})")
+            backend.open_session()
+    elif isinstance(estimator, DynamicsBackendEstimator):
+        if not isinstance(backend, DynamicsBackend) or not isinstance(
+            backend.options.solver, JaxSolver
+        ):
+            raise TypeError(
+                "DynamicsBackendEstimator can only be used with DynamicsBackend and JaxSolver"
+            )
+        # Update callable within the jit compiled function
+        backend.options.solver.circuit_macro = lambda: schedule(qc, backend)
+        # Update initial state of DynamicsBackend with input state circuit
+        # The initial state is adapted to match the dimensions of the HamiltonianModel
+        new_circ = transpile(input_state_circ, backend)
+        subsystem_dims = backend.options.subsystem_dims
+        initial_state = Statevector.from_int(0, dims=subsystem_dims)
+        initial_rotations = [
+            Operator.from_label("I") for i in range(new_circ.num_qubits)
+        ]
+        qubit_counter, qubit_list = 0, []
+        for instruction in new_circ.data:
+            assert (
+                len(instruction.qubits) == 1
+            ), "Input state circuit must be in a tensor product form"
+            if instruction.qubits[0] not in qubit_list:
+                qubit_list.append(instruction.qubits[0])
+                qubit_counter += 1
+            initial_rotations[qubit_counter - 1] = initial_rotations[
+                qubit_counter - 1
+            ].compose(Operator(instruction.operation))
+
+        operation = PauliToQuditOperator(initial_rotations, subsystem_dims)
+        initial_state = initial_state.evolve(operation)
+        backend.set_options(initial_state=initial_state)
 
 
 def get_solver_and_freq_from_backend(
@@ -697,6 +782,81 @@ def get_solver_and_freq_from_backend(
     return channel_freqs, solver
 
 
+def load_q_env_from_yaml_file(file_path: str):
+    with open(file_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    low = np.array(config["ENV"]["ACTION_SPACE"]["LOW"])
+    high = np.array(config["ENV"]["ACTION_SPACE"]["HIGH"])
+    params = {
+        "action_space": Box(
+            low=low, high=high, shape=(config["ENV"]["N_ACTIONS"],), dtype=np.float32
+        ),
+        "observation_space": Box(
+            low=0.0,
+            high=1.0,
+            shape=(config["ENV"]["OBSERVATION_SPACE"],),
+            dtype=np.float32,
+        ),
+        "batch_size": config["ENV"]["BATCH_SIZE"],
+        "sampling_Paulis": config["ENV"]["SAMPLING_PAULIS"],
+        "n_shots": config["ENV"]["N_SHOTS"],
+        "c_factor": config["ENV"]["C_FACTOR"],
+        "seed": config["ENV"]["SEED"],
+        "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
+        "target": {
+            "register": config["TARGET"]["PHYSICAL_QUBITS"],
+        },
+    }
+    if "GATE" in config["TARGET"]:
+        params["target"]["gate"] = get_standard_gate_name_mapping()[
+            config["TARGET"]["GATE"].lower()
+        ]
+    else:
+        params["target"]["dm"] = DensityMatrix.from_label(config["TARGET"]["STATE"])
+
+    backend_params = {
+        "real_backend": config["BACKEND"]["REAL_BACKEND"],
+        "backend_name": config["BACKEND"]["NAME"],
+        "use_dynamics": config["BACKEND"]["DYNAMICS"]["USE_DYNAMICS"],
+        "physical_qubits": config["BACKEND"]["DYNAMICS"]["PHYSICAL_QUBITS"],
+        "channel": config["SERVICE"]["CHANNEL"],
+        "instance": config["SERVICE"]["INSTANCE"],
+    }
+    runtime_options = config["RUNTIME_OPTIONS"]
+    check_on_exp = config["ENV"]["CHECK_ON_EXP"]
+    return params, backend_params, RuntimeOptions(**runtime_options), check_on_exp
+
+
+def load_agent_from_yaml_file(file_path: str):
+    with open(file_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    ppo_params = {
+        "n_steps": config["AGENT"]["NUM_UPDATES"],
+        "n_epochs": config["AGENT"]["N_EPOCHS"],
+        "batch_size": config["AGENT"]["MINIBATCH_SIZE"],
+        "learning_rate": config["AGENT"]["LR_ACTOR"],
+        # "lr_critic": config["AGENT"]["LR_CRITIC"],
+        "gamma": config["AGENT"]["GAMMA"],
+        "gae_lambda": config["AGENT"]["GAE_LAMBDA"],
+        "ent_coef": config["AGENT"]["ENT_COEF"],
+        "vf_coef": config["AGENT"]["V_COEF"],
+        "max_grad_norm": config["AGENT"]["GRADIENT_CLIP"],
+        "clip_range_vf": config["AGENT"]["CLIP_VALUE_LOSS"],
+        "clip_range": config["AGENT"]["CLIP_RATIO"],
+    }
+    network_params = {
+        "optimizer": config["AGENT"]["OPTIMIZER"],
+        "n_units": config["AGENT"]["N_UNITS"],
+        "activation": config["AGENT"]["ACTIVATION"],
+        "include_critic": config["AGENT"]["INCLUDE_CRITIC"],
+        "checkpoint_dir": config["AGENT"]["CHKPT_DIR"],
+    }
+
+    return ppo_params, network_params
+
+
 def retrieve_backend_info(
     backend: Backend, estimator: Optional[RuntimeEstimator] = None
 ):
@@ -732,6 +892,13 @@ def retrieve_backend_info(
             "InstructionDurations not specified in provided Backend, required for transpilation"
         )
     return dt, coupling_map, basis_gates, instruction_durations
+
+
+def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
+    tgt_instruction = CircuitInstruction(
+        target["gate"], [qc.qubits[i] for i in target["register"]]
+    )
+    return qc.data.count(tgt_instruction)
 
 
 def select_optimizer(
