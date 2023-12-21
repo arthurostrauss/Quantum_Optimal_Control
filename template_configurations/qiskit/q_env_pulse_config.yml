@@ -1,0 +1,52 @@
+SERVICE: # Relevant only when using the Qiskit runtime service
+  CHANNEL: "ibm_quantum"
+  INSTANCE: "ibm-q-nus/default/default"
+
+RUNTIME_OPTIONS: # Relevant only when using the Qiskit runtime service
+  optimization_level: 3
+  resilience_level: null
+  max_execution_time: null
+  transpilation:
+    skip_transpilation: False
+    initial_layout: null
+    approximation_degree: null
+    layout_method: null
+    routing_method: null
+  resilience:
+    extrapolator: null
+    noise_amplifier: null
+    noise_factors: null
+  environment:
+    log_level: "WARNING"
+    job_tags: null
+  simulator:
+    seed_simulator: 100
+    coupling_map: null
+    basis_gates: null
+
+BACKEND: # Backend configuration (If all set to None, the user needs to specify its own backend in q_env_config.py's get_backend() function)
+  REAL_BACKEND: null # True: real or False: fake Aer backend
+  NAME: null # Name of the backend
+  DYNAMICS: # Use a DynamicsBackend (if fields above are not null, build a DynamicsBackend.from_backend() with the specified backend)
+    USE_DYNAMICS: True # Whether to use a DynamicsBackend
+    PHYSICAL_QUBITS: null # Number of qubits characterizing the environment (i.e. the full quantum circuit dimension)
+
+TARGET: # Target Gate configuration
+  GATE: "X"
+  # STATE: "0" # Target state (if GATE is null)
+  PHYSICAL_QUBITS: [0]
+
+ENV: # Environment configuration
+  SAMPLING_PAULIS: 100 # Number of Pauli strings to sample
+  N_SHOTS: 1
+  C_FACTOR: 0.5 # Cost factor for the reward function
+  N_ACTIONS: 2 # Action vector length
+  BATCH_SIZE: 256 # Number of actions to evaluate per policy iteration
+  ACTION_SPACE:
+    LOW: [-1., -1.]
+    HIGH: [1., 1.]
+  OBSERVATION_SPACE: 1 # Shape of the observation space
+  BENCHMARK_CYCLE: 1000 # Number of steps between two fidelity benchmarks
+  SEED: 100
+  CHECK_ON_EXP: False # Whether to perform fidelity benchmarking with tomographic experiments or just using simulation
+  TRAINING_WITH_CAL: True

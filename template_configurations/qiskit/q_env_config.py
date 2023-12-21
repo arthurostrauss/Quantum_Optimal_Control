@@ -26,7 +26,7 @@ from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from dynamics_config import dynamics_backend
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-config_file_name = "q_env_config.yml"
+config_file_name = "q_env_gate_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
 
 
@@ -45,6 +45,7 @@ def apply_parametrized_circuit(
     parametrized_qc = QuantumCircuit(q_reg)
     my_qc = QuantumCircuit(q_reg, name="custom_cx")
     optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
+    # optimal_params = np.pi * np.zeros(7)
 
     my_qc.u(
         optimal_params[0] + params[0],
@@ -58,6 +59,7 @@ def apply_parametrized_circuit(
         optimal_params[5] + params[5],
         q_reg[1],
     )
+
     my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
     # my_qc.u(np.pi *params[0], np.pi *params[1], np.pi *params[2], 0)
     # my_qc.u(np.pi *params[3], np.pi *params[4], np.pi *params[5], 1)
