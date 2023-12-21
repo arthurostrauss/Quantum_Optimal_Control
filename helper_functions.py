@@ -381,9 +381,11 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
     return default_params, pulse_features, basis_gate_instructions, instructions_array
 
 
-def get_x_params(backend: Backend_type, physical_qubit: Sequence[int]):
+def get_pulse_params(
+    backend: Backend_type, physical_qubit: Sequence[int], name: str = "x"
+):
     """
-    Determine default parameters for SX gate on provided backend
+    Determine default parameters for SX or X gate on provided backend
     """
     if not isinstance(backend, (BackendV1, BackendV2)):
         raise TypeError("Backend must be defined")
@@ -391,15 +393,15 @@ def get_x_params(backend: Backend_type, physical_qubit: Sequence[int]):
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
         instruction_schedule_map = backend.target.instruction_schedule_map()
-    basis_gate_inst = instruction_schedule_map.get("x", physical_qubit)
+    basis_gate_inst = instruction_schedule_map.get(name, physical_qubit)
     basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
-    sx_pulse = basis_gate_inst.instructions[0][1].pulse
+    ref_pulse = basis_gate_inst.instructions[0][1].pulse
     default_params = {
-        ("amp", physical_qubit, "x"): sx_pulse.amp,
-        ("σ", physical_qubit, "x"): sx_pulse.sigma,
-        ("β", physical_qubit, "x"): sx_pulse.beta,
-        ("duration", physical_qubit, "x"): sx_pulse.duration,
-        ("angle", physical_qubit, "x"): sx_pulse.angle,
+        ("amp", physical_qubit, "x"): ref_pulse.amp,
+        ("σ", physical_qubit, "x"): ref_pulse.sigma,
+        ("β", physical_qubit, "x"): ref_pulse.beta,
+        ("duration", physical_qubit, "x"): ref_pulse.duration,
+        ("angle", physical_qubit, "x"): ref_pulse.angle,
     }
     pulse_features = ["amp", "angle", "duration", "σ", "β"]
     return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
@@ -575,7 +577,7 @@ def retrieve_primitives(
             sampler = BackendSampler(
                 backend, options=estimator_options, skip_transpilation=False
             )
-            if config.do_calibrations and "x" not in backend.operation_names:
+            if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
                 calibration_files: List[str] = config.calibration_files
                 _, _ = perform_standard_calibrations(backend, calibration_files)
 

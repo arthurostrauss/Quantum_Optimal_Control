@@ -5,17 +5,17 @@ import os
 import yaml
 from gymnasium.spaces import Box
 import numpy as np
+import warnings
 from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from helper_functions import (
     get_ecr_params,
-    get_x_params,
+    get_pulse_params,
     load_q_env_from_yaml_file,
     perform_standard_calibrations,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
-from qiskit_dynamics import Solver, DynamicsBackend
-from custom_jax_sim import JaxSolver
+from qiskit_dynamics import DynamicsBackend
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
 from qiskit_ibm_runtime.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
@@ -83,7 +83,7 @@ def new_params_x(
     pulse_features: List[str],
     duration_window: float,
 ):
-    new_params, available_features, _, _ = get_x_params(backend, qubits)
+    new_params, available_features, _, _ = get_pulse_params(backend, qubits, "x")
     if len(pulse_features) != len(params):
         raise ValueError(
             f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)}"
@@ -240,7 +240,7 @@ def get_backend(
             # TODO: Add here your custom backend
             pass
     if backend is None:
-        Warning("No backend was provided, Statevector simulation will be used")
+        warnings.warn("No backend was provided, Statevector simulation will be used")
 
     return backend
 

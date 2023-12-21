@@ -96,6 +96,7 @@ class DynamicsBackendEstimator(BackendEstimator):
             "observables",
         ]:
             self.backend.options.solver_options.pop(option)
+        self.backend.set_options(initial_state="ground_state")
         return self._postprocessing(result, accum, metadata)
 
     def _run(

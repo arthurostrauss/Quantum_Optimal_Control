@@ -110,6 +110,10 @@ def get_backend(
                     backend, subsystem_list=list(physical_qubits)
                 )
                 _, _ = perform_standard_calibrations(backend)
+            else:
+                raise ValueError(
+                    "No backend was found with given name, DynamicsBackend cannot be used"
+                )
     else:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
         if use_dynamics is not None and use_dynamics:
@@ -118,7 +122,7 @@ def get_backend(
         else:
             # TODO: Add here your custom backend
             # For now use FakeJakartaV2 as a safe working custom backend
-            backend = FakeJakartaV2()
+            backend = dynamics_backend
 
     if backend is None:
         Warning("No backend was provided, Statevector simulation will be used")
