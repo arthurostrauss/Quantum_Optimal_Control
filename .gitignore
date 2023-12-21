@@ -147,3 +147,5 @@ torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513619.MBP-v
 torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513890.MBP-von-Lukas-2.10017.0
 torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513898.MBP-von-Lukas-2.10017.1
 torch_contextual_gate_calibration/runs/test/events.out.tfevents.1699513975.MBP-von-Lukas-2.10081.0
+.vscode/launch.json
+.vscode/settings.json
