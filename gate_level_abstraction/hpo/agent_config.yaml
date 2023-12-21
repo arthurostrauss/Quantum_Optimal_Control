@@ -23,38 +23,36 @@ NETWORK:
   CHKPT_DIR: "checkpoints" # Directory to save checkpoints
 
 HPO:
-  NUM_TRIALS: 10
+  NUM_TRIALS: 2
   NUM_UPDATES:
-    - 2 # Min value
-    - 25 # Max value
+    - 200 # Min value
+    - 1000 # Max value
   N_EPOCHS:
-    - 25 
-    - 200
-  MINIBATCH_SIZE: [16, 32, 48, 64, 96, 128]
+    - 8 
+    - 25
+  MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
   BATCHSIZE_MULTIPLIER:
     - 2
     - 12
   LR_ACTOR:
-    - 0.001
+    - 0.0001
     - 0.02
   GAMMA:
     - 0.95
-    - 0.99
+    - 0.999
   GAE_LAMBDA:
     - 0.90
-    - 0.99
+    - 0.999
   ENT_COEF:
-    - 0.005
-    - 0.02
+    - 0.00005
+    - 0.001
   V_COEF:
     - 0.25
     - 0.75
   GRADIENT_CLIP:
     - 0.005
-    - 1
-  CLIP_VALUE_LOSS:
-    - False
-    - True
+    - 0.9
+  CLIP_VALUE_LOSS: True
   CLIP_VALUE_COEF:
     - 0.1
     - 0.3

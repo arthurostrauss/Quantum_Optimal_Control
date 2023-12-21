@@ -47,22 +47,22 @@ def apply_parametrized_circuit(
     my_qc = QuantumCircuit(q_reg, name="custom_cx")
     optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
 
-    # my_qc.u(
-    #     optimal_params[0] + params[0],
-    #     optimal_params[1] + params[1],
-    #     optimal_params[2] + params[2],
-    #     q_reg[0],
-    # )
-    # my_qc.u(
-    #     optimal_params[3] + params[3],
-    #     optimal_params[4] + params[4],
-    #     optimal_params[5] + params[5],
-    #     q_reg[1],
-    # )
-    # my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
-    my_qc.u(2 * np.pi * params[0], 2 *  np.pi * params[1], 2 * np.pi * params[2], 0)
-    my_qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
-    my_qc.rzx(2 * np.pi * params[6], 0, 1)
+    my_qc.u(
+        optimal_params[0] + params[0],
+        optimal_params[1] + params[1],
+        optimal_params[2] + params[2],
+        q_reg[0],
+    )
+    my_qc.u(
+        optimal_params[3] + params[3],
+        optimal_params[4] + params[4],
+        optimal_params[5] + params[5],
+        q_reg[1],
+    )
+    my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
+    # my_qc.u(2 * np.pi * params[0], 2 *  np.pi * params[1], 2 * np.pi * params[2], 0)
+    # my_qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
+    # my_qc.rzx(2 * np.pi * params[6], 0, 1)
     qc.append(my_qc.to_instruction(label="custom_cx"), q_reg)
 
 

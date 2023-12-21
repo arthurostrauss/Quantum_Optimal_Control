@@ -787,15 +787,15 @@ def load_q_env_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
-    low = np.array(config["ENV"]["ACTION_SPACE"]["LOW"])
-    high = np.array(config["ENV"]["ACTION_SPACE"]["HIGH"])
+    low = np.array(config["ENV"]["ACTION_SPACE"]["LOW"], dtype=np.float32)
+    high = np.array(config["ENV"]["ACTION_SPACE"]["HIGH"], dtype=np.float32)
     params = {
         "action_space": Box(
             low=low, high=high, shape=(config["ENV"]["N_ACTIONS"],), dtype=np.float32
         ),
         "observation_space": Box(
-            low=0.0,
-            high=1.0,
+            low=np.float32(0.0),
+            high=np.float32(1.0),
             shape=(config["ENV"]["OBSERVATION_SPACE"],),
             dtype=np.float32,
         ),

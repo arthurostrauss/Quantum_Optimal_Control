@@ -121,4 +121,5 @@ class QEnvConfig:
     c_factor: float = 0.5
     benchmark_cycle: int = 1
     seed: int = 1234
+    training_with_cal: bool = True
     device: Optional[torch.device] = None
