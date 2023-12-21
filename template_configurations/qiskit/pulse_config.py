@@ -17,13 +17,13 @@ from qiskit.circuit import ParameterVector, Gate
 from qiskit_dynamics import Solver, DynamicsBackend
 from custom_jax_sim import JaxSolver
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
-from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit.providers.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from dynamics_config import dynamics_backend
+from template_configurations.qiskit.dynamics_config import dynamics_backend
 from typing import List, Sequence
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
@@ -50,7 +50,7 @@ def new_params_ecr(
         for sched in ["cr45p", "cr45m"]:
             for i, feature in enumerate(pulse_features):
                 if feature != "duration" and feature in available_features:
-                    new_params[(feature, qubits, sched)] += params[i]
+                    new_params[(feature, qubits, sched)] = params[i]
                 else:
                     new_params[
                         (feature, qubits, sched)
@@ -120,7 +120,7 @@ def custom_schedule(
 
     # Load here all pulse parameters names that should be tuned during model-free calibration.
     # Here we focus on real time tunable pulse parameters (amp, angle, duration)
-    ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]
+    ecr_pulse_features = ['amp', 'angle', 'σ', 'risefall', 'tgt_amp', 'tgt_angle']
     x_pulse_features = ["amp", "angle"]
     # Uncomment line below to include pulse duration as tunable parameter
     # ecr_pulse_features.append("duration")
@@ -158,6 +158,7 @@ def custom_schedule(
     gate_name = "ecr" if len(physical_qubits) == 2 else "x"
     # Retrieve schedule (for now, works only with ECRGate(), as no library yet available for CX)
 
+    print(new_params)
     return cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
 

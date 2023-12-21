@@ -28,11 +28,11 @@ BACKEND: # Backend configuration (If all set to None, the user needs to specify 
   REAL_BACKEND: null  # True: real or False: fake Aer backend
   NAME: null  # Name of the backend
   DYNAMICS: # Use a DynamicsBackend (if fields above are not null, build a DynamicsBackend.from_backend() with the specified backend)
-    USE_DYNAMICS: True # Whether to use a DynamicsBackend
+    USE_DYNAMICS: null # Whether to use a DynamicsBackend
     PHYSICAL_QUBITS: null  # Number of qubits characterizing the environment (i.e. the full quantum circuit dimension)
 
 TARGET: # Target Gate configuration
-  GATE: "ECR"
+  GATE: "CX"
   # STATE: "0" # Target state (if GATE is null)
   PHYSICAL_QUBITS: [ 0, 1 ]
 
@@ -40,11 +40,11 @@ ENV: # Environment configuration
   SAMPLING_PAULIS: 100 # Number of Pauli strings to sample
   N_SHOTS: 1
   C_FACTOR: 1. # Cost factor for the reward function
-  N_ACTIONS: 6 # Action vector length
+  N_ACTIONS: 7 # Action vector length
   BATCH_SIZE: 96 # Number of actions to evaluate per policy iteration
   ACTION_SPACE:
-    LOW: [ -1., -3.14, 40, 0.8, -1., -3.14] # ['amp', 'angle', 'σ', 'risefall', 'tgt_amp', 'tgt_angle']
-    HIGH: [ 1., 3.14, 80, 3.0, 1., 3.14] # ['amp', 'angle', 'σ', 'risefall', 'tgt_amp', 'tgt_angle']
+    LOW: [ -1., -1., -1., -1., -1., -1., -1.] # 
+    HIGH: [ 1., 1., 1., 1., 1., 1., 1.] # 
   OBSERVATION_SPACE: 1  # Shape of the observation space
   BENCHMARK_CYCLE: 10  # Number of steps between two fidelity benchmarks
   SEED: 100
