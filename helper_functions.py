@@ -362,6 +362,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
                 else np.angle(np.max(target_pulse.samples)),
                 ("duration", physical_qubits, sched): control_pulse.duration,
                 ("σ", physical_qubits, sched): control_pulse.sigma,
+                # ("β", physical_qubits, sched): control_pulse.beta,
                 ("risefall", physical_qubits, sched): (
                     control_pulse.duration - control_pulse.width
                 )
@@ -833,7 +834,8 @@ def load_agent_from_yaml_file(file_path: str):
         config = yaml.safe_load(f)
 
     ppo_params = {
-        "n_steps": config["AGENT"]["NUM_UPDATES"],
+        "run_name": config["AGENT"]["RUN_NAME"],
+        "n_updates": config["AGENT"]["NUM_UPDATES"],
         "n_epochs": config["AGENT"]["N_EPOCHS"],
         "batch_size": config["AGENT"]["MINIBATCH_SIZE"],
         "learning_rate": config["AGENT"]["LR_ACTOR"],
@@ -847,14 +849,32 @@ def load_agent_from_yaml_file(file_path: str):
         "clip_range": config["AGENT"]["CLIP_RATIO"],
     }
     network_params = {
-        "optimizer": config["AGENT"]["OPTIMIZER"],
-        "n_units": config["AGENT"]["N_UNITS"],
-        "activation": config["AGENT"]["ACTIVATION"],
-        "include_critic": config["AGENT"]["INCLUDE_CRITIC"],
-        "checkpoint_dir": config["AGENT"]["CHKPT_DIR"],
+        "optimizer": config["NETWORK"]["OPTIMIZER"],
+        "n_units": config["NETWORK"]["N_UNITS"],
+        "activation": config["NETWORK"]["ACTIVATION"],
+        "include_critic": config["NETWORK"]["INCLUDE_CRITIC"],
+        "normalize_advantage": config["NETWORK"]["NORMALIZE_ADVANTAGE"],
+        "checkpoint_dir": config["NETWORK"]["CHKPT_DIR"],
     }
 
-    return ppo_params, network_params
+    hpo_params = {
+        "num_trials": config["HPO"]["NUM_TRIALS"],
+        "n_updates": config["HPO"]["NUM_UPDATES"],
+        "n_epochs": config["HPO"]["N_EPOCHS"],
+        "minibatch_size": config["HPO"]["MINIBATCH_SIZE"],
+        "batchsize_multiplier": config["HPO"]["BATCHSIZE_MULTIPLIER"],
+        "learning_rate": config["HPO"]["LR_ACTOR"],
+        "gamma": config["HPO"]["GAMMA"],
+        "gae_lambda": config["HPO"]["GAE_LAMBDA"],
+        "ent_coef": config["HPO"]["ENT_COEF"],
+        "v_coef": config["HPO"]["V_COEF"],
+        "max_grad_norm": config["HPO"]["GRADIENT_CLIP"],
+        "clip_value_loss": config["HPO"]["CLIP_VALUE_LOSS"],
+        "clip_value_coef": config["HPO"]["CLIP_VALUE_COEF"],
+        "clip_ratio": config["HPO"]["CLIP_RATIO"],
+    }
+
+    return ppo_params, network_params, hpo_params
 
 
 def retrieve_backend_info(
