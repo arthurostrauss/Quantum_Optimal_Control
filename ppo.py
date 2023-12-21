@@ -148,14 +148,15 @@ def make_train_ppo(
         values = torch.zeros((num_time_steps, batchsize))
 
         ### Starting Learning ###
-        for _ in tqdm.tqdm(range(1, total_updates + 1)):
+        avg_return = []
+        fidelities = np.zeros(total_updates)
+        for ii in tqdm.tqdm(range(1, total_updates + 1)):
             next_obs, _ = env.reset(seed=seed)
             num_steps = num_time_steps  # env.episode_length(global_step)
             batch_obs = torch.tile(torch.Tensor(next_obs), (batchsize, 1))
             batch_done = torch.zeros_like(dones[0])
 
             # print("episode length:", num_steps)
-
             for step in range(num_steps):
                 global_step += 1
                 obs[step] = batch_obs
@@ -287,7 +288,7 @@ def make_train_ppo(
             )
             if print_debug:
                 print("mean", mean_action[0])
-                print("sigma", std_action[0])
+                # print("sigma", std_action[0])
                 print("Average return:", np.mean(env.reward_history, axis=1)[-1])
                 # print(np.mean(env.reward_history, axis =1)[-1])
                 # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
@@ -314,7 +315,17 @@ def make_train_ppo(
             writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
             writer.add_scalar("losses/explained_variance", explained_var, global_step)
 
+            avg_return.append(np.mean(env.reward_history, axis=1)[-1])
+            print('Fidelity History:', env.avg_fidelity_history)
+
         env.close()
         writer.close()
+
+        return {
+            'avg_return': avg_return,
+            # 'fidelities': fidelities,
+            # returns the action vector that led to the highest gate fidelity during the training process
+            'action_vector': np.mean(env.action_history[np.argmax(avg_return)], axis=0),
+        }
 
     return train

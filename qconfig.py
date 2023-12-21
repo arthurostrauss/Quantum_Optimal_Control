@@ -1,22 +1,50 @@
-from dataclasses import dataclass
-from typing import Callable, Dict, Optional, List, Union, Sequence
+from __future__ import annotations
+
+from abc import ABC
+from dataclasses import dataclass, field
+from typing import Callable, Dict, Optional, List, Union, Sequence, Any
+from agent import Agent, ActorNetwork, CriticNetwork
+
+import torch
+import torch.optim as optim
+import torch.nn as nn
+from gymnasium import Space
 
 from qiskit_ibm_runtime import QiskitRuntimeService, Options
 from qiskit.providers import Backend
-from qiskit.circuit import QuantumCircuit, Gate, ParameterExpression, ParameterVector, QuantumRegister
+from qiskit.circuit import (
+    QuantumCircuit,
+    Parameter,
+    ParameterVector,
+    QuantumRegister,
+    Gate,
+)
 from qiskit_dynamics import Solver
 from qualang_tools.config.configuration import QMConfiguration
 
-import torch
+
+class BackendConfig(ABC):
+    """
+    Abstract base class for backend configurations.
+    """
+
+    def __init__(self, config_type: str = ""):
+        self._config_type = config_type
+
+    @property
+    def config_type(self) -> str:
+        return self._config_type
+
 
 @dataclass
-class QiskitConfig:
+class QiskitConfig(BackendConfig):
     """
     Qiskit configuration elements.
 
     Args:
         parametrized_circuit: Function applying parametrized transformation to a QuantumCircuit instance
         backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
+        additional_args: Additional arguments to feed the parametrized_circuit function
         estimator_options: Options to feed the Estimator primitive
         solver: Relevant only if dealing with pulse simulation (typically with DynamicsBackend), gives away solver used
         to run simulations for computing exact fidelity benchmark
@@ -26,64 +54,71 @@ class QiskitConfig:
         baseline gate calibrations for running algorithm
 
     """
-    parametrized_circuit: Callable[[QuantumCircuit, Optional[Union[Sequence[ParameterExpression], ParameterVector]],
-                                    Optional[Union[List, QuantumRegister]]], None] = None
+
+    parametrized_circuit: Callable[
+        [
+            QuantumCircuit,
+            ParameterVector,
+            QuantumRegister,
+            Any,
+        ],
+        None,
+    ]
     backend: Optional[Backend] = None
+    parametrized_circuit_kwargs: Optional[Dict] = field(default_factory=dict)
     estimator_options: Optional[Options] = None
     solver: Optional[Solver] = None
-    channel_freq: Optional[Dict] = None
-    do_calibrations: Optional[bool] = True
+    channel_freq: Optional[Dict] = field(default_factory=dict)
     calibration_files: Optional[List[str]] = None
+    do_calibrations: bool = True
+
+    def __post_init__(self):
+        super().__init__(config_type="Qiskit")
 
 
 @dataclass
-class QuaConfig:
+class QuaConfig(BackendConfig):
     """
     QUA Configuration
     """
-    parametrized_macro: Callable = None
-    hardware_config: QMConfiguration = None
+
+    parametrized_macro: Callable
+    hardware_config: QMConfiguration
+
+    def __post_init__(self):
+        super().__init__(config_type="Qua")
 
 
 @dataclass
-class SimulationConfig:
+class QEnvConfig:
     """
-    Simulation Configuration
-    
+    Quantum Environment configuration. This is used to define all hyperparameters characterizing the Quantum Environment.
+    Those include a description of the backend, the action and observation spaces, the batch size (number of actions per
+    policy evaluation), the number of Pauli observables to sample for the fidelity estimation scheme,
+    the number of shots per Pauli for the fidelity estimation, the renormalization factor, and the device on which the simulation is run.
+
     Args:
-        parametrized_circuit: Function applying parametrized transformation to a QuantumCircuit instance
-        backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
-        estimator_options: Options to feed the Estimator primitive
-        solver: Relevant only if dealing with pulse simulation (typically with DynamicsBackend), gives away solver used
-        to run simulations for computing exact fidelity benchmark
-        channel_freq: Relevant only if dealing with pulse simulation, Dictionary containing information mapping
-        the channels and the qubit frequencies
-        calibration_files: Feature not available yet, load existing gate calibrations from csv files for DynamicsBackend
-        baseline gate calibrations for running algorithm
-        gate: Target gate to calibrate
-        custum_backend: Custom backend for the simulation
-        backend: Backend for the simulation
-        estimator_options: Options for the Estimator primitive
-        n_actions: Number of actions available to the agent
-        sampling_Paulis: Number of Paulis to sample for the fidelity estimation
-        n_shots: Number of shots for the fidelity estimation
-        c_factor: Renormalization factor
-        device: Device on which the simulation is run
+        target (Dict): Target state or target gate to prepare
+        backend_config (BackendConfig): Backend configuration
+        action_space (Space): Action space
+        observation_space (Space): Observation space
+        batch_size (int, optional): Batch size (iterate over a bunch of actions per policy to estimate expected return). Defaults to 50.
+        sampling_Paulis (int, optional): Number of Paulis to sample for the fidelity estimation scheme. Defaults to 100.
+        n_shots (int, optional): Number of shots per Pauli for the fidelity estimation. Defaults to 1.
+        c_factor (float, optional): Renormalization factor. Defaults to 0.5.
+        benchmark_cycle (int, optional): Number of epochs between two fidelity benchmarking. Defaults to 5.
+        seed (int, optional): Seed for Observable sampling. Defaults to 1234.
+        device (Optional[torch.device], optional): Device on which the simulation is run. Defaults to None.
     """
 
-    parametrized_circuit: Optional[Callable[[QuantumCircuit, Optional[Union[Sequence[ParameterExpression], ParameterVector]],
-                                    Optional[Union[List, QuantumRegister]]], None]] = None
-    estimator_options: Optional[Options] = None
-    solver: Optional[Solver] = None
-    channel_freq: Optional[Dict] = None
-    do_calibrations: Optional[bool] = True
-    calibration_files: Optional[List[str]] = None
-    config_type: str = 'Qiskit'
-    target: dict = None
-    custum_backend: Optional[Backend] = None
-    backend: Optional[Backend] = None
-    n_actions: int = None
-    sampling_Paulis: int = None
-    n_shots: int = None
+    target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit]
+    backend_config: BackendConfig
+    action_space: Space
+    observation_space: Space
+    batch_size: int = 50
+    sampling_Paulis: int = 100
+    n_shots: int = 1
     c_factor: float = 0.5
-    device: torch.device = None
+    benchmark_cycle: int = 1
+    seed: int = 1234
+    device: Optional[torch.device] = None
