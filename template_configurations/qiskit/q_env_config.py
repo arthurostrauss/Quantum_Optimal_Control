@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, Dict
 import os
+import sys
 import yaml
 from gymnasium.spaces import Box
 import numpy as np
@@ -16,14 +17,14 @@ from qiskit.circuit import ParameterVector, Gate
 from qiskit_dynamics import Solver, DynamicsBackend
 from custom_jax_sim import JaxSolver
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
-from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit.providers.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit.providers.fake_provider import FakeJakartaV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from dynamics_config import dynamics_backend
+from template_configurations.qiskit.dynamics_config import dynamics_backend
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_config.yml"
@@ -59,9 +60,9 @@ def apply_parametrized_circuit(
         q_reg[1],
     )
     my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
-    # my_qc.u(np.pi *params[0], np.pi *params[1], np.pi *params[2], 0)
-    # my_qc.u(np.pi *params[3], np.pi *params[4], np.pi *params[5], 1)
-    # my_qc.rzx(np.pi * params[6], 0, 1)
+    # my_qc.u(2 * np.pi * params[0], 2 *  np.pi *params[1], 2 * np.pi * params[2], 0)
+    # my_qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
+    # my_qc.rzx(2 * np.pi * params[6], 0, 1)
     qc.append(my_qc.to_instruction(label="custom_cx"), q_reg)
 
 
