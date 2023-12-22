@@ -80,6 +80,13 @@ target/
 profile_default/
 ipython_config.py
 
+# TensorFlow events
+events.out.tfevents.*
+
+# Pickle files
+*.pkl
+*.pickle
+
 # pyenv
 .python-version
 
