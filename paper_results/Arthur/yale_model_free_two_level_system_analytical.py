@@ -1,6 +1,6 @@
 """
 Code example reproducing Educational Example described in Appendix A of the paper PhysRevX.12.011059
- (https://doi.org/10.1103/PhysRevX.12.011059) using Qiskit modules
+ (https://doi.org/10.1103/PhysRevX.12.011059) using qiskit modules
 
  Author: Arthur Strauss
  Created on 05/08/2022
@@ -40,19 +40,23 @@ def perform_action(amp, shots=1):
 
     reward_table = np.zeros(np.shape(amp))
     for j, angle in enumerate(amp):
-        qc.rx(2 * np.pi * angle, 0)  # Add parametrized gate for each amplitude in the batch
+        qc.rx(
+            2 * np.pi * angle, 0
+        )  # Add parametrized gate for each amplitude in the batch
         qc.measure(0, 0)  # Measure the qubit
         job = qasm.run(qc, shots=shots)
         result = job.result()
-        counts = result.get_counts(qc)  # Returns a dictionary with keys '0' and '1' with number of counts for each key
+        counts = result.get_counts(
+            qc
+        )  # Returns a dictionary with keys '0' and '1' with number of counts for each key
 
         #  Calculate reward
-        if '1' in counts and '0' in counts:
-            reward_table[j] += np.mean(np.array([1] * counts['1'] + [-1] * counts['0']))
-        elif '0' in counts:
-            reward_table[j] += np.mean([-1] * counts['0'])
+        if "1" in counts and "0" in counts:
+            reward_table[j] += np.mean(np.array([1] * counts["1"] + [-1] * counts["0"]))
+        elif "0" in counts:
+            reward_table[j] += np.mean([-1] * counts["0"])
         else:
-            reward_table[j] += np.mean([1] * counts['1'])
+            reward_table[j] += np.mean([1] * counts["1"])
         qc.clear()
 
     return reward_table  # Shape [batchsize]
@@ -75,15 +79,19 @@ insert_baseline = True
 if insert_baseline:
     b = np.random.uniform(0, 1)
 else:
-    b = 0.
+    b = 0.0
 
 # Trainable parameters of the policy (mean and standard deviation of the univariate Gaussian policy)
 
 mu = np.random.uniform(0, 1)
 sigma = np.random.uniform(1, 2)
 
-means, stds, amps, rewards = np.zeros(n_epochs + 1), np.zeros(n_epochs + 1), \
-                            np.zeros(n_epochs), np.zeros([n_epochs, batchsize])
+means, stds, amps, rewards = (
+    np.zeros(n_epochs + 1),
+    np.zeros(n_epochs + 1),
+    np.zeros(n_epochs),
+    np.zeros([n_epochs, batchsize]),
+)
 baselines = np.zeros(n_epochs + 1)
 
 for i in tqdm(range(n_epochs)):
@@ -98,8 +106,8 @@ for i in tqdm(range(n_epochs)):
 
     # REINFORCE Algorithm with Actor-Critic, update the parameters with the derived analytical formulas for gradients
     advantage = reward - b
-    mu += eta * np.mean(advantage * (a - mu) / sigma ** 2)
-    sigma += eta * np.mean(advantage * ((a - mu) ** 2 / sigma ** 3 - 1 / sigma))
+    mu += eta * np.mean(advantage * (a - mu) / sigma**2)
+    sigma += eta * np.mean(advantage * ((a - mu) ** 2 / sigma**3 - 1 / sigma))
     if insert_baseline:
         b -= eta_2 * np.mean(-2 * advantage)
 
@@ -108,9 +116,9 @@ final_std = sigma
 means[-1] = final_mean
 stds[-1] = final_std
 
-print("means: ", means, '\n')
-print("stds: ", stds, '\n')
-print("amplitudes: ", amps, '\n')
+print("means: ", means, "\n")
+print("stds: ", stds, "\n")
+print("amplitudes: ", amps, "\n")
 print("average rewards: ", np.mean(rewards, axis=1))
 
 
@@ -119,26 +127,28 @@ def plot_examples(colormaps, ax, reward_table):
     Helper function to plot data with associated colormap, used for plotting the reward per each epoch and each episode
     """
 
-    ax.pcolormesh(reward_table.transpose(), cmap=colormaps, rasterized=True, vmin=-1, vmax=1)
+    ax.pcolormesh(
+        reward_table.transpose(), cmap=colormaps, rasterized=True, vmin=-1, vmax=1
+    )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Episode")
     plt.show()
 
 
 number_of_steps = 10
-x = np.linspace(-2., 2., 200)
+x = np.linspace(-2.0, 2.0, 200)
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
 # Plot probability density associated to updated parameters for a few steps
 for i in range(0, n_epochs + 1, number_of_steps):
-    ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(stds[i])), '.-', label=f'{i}')
+    ax1.plot(x, norm.pdf(x, loc=means[i], scale=np.abs(stds[i])), ".-", label=f"{i}")
 
 ax1.set_xlabel("Action, a")
 ax1.set_ylabel("Probability density")
 #  Plot return as a function of epochs
-ax2.plot(np.mean(rewards, axis=1), '-.', label='Reward')
+ax2.plot(np.mean(rewards, axis=1), "-.", label="Reward")
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Expected reward")
-ax2.plot(baselines, '.-', label='baseline')
+ax2.plot(baselines, ".-", label="baseline")
 ax2.legend()
 ax1.legend()
 
