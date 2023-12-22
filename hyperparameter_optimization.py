@@ -114,3 +114,10 @@ class HyperparameterOptimizer:
             'best_hyperparams': self.best_trial.params,
         }
         return best_config
+    
+    @property
+    def target_gate(self):
+        return {
+            'target_gate': self.gate_q_env_config.target['gate'],
+            'target_register': self.gate_q_env_config.target['register']
+        }
