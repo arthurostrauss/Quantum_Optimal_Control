@@ -1,0 +1,61 @@
+AGENT:
+  RUN_NAME: "test" # Name of the run
+  NUM_UPDATES: 1 # Number of policy updates
+  N_EPOCHS: 12 # Number of epochs for each policy update
+  MINIBATCH_SIZE: 24 # Number of samples per mini-batch
+  LR_ACTOR: 0.01 # Learning rate
+  LR_CRITIC: 0.01 # Learning rate
+  GAMMA: 0.99 # Discount factor
+  GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
+  ENT_COEF: 0.01 # Entropy coefficient
+  V_COEF: 0.5 # Value (critic) function coefficient
+  GRADIENT_CLIP: 5. # Gradient clipping
+  CLIP_VALUE_LOSS: True # Whether to clip value loss
+  CLIP_VALUE_COEF: 0.2 # Clipping coefficient for value loss
+  CLIP_RATIO: 0.2 # Clipping ratio for PPO
+
+NETWORK:
+  OPTIMIZER: "adam" # Optimizer for the policy network
+  N_UNITS: [ 64, 64 ] # Number of units in hidden layers
+  ACTIVATION: "tanh" # Activation functions
+  INCLUDE_CRITIC: True # Whether to include critic network within ActorCritic model
+  NORMALIZE_ADVANTAGE: True # Whether to normalize advantage
+  CHKPT_DIR: "checkpoints" # Directory to save checkpoints
+
+HPO:
+  NUM_TRIALS: 1
+  NUM_UPDATES:
+    - 20 # Min value
+    - 100 # Max value
+  N_EPOCHS:
+    - 8 
+    - 25
+  MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
+  BATCHSIZE_MULTIPLIER:
+    - 2
+    - 12
+  LR_ACTOR:
+    - 0.0001
+    - 0.02
+  GAMMA:
+    - 0.95
+    - 0.999
+  GAE_LAMBDA:
+    - 0.90
+    - 0.999
+  ENT_COEF:
+    - 0.00005
+    - 0.001
+  V_COEF:
+    - 0.25
+    - 0.75
+  GRADIENT_CLIP:
+    - 0.005
+    - 0.9
+  CLIP_VALUE_LOSS: True
+  CLIP_VALUE_COEF:
+    - 0.1
+    - 0.3
+  CLIP_RATIO:
+    - 0.1
+    - 0.3
