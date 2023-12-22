@@ -81,5 +81,45 @@ class QuaConfig(BackendConfig):
     """
     QUA Configuration
     """
-    parametrized_macro: Callable = None
-    hardware_config: QMConfiguration = None
+
+    parametrized_macro: Callable
+    hardware_config: QMConfiguration
+
+    def __post_init__(self):
+        super().__init__(config_type="Qua")
+
+
+@dataclass
+class QEnvConfig:
+    """
+    Quantum Environment configuration. This is used to define all hyperparameters characterizing the Quantum Environment.
+    Those include a description of the backend, the action and observation spaces, the batch size (number of actions per
+    policy evaluation), the number of Pauli observables to sample for the fidelity estimation scheme,
+    the number of shots per Pauli for the fidelity estimation, the renormalization factor, and the device on which the simulation is run.
+
+    Args:
+        target (Dict): Target state or target gate to prepare
+        backend_config (BackendConfig): Backend configuration
+        action_space (Space): Action space
+        observation_space (Space): Observation space
+        batch_size (int, optional): Batch size (iterate over a bunch of actions per policy to estimate expected return). Defaults to 50.
+        sampling_Paulis (int, optional): Number of Paulis to sample for the fidelity estimation scheme. Defaults to 100.
+        n_shots (int, optional): Number of shots per Pauli for the fidelity estimation. Defaults to 1.
+        c_factor (float, optional): Renormalization factor. Defaults to 0.5.
+        benchmark_cycle (int, optional): Number of epochs between two fidelity benchmarking. Defaults to 5.
+        seed (int, optional): Seed for Observable sampling. Defaults to 1234.
+        device (Optional[torch.device], optional): Device on which the simulation is run. Defaults to None.
+    """
+
+    target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit]
+    backend_config: BackendConfig
+    action_space: Space
+    observation_space: Space
+    batch_size: int = 50
+    sampling_Paulis: int = 100
+    n_shots: int = 1
+    c_factor: float = 0.5
+    benchmark_cycle: int = 1
+    seed: int = 1234
+    training_with_cal: bool = True
+    device: Optional[torch.device] = None
