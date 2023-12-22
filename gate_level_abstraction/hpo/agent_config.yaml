@@ -23,10 +23,10 @@ NETWORK:
   CHKPT_DIR: "checkpoints" # Directory to save checkpoints
 
 HPO:
-  NUM_TRIALS: 2
+  NUM_TRIALS: 1
   NUM_UPDATES:
-    - 200 # Min value
-    - 1000 # Max value
+    - 20 # Min value
+    - 100 # Max value
   N_EPOCHS:
     - 8 
     - 25

@@ -54,6 +54,8 @@ from qiskit_ibm_runtime import (
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
 
+import optuna
+
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from custom_jax_sim.jax_solver import PauliToQuditOperator
 from qconfig import QiskitConfig
@@ -876,6 +878,37 @@ def load_agent_from_yaml_file(file_path: str):
 
     return ppo_params, network_params, hpo_params
 
+def create_agent_config(trial: optuna.trial.Trial, hpo_config: dict, network_config: dict, ppo_params: dict):
+    agent_config = {
+        'N_UPDATES': trial.suggest_int('N_UPDATES', hpo_config['n_updates'][0], hpo_config['n_updates'][1]),
+        'N_EPOCHS': trial.suggest_int('N_EPOCHS', hpo_config['n_epochs'][0], hpo_config['n_epochs'][1]),
+        'MINIBATCH_SIZE': trial.suggest_categorical('MINIBATCH_SIZE', hpo_config['minibatch_size']),
+        'BATCHSIZE_MULTIPLIER': trial.suggest_int('BATCHSIZE_MULTIPLIER', hpo_config['batchsize_multiplier'][0], hpo_config['batchsize_multiplier'][1]),
+        'LR': trial.suggest_float('LR', hpo_config['learning_rate'][0], hpo_config['learning_rate'][1], log=True),
+        'GAMMA': trial.suggest_float('GAMMA', hpo_config['gamma'][0], hpo_config['gamma'][1]),
+        'GAE_LAMBDA': trial.suggest_float('GAE_LAMBDA', hpo_config['gae_lambda'][0], hpo_config['gae_lambda'][1]),
+        'ENT_COEF': trial.suggest_float('ENT_COEF', hpo_config['ent_coef'][0], hpo_config['ent_coef'][1]),
+        'V_COEF': trial.suggest_float('V_COEF', hpo_config['v_coef'][0], hpo_config['v_coef'][1]),
+        'GRADIENT_CLIP': trial.suggest_float('GRADIENT_CLIP', hpo_config['max_grad_norm'][0], hpo_config['max_grad_norm'][1]),
+        'CLIP_VALUE_COEF': trial.suggest_float('CLIP_VALUE_COEF', hpo_config['clip_value_coef'][0], hpo_config['clip_value_coef'][1]),
+        'CLIP_RATIO': trial.suggest_float('CLIP_RATIO', hpo_config['clip_ratio'][0], hpo_config['clip_ratio'][1]),
+        }
+    agent_config['BATCHSIZE'] = agent_config['MINIBATCH_SIZE'] * agent_config['BATCHSIZE_MULTIPLIER']
+    # The upper hyperparameters are part of HPO scope
+    hyperparams = list(agent_config.keys())
+
+    # The following hyperparameters are NOT part of HPO scope
+    agent_config['CLIP_VALUE_LOSS'] = hpo_config['clip_value_loss']
+
+    # Add network-specific hyperparameters that are not part of HPO scope
+    agent_config['OPTIMIZER'] = network_config['optimizer']
+    agent_config['N_UNITS'] = network_config['n_units']
+    agent_config['ACTIVATION'] = network_config['activation']
+    agent_config['INCLUDE_CRITIC'] = network_config['include_critic']
+    agent_config['NORMALIZE_ADVANTAGE'] = network_config['normalize_advantage']
+    agent_config['RUN_NAME'] = ppo_params['run_name']
+
+    return agent_config, hyperparams
 
 def retrieve_backend_info(
     backend: Backend, estimator: Optional[RuntimeEstimator] = None
