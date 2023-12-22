@@ -1,3 +1,9 @@
+"""
+Hyperparameter Optimization (HPO) class for the Quantum Environment.
+
+Author: Lukas Voss
+Date: 22/12/2023
+"""
 import sys
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
