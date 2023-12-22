@@ -111,6 +111,6 @@ class HyperparameterOptimizer:
 
         best_config = {
             'best_avg_return': self.best_trial.value,
-            'best_parameters': self.best_trial.params,
+            'best_hyperparams': self.best_trial.params,
         }
         return best_config
