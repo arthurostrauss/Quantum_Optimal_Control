@@ -114,33 +114,27 @@ def perform_standard_calibrations(
     """
 
     target, qubits = backend.target, range(backend.num_qubits)
-    # for i, dim in enumerate(backend.options.subsystem_dims):
-    #     if dim > 1:
-    #         qubits.append(i)
     num_qubits = len(qubits)
-    # single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
-    # single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
-    single_qubit_properties = {(qubit,): None for qubit in range(backend.num_qubits)}
-    single_qubit_errors = {(qubit,): 0.0 for qubit in range(backend.num_qubits)}
+    single_qubit_properties = {(qubit,): None for qubit in qubits}
+    single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
 
     control_channel_map = backend.options.control_channel_map
-    if not bool(control_channel_map):
-        control_channel_map = {
-            (qubits[0], qubits[1]): index
-            for index, qubits in enumerate(tuple(permutations(qubits, 2)))
-        }
-
-    if backend.options.control_channel_map:
+    physical_control_channel_map = None
+    if control_channel_map is not None:
         physical_control_channel_map = {
             (qubit_pair[0], qubit_pair[1]): backend.control_channel(
                 (qubit_pair[0], qubit_pair[1])
             )
-            for qubit_pair in backend.options.control_channel_map
+            for qubit_pair in control_channel_map
         }
-    else:
+    elif num_qubits > 1:
+        all_to_all_connectivity = tuple(permutations(qubits, 2))
+        control_channel_map = {
+            (q[0], q[1]): index for index, q in enumerate(all_to_all_connectivity)
+        }
         physical_control_channel_map = {
-            (qubit_pair[0], qubit_pair[1]): [pulse.ControlChannel(index)]
-            for index, qubit_pair in enumerate(tuple(permutations(qubits, 2)))
+            (q[0], q[1]): [pulse.ControlChannel(index)]
+            for index, q in enumerate(all_to_all_connectivity)
         }
     backend.set_options(control_channel_map=control_channel_map)
     coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
@@ -432,7 +426,7 @@ def state_fidelity_from_state_tomography(
         jobs = run_jobs(session, state_tomo._transpiled_circuits())
         exp_data = state_tomo._initialize_experiment_data()
         exp_data.add_jobs(jobs)
-        results = state_tomo.analysis.run(exp_data).block_for_results()
+        exp_data = state_tomo.analysis.run(exp_data).block_for_results()
     else:
         exp_data = state_tomo.run().block_for_results()
 
@@ -519,6 +513,9 @@ def retrieve_primitives(
     abstraction_level: str = "circuit",
     estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
 ) -> (Estimator_type, Sampler_type):
+    """
+    Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
+    """
     if isinstance(
         backend, RuntimeBackend
     ):  # Real backend, or Simulation backend from Runtime Service
@@ -579,6 +576,7 @@ def retrieve_primitives(
             )
             if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
                 calibration_files: List[str] = config.calibration_files
+                print("3")
                 _, _ = perform_standard_calibrations(backend, calibration_files)
 
         else:
@@ -784,7 +782,56 @@ def get_solver_and_freq_from_backend(
     return channel_freqs, solver
 
 
+def build_qubit_space_projector(initial_subsystem_dims: list):
+    """
+    Build projector on qubit space from initial subsystem dimensions
+    """
+    total_dim = np.prod(initial_subsystem_dims)
+    projector = Operator(
+        np.zeros((total_dim, total_dim)),
+        input_dims=tuple(initial_subsystem_dims),
+        output_dims=tuple(initial_subsystem_dims),
+    )
+    for i in range(total_dim):
+        s = Statevector.from_int(i, initial_subsystem_dims)
+        for key in s.to_dict().keys():
+            if all([int(char) == 0 or int(char == 1) for char in key]):
+                projector += s.to_operator()
+                break
+            else:
+                continue
+
+    return projector
+
+
+def qubit_projection(unitary, initial_subsystem_list):
+    """
+    Project unitary on qubit space
+    """
+    proj = build_qubit_space_projector(initial_subsystem_list)
+    new_dim = 2 ** len(initial_subsystem_list)
+    qubitized_unitary = np.zeros((new_dim, new_dim))
+    qubit_count1 = qubit_count2 = 0
+    for i in range(np.prod(initial_subsystem_list)):
+        for j in range(np.prod(initial_subsystem_list)):
+            if proj.data[i, j] != 0:
+                qubitized_unitary[qubit_count1, qubit_count2] = unitary[i, j]
+
+                qubit_count2 += 1
+                if qubit_count2 == new_dim:
+                    qubit_count2 = 0
+                    qubit_count1 += 1
+    return Operator(
+        qubitized_unitary,
+        input_dims=(2,) * len(initial_subsystem_list),
+        output_dims=(2,) * len(initial_subsystem_list),
+    )
+
+
 def load_q_env_from_yaml_file(file_path: str):
+    """
+    Load Qiskit Quantum Environment from yaml file
+    """
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 

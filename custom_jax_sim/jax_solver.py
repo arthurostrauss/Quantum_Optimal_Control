@@ -13,7 +13,7 @@ from qiskit.quantum_info import Operator
 from qiskit.pulse import Schedule, SymbolicPulse
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.array import wrap
-from jax import vmap, jit
+from jax import vmap, jit, numpy as jnp
 import numpy as np
 from scipy.integrate._ivp.ivp import OdeResult
 
@@ -127,7 +127,12 @@ class JaxSolver(Solver):
             validate,
         )
         self._schedule_func = schedule_func
+        self._param_values = None
+        self._param_names = None
+        self._subsystem_dims = None
+        self._t_span = None
         self._batched_sims = []
+        self._kwargs = None
         SymbolicPulse.disable_validation = True
 
     @property
@@ -144,6 +149,46 @@ class JaxSolver(Solver):
     @property
     def batched_sims(self):
         return self._batched_sims
+
+    def unitary_solve(self):
+        """
+        This method is used to solve the unitary evolution of the system and get the total unitary
+        (not just the final state)
+        It assumes that a DynamicsEstimator job has been run previously
+        """
+        if self.circuit_macro is None:
+            raise ValueError(
+                "No circuit macro has been provided, please provide a circuit macro"
+            )
+
+        def sim_function(t_span, params):
+            parametrized_schedule = self.circuit_macro()
+            model_sigs = self.model.signals
+
+            parametrized_schedule.assign_parameters(
+                {
+                    param_obj: param
+                    for (param_obj, param) in zip(self._param_names, params)
+                }
+            )
+            signals = self._schedule_to_signals(parametrized_schedule)
+            self._set_new_signals(signals)
+            results = solve_lmde(
+                generator=self.model,
+                t_span=t_span,
+                y0=jnp.eye(
+                    np.prod(self._subsystem_dims), np.prod(self._subsystem_dims)
+                ),
+                **self._kwargs,
+            )
+            self.model.signals = model_sigs  # reset signals to original
+            return Array(results.t).data, Array(results.y).data
+
+        jit_func = jit(vmap(sim_function, in_axes=(None, 0)))
+        batch_results_t, batch_results_y = jit_func(
+            Array(self._t_span).data, Array(self._param_values).data
+        )
+        return batch_results_y
 
     def _solve_schedule_list_jax(
         self,
@@ -165,9 +210,9 @@ class JaxSolver(Solver):
         else:
             # Otherwise, we need to load the parameters and observables from the solver options
             param_dicts = kwargs["parameter_dicts"]
-            param_names = param_dicts[0].keys()
-            param_values = kwargs["parameter_values"]
-            subsystem_dims = kwargs["subsystem_dims"]
+            param_names = self._param_names = param_dicts[0].keys()
+            param_values = self._param_values = kwargs["parameter_values"]
+            subsystem_dims = self._subsystem_dims = kwargs["subsystem_dims"]
             if self.circuit_macro is None:
                 raise ValueError(
                     "No circuit macro has been provided, please provide a circuit macro"
@@ -210,6 +255,7 @@ class JaxSolver(Solver):
                 "subsystem_dims",
             ]:
                 kwargs.pop(key)
+            self._kwargs = kwargs
 
             def sim_function(t_span, y0, params, y0_input, y0_cls):
                 parametrized_schedule = self.circuit_macro()
@@ -244,12 +290,12 @@ class JaxSolver(Solver):
                 y0_cls,
                 state_type_wrapper,
             ) = validate_and_format_initial_state(y0_list[0], self.model)
-            t_span = t_span_list[0]
+            t_span = self._t_span = t_span_list[0]
 
             batch_results_t, batch_results_y = jit_func(
                 Array(t_span).data,
                 Array(y0).data,
-                np.array(param_values),
+                Array(param_values).data,
                 Array(y0_input).data,
                 y0_cls,
             )

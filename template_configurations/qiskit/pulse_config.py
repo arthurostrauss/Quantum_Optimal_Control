@@ -225,20 +225,19 @@ def get_backend(
                 backend_name = "fake_jakarta"
             backend = FakeProvider().get_backend(backend_name)
 
-        if use_dynamics is not None and use_dynamics:
-            if backend is not None:
-                backend = DynamicsBackend.from_backend(
-                    backend, subsystem_list=list(physical_qubits)
-                )
-                _, _ = perform_standard_calibrations(backend)
-    else:
-        # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        if use_dynamics:
-            backend = dynamics_backend
-            _, _ = perform_standard_calibrations(backend)
+    if use_dynamics is not None and use_dynamics:
+        if backend is not None:
+            backend = DynamicsBackend.from_backend(
+                backend, subsystem_list=list(physical_qubits)
+            )
         else:
-            # TODO: Add here your custom backend
-            pass
+            # TODO: Add here your custom DynamicsBackend
+            backend = dynamics_backend
+
+        _, _ = perform_standard_calibrations(backend)
+    else:
+        # TODO: Add here your custom backend
+        pass
     if backend is None:
         warnings.warn("No backend was provided, Statevector simulation will be used")
 

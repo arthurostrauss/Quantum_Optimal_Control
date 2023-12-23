@@ -64,6 +64,8 @@ from helper_functions import (
     handle_session,
     state_fidelity_from_state_tomography,
     gate_fidelity_from_process_tomography,
+    qubit_projection,
+    build_qubit_space_projector,
 )
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
@@ -71,80 +73,6 @@ from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 # from qualang_tools.bakery.bakery import baking
 # from qm.qua import *
 # from qm.QuantumMachinesManager import QuantumMachinesManager
-
-
-def positive_int_to_base(value: int, base: int, padding: int = 0):
-    digs = string.digits + string.ascii_letters
-    if value < 0:
-        raise ValueError(f"Value must be > 0. Actual {value}")
-    elif value == int(string.digits[0]):
-        return "0".zfill(padding)
-    digits = []
-
-    while value:
-        digits.append(digs[value % base])
-        value = value // base
-    digits.reverse()
-    return "".join(digits).zfill(padding)
-
-
-def create_qudit_operator_from_qubit_operator(qubit_op: np.ndarray, qudit_levels: int):
-    """Transform a two level operator into an n-level operator."""
-    if qubit_op.shape[0] != qubit_op.shape[1]:
-        raise ValueError(
-            f"Operator must be a square matrix. {qubit_op.shape[0]} != {qubit_op.shape[1]}"
-        )
-    n_qubits = int(np.log2(qubit_op.shape[0]))
-    qubit_row_and_column_indexes = [
-        positive_int_to_base(index, base=2, padding=n_qubits)
-        for index in range(qubit_op.shape[0])
-    ]
-    qudit_row_and_column_indexes = [
-        positive_int_to_base(index, base=qudit_levels, padding=n_qubits)
-        for index in range(qudit_levels**n_qubits)
-    ]
-    qubit_op_df = pd.DataFrame(
-        data=qubit_op,
-        index=qubit_row_and_column_indexes,
-        columns=qubit_row_and_column_indexes,
-    )
-    qudit_op_df = pd.DataFrame(
-        data=np.eye(qudit_levels**n_qubits),
-        index=qudit_row_and_column_indexes,
-        columns=qudit_row_and_column_indexes,
-    )
-    for index, _ in qubit_op_df.iterrows():
-        for column_name in qubit_op_df.columns:
-            value = qubit_op_df.at[index, column_name]
-            qudit_op_df.at[index, column_name] = value
-    print(qudit_op_df.to_numpy())
-    return qudit_op_df.to_numpy()
-
-
-def extract_qubit_unitary_from_qudit_operator(operator: np.ndarray, n_levels: int):
-    print(operator.shape)
-    print(operator)
-    if operator.shape[0] != operator.shape[1]:
-        raise ValueError(
-            f"Operators must be a square matrix. {operator.shape[0]} != {operator.shape[1]}"
-        )
-    n_systems = int(np.emath.logn(n_levels, operator.shape[0]))
-    row_and_column_indices = [
-        positive_int_to_base(index, base=n_levels, padding=n_systems)
-        for index in range(operator.shape[0])
-    ]
-    row_and_column_indices_only_zero_and_ones = []
-    for index in row_and_column_indices:
-        if any(digit not in set("01") for digit in index):
-            continue
-        row_and_column_indices_only_zero_and_ones.append(index)
-    operator_df = pd.DataFrame(
-        data=operator, index=row_and_column_indices, columns=row_and_column_indices
-    )
-    unitary_for_qubit_df = operator_df[row_and_column_indices_only_zero_and_ones].loc[
-        row_and_column_indices_only_zero_and_ones
-    ]
-    return unitary_for_qubit_df.to_numpy()
 
 
 def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
@@ -628,24 +556,20 @@ class QuantumEnvironment(Env):
                     self.backend.options.solver, JaxSolver
                 ):
                     # Jax compatible pulse simulation
-                    unitaries = self.backend.options.solver.batched_sims
-
-                    print("Unitaries", unitaries)
-                    dims = self.backend.options.subsystem_dims
+                    unitaries = np.array(self.backend.options.solver.unitary_solve()[0])
+                    qubitized_unitaries = [
+                        qubit_projection(u, self.backend.options.subsystem_dims)
+                        for u in unitaries
+                    ]
 
                     if self.target_type == "state":
                         density_matrix = DensityMatrix(
                             np.mean(
                                 [
-                                    Statevector.from_int(0, dims=self._d)
-                                    .evolve(
-                                        Operator(
-                                            unitary, input_dims=dims, output_dims=dims
-                                        )
+                                    Statevector.from_int(0, dims=self._d).evolve(
+                                        unitary
                                     )
-                                    .to_operator()
-                                    .to_matrix()
-                                    for unitary in unitaries
+                                    for unitary in qubitized_unitaries
                                 ],
                                 axis=0,
                             )
@@ -654,23 +578,13 @@ class QuantumEnvironment(Env):
                             state_fidelity(self.target["dm"], density_matrix)
                         )
                     else:  # Gate calibration task
-                        qubitized_unitaries = []
-                        extended_tgt_gate = Operator(
-                            create_qudit_operator_from_qubit_operator(
-                                self.target["gate"].to_matrix(), dims[0]
-                            ),
-                            input_dims=dims,
-                            output_dims=dims,
-                        )
-                        for unitary in unitaries:
-                            unitary = np.array(unitary)
-                            qubitized_unitaries.append(
-                                Operator(
-                                    extract_qubit_unitary_from_qudit_operator(
-                                        unitary, dims[0]
-                                    )
-                                )
-                            )
+                        # extended_tgt_gate = Operator(
+                        #     create_qudit_operator_from_qubit_operator(
+                        #         self.target["gate"].to_matrix(), dims[0]
+                        #     ),
+                        #     input_dims=dims,
+                        #     output_dims=dims,
+                        # )
 
                         self.avg_fidelity_history.append(
                             np.mean(
