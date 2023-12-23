@@ -1,5 +1,5 @@
 """
-Class to generate a RL environment suitable for usage with TF-agents, leveraging Qiskit modules to simulate
+Class to generate a RL environment suitable for usage with PyTorch, leveraging Qiskit modules to simulate
 quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 # For compatibility for options formatting between Estimators.
 import json
-import string
 from dataclasses import asdict
 from itertools import product
 from typing import Dict, Optional, List, Callable, Any, SupportsFloat
@@ -20,7 +19,6 @@ import numpy as np
 from gymnasium.core import ObsType, ActType
 
 # Qiskit imports
-from qiskit import pulse, schedule
 from qiskit.circuit import (
     QuantumCircuit,
     QuantumRegister,
@@ -65,7 +63,6 @@ from helper_functions import (
     state_fidelity_from_state_tomography,
     gate_fidelity_from_process_tomography,
     qubit_projection,
-    build_qubit_space_projector,
 )
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
