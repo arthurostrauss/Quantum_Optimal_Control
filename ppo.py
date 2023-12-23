@@ -180,6 +180,8 @@ def make_train_ppo(
                 )
                 next_obs = torch.Tensor(next_obs)
                 done = int(np.logical_or(terminated, truncated))
+                reward = torch.Tensor(reward)
+                rewards[step] = reward
 
                 batch_obs = torch.tile(next_obs, (batchsize, 1))
                 next_done = done * torch.ones_like(dones[0])
@@ -188,7 +190,7 @@ def make_train_ppo(
 
                 # print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
                 writer.add_scalar(
-                    "charts/episodic_return", np.mean(reward), global_step
+                    "charts/episodic_return", np.mean(reward.numpy()), global_step
                 )
                 writer.add_scalar("charts/episodic_length", num_steps, global_step)
 
@@ -288,7 +290,14 @@ def make_train_ppo(
             if print_debug:
                 print("mean", mean_action[0])
                 print("sigma", std_action[0])
-                print("Average return:", np.mean(env.reward_history, axis=1)[-1])
+                print("DFE Rewards Mean:", np.mean(env.reward_history, axis=1)[-1])
+                print(
+                    "DFE Rewards standard dev", np.std(env.reward_history, axis=1)[-1]
+                )
+                print("Returns Mean:", np.mean(b_returns.numpy()))
+                print("Returns standard dev", np.std(b_returns.numpy()))
+                print("Advantages Mean:", np.mean(b_advantages.numpy()))
+                print("Advantages standard dev", np.std(b_advantages.numpy()))
                 # print(np.mean(env.reward_history, axis =1)[-1])
                 # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
 

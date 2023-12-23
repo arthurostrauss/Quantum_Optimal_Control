@@ -228,9 +228,11 @@ class QuantumEnvironment(Env):
         self.n_shots = training_config.n_shots
         self.sampling_Pauli_space = training_config.sampling_Paulis
         self.c_factor = training_config.c_factor
+        self.training_with_cal = training_config.training_with_cal
         self.batch_size = training_config.batch_size
         self._parameters = ParameterVector("a", training_config.action_space.shape[-1])
         self._tgt_instruction_counts = 1  # Number of instructions to calibrate
+        self._reward_check_max = 1.1
         if isinstance(self.training_config.backend_config, QiskitConfig):
             self._config_type = "qiskit"
             if not isinstance(self.training_config.backend_config, QiskitConfig):
@@ -313,6 +315,7 @@ class QuantumEnvironment(Env):
                 f"The Training Config observation space: {self.observation_space.shape} does not "
                 f"match the Environment observation shape: {example_obs.shape}"
             )
+        self.check_reward()
 
     def reset(
         self,
@@ -379,6 +382,19 @@ class QuantumEnvironment(Env):
         reward = -np.log(1.0 - reward)
 
         return self._get_obs(), reward, terminated, False, self._get_info()
+
+    def check_reward(self):
+        if self.training_with_cal:
+            sample_action = np.zeros(self.action_space.shape)
+            batch_action = np.tile(sample_action, (self.batch_size, 1))
+            batch_rewards = self.perform_action(batch_action)
+            mean_reward = np.mean(batch_rewards)
+            if mean_reward > self._reward_check_max:
+                raise ValueError(
+                    f"Current Mean Reward with Config Vals is {mean_reward}, try a C Factor around {self.c_factor / mean_reward}"
+                )
+        else:
+            pass
 
     def episode_length(self, global_step: int):
         assert (
