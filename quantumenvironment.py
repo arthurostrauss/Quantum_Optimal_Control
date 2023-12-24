@@ -276,6 +276,7 @@ class QuantumEnvironment(Env):
                 self.abstraction_level,
                 estimator_options,
             )
+            self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
             self.fidelity_checker = ComputeUncompute(self.sampler)
         elif isinstance(self.training_config.backend_config, QuaConfig):
             raise AttributeError("QUA compatibility not yet implemented")
@@ -404,14 +405,27 @@ class QuantumEnvironment(Env):
 
     @property
     def benchmark_cycle(self) -> int:
+        """
+        Cycle at which fidelity benchmarking is performed
+        :return: 
+        """
         return self._benchmark_cycle
 
     @benchmark_cycle.setter
-    def benchmark_cycle(self, step) -> None:
+    def benchmark_cycle(self, step: int) -> None:
+        """
+        Set cycle at which fidelity benchmarking is performed
+        :param step:
+        :return: 
+        """
         assert step >= 0, "Cycle needs to be a positive integer"
         self._benchmark_cycle = step
 
     def do_benchmark(self) -> bool:
+        """
+        Check if benchmarking should be performed at current step
+        :return: 
+        """
         if self.benchmark_cycle == 0:
             return False
         else:
@@ -465,7 +479,7 @@ class QuantumEnvironment(Env):
                 parameter_values=params,
                 shots=int(np.max(pauli_shots) * self.n_shots),
             )
-
+            
             reward_table = job.result().values
         except Exception as e:
             self.close()
@@ -479,6 +493,8 @@ class QuantumEnvironment(Env):
     def store_benchmarks(self, params: np.array):
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
+        :param params: List of Action vectors to execute on quantum system
+        :return: None
         """
         qc = self.circuit_truncations[0]
         # Build reference circuit (ideal)
@@ -569,6 +585,7 @@ class QuantumEnvironment(Env):
                     self.backend.options.solver, JaxSolver
                 ):
                     # Jax compatible pulse simulation
+                  
                     unitaries = np.array(self.backend.options.solver.unitary_solve()[0])
                     qubitized_unitaries = [
                         qubit_projection(u, self.backend.options.subsystem_dims)
@@ -591,18 +608,11 @@ class QuantumEnvironment(Env):
                             state_fidelity(self.target["dm"], density_matrix)
                         )
                     else:  # Gate calibration task
-                        # extended_tgt_gate = Operator(
-                        #     create_qudit_operator_from_qubit_operator(
-                        #         self.target["gate"].to_matrix(), dims[0]
-                        #     ),
-                        #     input_dims=dims,
-                        #     output_dims=dims,
-                        # )
-
+                        gate = Operator(transpile(self.baseline_truncations[0], self.backend))
                         self.avg_fidelity_history.append(
                             np.mean(
                                 [
-                                    average_gate_fidelity(unitary, self.target["gate"])
+                                    average_gate_fidelity(unitary, gate)
                                     for unitary in qubitized_unitaries
                                 ]
                             )
@@ -724,6 +734,10 @@ class QuantumEnvironment(Env):
     @layout.setter
     def layout(self, layout: Layout):
         self._layout = layout
+
+    @property
+    def physical_target_qubits(self):
+        return self._physical_target_qubits
 
     @property
     def parameters(self):

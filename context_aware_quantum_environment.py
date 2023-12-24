@@ -113,7 +113,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 "Basis gate Library for CX gate not yet available, will be transpiled over ECR basis gate"
             )
         # Retrieve qubits forming the local circuit context (target qubits + nearest neighbor qubits on the chip)
-        self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
+        
         self._physical_neighbor_qubits = list(
             filter(
                 lambda x: x not in self.physical_target_qubits,
@@ -254,10 +254,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self._intermediate_rewards = intermediate_rewards
         self._max_return = 0
         self._best_action = np.zeros((self.batch_size, self.action_space.shape[-1]))
-
-    @property
-    def physical_target_qubits(self):
-        return self._physical_target_qubits
 
     @property
     def physical_neighbor_qubits(self):

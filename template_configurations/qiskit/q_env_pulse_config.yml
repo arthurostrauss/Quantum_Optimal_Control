@@ -32,7 +32,7 @@ BACKEND: # Backend configuration (If all set to None, the user needs to specify 
     PHYSICAL_QUBITS: null # Number of qubits characterizing the environment (i.e. the full quantum circuit dimension)
 
 TARGET: # Target Gate configuration
-  GATE: "CX"
+  GATE: "X"
   # STATE: "0" # Target state (if GATE is null)
   PHYSICAL_QUBITS: [0]
 
