@@ -788,19 +788,18 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
     """
     total_dim = np.prod(initial_subsystem_dims)
     projector = Operator(
-        np.zeros((total_dim, total_dim)),
+        np.zeros((total_dim, total_dim), dtype=np.complex128),
         input_dims=tuple(initial_subsystem_dims),
         output_dims=tuple(initial_subsystem_dims),
     )
     for i in range(total_dim):
         s = Statevector.from_int(i, initial_subsystem_dims)
         for key in s.to_dict().keys():
-            if all([int(char) == 0 or int(char == 1) for char in key]):
+            if all(c in "01" for c in key):
                 projector += s.to_operator()
                 break
             else:
                 continue
-
     return projector
 
 
@@ -808,24 +807,35 @@ def qubit_projection(unitary, initial_subsystem_list):
     """
     Project unitary on qubit space
     """
+
     proj = build_qubit_space_projector(initial_subsystem_list)
     new_dim = 2 ** len(initial_subsystem_list)
-    qubitized_unitary = np.zeros((new_dim, new_dim))
+    qubitized_unitary = np.zeros((new_dim, new_dim), dtype=np.complex128)
     qubit_count1 = qubit_count2 = 0
+    new_unitary = (
+        proj
+        @ Operator(
+            unitary,
+            input_dims=initial_subsystem_list,
+            output_dims=initial_subsystem_list,
+        )
+        @ proj
+    )
     for i in range(np.prod(initial_subsystem_list)):
         for j in range(np.prod(initial_subsystem_list)):
-            if proj.data[i, j] != 0:
-                qubitized_unitary[qubit_count1, qubit_count2] = unitary[i, j]
-
+            if new_unitary.data[i, j] != 0:
+                qubitized_unitary[qubit_count1, qubit_count2] = new_unitary.data[i, j]
                 qubit_count2 += 1
                 if qubit_count2 == new_dim:
                     qubit_count2 = 0
                     qubit_count1 += 1
-    return Operator(
+                    break
+    qubitized_unitary = Operator(
         qubitized_unitary,
         input_dims=(2,) * len(initial_subsystem_list),
         output_dims=(2,) * len(initial_subsystem_list),
     )
+    return qubitized_unitary
 
 
 def load_q_env_from_yaml_file(file_path: str):
@@ -855,7 +865,7 @@ def load_q_env_from_yaml_file(file_path: str):
         "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
         "target": {
             "register": config["TARGET"]["PHYSICAL_QUBITS"],
-        "training_with_cal": config["ENV"]["TRAINING_WITH_CAL"]
+            "training_with_cal": config["ENV"]["TRAINING_WITH_CAL"],
         },
     }
     if "GATE" in config["TARGET"]:

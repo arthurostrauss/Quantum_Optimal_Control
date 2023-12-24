@@ -17,6 +17,7 @@ import pandas as pd
 from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
+from qiskit import transpile
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -65,6 +66,7 @@ from helper_functions import (
     qubit_projection,
 )
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
+
 
 # QUA imports
 # from qualang_tools.bakery.bakery import baking
@@ -407,7 +409,7 @@ class QuantumEnvironment(Env):
     def benchmark_cycle(self) -> int:
         """
         Cycle at which fidelity benchmarking is performed
-        :return: 
+        :return:
         """
         return self._benchmark_cycle
 
@@ -416,7 +418,7 @@ class QuantumEnvironment(Env):
         """
         Set cycle at which fidelity benchmarking is performed
         :param step:
-        :return: 
+        :return:
         """
         assert step >= 0, "Cycle needs to be a positive integer"
         self._benchmark_cycle = step
@@ -424,7 +426,7 @@ class QuantumEnvironment(Env):
     def do_benchmark(self) -> bool:
         """
         Check if benchmarking should be performed at current step
-        :return: 
+        :return:
         """
         if self.benchmark_cycle == 0:
             return False
@@ -479,7 +481,7 @@ class QuantumEnvironment(Env):
                 parameter_values=params,
                 shots=int(np.max(pauli_shots) * self.n_shots),
             )
-            
+
             reward_table = job.result().values
         except Exception as e:
             self.close()
@@ -585,8 +587,11 @@ class QuantumEnvironment(Env):
                     self.backend.options.solver, JaxSolver
                 ):
                     # Jax compatible pulse simulation
-                  
-                    unitaries = np.array(self.backend.options.solver.unitary_solve()[0])
+
+                    unitaries = np.array(self.backend.options.solver.unitary_solve())[
+                        :, 1, :, :
+                    ]
+
                     qubitized_unitaries = [
                         qubit_projection(u, self.backend.options.subsystem_dims)
                         for u in unitaries
@@ -608,7 +613,9 @@ class QuantumEnvironment(Env):
                             state_fidelity(self.target["dm"], density_matrix)
                         )
                     else:  # Gate calibration task
-                        gate = Operator(transpile(self.baseline_truncations[0], self.backend))
+                        gate = Operator(
+                            transpile(self.baseline_truncations[0], self.backend)
+                        )
                         self.avg_fidelity_history.append(
                             np.mean(
                                 [
