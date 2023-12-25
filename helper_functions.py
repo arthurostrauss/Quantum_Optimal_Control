@@ -103,7 +103,7 @@ def remove_unused_wires(qc: QuantumCircuit):
 
 
 def perform_standard_calibrations(
-    backend: DynamicsBackend, calibration_files: Optional[List[str]] = None
+        backend: DynamicsBackend, calibration_files: Optional[List[str]] = None
 ):
     """
     Generate baseline single qubit gates (X, SX, RZ, H) for all qubits using traditional calibration experiments
@@ -167,7 +167,7 @@ def perform_standard_calibrations(
             backend_version=backend.backend_version,
         )
     if (
-        len(target.instruction_schedule_map().instructions) <= 1
+            len(target.instruction_schedule_map().instructions) <= 1
     ):  # Check if instructions have already been added
         for gate in single_qubit_gates:
             target.add_instruction(
@@ -357,9 +357,9 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
                 ("duration", physical_qubits, sched): control_pulse.duration,
                 ("σ", physical_qubits, sched): control_pulse.sigma,
                 ("risefall", physical_qubits, sched): (
-                    control_pulse.duration - control_pulse.width
-                )
-                / (2 * control_pulse.sigma),
+                                                              control_pulse.duration - control_pulse.width
+                                                      )
+                                                      / (2 * control_pulse.sigma),
             }
         )
     pulse_features = [
@@ -376,7 +376,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
 
 
 def get_pulse_params(
-    backend: Backend_type, physical_qubit: Sequence[int], name: str = "x"
+        backend: Backend_type, physical_qubit: Sequence[int], name: str = "x"
 ):
     """
     Determine default parameters for SX or X gate on provided backend
@@ -402,12 +402,12 @@ def get_pulse_params(
 
 
 def state_fidelity_from_state_tomography(
-    qc_list: List[QuantumCircuit],
-    backend: Backend,
-    physical_qubits: Optional[Sequence[int]],
-    analysis: Union[BaseAnalysis, None, str] = "default",
-    target_state: Optional[QuantumState] = None,
-    session: Optional[Session] = None,
+        qc_list: List[QuantumCircuit],
+        backend: Backend,
+        physical_qubits: Optional[Sequence[int]],
+        analysis: Union[BaseAnalysis, None, str] = "default",
+        target_state: Optional[QuantumState] = None,
+        session: Optional[Session] = None,
 ):
     state_tomo = BatchExperiment(
         [
@@ -446,12 +446,12 @@ def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options=None)
 
 
 def gate_fidelity_from_process_tomography(
-    qc_list: List[QuantumCircuit],
-    backend: Backend,
-    target_gate: Gate,
-    physical_qubits: Optional[Sequence[int]],
-    analysis: Union[BaseAnalysis, None, str] = "default",
-    session: Optional[Session] = None,
+        qc_list: List[QuantumCircuit],
+        backend: Backend,
+        target_gate: Gate,
+        physical_qubits: Optional[Sequence[int]],
+        analysis: Union[BaseAnalysis, None, str] = "default",
+        session: Optional[Session] = None,
 ):
     """
     Extract average gate and process fidelities from batch of Quantum Circuit for target gate
@@ -507,17 +507,17 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
 
 
 def retrieve_primitives(
-    backend: Backend_type,
-    layout: Layout,
-    config: Union[Dict, QiskitConfig],
-    abstraction_level: str = "circuit",
-    estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
+        backend: Backend_type,
+        layout: Layout,
+        config: Union[Dict, QiskitConfig],
+        abstraction_level: str = "circuit",
+        estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
 ) -> (Estimator_type, Sampler_type):
     """
     Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
     """
     if isinstance(
-        backend, RuntimeBackend
+            backend, RuntimeBackend
     ):  # Real backend, or Simulation backend from Runtime Service
         estimator: Estimator_type = RuntimeEstimator(
             session=Session(backend.service, backend),
@@ -560,7 +560,7 @@ def retrieve_primitives(
 
         elif isinstance(backend, DynamicsBackend):
             assert (
-                abstraction_level == "pulse"
+                    abstraction_level == "pulse"
             ), "DynamicsBackend works only with pulse level abstraction"
             if isinstance(backend.options.solver, JaxSolver):
                 estimator: Estimator_type = DynamicsBackendEstimator(
@@ -585,7 +585,7 @@ def retrieve_primitives(
 
 
 def set_primitives_transpile_options(
-    estimator, sampler, layout, skip_transpilation, physical_qubits
+        estimator, sampler, layout, skip_transpilation, physical_qubits
 ):
     if isinstance(estimator, RuntimeEstimator):
         # TODO: Could change resilience level
@@ -635,7 +635,7 @@ def handle_session(qc, input_state_circ, estimator, backend, session_count):
             )
             estimator = RuntimeEstimator(session=session, options=dict(options))
     elif isinstance(
-        backend, IBMBackend
+            backend, IBMBackend
     ):  # Soon deprecated (backend.run also available in Qiskit Runtime)
         if not backend.session.active:
             session_count += 1
@@ -643,7 +643,7 @@ def handle_session(qc, input_state_circ, estimator, backend, session_count):
             backend.open_session()
     elif isinstance(estimator, DynamicsBackendEstimator):
         if not isinstance(backend, DynamicsBackend) or not isinstance(
-            backend.options.solver, JaxSolver
+                backend.options.solver, JaxSolver
         ):
             raise TypeError(
                 "DynamicsBackendEstimator can only be used with DynamicsBackend and JaxSolver"
@@ -661,14 +661,14 @@ def handle_session(qc, input_state_circ, estimator, backend, session_count):
         qubit_counter, qubit_list = 0, []
         for instruction in new_circ.data:
             assert (
-                len(instruction.qubits) == 1
+                    len(instruction.qubits) == 1
             ), "Input state circuit must be in a tensor product form"
             if instruction.qubits[0] not in qubit_list:
                 qubit_list.append(instruction.qubits[0])
                 qubit_counter += 1
             initial_rotations[qubit_counter - 1] = initial_rotations[
                 qubit_counter - 1
-            ].compose(Operator(instruction.operation))
+                ].compose(Operator(instruction.operation))
 
         operation = PauliToQuditOperator(initial_rotations, subsystem_dims)
         initial_state = initial_state.evolve(operation)
@@ -676,14 +676,14 @@ def handle_session(qc, input_state_circ, estimator, backend, session_count):
 
 
 def get_solver_and_freq_from_backend(
-    backend: BackendV1,
-    subsystem_list: Optional[List[int]] = None,
-    rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
-    evaluation_mode: str = "dense",
-    rwa_cutoff_freq: Optional[float] = None,
-    static_dissipators: Optional[Array] = None,
-    dissipator_operators: Optional[Array] = None,
-    dissipator_channels: Optional[List[str]] = None,
+        backend: BackendV1,
+        subsystem_list: Optional[List[int]] = None,
+        rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
+        evaluation_mode: str = "dense",
+        rwa_cutoff_freq: Optional[float] = None,
+        static_dissipators: Optional[Array] = None,
+        dissipator_operators: Optional[Array] = None,
+        dissipator_channels: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, float], Solver]:
     """
     Method to retrieve solver instance and relevant freq channels information from an IBM
@@ -803,26 +803,26 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
     return projector
 
 
-def qubit_projection(unitary, initial_subsystem_list):
+def qubit_projection(unitary, subsystem_dims):
     """
     Project unitary on qubit space
     """
 
-    proj = build_qubit_space_projector(initial_subsystem_list)
-    new_dim = 2 ** len(initial_subsystem_list)
+    proj = build_qubit_space_projector(subsystem_dims)
+    new_dim = 2 ** len(subsystem_dims)
     qubitized_unitary = np.zeros((new_dim, new_dim), dtype=np.complex128)
     qubit_count1 = qubit_count2 = 0
     new_unitary = (
-        proj
-        @ Operator(
-            unitary,
-            input_dims=initial_subsystem_list,
-            output_dims=initial_subsystem_list,
-        )
-        @ proj
+            proj
+            @ Operator(
+        unitary,
+        input_dims=subsystem_dims,
+        output_dims=subsystem_dims,
     )
-    for i in range(np.prod(initial_subsystem_list)):
-        for j in range(np.prod(initial_subsystem_list)):
+            @ proj
+    )
+    for i in range(np.prod(subsystem_dims)):
+        for j in range(np.prod(subsystem_dims)):
             if new_unitary.data[i, j] != 0:
                 qubitized_unitary[qubit_count1, qubit_count2] = new_unitary.data[i, j]
                 qubit_count2 += 1
@@ -832,8 +832,8 @@ def qubit_projection(unitary, initial_subsystem_list):
                     break
     qubitized_unitary = Operator(
         qubitized_unitary,
-        input_dims=(2,) * len(initial_subsystem_list),
-        output_dims=(2,) * len(initial_subsystem_list),
+        input_dims=(2,) * len(subsystem_dims),
+        output_dims=(2,) * len(subsystem_dims),
     )
     return qubitized_unitary
 
@@ -918,7 +918,7 @@ def load_agent_from_yaml_file(file_path: str):
 
 
 def retrieve_backend_info(
-    backend: Backend, estimator: Optional[RuntimeEstimator] = None
+        backend: Backend, estimator: Optional[RuntimeEstimator] = None
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration
@@ -927,9 +927,9 @@ def retrieve_backend_info(
     dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
     coupling_map = CouplingMap(backend_data.coupling_map)
     if (
-        coupling_map.size() == 0
-        and backend_data.num_qubits > 1
-        and estimator is not None
+            coupling_map.size() == 0
+            and backend_data.num_qubits > 1
+            and estimator is not None
     ):
         if isinstance(estimator, RuntimeEstimator):
             coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
@@ -962,11 +962,11 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
 
 
 def select_optimizer(
-    lr: float,
-    optimizer: str = "Adam",
-    grad_clip: Optional[float] = None,
-    concurrent_optimization: bool = True,
-    lr2: Optional[float] = None,
+        lr: float,
+        optimizer: str = "Adam",
+        grad_clip: Optional[float] = None,
+        concurrent_optimization: bool = True,
+        lr2: Optional[float] = None,
 ):
     if concurrent_optimization:
         if optimizer == "Adam":
@@ -985,11 +985,11 @@ def select_optimizer(
 
 
 def generate_model(
-    input_shape: Tuple,
-    hidden_units: Union[List, Tuple],
-    n_actions: int,
-    actor_critic_together: bool = True,
-    hidden_units_critic: Optional[Union[List, Tuple]] = None,
+        input_shape: Tuple,
+        hidden_units: Union[List, Tuple],
+        n_actions: int,
+        actor_critic_together: bool = True,
+        hidden_units_critic: Optional[Union[List, Tuple]] = None,
 ):
     """
     Helper function to generate fully connected NN
@@ -1034,7 +1034,7 @@ def generate_model(
         )
     else:
         assert (
-            hidden_units_critic is not None
+                hidden_units_critic is not None
         ), "Network structure for critic network not provided"
         input_critic = Input(shape=input_shape)
         Critic_Net = Dense(
