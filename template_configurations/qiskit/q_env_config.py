@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, Dict
 import os
+import sys
 import yaml
 from gymnasium.spaces import Box
 import numpy as np
@@ -14,16 +15,16 @@ from helper_functions import (
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
 from qiskit_dynamics import Solver, DynamicsBackend
-from custom_jax_sim import JaxSolver
+from custom_jax_sim.jax_solver import JaxSolver
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
-from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit.providers.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit.providers.fake_provider import FakeJakartaV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from dynamics_config import dynamics_backend
+from template_configurations.qiskit.dynamics_config import dynamics_backend
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_gate_config.yml"
@@ -45,7 +46,6 @@ def apply_parametrized_circuit(
     parametrized_qc = QuantumCircuit(q_reg)
     my_qc = QuantumCircuit(q_reg, name="custom_cx")
     optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-    # optimal_params = np.pi * np.zeros(7)
 
     my_qc.u(
         optimal_params[0] + params[0],
@@ -59,11 +59,10 @@ def apply_parametrized_circuit(
         optimal_params[5] + params[5],
         q_reg[1],
     )
-
     my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
-    # my_qc.u(np.pi *params[0], np.pi *params[1], np.pi *params[2], 0)
-    # my_qc.u(np.pi *params[3], np.pi *params[4], np.pi *params[5], 1)
-    # my_qc.rzx(np.pi * params[6], 0, 1)
+    # my_qc.u(2 * np.pi * params[0], 2 *  np.pi *params[1], 2 * np.pi * params[2], 0)
+    # my_qc.u(2 * np.pi * params[3], 2 * np.pi * params[4], 2 * np.pi * params[5], 1)
+    # my_qc.rzx(2 * np.pi * params[6], 0, 1)
     qc.append(my_qc.to_instruction(label="custom_cx"), q_reg)
 
 
@@ -112,10 +111,6 @@ def get_backend(
                     backend, subsystem_list=list(physical_qubits)
                 )
                 _, _ = perform_standard_calibrations(backend)
-            else:
-                raise ValueError(
-                    "No backend was found with given name, DynamicsBackend cannot be used"
-                )
     else:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
         if use_dynamics is not None and use_dynamics:
@@ -124,7 +119,7 @@ def get_backend(
         else:
             # TODO: Add here your custom backend
             # For now use FakeJakartaV2 as a safe working custom backend
-            backend = dynamics_backend
+            backend = FakeJakartaV2()
 
     if backend is None:
         Warning("No backend was provided, Statevector simulation will be used")

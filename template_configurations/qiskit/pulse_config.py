@@ -5,25 +5,25 @@ import os
 import yaml
 from gymnasium.spaces import Box
 import numpy as np
-import warnings
 from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from helper_functions import (
     get_ecr_params,
-    get_pulse_params,
+    get_x_params,
     load_q_env_from_yaml_file,
     perform_standard_calibrations,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
-from qiskit_dynamics import DynamicsBackend
+from qiskit_dynamics import Solver, DynamicsBackend
+from custom_jax_sim.jax_solver import JaxSolver
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
-from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit.providers.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from dynamics_config import dynamics_backend
+from template_configurations.qiskit.dynamics_config import dynamics_backend
 from typing import List, Sequence
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
@@ -50,7 +50,7 @@ def new_params_ecr(
         for sched in ["cr45p", "cr45m"]:
             for i, feature in enumerate(pulse_features):
                 if feature != "duration" and feature in available_features:
-                    new_params[(feature, qubits, sched)] += params[i]
+                    new_params[(feature, qubits, sched)] = params[i]
                 else:
                     new_params[
                         (feature, qubits, sched)
@@ -83,7 +83,7 @@ def new_params_x(
     pulse_features: List[str],
     duration_window: float,
 ):
-    new_params, available_features, _, _ = get_pulse_params(backend, qubits, "x")
+    new_params, available_features, _, _ = get_x_params(backend, qubits)
     if len(pulse_features) != len(params):
         raise ValueError(
             f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)}"
@@ -120,7 +120,7 @@ def custom_schedule(
 
     # Load here all pulse parameters names that should be tuned during model-free calibration.
     # Here we focus on real time tunable pulse parameters (amp, angle, duration)
-    ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]
+    ecr_pulse_features = ['amp', 'angle', 'σ', 'risefall', 'tgt_amp', 'tgt_angle']
     x_pulse_features = ["amp", "angle"]
     # Uncomment line below to include pulse duration as tunable parameter
     # ecr_pulse_features.append("duration")
@@ -158,6 +158,7 @@ def custom_schedule(
     gate_name = "ecr" if len(physical_qubits) == 2 else "x"
     # Retrieve schedule (for now, works only with ECRGate(), as no library yet available for CX)
 
+    print(new_params)
     return cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
 
@@ -225,21 +226,22 @@ def get_backend(
                 backend_name = "fake_jakarta"
             backend = FakeProvider().get_backend(backend_name)
 
-    if use_dynamics is not None and use_dynamics:
-        if backend is not None:
-            backend = DynamicsBackend.from_backend(
-                backend, subsystem_list=list(physical_qubits)
-            )
-        else:
-            # TODO: Add here your custom DynamicsBackend
-            backend = dynamics_backend
-
-        _, _ = perform_standard_calibrations(backend)
+        if use_dynamics is not None and use_dynamics:
+            if backend is not None:
+                backend = DynamicsBackend.from_backend(
+                    backend, subsystem_list=list(physical_qubits)
+                )
+                _, _ = perform_standard_calibrations(backend)
     else:
-        # TODO: Add here your custom backend
-        pass
+        # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
+        if use_dynamics:
+            backend = dynamics_backend
+            _, _ = perform_standard_calibrations(backend)
+        else:
+            # TODO: Add here your custom backend
+            pass
     if backend is None:
-        warnings.warn("No backend was provided, Statevector simulation will be used")
+        Warning("No backend was provided, Statevector simulation will be used")
 
     return backend
 

@@ -54,10 +54,12 @@ from qiskit_ibm_runtime import (
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
 
+import optuna
+
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
-from custom_jax_sim.jax_solver import PauliToQuditOperator
+from custom_jax_sim.jax_solver import PauliToQuditOperator, JaxSolver 
+from custom_jax_sim.dynamicsbackend_estimator import DynamicsBackendEstimator
 from qconfig import QiskitConfig
-from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 
@@ -114,27 +116,33 @@ def perform_standard_calibrations(
     """
 
     target, qubits = backend.target, range(backend.num_qubits)
+    # for i, dim in enumerate(backend.options.subsystem_dims):
+    #     if dim > 1:
+    #         qubits.append(i)
     num_qubits = len(qubits)
-    single_qubit_properties = {(qubit,): None for qubit in qubits}
-    single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+    # single_qubit_properties = {(qubit,): None for qubit in range(num_qubits)}
+    # single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+    single_qubit_properties = {(qubit,): None for qubit in range(backend.num_qubits)}
+    single_qubit_errors = {(qubit,): 0.0 for qubit in range(backend.num_qubits)}
 
     control_channel_map = backend.options.control_channel_map
-    physical_control_channel_map = None
-    if control_channel_map is not None:
+    if not bool(control_channel_map):
+        control_channel_map = {
+            (qubits[0], qubits[1]): index
+            for index, qubits in enumerate(tuple(permutations(qubits, 2)))
+        }
+
+    if backend.options.control_channel_map:
         physical_control_channel_map = {
             (qubit_pair[0], qubit_pair[1]): backend.control_channel(
                 (qubit_pair[0], qubit_pair[1])
             )
-            for qubit_pair in control_channel_map
+            for qubit_pair in backend.options.control_channel_map
         }
-    elif num_qubits > 1:
-        all_to_all_connectivity = tuple(permutations(qubits, 2))
-        control_channel_map = {
-            (q[0], q[1]): index for index, q in enumerate(all_to_all_connectivity)
-        }
+    else:
         physical_control_channel_map = {
-            (q[0], q[1]): [pulse.ControlChannel(index)]
-            for index, q in enumerate(all_to_all_connectivity)
+            (qubit_pair[0], qubit_pair[1]): [pulse.ControlChannel(index)]
+            for index, qubit_pair in enumerate(tuple(permutations(qubits, 2)))
         }
     backend.set_options(control_channel_map=control_channel_map)
     coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
@@ -356,6 +364,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
                 else np.angle(np.max(target_pulse.samples)),
                 ("duration", physical_qubits, sched): control_pulse.duration,
                 ("σ", physical_qubits, sched): control_pulse.sigma,
+                # ("β", physical_qubits, sched): control_pulse.beta,
                 ("risefall", physical_qubits, sched): (
                     control_pulse.duration - control_pulse.width
                 )
@@ -375,11 +384,9 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
     return default_params, pulse_features, basis_gate_instructions, instructions_array
 
 
-def get_pulse_params(
-    backend: Backend_type, physical_qubit: Sequence[int], name: str = "x"
-):
+def get_x_params(backend: Backend_type, physical_qubit: Sequence[int]):
     """
-    Determine default parameters for SX or X gate on provided backend
+    Determine default parameters for SX gate on provided backend
     """
     if not isinstance(backend, (BackendV1, BackendV2)):
         raise TypeError("Backend must be defined")
@@ -387,15 +394,15 @@ def get_pulse_params(
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
         instruction_schedule_map = backend.target.instruction_schedule_map()
-    basis_gate_inst = instruction_schedule_map.get(name, physical_qubit)
+    basis_gate_inst = instruction_schedule_map.get("x", physical_qubit)
     basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
-    ref_pulse = basis_gate_inst.instructions[0][1].pulse
+    sx_pulse = basis_gate_inst.instructions[0][1].pulse
     default_params = {
-        ("amp", physical_qubit, "x"): ref_pulse.amp,
-        ("σ", physical_qubit, "x"): ref_pulse.sigma,
-        ("β", physical_qubit, "x"): ref_pulse.beta,
-        ("duration", physical_qubit, "x"): ref_pulse.duration,
-        ("angle", physical_qubit, "x"): ref_pulse.angle,
+        ("amp", physical_qubit, "x"): sx_pulse.amp,
+        ("σ", physical_qubit, "x"): sx_pulse.sigma,
+        ("β", physical_qubit, "x"): sx_pulse.beta,
+        ("duration", physical_qubit, "x"): sx_pulse.duration,
+        ("angle", physical_qubit, "x"): sx_pulse.angle,
     }
     pulse_features = ["amp", "angle", "duration", "σ", "β"]
     return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
@@ -426,7 +433,7 @@ def state_fidelity_from_state_tomography(
         jobs = run_jobs(session, state_tomo._transpiled_circuits())
         exp_data = state_tomo._initialize_experiment_data()
         exp_data.add_jobs(jobs)
-        exp_data = state_tomo.analysis.run(exp_data).block_for_results()
+        results = state_tomo.analysis.run(exp_data).block_for_results()
     else:
         exp_data = state_tomo.run().block_for_results()
 
@@ -513,9 +520,6 @@ def retrieve_primitives(
     abstraction_level: str = "circuit",
     estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
 ) -> (Estimator_type, Sampler_type):
-    """
-    Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
-    """
     if isinstance(
         backend, RuntimeBackend
     ):  # Real backend, or Simulation backend from Runtime Service
@@ -574,9 +578,8 @@ def retrieve_primitives(
             sampler = BackendSampler(
                 backend, options=estimator_options, skip_transpilation=False
             )
-            if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
+            if config.do_calibrations and "x" not in backend.operation_names:
                 calibration_files: List[str] = config.calibration_files
-                print("3")
                 _, _ = perform_standard_calibrations(backend, calibration_files)
 
         else:
@@ -782,66 +785,7 @@ def get_solver_and_freq_from_backend(
     return channel_freqs, solver
 
 
-def build_qubit_space_projector(initial_subsystem_dims: list):
-    """
-    Build projector on qubit space from initial subsystem dimensions
-    """
-    total_dim = np.prod(initial_subsystem_dims)
-    projector = Operator(
-        np.zeros((total_dim, total_dim), dtype=np.complex128),
-        input_dims=tuple(initial_subsystem_dims),
-        output_dims=tuple(initial_subsystem_dims),
-    )
-    for i in range(total_dim):
-        s = Statevector.from_int(i, initial_subsystem_dims)
-        for key in s.to_dict().keys():
-            if all(c in "01" for c in key):
-                projector += s.to_operator()
-                break
-            else:
-                continue
-    return projector
-
-
-def qubit_projection(unitary, initial_subsystem_list):
-    """
-    Project unitary on qubit space
-    """
-
-    proj = build_qubit_space_projector(initial_subsystem_list)
-    new_dim = 2 ** len(initial_subsystem_list)
-    qubitized_unitary = np.zeros((new_dim, new_dim), dtype=np.complex128)
-    qubit_count1 = qubit_count2 = 0
-    new_unitary = (
-        proj
-        @ Operator(
-            unitary,
-            input_dims=initial_subsystem_list,
-            output_dims=initial_subsystem_list,
-        )
-        @ proj
-    )
-    for i in range(np.prod(initial_subsystem_list)):
-        for j in range(np.prod(initial_subsystem_list)):
-            if new_unitary.data[i, j] != 0:
-                qubitized_unitary[qubit_count1, qubit_count2] = new_unitary.data[i, j]
-                qubit_count2 += 1
-                if qubit_count2 == new_dim:
-                    qubit_count2 = 0
-                    qubit_count1 += 1
-                    break
-    qubitized_unitary = Operator(
-        qubitized_unitary,
-        input_dims=(2,) * len(initial_subsystem_list),
-        output_dims=(2,) * len(initial_subsystem_list),
-    )
-    return qubitized_unitary
-
-
 def load_q_env_from_yaml_file(file_path: str):
-    """
-    Load Qiskit Quantum Environment from yaml file
-    """
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
@@ -865,7 +809,6 @@ def load_q_env_from_yaml_file(file_path: str):
         "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
         "target": {
             "register": config["TARGET"]["PHYSICAL_QUBITS"],
-            "training_with_cal": config["ENV"]["TRAINING_WITH_CAL"],
         },
     }
     if "GATE" in config["TARGET"]:
@@ -893,7 +836,8 @@ def load_agent_from_yaml_file(file_path: str):
         config = yaml.safe_load(f)
 
     ppo_params = {
-        "n_steps": config["AGENT"]["NUM_UPDATES"],
+        "run_name": config["AGENT"]["RUN_NAME"],
+        "n_updates": config["AGENT"]["NUM_UPDATES"],
         "n_epochs": config["AGENT"]["N_EPOCHS"],
         "batch_size": config["AGENT"]["MINIBATCH_SIZE"],
         "learning_rate": config["AGENT"]["LR_ACTOR"],
@@ -907,15 +851,64 @@ def load_agent_from_yaml_file(file_path: str):
         "clip_range": config["AGENT"]["CLIP_RATIO"],
     }
     network_params = {
-        "optimizer": config["AGENT"]["OPTIMIZER"],
-        "n_units": config["AGENT"]["N_UNITS"],
-        "activation": config["AGENT"]["ACTIVATION"],
-        "include_critic": config["AGENT"]["INCLUDE_CRITIC"],
-        "checkpoint_dir": config["AGENT"]["CHKPT_DIR"],
+        "optimizer": config["NETWORK"]["OPTIMIZER"],
+        "n_units": config["NETWORK"]["N_UNITS"],
+        "activation": config["NETWORK"]["ACTIVATION"],
+        "include_critic": config["NETWORK"]["INCLUDE_CRITIC"],
+        "normalize_advantage": config["NETWORK"]["NORMALIZE_ADVANTAGE"],
+        "checkpoint_dir": config["NETWORK"]["CHKPT_DIR"],
     }
 
-    return ppo_params, network_params
+    hpo_params = {
+        "num_trials": config["HPO"]["NUM_TRIALS"],
+        "n_updates": config["HPO"]["NUM_UPDATES"],
+        "n_epochs": config["HPO"]["N_EPOCHS"],
+        "minibatch_size": config["HPO"]["MINIBATCH_SIZE"],
+        "batchsize_multiplier": config["HPO"]["BATCHSIZE_MULTIPLIER"],
+        "learning_rate": config["HPO"]["LR_ACTOR"],
+        "gamma": config["HPO"]["GAMMA"],
+        "gae_lambda": config["HPO"]["GAE_LAMBDA"],
+        "ent_coef": config["HPO"]["ENT_COEF"],
+        "v_coef": config["HPO"]["V_COEF"],
+        "max_grad_norm": config["HPO"]["GRADIENT_CLIP"],
+        "clip_value_loss": config["HPO"]["CLIP_VALUE_LOSS"],
+        "clip_value_coef": config["HPO"]["CLIP_VALUE_COEF"],
+        "clip_ratio": config["HPO"]["CLIP_RATIO"],
+    }
 
+    return ppo_params, network_params, hpo_params
+
+def create_agent_config(trial: optuna.trial.Trial, hpo_config: dict, network_config: dict, ppo_params: dict):
+    agent_config = {
+        'N_UPDATES': trial.suggest_int('N_UPDATES', hpo_config['n_updates'][0], hpo_config['n_updates'][1]),
+        'N_EPOCHS': trial.suggest_int('N_EPOCHS', hpo_config['n_epochs'][0], hpo_config['n_epochs'][1]),
+        'MINIBATCH_SIZE': trial.suggest_categorical('MINIBATCH_SIZE', hpo_config['minibatch_size']),
+        'BATCHSIZE_MULTIPLIER': trial.suggest_int('BATCHSIZE_MULTIPLIER', hpo_config['batchsize_multiplier'][0], hpo_config['batchsize_multiplier'][1]),
+        'LR': trial.suggest_float('LR', hpo_config['learning_rate'][0], hpo_config['learning_rate'][1], log=True),
+        'GAMMA': trial.suggest_float('GAMMA', hpo_config['gamma'][0], hpo_config['gamma'][1]),
+        'GAE_LAMBDA': trial.suggest_float('GAE_LAMBDA', hpo_config['gae_lambda'][0], hpo_config['gae_lambda'][1]),
+        'ENT_COEF': trial.suggest_float('ENT_COEF', hpo_config['ent_coef'][0], hpo_config['ent_coef'][1]),
+        'V_COEF': trial.suggest_float('V_COEF', hpo_config['v_coef'][0], hpo_config['v_coef'][1]),
+        'GRADIENT_CLIP': trial.suggest_float('GRADIENT_CLIP', hpo_config['max_grad_norm'][0], hpo_config['max_grad_norm'][1]),
+        'CLIP_VALUE_COEF': trial.suggest_float('CLIP_VALUE_COEF', hpo_config['clip_value_coef'][0], hpo_config['clip_value_coef'][1]),
+        'CLIP_RATIO': trial.suggest_float('CLIP_RATIO', hpo_config['clip_ratio'][0], hpo_config['clip_ratio'][1]),
+        }
+    agent_config['BATCHSIZE'] = agent_config['MINIBATCH_SIZE'] * agent_config['BATCHSIZE_MULTIPLIER']
+    # The upper hyperparameters are part of HPO scope
+    hyperparams = list(agent_config.keys())
+
+    # The following hyperparameters are NOT part of HPO scope
+    agent_config['CLIP_VALUE_LOSS'] = hpo_config['clip_value_loss']
+
+    # Add network-specific hyperparameters that are not part of HPO scope
+    agent_config['OPTIMIZER'] = network_config['optimizer']
+    agent_config['N_UNITS'] = network_config['n_units']
+    agent_config['ACTIVATION'] = network_config['activation']
+    agent_config['INCLUDE_CRITIC'] = network_config['include_critic']
+    agent_config['NORMALIZE_ADVANTAGE'] = network_config['normalize_advantage']
+    agent_config['RUN_NAME'] = ppo_params['run_name']
+
+    return agent_config, hyperparams
 
 def retrieve_backend_info(
     backend: Backend, estimator: Optional[RuntimeEstimator] = None
