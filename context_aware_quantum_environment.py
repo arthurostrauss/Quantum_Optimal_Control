@@ -30,7 +30,7 @@ from qiskit.quantum_info.states import Statevector, DensityMatrix
 from qiskit.transpiler import Layout, InstructionProperties, Target
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
-from qiskit_algorithms.state_fidelities import ComputeUncompute
+from qiskit.algorithms.state_fidelities import ComputeUncompute
 from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BackendData

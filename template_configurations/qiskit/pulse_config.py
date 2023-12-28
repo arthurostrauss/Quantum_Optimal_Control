@@ -17,7 +17,8 @@ from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
 from qiskit_dynamics import DynamicsBackend
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
-from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit.providers.fake_provider import FakeProvider
+# from qiskit_ibm_runtime.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig

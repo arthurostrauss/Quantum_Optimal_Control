@@ -40,7 +40,7 @@ from qiskit.quantum_info.operators.measures import (
 )
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import Layout
-from qiskit_algorithms.state_fidelities import ComputeUncompute
+from qiskit.algorithms.state_fidelities import ComputeUncompute
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
