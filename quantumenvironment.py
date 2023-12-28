@@ -82,14 +82,14 @@ def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
     :return: Target state supplemented with appropriate "Chi" key
     """
     assert "dm" in target_state, "No input data for target state, provide DensityMatrix"
-    d = 2**n_qubits
+    d = 2 ** n_qubits
     Pauli_basis = pauli_basis(num_qubits=n_qubits)
     target_state["Chi"] = np.array(
         [
             np.trace(
                 np.array(target_state["dm"].to_operator()) @ Pauli_basis[k].to_matrix()
             ).real
-            for k in range(d**2)
+            for k in range(d ** 2)
         ]
     )
     # Real part is taken to convert it in good format,
@@ -118,7 +118,7 @@ def _define_target(target: Dict):
             " 'circuit' or 'dm' for state preparation"
         )
     elif ("gate" in target and "circuit" in target) or (
-        "gate" in target and "dm" in target
+            "gate" in target and "dm" in target
     ):
         raise KeyError("Cannot have simultaneously a gate target and a state target")
     if "circuit" in target or "dm" in target:  # State preparation task
@@ -130,7 +130,7 @@ def _define_target(target: Dict):
             target["dm"] = DensityMatrix(target["circuit"])
 
         assert (
-            "dm" in target
+                "dm" in target
         ), "no DensityMatrix or circuit argument provided to target dictionary"
         assert isinstance(
             target["dm"], DensityMatrix
@@ -248,7 +248,7 @@ class QuantumEnvironment(Env):
                 self._layout,
             ) = _define_target(training_config.target)
 
-            self._d = 2**self.n_qubits
+            self._d = 2 ** self.n_qubits
             self.backend = training_config.backend_config.backend
 
             if self.backend is not None:
@@ -321,10 +321,10 @@ class QuantumEnvironment(Env):
         self.check_reward()
 
     def reset(
-        self,
-        *,
-        seed: int | None = None,
-        options: dict[str, Any] | None = None,
+            self,
+            *,
+            seed: int | None = None,
+            options: dict[str, Any] | None = None,
     ) -> tuple[ObsType, dict[str, Any]]:
         """
         Reset the environment to its initial state
@@ -357,7 +357,7 @@ class QuantumEnvironment(Env):
         )
 
     def step(
-        self, action: ActType
+            self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         self._step_tracker += 1
         if self._episode_ended:
@@ -401,7 +401,7 @@ class QuantumEnvironment(Env):
 
     def episode_length(self, global_step: int):
         assert (
-            global_step == self.step_tracker
+                global_step == self.step_tracker
         ), "Given step not synchronized with internal environment step counter"
         return 1
 
@@ -432,8 +432,8 @@ class QuantumEnvironment(Env):
             return False
         else:
             return (
-                self._episode_tracker % self.benchmark_cycle == 0
-                and self._episode_tracker > 1
+                    self._episode_tracker % self.benchmark_cycle == 0
+                    and self._episode_tracker > 1
             )
 
     def perform_action(self, actions: np.array):
@@ -448,7 +448,7 @@ class QuantumEnvironment(Env):
 
         params, batch_size = np.array(actions), self.batch_size
         assert (
-            len(params) == batch_size
+                len(params) == batch_size
         ), f"Action size mismatch {len(params)} != {batch_size} "
         self.action_history.append(params)
 
@@ -488,7 +488,7 @@ class QuantumEnvironment(Env):
             raise
         self.reward_history.append(reward_table)
         assert (
-            len(reward_table) == self.batch_size
+                len(reward_table) == self.batch_size
         ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
         return reward_table  # Shape [batchsize]
 
@@ -584,13 +584,13 @@ class QuantumEnvironment(Env):
             elif self.abstraction_level == "pulse":
                 # Pulse simulation
                 if isinstance(self.backend, DynamicsBackend) and isinstance(
-                    self.backend.options.solver, JaxSolver
+                        self.backend.options.solver, JaxSolver
                 ):
                     # Jax compatible pulse simulation
 
-                    unitaries = np.array(self.backend.options.solver.unitary_solve())[
-                        :, 1, :, :
-                    ]
+                    unitaries = np.array(self.backend.options.solver.unitary_solve(params))[
+                                :, 1, :, :
+                                ]
 
                     qubitized_unitaries = [
                         qubit_projection(u, self.backend.options.subsystem_dims)
@@ -730,7 +730,7 @@ class QuantumEnvironment(Env):
     @n_qubits.setter
     def n_qubits(self, n_qubits):
         assert (
-            isinstance(n_qubits, int) and n_qubits > 0
+                isinstance(n_qubits, int) and n_qubits > 0
         ), "n_qubits must be a positive integer"
         self._n_qubits = n_qubits
 

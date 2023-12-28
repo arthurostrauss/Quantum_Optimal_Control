@@ -18,6 +18,8 @@ import numpy as np
 from scipy.integrate._ivp.ivp import OdeResult
 
 jit_wrap = wrap(jit, decorator=True)
+
+
 # qd_vmap = wrap(vmap, decorator=True)
 
 
@@ -50,22 +52,22 @@ class JaxSolver(Solver):
     non-jit compiled)"""
 
     def __init__(
-        self,
-        static_hamiltonian: Optional[Array] = None,
-        hamiltonian_operators: Optional[Array] = None,
-        static_dissipators: Optional[Array] = None,
-        dissipator_operators: Optional[Array] = None,
-        hamiltonian_channels: Optional[List[str]] = None,
-        dissipator_channels: Optional[List[str]] = None,
-        channel_carrier_freqs: Optional[dict] = None,
-        dt: Optional[float] = None,
-        rotating_frame: Optional[Union[Array, RotatingFrame]] = None,
-        in_frame_basis: bool = False,
-        evaluation_mode: str = "dense",
-        rwa_cutoff_freq: Optional[float] = None,
-        rwa_carrier_freqs: Optional[Union[Array, Tuple[Array, Array]]] = None,
-        validate: bool = True,
-        schedule_func: Optional[Callable[[], Schedule]] = None,
+            self,
+            static_hamiltonian: Optional[Array] = None,
+            hamiltonian_operators: Optional[Array] = None,
+            static_dissipators: Optional[Array] = None,
+            dissipator_operators: Optional[Array] = None,
+            hamiltonian_channels: Optional[List[str]] = None,
+            dissipator_channels: Optional[List[str]] = None,
+            channel_carrier_freqs: Optional[dict] = None,
+            dt: Optional[float] = None,
+            rotating_frame: Optional[Union[Array, RotatingFrame]] = None,
+            in_frame_basis: bool = False,
+            evaluation_mode: str = "dense",
+            rwa_cutoff_freq: Optional[float] = None,
+            rwa_carrier_freqs: Optional[Union[Array, Tuple[Array, Array]]] = None,
+            validate: bool = True,
+            schedule_func: Optional[Callable[[], Schedule]] = None,
     ):
         """Initialize solver with model information.
 
@@ -150,7 +152,7 @@ class JaxSolver(Solver):
     def batched_sims(self):
         return self._batched_sims
 
-    def unitary_solve(self):
+    def unitary_solve(self, param_values):
         """
         This method is used to solve the unitary evolution of the system and get the total unitary
         (not just the final state)
@@ -186,22 +188,22 @@ class JaxSolver(Solver):
 
         jit_func = jit(vmap(sim_function, in_axes=(None, 0)))
         batch_results_t, batch_results_y = jit_func(
-            Array(self._t_span).data, Array(self._param_values).data
+            Array(self._t_span).data, Array(param_values).data
         )
         return batch_results_y
 
     def _solve_schedule_list_jax(
-        self,
-        t_span_list: List[Array],
-        y0_list: List[Union[Array, QuantumState, BaseOperator]],
-        schedule_list: List[Schedule],
-        convert_results: bool = True,
-        **kwargs,
+            self,
+            t_span_list: List[Array],
+            y0_list: List[Union[Array, QuantumState, BaseOperator]],
+            schedule_list: List[Schedule],
+            convert_results: bool = True,
+            **kwargs,
     ) -> List[OdeResult]:
         if (
-            "parameter_dicts" not in kwargs
-            or "parameter_values" not in kwargs
-            or "observables" not in kwargs
+                "parameter_dicts" not in kwargs
+                or "parameter_values" not in kwargs
+                or "observables" not in kwargs
         ):
             # If the user is not using the estimator, then we can just use the original solver method
             return super()._solve_schedule_list_jax(
@@ -233,7 +235,7 @@ class JaxSolver(Solver):
                 qubit_list = []
                 for circuit_instruction in circuit.data:
                     assert (
-                        len(circuit_instruction.qubits) == 1
+                            len(circuit_instruction.qubits) == 1
                     ), "Operation non local, need local rotations"
                     if circuit_instruction.qubits[0] not in qubit_list:
                         qubit_list.append(circuit_instruction.qubits[0])
@@ -241,7 +243,7 @@ class JaxSolver(Solver):
 
                     pauli_rotations[i][qubit_counter - 1] = pauli_rotations[i][
                         qubit_counter - 1
-                    ].compose(Operator(circuit_instruction.operation))
+                        ].compose(Operator(circuit_instruction.operation))
 
             observables = [
                 PauliToQuditOperator(pauli_rotations[i], subsystem_dims)
