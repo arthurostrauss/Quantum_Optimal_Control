@@ -122,3 +122,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# result files of training
+*.pkl
+*.pickle
+events.out.tfevents*
