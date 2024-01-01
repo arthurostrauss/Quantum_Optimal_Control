@@ -23,6 +23,7 @@ from qiskit.transpiler import (
     InstructionProperties,
     Layout,
 )
+from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import (
@@ -581,11 +582,12 @@ def retrieve_primitives(
 
         else:
             raise TypeError("Backend not recognized")
-    return estimator, sampler
+    return estimator, ComputeUncompute(sampler)
 
 
 def set_primitives_transpile_options(
-        estimator, sampler, layout, skip_transpilation, physical_qubits
+        estimator: Estimator_type, fidelity_checker: ComputeUncompute, layout: Layout,
+        skip_transpilation: bool, physical_qubits: list
 ):
     if isinstance(estimator, RuntimeEstimator):
         # TODO: Could change resilience level
@@ -595,23 +597,23 @@ def set_primitives_transpile_options(
             skip_transpilation=skip_transpilation,
         )
         estimator.options.transpilation["initial_layout"] = physical_qubits
-        sampler.set_options(**estimator.options)
+        fidelity_checker.update_default_options(**estimator.options)
 
     elif isinstance(estimator, AerEstimator):
         estimator._transpile_options = AerOptions(
             initial_layout=layout, optimization_level=0
         )
         estimator._skip_transpilation = skip_transpilation
-        sampler_transpile_options = AerOptions(
+        fidelity_checker._sampler._transpile_options = AerOptions(
             initial_layout=layout, optimization_level=0
         )
-        sampler._skip_transpilation = skip_transpilation
+        fidelity_checker._sampler._skip_transpilation = skip_transpilation
 
     elif isinstance(estimator, BackendEstimator):
         estimator.set_transpile_options(initial_layout=layout, optimization_level=0)
         estimator._skip_transpilation = skip_transpilation
-        sampler.set_transpile_options(initial_layout=layout, optimization_level=0)
-        sampler._skip_transpilation = skip_transpilation
+        fidelity_checker._sampler.set_transpile_options(initial_layout=layout, optimization_level=0)
+        fidelity_checker._sampler._skip_transpilation = skip_transpilation
 
     else:
         raise TypeError(
@@ -801,6 +803,22 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
             else:
                 continue
     return projector
+
+
+def projected_statevector(statevector, subsystem_dims):
+    proj = build_qubit_space_projector(subsystem_dims)
+    new_dim = 2 ** len(subsystem_dims)
+    qubitized_statevector = np.zeros(new_dim, dtype=np.complex128)
+    qubit_count = 0
+    new_statevector = proj @ Statevector(statevector, dims=subsystem_dims)
+    for i in range(np.prod(subsystem_dims)):
+        if new_statevector.data[i] != 0:
+            qubitized_statevector[qubit_count] = new_statevector.data[i]
+            qubit_count += 1
+    qubitized_statevector = Statevector(
+        qubitized_statevector, dims=(2,) * len(subsystem_dims)
+    )
+    return qubitized_statevector
 
 
 def qubit_projection(unitary, subsystem_dims):

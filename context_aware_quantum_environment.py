@@ -29,6 +29,8 @@ from qiskit.quantum_info.operators.measures import (
 from qiskit.quantum_info.states import Statevector, DensityMatrix
 from qiskit.transpiler import Layout, InstructionProperties, Target
 from qiskit_aer.backends import AerSimulator
+from qiskit_aer.backends.aerbackend import AerBackend
+from qiskit_aer.noise import NoiseModel
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_dynamics import DynamicsBackend
@@ -52,7 +54,7 @@ from helper_functions import (
     retrieve_backend_info,
     get_ecr_params,
     set_primitives_transpile_options,
-    handle_session,
+    handle_session, qubit_projection, projected_statevector,
 )
 from qconfig import QEnvConfig
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
@@ -74,11 +76,11 @@ def create_array(circ_trunc, batchsize, n_actions):
 
 class ContextAwareQuantumEnvironment(QuantumEnvironment):
     def __init__(
-        self,
-        training_config: QEnvConfig,
-        circuit_context: QuantumCircuit,
-        training_steps_per_gate: Union[List[int], int] = 1500,
-        intermediate_rewards: bool = False,
+            self,
+            training_config: QEnvConfig,
+            circuit_context: QuantumCircuit,
+            training_steps_per_gate: Union[List[int], int] = 1500,
+            intermediate_rewards: bool = False,
     ):
         """
         Class for wrapping a quantum environment in a Gym environment able to tackle
@@ -100,7 +102,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         super().__init__(training_config)
 
         assert (
-            self.target_type == "gate"
+                self.target_type == "gate"
         ), "This class is made for gate calibration only"
 
         # Retrieve information on the backend for building circuit context workflow
@@ -126,6 +128,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             )
         )
         if self.abstraction_level == "pulse":
+            # Add ECR gate to basis gates if not present
             if "ecr" not in basis_gates and self.backend_data.num_qubits > 1:
                 target: Target = self.backend.target
                 target.add_instruction(
@@ -159,8 +162,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 for i, gate in enumerate(basis_gates):
                     if gate == "cx":
                         basis_gates.pop(i)
-                # raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the future")
-
+                # raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the
+                # future")
+        # Transpile circuit context to match backend and retreve instruction timings
         self.circuit_context = transpile(
             circuit_context.remove_final_measurements(inplace=False),
             backend=self.backend,
@@ -171,7 +175,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             optimization_level=0,
             dt=dt,
         )
-
+        # Define target register and nearest neighbor register for truncated circuits
         self.tgt_register = QuantumRegister(
             bits=[self.circuit_context.qubits[i] for i in self.physical_target_qubits],
             name="tgt",
@@ -182,7 +186,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             ],
             name="nn",
         )
-
+        # Define layout for transpilation
         self.layout = Layout(
             {
                 self.tgt_register[i]: self.physical_target_qubits[i]
@@ -193,6 +197,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 for j in range(len(self.nn_register))
             }
         )
+        # Define input state preparation circuits for the whole circuit context
         self._input_circuits = [
             PauliPreparationBasis().circuit(s).decompose()
             for s in product(
@@ -203,18 +208,16 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
         set_primitives_transpile_options(
             self.estimator,
-            self.sampler,
+            self.fidelity_checker,
             self.layout,
             skip_transpilation,
             self.physical_target_qubits + self.physical_neighbor_qubits,
         )
 
-        self.fidelity_checker._sampler = self.sampler
-        self._d = 2**self.tgt_register.size
+        self._d = 2 ** self.tgt_register.size
 
         # Adjust target register to match it with circuit context
         self.target_instruction.qubits = tuple(self.tgt_register)
-
         self._tgt_instruction_counts = self.circuit_context.data.count(
             self.target_instruction
         )
@@ -228,7 +231,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         )
 
         # Store time and instruction indices where target gate is played in circuit
-
         self._target_instruction_timings = []
         if instruction_durations is not None:
             for i, instruction in enumerate(self.circuit_context.data):
@@ -242,15 +244,17 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             self.baseline_truncations,
             self.custom_gates,
         ) = self._generate_circuit_truncations()
+
+        self._training_steps_per_gate = training_steps_per_gate
+        self._inside_trunc_tracker = 0
+        self._trunc_index = 0
+
+        # Storing data
         self._punctual_avg_fidelities = np.zeros(self.batch_size)
         self._punctual_circuit_fidelities = np.zeros(self.batch_size)
         self._punctual_observable: SparsePauliOp = SparsePauliOp("X")
         self.circuit_fidelity_history = []
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
-        self._training_steps_per_gate = training_steps_per_gate
-        self._inside_trunc_tracker = 0
-        self._trunc_index = 0
-
         self._intermediate_rewards = intermediate_rewards
         self._max_return = 0
         self._best_action = np.zeros((self.batch_size, self.action_space.shape[-1]))
@@ -312,7 +316,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         )
 
     def _generate_circuit_truncations(
-        self,
+            self,
     ) -> Tuple[List[QuantumCircuit], List[QuantumCircuit], List[QuantumCircuit]]:
         custom_circuit_truncations = [
             QuantumCircuit(
@@ -331,7 +335,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         for i in range(self.tgt_instruction_counts):
             counts = 0
             for start_time, instruction in zip(
-                self.circuit_context.op_start_times, self.circuit_context.data
+                    self.circuit_context.op_start_times, self.circuit_context.data
             ):
                 qubits_in_vicinity = np.array(
                     [
@@ -343,13 +347,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     qubit[0]
                     for qubit in qubits_in_vicinity
                     if not qubit[1]
-                    and qubit[0] not in custom_circuit_truncations[i].qubits
+                       and qubit[0] not in custom_circuit_truncations[i].qubits
                 ]
 
                 # if all([qubit in self.tgt_register or qubit in self.nn_register for qubit in instruction.qubits]):
                 if any(qubits_in_vicinity[:, 1]):
                     if (
-                        counts <= i or start_time <= self._target_instruction_timings[i]
+                            counts <= i or start_time <= self._target_instruction_timings[i]
                     ):  # Append until reaching tgt i
                         if other_qubits:
                             last_reg_name = (
@@ -358,7 +362,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                             if last_reg_name != "nn":
                                 new_reg = QuantumRegister(
                                     name=last_reg_name
-                                    + str(int(last_reg_name[-1]) + 1),
+                                         + str(int(last_reg_name[-1]) + 1),
                                     bits=other_qubits,
                                 )
                             else:
@@ -408,30 +412,17 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: Batch of actions
-        :param check_on_exp: If True, run on backend a set of fidelity characterization experiments (ComputeUncompute
-            for circuit fidelity, ProcessTomography for gate fidelities), if False, simulate StateVector
         """
         n_actions = self.action_space.shape[-1]
 
         n_custom_instructions = (
-            self._trunc_index + 1
+                self._trunc_index + 1
         )  # Count custom instructions present in the current truncation
         benchmark_circ = self.circuit_truncations[self._trunc_index].copy(name="b_circ")
         baseline_circ = self.baseline_truncations[self._trunc_index]
 
-        custom_gate_circuits = []
-        for i in range(n_custom_instructions):
-            assigned_gate = QuantumCircuit(
-                self.tgt_register
-            )  # Assign parameter to each custom gate
-            # to check its individual gate fidelity (have to detour by a QuantumCircuit)
-            self.parametrized_circuit_func(
-                assigned_gate, self._parameters[i], self.tgt_register
-            )
-            custom_gate_circuits.append(assigned_gate)
-
         if (
-            self.check_on_exp
+                self.check_on_exp
         ):  # Perform real experiments to retrieve from measurement data fidelities
             # Assess circuit fidelity with ComputeUncompute algo
             try:
@@ -451,10 +442,14 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         else:  # Perform ideal simulation at circuit or pulse level
             if self.abstraction_level == "circuit":
                 # Calculate circuit fidelity with statevector simulation
+                if isinstance(self.backend, AerBackend):
+                    backend = self.backend
+                else:
+                    noise_model = NoiseModel.from_backend(self.backend)
+                    backend = AerSimulator(method="density_matrix", noise_model=noise_model)
 
-                benchmark_circ.save_statevector()
-                state_backend = AerSimulator(method="statevector")
-                states_result = state_backend.run(
+                benchmark_circ.save_density_matrix()
+                states_result = backend.run(
                     benchmark_circ.decompose(),
                     parameter_binds=[
                         {
@@ -464,125 +459,31 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                         }
                     ],
                 ).result()
-                output_state_list = [
-                    states_result.get_statevector(i) for i in range(self.batch_size)
+                output_states = [
+                    states_result.get_density_matrix(i) for i in range(self.batch_size)
                 ]
-                batched_dm = DensityMatrix(
-                    np.mean(
-                        [
-                            state.to_operator().to_matrix()
-                            for state in output_state_list
-                        ],
-                        axis=0,
-                    )
-                )
-                batched_circuit_fidelity = state_fidelity(
-                    batched_dm, Statevector(baseline_circ)
-                )
-                self.circuit_fidelity_history.append(
-                    batched_circuit_fidelity
-                )  # Circuit fidelity over the action batch
-
-                circuit_fidelities = [
-                    state_fidelity(state, Statevector(baseline_circ))
-                    for state in output_state_list
-                ]
-                self._punctual_circuit_fidelities = np.array(circuit_fidelities)
-
-                # Calculate average gate fidelities for each gate instance within circuit truncation
-                custom_gates_list = []
-                unitary_backend = AerSimulator(method="unitary")
-                for i, gate in enumerate(self.custom_gates):
-                    gate.save_unitary()
-                    gates_result = unitary_backend.run(
-                        gate.decompose(),
-                        parameter_binds=[
-                            {
-                                self._parameters[i][j]: params[:, i * n_actions + j]
-                                for j in range(n_actions)
-                            }
-                        ],
-                    ).result()
-                    assigned_instructions = [
-                        gates_result.get_unitary(i) for i in range(self.batch_size)
-                    ]
-                    custom_gates_list.append(assigned_instructions)
-
-                tgt_gate = self.target["gate"]
-                avg_fidelities = np.array(
-                    [
-                        [
-                            average_gate_fidelity(custom_gate, tgt_gate)
-                            for custom_gate in custom_gates
-                        ]
-                        for custom_gates in custom_gates_list
-                    ]
-                )
-                self._punctual_avg_fidelities = avg_fidelities
-                self.avg_fidelity_history.append(
-                    np.mean(avg_fidelities, axis=1)
-                )  # Avg gate fidelity over action batch
+                self.update_circuit_fidelity_history(output_states, baseline_circ)
 
             else:  # Pulse simulation
-                assert isinstance(self.backend, DynamicsBackend)
+                # Calculate circuit fidelity with pulse simulation
+                if isinstance(self.backend, DynamicsBackend) and isinstance(
+                        self.backend.options.solver, JaxSolver
+                ):
+                    # Jax compatible pulse simulation
 
-                model_dim = self.backend.options.solver.model.dim % 2
-                qc_list = [
-                    benchmark_circ.assign_parameters(param) for param in params
-                ]  # Bind each action of the batch to a circ
-                schedule_list = [
-                    schedule(qc, backend=self.backend, dt=self.backend_data.dt)
-                    for qc in qc_list
-                ]
-                unitaries = self._simulate_pulse_schedules(schedule_list)
+                    output_states = np.array(self.backend.options.solver.batched_sims)[:, 1, :]
 
-                unitaries = [Operator(np.array(unitary.y[0])) for unitary in unitaries]
-                if model_dim != 0:
-                    # TODO: Line below yields an error if simulation is not done over a set of qubit
-                    #  (fails if third level of
-                    # TODO: transmon is simulated), project unitary in qubit subspace
-                    dms = [
-                        DensityMatrix.from_int(0, model_dim).evolve(unitary)
-                        for unitary in unitaries
+                    output_states = [
+                        projected_statevector(s, self.backend.options.subsystem_dims)
+                        for s in output_states
                     ]
-                    qubitized_unitaries = [
-                        np.zeros((self._d, self._d)) for _ in range(len(unitaries))
-                    ]
-                    for u in range(len(unitaries)):
-                        for i in range(self._d):
-                            for j in range(self._d):
-                                qubitized_unitaries[u][i, j] = unitaries[u]
 
-                if self.target_type == "state":
-                    density_matrix = DensityMatrix(
-                        np.mean(
-                            [
-                                Statevector.from_int(0, dims=self._d).evolve(unitary)
-                                for unitary in unitaries
-                            ]
-                        )
-                    )
-                    self.state_fidelity_history.append(
-                        state_fidelity(self.target["dm"], density_matrix)
-                    )
+                    self.update_circuit_fidelity_history(output_states, baseline_circ)
+
                 else:
-                    self.process_fidelity_history.append(
-                        np.mean(
-                            [
-                                process_fidelity(unitary, Operator(baseline_circ))
-                                for unitary in unitaries
-                            ]
-                        )
+                    raise NotImplementedError(
+                        "Pulse simulation not yet implemented for this backend"
                     )
-                    self.avg_fidelity_history.append(
-                        np.mean(
-                            [
-                                average_gate_fidelity(unitary, Operator(baseline_circ))
-                                for unitary in unitaries
-                            ]
-                        )
-                    )
-                self.built_unitaries.append(unitaries)
 
     def _select_trunc_index(self):
         if self._intermediate_rewards:
@@ -597,7 +498,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
     def episode_length(self, global_step: int):
         assert (
-            global_step == self.step_tracker
+                global_step == self.step_tracker
         ), "Given step not synchronized with internal environment step counter"
         return self._select_trunc_index() + 1
 
@@ -728,7 +629,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             self._best_action = np.mean(reshaped_params, axis=0)
         self.reward_history.append(reward_table)
         assert (
-            len(reward_table) == self.batch_size
+                len(reward_table) == self.batch_size
         ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
 
         return reward_table
@@ -746,10 +647,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self.circuit_fidelity_history.clear()
 
     def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
+            self,
+            *,
+            seed: Optional[int] = None,
+            options: Optional[Dict[str, Any]] = None,
     ) -> tuple[ObsType, dict[str, Any]]:
         """Reset the Environment, chooses a new input state"""
         super().reset(seed=seed)
@@ -771,7 +672,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         return self._get_obs(), self._get_info()
 
     def step(
-        self, action: ActType
+            self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         # trunc_index tells us which circuit truncation should be trained
         # Dependent on global_step and method select_trunc_index
@@ -842,3 +743,26 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         string = QuantumEnvironment.__repr__(self)
         string += f"Number of target gates in circuit context: {self.tgt_instruction_counts}\n"
         return string
+
+    def update_circuit_fidelity_history(self, output_states, baseline_circ):
+
+        batched_dm = DensityMatrix(
+            np.mean(
+                [
+                    state.to_operator().to_matrix()
+                    for state in output_states
+                ],
+                axis=0,
+            )
+        )
+        batched_circuit_fidelity = state_fidelity(
+            batched_dm, Statevector(baseline_circ)
+        )
+        self.circuit_fidelity_history.append(
+            batched_circuit_fidelity
+        )
+        circuit_fidelities = [
+            state_fidelity(state, Statevector(baseline_circ))
+            for state in output_states
+        ]
+        self._punctual_circuit_fidelities = np.array(circuit_fidelities)

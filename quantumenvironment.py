@@ -40,7 +40,6 @@ from qiskit.quantum_info.operators.measures import (
 )
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import Layout
-from qiskit_algorithms.state_fidelities import ComputeUncompute
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
@@ -271,7 +270,7 @@ class QuantumEnvironment(Env):
 
             estimator_options = training_config.backend_config.estimator_options
 
-            self._estimator, self._sampler = retrieve_primitives(
+            self._estimator, self.fidelity_checker = retrieve_primitives(
                 self.backend,
                 self.layout,
                 self.config.backend_config,
@@ -279,7 +278,6 @@ class QuantumEnvironment(Env):
                 estimator_options,
             )
             self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
-            self.fidelity_checker = ComputeUncompute(self.sampler)
         elif isinstance(self.training_config.backend_config, QuaConfig):
             raise AttributeError("QUA compatibility not yet implemented")
 
@@ -765,10 +763,6 @@ class QuantumEnvironment(Env):
     @estimator.setter
     def estimator(self, estimator: BaseEstimator):
         self._estimator = estimator
-
-    @property
-    def sampler(self) -> Sampler_type:
-        return self._sampler
 
     @estimator.setter
     def estimator(self, sampler: Sampler_type):

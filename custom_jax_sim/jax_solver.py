@@ -133,7 +133,7 @@ class JaxSolver(Solver):
         self._param_names = None
         self._subsystem_dims = None
         self._t_span = None
-        self._batched_sims = []
+        self._batched_sims = None
         self._kwargs = None
         SymbolicPulse.disable_validation = True
 
@@ -302,7 +302,7 @@ class JaxSolver(Solver):
                 y0_cls,
             )
 
-            self._batched_sims.append(batch_results_y)
+            self._batched_sims = batch_results_y
 
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:
