@@ -74,8 +74,12 @@ def make_train_ppo(
     n_actions = env.action_space.shape[-1]
     batchsize = env.batch_size
     num_time_steps = env.tgt_instruction_counts
-    min_action = env.action_space.low
-    max_action = env.action_space.high
+    if hasattr(env, "min_action"):
+        min_action = env.min_action
+        max_action = env.max_action
+    else:
+        min_action = env.action_space.low
+        max_action = env.action_space.high
 
     hidden_units = agent_config["N_UNITS"]
     activation_fn = agent_config["ACTIVATION"]
