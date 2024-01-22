@@ -244,13 +244,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         # for gate in ref_circuit.data:  # Append only gates that are applied on the target register
         #     if all([qubit in self.tgt_register for qubit in gate.qubits]):
         #         target_circuit.append(gate)
-
         return _calculate_chi_target_state(
             {
                 "dm": DensityMatrix(target_circuit)
                 if len(self.physical_neighbor_qubits) == 0
                 else partial_trace(
-                    Statevector(target_circuit), self.physical_neighbor_qubits
+                    Statevector(target_circuit),
+                    list(range(self.tgt_register.size, target_circuit.num_qubits)),
                 ),
                 "circuit": custom_circuit,
                 "target_type": "state",
@@ -446,6 +446,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             )
 
     def episode_length(self, global_step: int):
+        """
+        Method to retrieve the length of the current episode, i.e. the gate instance that should be calibrated
+        """
         assert (
             global_step == self.step_tracker
         ), "Given step not synchronized with internal environment step counter"
@@ -561,8 +564,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 self.close()
                 raise exc
             scaling_reward_factor = len(observables) / 4 ** len(self.tgt_register)
-            reward_table *= scaling_reward_factor
-            reward_table = -np.log10(1 - reward_table)
+            # reward_table *= scaling_reward_factor
             print("Job done")
 
         if np.mean(reward_table) > self._max_return:
@@ -678,7 +680,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             else:
                 obs = self._get_obs()
 
-            return obs, reward_table, terminated, False, self._get_info()
+            # Using Negative Log Error as the Reward
+            optimal_error_precision = 1e-6
+            max_fidelity = 1.0 - optimal_error_precision
+            reward = np.clip(reward_table, a_min=0.0, a_max=max_fidelity)
+            reward = -np.log(1.0 - reward)
+
+            return obs, reward, terminated, False, self._get_info()
 
     def __repr__(self):
         string = QuantumEnvironment.__repr__(self)

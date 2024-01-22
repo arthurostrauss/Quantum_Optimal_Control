@@ -440,6 +440,9 @@ class QuantumEnvironment(Env):
             pass
 
     def episode_length(self, global_step: int):
+        """
+        Return episode length (here defined as 1 as only one gate is calibrated per episode)
+        """
         assert (
             global_step == self.step_tracker
         ), "Given step not synchronized with internal environment step counter"
