@@ -45,7 +45,8 @@ def apply_parametrized_circuit(
 
     parametrized_qc = QuantumCircuit(q_reg)
     my_qc = QuantumCircuit(q_reg, name="custom_cx")
-    optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
+    # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
+    optimal_params = np.pi * np.zeros(7)
 
     my_qc.u(
         optimal_params[0] + params[0],
@@ -126,14 +127,14 @@ def get_backend(
     return backend
 
 
-def get_circuit_context(backend: BackendV1 | BackendV2):
+def get_circuit_context(backend: Optional[BackendV1 | BackendV2]):
     circuit = QuantumCircuit(2)
     circuit.h(0)
     circuit.cx(0, 1)
+    if backend is not None:
+        circuit = transpile(circuit, backend)
 
-    transpiled_circ = transpile(circuit, backend)
-
-    return transpiled_circ
+    return circuit
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
