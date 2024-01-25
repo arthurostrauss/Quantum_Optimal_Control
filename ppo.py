@@ -17,9 +17,10 @@ from agent import ActorNetwork, CriticNetwork, Agent
 from quantumenvironment import QuantumEnvironment
 
 import logging
+
 logging.basicConfig(
     level=logging.WARNING,
-    format="%(asctime)s INFO %(message)s", # hardcoded INFO level
+    format="%(asctime)s INFO %(message)s",  # hardcoded INFO level
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
@@ -542,7 +543,9 @@ def make_train_ppo(
                             nextnonterminal = 1.0 - dones[t + 1]
                             nextvalues = values[t + 1]
                         delta = (
-                            rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
+                            rewards[t]
+                            + gamma * nextvalues * nextnonterminal
+                            - values[t]
                         )
                         advantages[t] = lastgaelam = (
                             delta + gamma * gae_lambda * nextnonterminal * lastgaelam
@@ -567,9 +570,9 @@ def make_train_ppo(
                         mb_inds = b_inds[start:end]
                         new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
                         new_dist = Normal(new_mean, new_sigma)
-                        new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(
-                            1
-                        ), new_dist.entropy().sum(1)
+                        new_logprob, entropy = new_dist.log_prob(
+                            b_actions[mb_inds]
+                        ).sum(1), new_dist.entropy().sum(1)
                         logratio = new_logprob - b_logprobs[mb_inds]
                         ratio = logratio.exp()
 
@@ -578,7 +581,10 @@ def make_train_ppo(
                             old_approx_kl = (-logratio).mean()
                             approx_kl = ((ratio - 1) - logratio).mean()
                             clipfracs += [
-                                ((ratio - 1.0).abs() > ppo_epsilon).float().mean().item()
+                                ((ratio - 1.0).abs() > ppo_epsilon)
+                                .float()
+                                .mean()
+                                .item()
                             ]
 
                         mb_advantages = b_advantages[mb_inds]
@@ -610,7 +616,11 @@ def make_train_ppo(
                             v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                         entropy_loss = entropy.mean()
-                        loss = pg_loss - ent_coef * entropy_loss + v_loss * critic_loss_coef
+                        loss = (
+                            pg_loss
+                            - ent_coef * entropy_loss
+                            + v_loss * critic_loss_coef
+                        )
 
                         optimizer.zero_grad()
                         loss.backward()
@@ -624,11 +634,12 @@ def make_train_ppo(
                 )
                 if print_debug:
                     print("mean", mean_action[0])
-                    #print("sigma", std_action[0])
+                    # print("sigma", std_action[0])
                     print("Average return:", np.mean(env.reward_history, axis=1)[-1])
                     print("DFE Rewards Mean:", np.mean(env.reward_history, axis=1)[-1])
                     print(
-                        "DFE Rewards standard dev", np.std(env.reward_history, axis=1)[-1]
+                        "DFE Rewards standard dev",
+                        np.std(env.reward_history, axis=1)[-1],
                     )
                     print("Returns Mean:", np.mean(b_returns.numpy()))
                     print("Returns standard dev", np.std(b_returns.numpy()))
@@ -654,32 +665,38 @@ def make_train_ppo(
                 # writer.add_scalar("losses/circuit_fidelity", env.circuit_fidelity_history[-1], global_step)
                 writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
                 writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-                writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+                writer.add_scalar(
+                    "losses/old_approx_kl", old_approx_kl.item(), global_step
+                )
                 writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
                 writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-                writer.add_scalar("losses/explained_variance", explained_var, global_step)
+                writer.add_scalar(
+                    "losses/explained_variance", explained_var, global_step
+                )
 
                 avg_reward.append(np.mean(env.reward_history, axis=1)[-1])
                 std_action_list.append(std_action[0].numpy())
                 avg_action_history.append(mean_action[0])
-                print('Fidelity History:', env.avg_fidelity_history)
+                print("Fidelity History:", env.avg_fidelity_history)
 
             env.close()
             writer.close()
 
             return {
-                'avg_reward': avg_reward,
-                'std_action': std_action_list,
-                'fidelity_history': env.avg_fidelity_history,
-                'action_vector_history': avg_action_history,
+                "avg_reward": avg_reward,
+                "std_action": std_action_list,
+                "fidelity_history": env.avg_fidelity_history,
+                "action_vector_history": avg_action_history,
                 # returns the action vector that led to the highest gate fidelity during the training process
-                'best_action_vector': np.mean(env.action_history[np.argmax(avg_reward)], axis=0),
+                "best_action_vector": np.mean(
+                    env.action_history[np.argmax(avg_reward)], axis=0
+                ),
             }
         except Exception as e:
-            logging.error(f'An error occurred during training: {e}')
+            logging.error(f"An error occurred during training: {e}")
             return {
-                'avg_return': -1.0,  # penalized return value
-                'action_vector': [0] * len(env.action_history[0][0]),
+                "avg_return": -1.0,  # penalized return value
+                "action_vector": [0] * len(env.action_history[0][0]),
             }
 
     return train

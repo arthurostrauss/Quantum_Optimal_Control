@@ -966,35 +966,72 @@ def load_hpo_config_from_yaml_file(file_path: str):
     return hpo_params
 
 
-def create_agent_config(trial: optuna.trial.Trial, hpo_config: dict, network_config: dict, ppo_params: dict):
+def create_agent_config(
+    trial: optuna.trial.Trial, hpo_config: dict, network_config: dict, ppo_params: dict
+):
     agent_config = {
-        'N_UPDATES': trial.suggest_int('N_UPDATES', hpo_config['n_updates'][0], hpo_config['n_updates'][1]),
-        'N_EPOCHS': trial.suggest_int('N_EPOCHS', hpo_config['n_epochs'][0], hpo_config['n_epochs'][1]),
-        'MINIBATCH_SIZE': trial.suggest_categorical('MINIBATCH_SIZE', hpo_config['minibatch_size']),
-        'BATCHSIZE_MULTIPLIER': trial.suggest_int('BATCHSIZE_MULTIPLIER', hpo_config['batchsize_multiplier'][0], hpo_config['batchsize_multiplier'][1]),
-        'LR': trial.suggest_float('LR', hpo_config['learning_rate'][0], hpo_config['learning_rate'][1], log=True),
-        'GAMMA': trial.suggest_float('GAMMA', hpo_config['gamma'][0], hpo_config['gamma'][1]),
-        'GAE_LAMBDA': trial.suggest_float('GAE_LAMBDA', hpo_config['gae_lambda'][0], hpo_config['gae_lambda'][1]),
-        'ENT_COEF': trial.suggest_float('ENT_COEF', hpo_config['ent_coef'][0], hpo_config['ent_coef'][1]),
-        'V_COEF': trial.suggest_float('V_COEF', hpo_config['v_coef'][0], hpo_config['v_coef'][1]),
-        'GRADIENT_CLIP': trial.suggest_float('GRADIENT_CLIP', hpo_config['max_grad_norm'][0], hpo_config['max_grad_norm'][1]),
-        'CLIP_VALUE_COEF': trial.suggest_float('CLIP_VALUE_COEF', hpo_config['clip_value_coef'][0], hpo_config['clip_value_coef'][1]),
-        'CLIP_RATIO': trial.suggest_float('CLIP_RATIO', hpo_config['clip_ratio'][0], hpo_config['clip_ratio'][1]),
-        }
-    agent_config['BATCHSIZE'] = agent_config['MINIBATCH_SIZE'] * agent_config['BATCHSIZE_MULTIPLIER']
+        "N_UPDATES": trial.suggest_int(
+            "N_UPDATES", hpo_config["n_updates"][0], hpo_config["n_updates"][1]
+        ),
+        "N_EPOCHS": trial.suggest_int(
+            "N_EPOCHS", hpo_config["n_epochs"][0], hpo_config["n_epochs"][1]
+        ),
+        "MINIBATCH_SIZE": trial.suggest_categorical(
+            "MINIBATCH_SIZE", hpo_config["minibatch_size"]
+        ),
+        "BATCHSIZE_MULTIPLIER": trial.suggest_int(
+            "BATCHSIZE_MULTIPLIER",
+            hpo_config["batchsize_multiplier"][0],
+            hpo_config["batchsize_multiplier"][1],
+        ),
+        "LR": trial.suggest_float(
+            "LR",
+            hpo_config["learning_rate"][0],
+            hpo_config["learning_rate"][1],
+            log=True,
+        ),
+        "GAMMA": trial.suggest_float(
+            "GAMMA", hpo_config["gamma"][0], hpo_config["gamma"][1]
+        ),
+        "GAE_LAMBDA": trial.suggest_float(
+            "GAE_LAMBDA", hpo_config["gae_lambda"][0], hpo_config["gae_lambda"][1]
+        ),
+        "ENT_COEF": trial.suggest_float(
+            "ENT_COEF", hpo_config["ent_coef"][0], hpo_config["ent_coef"][1]
+        ),
+        "V_COEF": trial.suggest_float(
+            "V_COEF", hpo_config["v_coef"][0], hpo_config["v_coef"][1]
+        ),
+        "GRADIENT_CLIP": trial.suggest_float(
+            "GRADIENT_CLIP",
+            hpo_config["max_grad_norm"][0],
+            hpo_config["max_grad_norm"][1],
+        ),
+        "CLIP_VALUE_COEF": trial.suggest_float(
+            "CLIP_VALUE_COEF",
+            hpo_config["clip_value_coef"][0],
+            hpo_config["clip_value_coef"][1],
+        ),
+        "CLIP_RATIO": trial.suggest_float(
+            "CLIP_RATIO", hpo_config["clip_ratio"][0], hpo_config["clip_ratio"][1]
+        ),
+    }
+    agent_config["BATCHSIZE"] = (
+        agent_config["MINIBATCH_SIZE"] * agent_config["BATCHSIZE_MULTIPLIER"]
+    )
     # The upper hyperparameters are part of HPO scope
     hyperparams = list(agent_config.keys())
 
     # The following hyperparameters are NOT part of HPO scope
-    agent_config['CLIP_VALUE_LOSS'] = hpo_config['clip_value_loss']
+    agent_config["CLIP_VALUE_LOSS"] = hpo_config["clip_value_loss"]
 
     # Add network-specific hyperparameters that are not part of HPO scope
-    agent_config['OPTIMIZER'] = network_config['OPTIMIZER']
-    agent_config['N_UNITS'] = network_config['N_UNITS']
-    agent_config['ACTIVATION'] = network_config['ACTIVATION']
-    agent_config['INCLUDE_CRITIC'] = network_config['INCLUDE_CRITIC']
-    agent_config['NORMALIZE_ADVANTAGE'] = network_config['NORMALIZE_ADVANTAGE']
-    agent_config['RUN_NAME'] = ppo_params['RUN_NAME']
+    agent_config["OPTIMIZER"] = network_config["OPTIMIZER"]
+    agent_config["N_UNITS"] = network_config["N_UNITS"]
+    agent_config["ACTIVATION"] = network_config["ACTIVATION"]
+    agent_config["INCLUDE_CRITIC"] = network_config["INCLUDE_CRITIC"]
+    agent_config["NORMALIZE_ADVANTAGE"] = network_config["NORMALIZE_ADVANTAGE"]
+    agent_config["RUN_NAME"] = ppo_params["RUN_NAME"]
 
     return agent_config, hyperparams
 
