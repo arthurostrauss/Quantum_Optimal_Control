@@ -50,19 +50,25 @@ class HyperparameterOptimizer:
         train_fn = make_train_ppo(self.agent_config, self.q_env)
         training_results = train_fn(total_updates=self.agent_config['N_UPDATES'], print_debug=True, num_prints=50)
 
-        # Save the action vector associated with this trial's fidelity for future retrieval
-        trial.set_user_attr('action_vector', training_results['action_vector'])
+        # Save important information about the trial
+        trial.set_user_attr('action_vector', training_results['best_action_vector'])
+        trial.set_user_attr('avg_reward', training_results['avg_reward'])
+        trial.set_user_attr('std_action', training_results['std_action'])
+        trial.set_user_attr('fidelity_history', training_results['fidelity_history'])
 
         # Use a relevant metric from training_results as the return value
         last_ten_percent = int(0.1 * self.agent_config['N_UPDATES'])
         
-        return training_results['avg_return'][-last_ten_percent]  # Return a metric to minimize or maximize
+        return training_results['avg_reward'][-last_ten_percent]  # Return a metric to minimize or maximize
 
     def _save_best_configuration(self):
         if self.best_trial is not None:
             best_config = {
-                'parameters': self.best_trial.params,
-                'action_vector': self.best_trial.user_attrs['action_vector']
+                'hyper_params': self.best_trial.params,
+                'action_vector': self.best_trial.user_attrs['action_vector'],
+                'avg_reward': self.best_trial.user_attrs['avg_reward'],
+                'std_action': self.best_trial.user_attrs['std_action'],
+                'fidelity_history': self.best_trial.user_attrs['fidelity_history'],
             }
 
             if not os.path.exists(self.save_results_path):
@@ -72,9 +78,9 @@ class HyperparameterOptimizer:
             pickle_file_name = os.path.join(self.save_results_path, f'reward_{round(self.best_trial.value, 6)}.pickle')
             with open(pickle_file_name, 'wb') as handle:
                 pickle.dump(best_config, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            print(f"Best configuration saved to {pickle_file_name}")
+            logging.warning(f"Best configuration saved to {pickle_file_name}")
         else:
-            print("No best trial data to save.")
+            logging.warning("No best trial data to save.")
     
     def _logging_progress(self, study, start_time):
         logging.warning('---------------- FINISHED HPO ----------------')
@@ -94,7 +100,7 @@ class HyperparameterOptimizer:
         logging.warning('num_HPO_trials: {}'.format(self.num_hpo_trials))
         logging.warning('---------------- STARTING HPO ----------------')
 
-        study = optuna.create_study(direction="maximize")
+        study = optuna.create_study(direction="maximize", study_name=f'{self.target_gate["target_gate"].name}-calibration')
         study.optimize(self._objective, n_trials=self.num_hpo_trials)
         
         if self.log_progress:
@@ -109,7 +115,7 @@ class HyperparameterOptimizer:
             return "No HPO trial has been run yet."
 
         best_config = {
-            'best_avg_return': self.best_trial.value,
+            'best_avg_reward': self.best_trial.value,
             'best_hyperparams': self.best_trial.params,
         }
         return best_config

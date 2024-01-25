@@ -28,8 +28,9 @@ from dynamics_config import dynamics_backend
 from typing import List, Sequence
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-config_file_name = "q_env_pulse_config.yml"
-config_file_address = os.path.join(current_dir, config_file_name)
+config_file_name = 'q_env_pulse_config.yaml'
+folder_name = 'config_yamls'
+config_file_address = os.path.join(current_dir, folder_name, config_file_name)
 
 
 def new_params_ecr(

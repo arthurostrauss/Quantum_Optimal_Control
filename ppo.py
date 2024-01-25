@@ -481,8 +481,9 @@ def make_train_ppo(
             values = torch.zeros((num_time_steps, batchsize))
 
             ### Starting Learning ###
-            avg_return = []
-            fidelities = np.zeros(total_updates)
+            avg_reward = []
+            std_action_list = []
+            avg_action_history = []
             for ii in tqdm.tqdm(range(1, total_updates + 1)):
                 next_obs, _ = env.reset(seed=seed)
                 num_steps = num_time_steps  # env.episode_length(global_step)
@@ -658,17 +659,21 @@ def make_train_ppo(
                 writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
                 writer.add_scalar("losses/explained_variance", explained_var, global_step)
 
-                avg_return.append(np.mean(env.reward_history, axis=1)[-1])
+                avg_reward.append(np.mean(env.reward_history, axis=1)[-1])
+                std_action_list.append(std_action[0].numpy())
+                avg_action_history.append(mean_action[0])
                 print('Fidelity History:', env.avg_fidelity_history)
 
             env.close()
             writer.close()
 
             return {
-                'avg_return': avg_return,
-                # 'fidelities': fidelities,
+                'avg_reward': avg_reward,
+                'std_action': std_action_list,
+                'fidelity_history': env.avg_fidelity_history,
+                'action_vector_history': avg_action_history,
                 # returns the action vector that led to the highest gate fidelity during the training process
-                'action_vector': np.mean(env.action_history[np.argmax(avg_return)], axis=0),
+                'best_action_vector': np.mean(env.action_history[np.argmax(avg_reward)], axis=0),
             }
         except Exception as e:
             logging.error(f'An error occurred during training: {e}')
