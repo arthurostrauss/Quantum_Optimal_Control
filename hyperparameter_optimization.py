@@ -7,7 +7,7 @@ import pickle
 import optuna
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from helper_functions import load_agent_from_yaml_file, create_agent_config
+from helper_functions import load_agent_from_yaml_file, create_agent_config, load_hpo_config_from_yaml_file
 from ppo import make_train_ppo
 
 import logging
@@ -19,16 +19,54 @@ logging.basicConfig(
 )
 
 class HyperparameterOptimizer:
+    """
+    A class for optimizing the hyperparameters of a Proximal Policy Optimization (PPO) agent 
+    in a quantum environment using Optuna.
+
+    The class is responsible for initializing the quantum environment and the PPO agent, 
+    setting up hyperparameter optimization trials, and saving the best configurations 
+    discovered during optimization.
+
+    Attributes:
+        gate_q_env_config (QEnvConfig): Configuration for the quantum environment.
+        q_env (QuantumEnvironment): The quantum environment instance.
+        ppo_params (dict): Parameters for the PPO agent.
+        network_config (dict): Configuration for the neural network used in the PPO agent.
+        hpo_config (dict): Configuration for hyperparameter optimization.
+        save_results_path (str): Path to save the best configuration and results.
+        log_progress (bool): Flag to indicate whether to log the progress of hyperparameter optimization.
+        rescalse_action (dict): Dictionary containing information about whether and how to apply the RescaleAction wrapper.
+        num_hpo_trials (int): The number of trials to run for hyperparameter optimization.
+        best_trial (optuna.trial._frozen.FrozenTrial, optional): The best trial found during optimization.
+
+    Methods:
+        optimize_hyperparameters(): Runs the hyperparameter optimization process.
+        best_hpo_configuration: Returns the best hyperparameter configuration and its performance metric.
+        target_gate: Returns information about the target gate and register from the quantum environment.
+    
+    Example:
+    >>> optimizer = HyperparameterOptimizer(
+            q_env=QuantumEnvironment,
+            path_agent_config="path/to/agent/config.yaml",
+            path_hpo_config="path/to/hpo/config.yaml",
+            save_results_path="path/to/save/results",
+            log_progress=True
+        )
+    >>> optimizer.optimize_hyperparameters()
+    
+    """
     def __init__(
             self, 
             q_env: Union[QuantumEnvironment, ContextAwareQuantumEnvironment], 
-            path_agent_config: str, 
+            path_agent_config: str,
+            path_hpo_config: str, 
             save_results_path: str, 
             log_progress: bool = True,
             num_hpo_trials: int = None,
         ):
         self.q_env = q_env
-        self.ppo_params, self.network_config, self.hpo_config = load_agent_from_yaml_file(path_agent_config)
+        self.ppo_params, self.network_config = load_agent_from_yaml_file(path_agent_config)
+        self.hpo_config = load_hpo_config_from_yaml_file(path_hpo_config)
         self.save_results_path = save_results_path
         self.log_progress = log_progress
 
