@@ -27,8 +27,7 @@ class HyperparameterOptimizer:
             log_progress: bool = True,
             num_hpo_trials: int = None,
         ):
-        # self.gate_q_env_config = gate_q_env_config
-        self.q_env = q_env # QuantumEnvironment(self.gate_q_env_config)
+        self.q_env = q_env
         self.ppo_params, self.network_config, self.hpo_config = load_agent_from_yaml_file(path_agent_config)
         self.save_results_path = save_results_path
         self.log_progress = log_progress
@@ -45,7 +44,6 @@ class HyperparameterOptimizer:
         # Fetch hyperparameters from the trial object
         self.agent_config, self.hyperparams = create_agent_config(trial, self.hpo_config, self.network_config, self.ppo_params)
 
-        # self.q_env = QuantumEnvironment(self.gate_q_env_config)
         # Overwrite the batch_size of the environment with the one from the agent_config
         self.q_env.batch_size = self.agent_config['BATCHSIZE']
 
