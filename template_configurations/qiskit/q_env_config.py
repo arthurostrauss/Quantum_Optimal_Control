@@ -45,7 +45,8 @@ def apply_parametrized_circuit(
 
     parametrized_qc = QuantumCircuit(q_reg)
     my_qc = QuantumCircuit(q_reg, name="custom_cx")
-    optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
+    # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
+    optimal_params = np.pi * np.zeros(7)
 
     my_qc.u(
         optimal_params[0] + params[0],

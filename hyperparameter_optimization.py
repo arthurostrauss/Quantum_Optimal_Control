@@ -1,13 +1,14 @@
 import sys
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+from typing import Union
 import time
 import pickle
 import optuna
 from quantumenvironment import QuantumEnvironment
+from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from helper_functions import load_agent_from_yaml_file, create_agent_config
 from ppo import make_train_ppo
-from qconfig import QEnvConfig
 
 import logging
 logging.basicConfig(
@@ -20,14 +21,14 @@ logging.basicConfig(
 class HyperparameterOptimizer:
     def __init__(
             self, 
-            gate_q_env_config: QEnvConfig, 
+            q_env: Union[QuantumEnvironment, ContextAwareQuantumEnvironment], 
             path_agent_config: str, 
             save_results_path: str, 
             log_progress: bool = True,
             num_hpo_trials: int = None,
         ):
-        self.gate_q_env_config = gate_q_env_config
-        self.q_env = QuantumEnvironment(self.gate_q_env_config)
+        # self.gate_q_env_config = gate_q_env_config
+        self.q_env = q_env # QuantumEnvironment(self.gate_q_env_config)
         self.ppo_params, self.network_config, self.hpo_config = load_agent_from_yaml_file(path_agent_config)
         self.save_results_path = save_results_path
         self.log_progress = log_progress
@@ -44,7 +45,7 @@ class HyperparameterOptimizer:
         # Fetch hyperparameters from the trial object
         self.agent_config, self.hyperparams = create_agent_config(trial, self.hpo_config, self.network_config, self.ppo_params)
 
-        self.q_env = QuantumEnvironment(self.gate_q_env_config)
+        # self.q_env = QuantumEnvironment(self.gate_q_env_config)
         # Overwrite the batch_size of the environment with the one from the agent_config
         self.q_env.batch_size = self.agent_config['BATCHSIZE']
 
@@ -118,6 +119,6 @@ class HyperparameterOptimizer:
     @property
     def target_gate(self):
         return {
-            'target_gate': self.gate_q_env_config.target['gate'],
-            'target_register': self.gate_q_env_config.target['register']
+            'target_gate': self.q_env.target['gate'],
+            'target_register': self.q_env.target['register']
         }
