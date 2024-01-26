@@ -200,6 +200,12 @@ class JaxSolver(Solver):
         convert_results: bool = True,
         **kwargs,
     ) -> List[OdeResult]:
+        """
+        This method is overriding the one from the original Solver and is used to solve the
+        dynamics of the system using the jax backend for the specific use case of the DynamicsEstimator.
+        It assumes that a DynamicsEstimator job has been run previously and that the user has provided
+        the parameter values and the observables to be measured as solver options
+        """
         if (
             "parameter_dicts" not in kwargs
             or "parameter_values" not in kwargs
@@ -211,8 +217,7 @@ class JaxSolver(Solver):
             )
         else:
             # Otherwise, we need to load the parameters and observables from the solver options
-            param_dicts = kwargs["parameter_dicts"]
-            param_names = self._param_names = param_dicts[0].keys()
+            param_names = self._param_names = kwargs["parameter_dicts"][0].keys()
             param_values = self._param_values = kwargs["parameter_values"]
             subsystem_dims = self._subsystem_dims = kwargs["subsystem_dims"]
             if self.circuit_macro is None:

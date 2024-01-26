@@ -513,7 +513,7 @@ class QuantumEnvironment(Env):
 
         try:
             handle_session(
-                qc, input_state_circ, self.estimator, self.backend, self._session_counts
+                self.estimator, self.backend, self._session_counts, qc, input_state_circ
             )
             # Append input state prep circuit to the custom circuit with front composition
             full_circ = qc.compose(input_state_circ, inplace=False, front=True)
@@ -655,6 +655,7 @@ class QuantumEnvironment(Env):
                         self.state_fidelity_history.append(
                             state_fidelity(self.target["dm"], density_matrix)
                         )
+
                     else:  # Gate calibration task
                         gate = Operator(
                             transpile(self.baseline_truncations[0], self.backend)
@@ -668,10 +669,15 @@ class QuantumEnvironment(Env):
                             )
                         )
                     self.built_unitaries.append(unitaries)
+
                 else:
                     raise NotImplementedError(
                         "Pulse simulation not yet implemented for this backend"
                     )
+            if self.target_type == "state":
+                print("State fidelity:", self.state_fidelity_history[-1])
+            else:
+                print("Avg gate fidelity:", self.avg_fidelity_history[-1])
             print("Finished simulation benchmark")
 
     def retrieve_observables(self, target_state, qc):

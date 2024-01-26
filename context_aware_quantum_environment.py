@@ -539,11 +539,11 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             print("Sending job...")
             try:
                 handle_session(
-                    qc,
-                    target_state["input_state_circ"],
                     self.estimator,
                     self.backend,
                     self._session_counts,
+                    qc,
+                    target_state["input_state_circ"],
                 )
 
                 # Append input state prep circuit to the custom circuit with front composition

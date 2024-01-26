@@ -626,9 +626,21 @@ def set_primitives_transpile_options(
         )
 
 
-def handle_session(qc, input_state_circ, estimator, backend, session_count):
+def handle_session(
+    estimator: Estimator_type,
+    backend: Backend_type,
+    session_count: Optional[int] = None,
+    qc: Optional[QuantumCircuit] = None,
+    input_state_circ: Optional[QuantumCircuit] = None,
+):
     """
-    Handle session reopening for RuntimeEstimator and load necessary data for DynamicsBackendEstimator
+    Handle session reopening for RuntimeEstimator or load necessary data for custom DynamicsBackendEstimator
+    Args:
+        estimator: Estimator instance
+        backend: Backend instance
+        session_count: Optional session counter (for RuntimeEstimator)
+        qc: Optional QuantumCircuit instance (for DynamicsBackendEstimator)
+        input_state_circ: Optional input state QuantumCircuit instance (for DynamicsBackendEstimator)
     """
     if isinstance(estimator, RuntimeEstimator):
         """Open a new Session if time limit of the ongoing one is reached"""
