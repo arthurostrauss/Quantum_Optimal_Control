@@ -23,7 +23,7 @@ from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from dynamics_config import dynamics_backend
+from dynamics_config import jax_backend
 from typing import List, Sequence
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
@@ -232,7 +232,7 @@ def get_backend(
             )
         else:
             # TODO: Add here your custom DynamicsBackend
-            backend = dynamics_backend
+            backend = jax_backend
 
         _, _ = perform_standard_calibrations(backend)
     else:

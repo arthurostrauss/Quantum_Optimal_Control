@@ -23,7 +23,7 @@ from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from dynamics_config import dynamics_backend
+from dynamics_config import jax_backend
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_gate_config.yml"
@@ -119,7 +119,7 @@ def get_backend(
     else:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
         if use_dynamics is not None and use_dynamics:
-            backend = dynamics_backend
+            backend = jax_backend
             _, _ = perform_standard_calibrations(backend)
         else:
             # TODO: Add here your custom backend
@@ -132,12 +132,16 @@ def get_backend(
 
 
 def get_circuit_context(backend: Optional[BackendV1 | BackendV2]):
-    circuit = QuantumCircuit(2)
+    circuit = QuantumCircuit(5)
     circuit.h(0)
-    circuit.cx(0, 1)
+    for i in range(1, 5):
+        circuit.cx(0, i)
+    circuit.h(0)
+
     if backend is not None:
         circuit = transpile(circuit, backend)
-
+    print("Circuit context")
+    print(circuit)
     return circuit
 
 

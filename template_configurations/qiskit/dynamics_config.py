@@ -1,9 +1,8 @@
 from qiskit_dynamics.array import Array
 import jax
-from qiskit_dynamics import DynamicsBackend
+from qiskit_dynamics import DynamicsBackend, Solver
 from custom_jax_sim import JaxSolver
 import numpy as np
-
 
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
@@ -51,7 +50,7 @@ drive_op1 = 2 * np.pi * r1 * (a1 + a1dag)
 # build solver
 dt = 2.2222e-10
 
-solver = JaxSolver(
+jax_solver = JaxSolver(
     static_hamiltonian=static_ham_full,
     hamiltonian_operators=[
         drive_op0,
@@ -72,6 +71,33 @@ solver = JaxSolver(
 )
 # Consistent solver option to use throughout notebook
 solver_options = {"method": "jax_odeint", "atol": 1e-5, "rtol": 1e-7, "hmax": dt}
+
+solver = Solver(
+    static_hamiltonian=static_ham_full,
+    hamiltonian_operators=[
+        drive_op0,
+        drive_op1,
+        drive_op0,
+        drive_op1,
+    ],
+    rotating_frame=static_ham_full,
+    hamiltonian_channels=["d0", "d1", "u0", "u1"],
+    channel_carrier_freqs={
+        "d0": v0,
+        "d1": v1,
+        "u0": v1,
+        "u1": v0,
+    },
+    dt=dt,
+    evaluation_mode="dense",
+)
+
+jax_backend = DynamicsBackend(
+    solver=jax_solver,
+    # target = fake_backend_v2.target,
+    subsystem_dims=[dim, dim],  # for computing measurement data
+    solver_options=solver_options,  # to be used every time run is called
+)
 
 dynamics_backend = DynamicsBackend(
     solver=solver,

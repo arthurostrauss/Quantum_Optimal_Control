@@ -34,7 +34,7 @@ BACKEND: # Backend configuration (If all set to None, the user needs to specify 
 TARGET: # Target Gate configuration
   GATE: "CX"
   # STATE: "0" # Target state (if GATE is null)
-  PHYSICAL_QUBITS: [0, 1]
+  PHYSICAL_QUBITS: [ 0, 1 ]
 
 ENV: # Environment configuration
   SAMPLING_PAULIS: 100 # Number of Pauli strings to sample
@@ -43,10 +43,10 @@ ENV: # Environment configuration
   N_ACTIONS: 7 # Action vector length
   BATCH_SIZE: 256 # Number of actions to evaluate per policy iteration
   ACTION_SPACE:
-    LOW: [-1., -1., -1., -1., -1., -1., -1.]
-    HIGH: [1., 1., 1., 1., 1., 1., 1.]
+    LOW: [ -3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14 ]
+    HIGH: [ 3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14 ]
   OBSERVATION_SPACE: 1 # Shape of the observation space
-  BENCHMARK_CYCLE: 1000 # Number of steps between two fidelity benchmarks
+  BENCHMARK_CYCLE: 1 # Number of steps between two fidelity benchmarks
   SEED: 100
   CHECK_ON_EXP: False # Whether to perform fidelity benchmarking with tomographic experiments or just using simulation
-  TRAINING_WITH_CAL: True
+  TRAINING_WITH_CAL: False
