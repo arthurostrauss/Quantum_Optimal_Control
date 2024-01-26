@@ -1,30 +1,24 @@
 from __future__ import annotations
 
-from typing import Optional, Dict
+from typing import Optional
 import os
-import sys
-import yaml
-from gymnasium.spaces import Box
 import numpy as np
-from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from helper_functions import (
-    get_ecr_params,
     load_q_env_from_yaml_file,
     perform_standard_calibrations,
 )
-from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
-from qiskit.circuit import ParameterVector, Gate
-from qiskit_dynamics import Solver, DynamicsBackend
-from custom_jax_sim.jax_solver import JaxSolver
+from qiskit import QuantumCircuit, QuantumRegister, transpile
+from qiskit.circuit import ParameterVector
+from qiskit_dynamics import DynamicsBackend
 from qiskit_ibm_runtime import QiskitRuntimeService, IBMBackend as RuntimeBackend
 from qiskit.providers.fake_provider import FakeProvider
 from qiskit.providers import BackendV1, BackendV2
 from qiskit.providers.fake_provider import FakeJakartaV2
-from qiskit_experiments.calibration_management import Calibrations
+
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from template_configurations.qiskit.dynamics_config import dynamics_backend
+from dynamics_config import dynamics_backend
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_gate_config.yaml"
