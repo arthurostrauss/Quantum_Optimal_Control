@@ -1,37 +1,36 @@
-HPO:
-  NUM_TRIALS: 1
-  NUM_UPDATES:
-    - 20 # Min value
-    - 100 # Max value
-  N_EPOCHS:
-    - 8 
-    - 25
-  MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
-  BATCHSIZE_MULTIPLIER:
-    - 2
-    - 12
-  LR_ACTOR:
-    - 0.0001
-    - 0.02
-  GAMMA:
-    - 0.95
-    - 0.999
-  GAE_LAMBDA:
-    - 0.90
-    - 0.999
-  ENT_COEF:
-    - 0.00005
-    - 0.001
-  V_COEF:
-    - 0.25
-    - 0.75
-  GRADIENT_CLIP:
-    - 0.005
-    - 0.9
-  CLIP_VALUE_LOSS: True
-  CLIP_VALUE_COEF:
-    - 0.1
-    - 0.3
-  CLIP_RATIO:
-    - 0.1
-    - 0.3
+N_TRIALS: 1
+N_UPDATES:
+  - 100 # Min value
+  - 500 # Max value
+N_EPOCHS:
+  - 50 
+  - 300
+MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
+BATCHSIZE_MULTIPLIER:
+  - 2
+  - 12
+LR:
+  - 0.00005
+  - 0.02
+GAMMA:
+  - 0.95
+  - 0.999
+GAE_LAMBDA:
+  - 0.90
+  - 0.999
+ENT_COEF:
+  - 0.0
+  - 0.001
+V_COEF:
+  - 0.25
+  - 0.75
+GRADIENT_CLIP:
+  - 0.005
+  - 0.9
+CLIP_VALUE_LOSS: True
+CLIP_VALUE_COEF:
+  - 0.1
+  - 0.3
+CLIP_RATIO:
+  - 0.1
+  - 0.3

@@ -8,9 +8,10 @@ import pickle
 import optuna
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
+from gymnasium.wrappers import RescaleAction, ClipAction
 from helper_functions import (
     load_agent_from_yaml_file,
-    create_agent_config,
+    create_hpo_agent_config,
     load_hpo_config_from_yaml_file,
 )
 from ppo import make_train_ppo
@@ -70,33 +71,24 @@ class HyperparameterOptimizer:
         path_hpo_config: str,
         save_results_path: str,
         log_progress: bool = True,
-        num_hpo_trials: int = None,
-    ):
+        ):
         self.q_env = q_env
-        self.ppo_params, self.network_config = load_agent_from_yaml_file(
+        # Start with an initial agent configuration and then update it with the hyperparameters later in the workflow
+        self.agent_config_init = load_agent_from_yaml_file(
             path_agent_config
         )
         self.hpo_config = load_hpo_config_from_yaml_file(path_hpo_config)
         self.save_results_path = save_results_path
         self.log_progress = log_progress
 
-        if num_hpo_trials is not None:
-            self.num_hpo_trials = num_hpo_trials
-        else:
-            self.num_hpo_trials = self.hpo_config.get("num_trials", 0)
-        # Assert that num_hpo_trials is an integer and greater than 0
-        assert (
-            isinstance(self.num_hpo_trials, int) and self.num_hpo_trials > 0
-        ), "num_hpo_trials must be an integer greater than 0"
-
     def _objective(self, trial):
         # Fetch hyperparameters from the trial object
-        self.agent_config, self.hyperparams = create_agent_config(
-            trial, self.hpo_config, self.network_config, self.ppo_params
+        self.agent_config, self.hyperparams = create_hpo_agent_config(
+            trial, self.hpo_config, self.agent_config_init
         )
 
-        # Overwrite the batch_size of the environment with the one from the agent_config
-        self.q_env.batch_size = self.agent_config["BATCHSIZE"]
+        # Overwrite the batch_size of the (unwrapped) environment with the one from the agent_config
+        self.q_env.unwrapped.batch_size = self.agent_config["BATCHSIZE"]
 
         train_fn = make_train_ppo(self.agent_config, self.q_env)
         training_results = train_fn(
@@ -114,7 +106,7 @@ class HyperparameterOptimizer:
         # Use a relevant metric from training_results as the return value
         last_ten_percent = int(0.1 * self.agent_config["N_UPDATES"])
 
-        return training_results["avg_reward"][
+        return training_results["fidelity_history"][
             -last_ten_percent
         ]  # Return a metric to minimize or maximize
 
@@ -142,6 +134,8 @@ class HyperparameterOptimizer:
         else:
             logging.warning("No best trial data to save.")
 
+        return best_config
+
     def _logging_progress(self, study, start_time):
         logging.warning("---------------- FINISHED HPO ----------------")
         logging.warning(
@@ -157,7 +151,16 @@ class HyperparameterOptimizer:
         best_action_vector = study.best_trial.user_attrs["action_vector"]
         logging.warning("The best action vector is {}".format(best_action_vector))
 
-    def optimize_hyperparameters(self):
+    def optimize_hyperparameters(self, num_hpo_trials: int = 1):
+        if num_hpo_trials is not None:
+            self.num_hpo_trials = num_hpo_trials
+        else:
+            self.num_hpo_trials = self.hpo_config.get("num_trials", 0)
+        # Assert that num_hpo_trials is an integer and greater than 0
+        assert (
+            isinstance(self.num_hpo_trials, int) and self.num_hpo_trials > 0
+        ), "num_hpo_trials must be an integer greater than 0"
+
         start_time = time.time()
         logging.warning("num_HPO_trials: {}".format(self.num_hpo_trials))
         logging.warning("---------------- STARTING HPO ----------------")
@@ -172,7 +175,8 @@ class HyperparameterOptimizer:
             self._logging_progress(study, start_time)
 
         self.best_trial = study.best_trial
-        self._save_best_configuration()
+        # Save the best configuration and return it as a dictionary for the user
+        return self._save_best_configuration()
 
     @property
     def best_hpo_configuration(self):
@@ -180,14 +184,15 @@ class HyperparameterOptimizer:
             return "No HPO trial has been run yet."
 
         best_config = {
-            "best_avg_reward": self.best_trial.value,
-            "best_hyperparams": self.best_trial.params,
+            'best_avg_reward': self.best_trial.value,
+            'best_hyperparams': self.best_trial.params,
+            # 'q_env': self.best_trial.q_env,
         }
         return best_config
 
     @property
     def target_gate(self):
         return {
-            "target_gate": self.q_env.target["gate"],
-            "target_register": self.q_env.target["register"],
+            'target_gate': self.q_env.target["gate"],
+            'target_register': self.q_env.target["register"],
         }

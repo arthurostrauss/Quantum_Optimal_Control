@@ -917,123 +917,116 @@ def load_agent_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
-    ppo_params = {
-        "RUN_NAME": config["AGENT"]["RUN_NAME"],
-        "NUM_UPDATES": config["AGENT"]["NUM_UPDATES"],
-        "N_EPOCHS": config["AGENT"]["N_EPOCHS"],
-        "MINIBATCH_SIZE": config["AGENT"]["MINIBATCH_SIZE"],
-        "LR": config["AGENT"]["LR_ACTOR"],
-        "GAMMA": config["AGENT"]["GAMMA"],
-        "GAE_LAMBDA": config["AGENT"]["GAE_LAMBDA"],
-        "ENT_COEF": config["AGENT"]["ENT_COEF"],
-        "V_COEF": config["AGENT"]["V_COEF"],
-        "GRADIENT_CLIP": config["AGENT"]["GRADIENT_CLIP"],
-        "CLIP_VALUE_LOSS": config["AGENT"]["CLIP_VALUE_LOSS"],
-        "CLIP_VALUE_COEF": config["AGENT"]["CLIP_VALUE_COEF"],
-        "CLIP_RATIO": config["AGENT"]["CLIP_RATIO"],
+    return {
+        "RUN_NAME": config["RUN_NAME"],
+        "NUM_UPDATES": config["NUM_UPDATES"],
+        "N_EPOCHS": config["N_EPOCHS"],
+        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
+        "LR": config["LR"],
+        "GAMMA": config["GAMMA"],
+        "GAE_LAMBDA": config["GAE_LAMBDA"],
+        "ENT_COEF": config["ENT_COEF"],
+        "V_COEF": config["V_COEF"],
+        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
+        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
+        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
+        "CLIP_RATIO": config["CLIP_RATIO"],
+        "OPTIMIZER": config["OPTIMIZER"],
+        "N_UNITS": config["N_UNITS"],
+        "ACTIVATION": config["ACTIVATION"],
+        "INCLUDE_CRITIC": config["INCLUDE_CRITIC"],
+        "NORMALIZE_ADVANTAGE": config["NORMALIZE_ADVANTAGE"],
+        "CHKPT_DIR": config["CHKPT_DIR"],
     }
-    network_params = {
-        "OPTIMIZER": config["NETWORK"]["OPTIMIZER"],
-        "N_UNITS": config["NETWORK"]["N_UNITS"],
-        "ACTIVATION": config["NETWORK"]["ACTIVATION"],
-        "INCLUDE_CRITIC": config["NETWORK"]["INCLUDE_CRITIC"],
-        "NORMALIZE_ADVANTAGE": config["NETWORK"]["NORMALIZE_ADVANTAGE"],
-        "CHKPT_DIR": config["NETWORK"]["CHKPT_DIR"],
-    }
-    return ppo_params, network_params
-
 
 def load_hpo_config_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
-    hpo_params = {
-        "num_trials": config["HPO"]["NUM_TRIALS"],
-        "n_updates": config["HPO"]["NUM_UPDATES"],
-        "n_epochs": config["HPO"]["N_EPOCHS"],
-        "minibatch_size": config["HPO"]["MINIBATCH_SIZE"],
-        "batchsize_multiplier": config["HPO"]["BATCHSIZE_MULTIPLIER"],
-        "learning_rate": config["HPO"]["LR_ACTOR"],
-        "gamma": config["HPO"]["GAMMA"],
-        "gae_lambda": config["HPO"]["GAE_LAMBDA"],
-        "ent_coef": config["HPO"]["ENT_COEF"],
-        "v_coef": config["HPO"]["V_COEF"],
-        "max_grad_norm": config["HPO"]["GRADIENT_CLIP"],
-        "clip_value_loss": config["HPO"]["CLIP_VALUE_LOSS"],
-        "clip_value_coef": config["HPO"]["CLIP_VALUE_COEF"],
-        "clip_ratio": config["HPO"]["CLIP_RATIO"],
+    return {
+        "N_TRIALS": config["N_TRIALS"],
+        "N_UPDATES": config["N_UPDATES"],
+        "N_EPOCHS": config["N_EPOCHS"],
+        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
+        "BATCHSIZE_MULTIPLIER": config["BATCHSIZE_MULTIPLIER"],
+        "LR": config["LR"],
+        "GAMMA": config["GAMMA"],
+        "GAE_LAMBDA": config["GAE_LAMBDA"],
+        "ENT_COEF": config["ENT_COEF"],
+        "V_COEF": config["V_COEF"],
+        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
+        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
+        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
+        "CLIP_RATIO": config["CLIP_RATIO"],
     }
-    return hpo_params
 
 
-def create_agent_config(
-    trial: optuna.trial.Trial, hpo_config: dict, network_config: dict, ppo_params: dict
+def create_hpo_agent_config(
+    trial: optuna.trial.Trial, hpo_config: dict, agent_config: dict
 ):
-    agent_config = {
+    hyper_params = {
         "N_UPDATES": trial.suggest_int(
-            "N_UPDATES", hpo_config["n_updates"][0], hpo_config["n_updates"][1]
+            "N_UPDATES", hpo_config["N_UPDATES"][0], hpo_config["N_UPDATES"][1]
         ),
         "N_EPOCHS": trial.suggest_int(
-            "N_EPOCHS", hpo_config["n_epochs"][0], hpo_config["n_epochs"][1]
+            "N_EPOCHS", hpo_config["N_EPOCHS"][0], hpo_config["N_EPOCHS"][1]
         ),
         "MINIBATCH_SIZE": trial.suggest_categorical(
-            "MINIBATCH_SIZE", hpo_config["minibatch_size"]
+            "MINIBATCH_SIZE", hpo_config["MINIBATCH_SIZE"]
         ),
         "BATCHSIZE_MULTIPLIER": trial.suggest_int(
             "BATCHSIZE_MULTIPLIER",
-            hpo_config["batchsize_multiplier"][0],
-            hpo_config["batchsize_multiplier"][1],
+            hpo_config["BATCHSIZE_MULTIPLIER"][0],
+            hpo_config["BATCHSIZE_MULTIPLIER"][1],
         ),
         "LR": trial.suggest_float(
             "LR",
-            hpo_config["learning_rate"][0],
-            hpo_config["learning_rate"][1],
+            hpo_config["LR"][0],
+            hpo_config["LR"][1],
             log=True,
         ),
         "GAMMA": trial.suggest_float(
-            "GAMMA", hpo_config["gamma"][0], hpo_config["gamma"][1]
+            "GAMMA", hpo_config["GAMMA"][0], hpo_config["GAMMA"][1]
         ),
         "GAE_LAMBDA": trial.suggest_float(
-            "GAE_LAMBDA", hpo_config["gae_lambda"][0], hpo_config["gae_lambda"][1]
+            "GAE_LAMBDA", hpo_config["GAE_LAMBDA"][0], hpo_config["GAE_LAMBDA"][1]
         ),
         "ENT_COEF": trial.suggest_float(
-            "ENT_COEF", hpo_config["ent_coef"][0], hpo_config["ent_coef"][1]
+            "ENT_COEF", hpo_config["ENT_COEF"][0], hpo_config["ENT_COEF"][1]
         ),
         "V_COEF": trial.suggest_float(
-            "V_COEF", hpo_config["v_coef"][0], hpo_config["v_coef"][1]
+            "V_COEF", hpo_config["V_COEF"][0], hpo_config["V_COEF"][1]
         ),
         "GRADIENT_CLIP": trial.suggest_float(
             "GRADIENT_CLIP",
-            hpo_config["max_grad_norm"][0],
-            hpo_config["max_grad_norm"][1],
+            hpo_config["GRADIENT_CLIP"][0],
+            hpo_config["GRADIENT_CLIP"][1],
         ),
         "CLIP_VALUE_COEF": trial.suggest_float(
             "CLIP_VALUE_COEF",
-            hpo_config["clip_value_coef"][0],
-            hpo_config["clip_value_coef"][1],
+            hpo_config["CLIP_VALUE_COEF"][0],
+            hpo_config["CLIP_VALUE_COEF"][1],
         ),
         "CLIP_RATIO": trial.suggest_float(
-            "CLIP_RATIO", hpo_config["clip_ratio"][0], hpo_config["clip_ratio"][1]
+            "CLIP_RATIO", hpo_config["CLIP_RATIO"][0], hpo_config["CLIP_RATIO"][1]
         ),
     }
-    agent_config["BATCHSIZE"] = (
-        agent_config["MINIBATCH_SIZE"] * agent_config["BATCHSIZE_MULTIPLIER"]
+
+    # Dynamically calculate batchsize from minibatch_size and batchsize_multiplier
+    hyper_params["BATCHSIZE"] = (
+        hyper_params["MINIBATCH_SIZE"] * hyper_params["BATCHSIZE_MULTIPLIER"]
     )
     # The upper hyperparameters are part of HPO scope
-    hyperparams = list(agent_config.keys())
+    hyperparams = list(hyper_params.keys())
 
     # The following hyperparameters are NOT part of HPO scope
-    agent_config["CLIP_VALUE_LOSS"] = hpo_config["clip_value_loss"]
+    hyper_params["CLIP_VALUE_LOSS"] = hpo_config["CLIP_VALUE_LOSS"]
 
-    # Add network-specific hyperparameters that are not part of HPO scope
-    agent_config["OPTIMIZER"] = network_config["OPTIMIZER"]
-    agent_config["N_UNITS"] = network_config["N_UNITS"]
-    agent_config["ACTIVATION"] = network_config["ACTIVATION"]
-    agent_config["INCLUDE_CRITIC"] = network_config["INCLUDE_CRITIC"]
-    agent_config["NORMALIZE_ADVANTAGE"] = network_config["NORMALIZE_ADVANTAGE"]
-    agent_config["RUN_NAME"] = ppo_params["RUN_NAME"]
+    # Take over attributes from agent_config and populate hyper_params
+    for attr in ["OPTIMIZER", "N_UNITS", "ACTIVATION", "INCLUDE_CRITIC", "NORMALIZE_ADVANTAGE", "CHKPT_DIR", "RUN_NAME"]:
+        hyper_params[attr] = agent_config[attr]
 
-    return agent_config, hyperparams
+    return hyper_params, hyperparams
 
 
 def retrieve_backend_info(
