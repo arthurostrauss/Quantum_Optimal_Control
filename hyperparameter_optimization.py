@@ -4,6 +4,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 from typing import Union
 import time
+from datetime import datetime
 import pickle
 import optuna
 from quantumenvironment import QuantumEnvironment
@@ -96,19 +97,19 @@ class HyperparameterOptimizer:
             print_debug=True,
             num_prints=50,
         )
-
-        # Save important information about the trial
-        trial.set_user_attr("action_vector", training_results["best_action_vector"])
-        trial.set_user_attr("avg_reward", training_results["avg_reward"])
-        trial.set_user_attr("std_action", training_results["std_action"])
-        trial.set_user_attr("fidelity_history", training_results["fidelity_history"])
+        if training_results["avg_reward"] != -1.0: # If the training was successful 
+            # Save important information about the trial
+            trial.set_user_attr("action_vector", training_results["best_action_vector"])
+            trial.set_user_attr("avg_reward", training_results["avg_reward"])
+            trial.set_user_attr("std_action", training_results["std_action"])
+            trial.set_user_attr("fidelity_history", training_results["fidelity_history"])
 
         # Use a relevant metric from training_results as the return value
-        last_ten_percent = int(0.1 * self.agent_config["N_UPDATES"])
+        last_ten_percent = int(0.1 * len(training_results["fidelity_history"]))
 
         return training_results["fidelity_history"][
             -last_ten_percent
-        ]  # Return a metric to minimize or maximize
+        ]  # Return the fidelity of the last 10% of updates
 
     def _save_best_configuration(self):
         if self.best_trial is not None:
@@ -126,7 +127,7 @@ class HyperparameterOptimizer:
 
             pickle_file_name = os.path.join(
                 self.save_results_path,
-                f"reward_{round(self.best_trial.value, 6)}.pickle",
+                f"fidelity_{round(self.best_trial.value, 6)}.pickle",
             )
             with open(pickle_file_name, "wb") as handle:
                 pickle.dump(best_config, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -136,59 +137,57 @@ class HyperparameterOptimizer:
 
         return best_config
 
-    def _logging_progress(self, study, start_time):
+    def _logging_result(self, study, start_time):
         logging.warning("---------------- FINISHED HPO ----------------")
         logging.warning(
             "HPO completed in {} seconds.".format(round(time.time() - start_time, 2))
         )
+
         logging.warning("Best trial:")
         logging.warning("-------------------------")
-        logging.warning("  Value: {}".format(study.best_trial.value))
-        logging.warning("  Parameters: ")
+        logging.warning("  Fidelity: {}".format(study.best_trial.value))
+        logging.warning("  Hyperparameters: ")
         for key, value in study.best_trial.params.items():
             logging.warning("    {}: {}".format(key, value))
 
         best_action_vector = study.best_trial.user_attrs["action_vector"]
-        logging.warning("The best action vector is {}".format(best_action_vector))
+        logging.warning("The best action vector: {}".format(best_action_vector))
 
     def optimize_hyperparameters(self, num_hpo_trials: int = 1):
         if num_hpo_trials is not None:
-            self.num_hpo_trials = num_hpo_trials
+            self.n_hpo_trials = num_hpo_trials
         else:
-            self.num_hpo_trials = self.hpo_config.get("num_trials", 0)
-        # Assert that num_hpo_trials is an integer and greater than 0
+            self.n_hpo_trials = self.hpo_config.get("n_trials", 0)
+        # Assert that n_hpo_trials is an integer and greater than 0
         assert (
-            isinstance(self.num_hpo_trials, int) and self.num_hpo_trials > 0
-        ), "num_hpo_trials must be an integer greater than 0"
+            isinstance(self.n_hpo_trials, int) and self.n_hpo_trials > 0
+        ), "n_hpo_trials must be an integer greater than 0"
 
         start_time = time.time()
-        logging.warning("num_HPO_trials: {}".format(self.num_hpo_trials))
+        logging.warning("n_HPO_trials: {}".format(self.n_hpo_trials))
         logging.warning("---------------- STARTING HPO ----------------")
 
         study = optuna.create_study(
             direction="maximize",
-            study_name=f'{self.target_gate["target_gate"].name}-calibration',
+            study_name=f'{self.target_gate["target_gate"].name}-calibration_{datetime.now().strftime("%d-%m-%Y-_%H:%M:%S")}',
         )
-        study.optimize(self._objective, n_trials=self.num_hpo_trials)
+        study.optimize(self._objective, n_trials=self.n_hpo_trials)
+
+        # If all trials led to errors in the training process, fidelities for all trials are 0.0
+        # If this is the case, then the HPO failed
+        # Return a warning and return a dictionary with the result
+        if study.best_trial.value == 0.0:
+            logging.warning("ERROR: HPO failed. No trials to save.")
+            return {
+                'result': 'ERROR: HPO failed. All hyperparameter trials led to errors in the training process.',
+            }
 
         if self.log_progress:
-            self._logging_progress(study, start_time)
+            self._logging_result(study, start_time)
 
         self.best_trial = study.best_trial
         # Save the best configuration and return it as a dictionary for the user
         return self._save_best_configuration()
-
-    @property
-    def best_hpo_configuration(self):
-        if self.best_trial is None:
-            return "No HPO trial has been run yet."
-
-        best_config = {
-            'best_avg_reward': self.best_trial.value,
-            'best_hyperparams': self.best_trial.params,
-            # 'q_env': self.best_trial.q_env,
-        }
-        return best_config
 
     @property
     def target_gate(self):

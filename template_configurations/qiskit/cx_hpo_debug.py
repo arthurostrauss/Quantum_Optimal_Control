@@ -82,10 +82,7 @@ optimizer.target_gate
 optimizer.hyperparams
 
 # %%
-optimizer.num_hpo_trials
-
-# %%
-optimizer.best_hpo_configuration
+optimizer.n_hpo_trials
 
 # %%
 import pickle

@@ -3,8 +3,8 @@ N_UPDATES:
   - 100 # Min value
   - 500 # Max value
 N_EPOCHS:
-  - 50 
-  - 300
+  - 8 
+  - 32
 MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
 BATCHSIZE_MULTIPLIER:
   - 2

@@ -485,6 +485,7 @@ def make_train_ppo(
             avg_reward = []
             std_action_list = []
             avg_action_history = []
+            fidelity = []
             for ii in tqdm.tqdm(range(1, total_updates + 1)):
                 next_obs, _ = env.reset(seed=seed)
                 num_steps = num_time_steps  # env.episode_length(global_step)
@@ -634,7 +635,8 @@ def make_train_ppo(
                 )
                 if print_debug:
                     print("mean", mean_action[0])
-                    # print("sigma", std_action[0])
+                    print("sigma", std_action[0])
+                    print("Fidelity:", env.avg_fidelity_history[-1]) if len(env.avg_fidelity_history) > 0 else None
                     print("Average return:", np.mean(env.reward_history, axis=1)[-1])
                     print("DFE Rewards Mean:", np.mean(env.reward_history, axis=1)[-1])
                     print(
@@ -677,7 +679,7 @@ def make_train_ppo(
                 avg_reward.append(np.mean(env.reward_history, axis=1)[-1])
                 std_action_list.append(std_action[0].numpy())
                 avg_action_history.append(mean_action[0])
-                print("Fidelity History:", env.avg_fidelity_history)
+                fidelity.append(env.avg_fidelity_history[-1]) if len(env.avg_fidelity_history) > 0 else None
 
             env.close()
             writer.close()
@@ -685,7 +687,7 @@ def make_train_ppo(
             return {
                 "avg_reward": avg_reward,
                 "std_action": std_action_list,
-                "fidelity_history": env.avg_fidelity_history,
+                "fidelity_history": fidelity,
                 "action_vector_history": avg_action_history,
                 # returns the action vector that led to the highest gate fidelity during the training process
                 "best_action_vector": np.mean(
@@ -695,8 +697,9 @@ def make_train_ppo(
         except Exception as e:
             logging.error(f"An error occurred during training: {e}")
             return {
-                "avg_return": -1.0,  # penalized return value
+                "avg_reward": -1.0,  # penalized reward value
                 "action_vector": [0] * len(env.action_history[0][0]),
+                "fidelity_history": np.zeros(10),
             }
 
     return train
