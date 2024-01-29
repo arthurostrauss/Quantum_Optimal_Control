@@ -23,7 +23,7 @@ from qiskit.transpiler import (
     InstructionProperties,
     Layout,
 )
-from qiskit.algorithms.state_fidelities import ComputeUncompute
+from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import (
