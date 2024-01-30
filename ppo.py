@@ -9,6 +9,7 @@ from IPython.display import clear_output
 from gymnasium.spaces import Box
 import torch
 import torch.nn as nn
+from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 from torch.distributions import Normal
@@ -58,12 +59,19 @@ def get_optimizer_from_str(optim_str):
 
 class CustomPPO:
     def __init__(
-        self,
-        agent_config: Dict,
-        env: QuantumEnvironment,
-        chkpt_dir: Optional[str] = "tmp/ppo",
-        chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+            self,
+            agent_config: Dict,
+            env: QuantumEnvironment,
+            chkpt_dir: Optional[str] = "tmp/ppo",
+            chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
     ):
+        """
+        Initializes the PPO algorithm with the given hyperparameters
+        :param agent_config: Dictionary containing all the hyperparameters for the PPO algorithm
+        :param env: Quantum Environment on which the algorithm is trained
+        :param chkpt_dir: Directory where the policy network is saved
+        :param chkpt_dir_critic: Directory where the critic network is saved
+        """
         self.agent_config = agent_config
         self.env = env
         self.chkpt_dir = chkpt_dir
@@ -143,6 +151,27 @@ class CustomPPO:
         self.reward_history = []
         self.circuit_fidelity_history = []
         self.avg_fidelity_history = []
+        self.fig, self.axs = None, None
+
+    def plot_curves(self):
+        if self.fig is None and self.axs is None:
+            plt.ion()
+            self.fig, self.axs = plt.subplots(2)
+
+        self.axs[0].clear()
+        self.axs[0].plot(np.mean(self.reward_history, axis=1))
+        self.axs[0].set_title('Reward History')
+        self.axs[0].set_xlabel('Iteration')
+        self.axs[0].set_ylabel('Reward')
+
+        self.axs[1].clear()
+        self.axs[1].plot(self.avg_fidelity_history)
+        self.axs[1].set_title('Fidelity History')
+        self.axs[1].set_xlabel('Iteration')
+        self.axs[1].set_ylabel('Fidelity')
+
+        plt.draw()
+        plt.pause(0.001)
 
     def train(self, total_updates, print_debug=True, num_prints=40):
         """
@@ -226,13 +255,13 @@ class CustomPPO:
                         nextnonterminal = 1.0 - dones[t + 1]
                         nextvalues = values[t + 1]
                     delta = (
-                        rewards[t]
-                        + self.gamma * nextvalues * nextnonterminal
-                        - values[t]
+                            rewards[t]
+                            + self.gamma * nextvalues * nextnonterminal
+                            - values[t]
                     )
                     advantages[t] = lastgaelam = (
-                        delta
-                        + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
+                            delta
+                            + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
                     )
                 returns = advantages + values
 
@@ -274,7 +303,7 @@ class CustomPPO:
                     mb_advantages = b_advantages[mb_inds]
                     if self.normalize_advantage:
                         mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                            mb_advantages.std() + 1e-8
+                                mb_advantages.std() + 1e-8
                         )
 
                     # Policy loss
@@ -302,9 +331,9 @@ class CustomPPO:
 
                     entropy_loss = entropy.mean()
                     loss = (
-                        pg_loss
-                        - self.ent_coef * entropy_loss
-                        + v_loss * self.critic_loss_coef
+                            pg_loss
+                            - self.ent_coef * entropy_loss
+                            + v_loss * self.critic_loss_coef
                     )
 
                     self.optimizer.zero_grad()
@@ -373,10 +402,10 @@ class CustomPPO:
 
 
 def make_train_ppo(
-    agent_config: Dict,
-    env: QuantumEnvironment,
-    chkpt_dir: Optional[str] = "tmp/ppo",
-    chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+        agent_config: Dict,
+        env: QuantumEnvironment,
+        chkpt_dir: Optional[str] = "tmp/ppo",
+        chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
 ):
     """
     Creates a training function for PPO algorithm.
@@ -455,10 +484,16 @@ def make_train_ppo(
     )
 
     def train(
-        total_updates: int,
-        print_debug: Optional[bool] = True,
-        num_prints: Optional[int] = 40,
+            total_updates: int,
+            print_debug: Optional[bool] = True,
+            num_prints: Optional[int] = 40,
     ):
+        """
+        Training function for PPO algorithm
+        :param total_updates: Total number of updates to perform
+        :param print_debug: If True, then print debug statements
+        :param num_prints: Number of times to print debug statements
+        """
         env.clear_history()
         start = time.time()
         global_step = 0
@@ -530,10 +565,10 @@ def make_train_ppo(
                         nextnonterminal = 1.0 - dones[t + 1]
                         nextvalues = values[t + 1]
                     delta = (
-                        rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
+                            rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
                     )
                     advantages[t] = lastgaelam = (
-                        delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+                            delta + gamma * gae_lambda * nextnonterminal * lastgaelam
                     )
                 returns = advantages + values
 
@@ -572,7 +607,7 @@ def make_train_ppo(
                     mb_advantages = b_advantages[mb_inds]
                     if normalize_advantage:  # Normalize advantage
                         mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                            mb_advantages.std() + 1e-8
+                                mb_advantages.std() + 1e-8
                         )
 
                     # Policy loss
