@@ -55,8 +55,6 @@ from qiskit_ibm_runtime import (
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
 
-import optuna
-
 from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from custom_jax_sim.jax_solver import PauliToQuditOperator
 from qconfig import QiskitConfig
@@ -929,116 +927,29 @@ def load_agent_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
-    return {
-        "RUN_NAME": config["RUN_NAME"],
-        "NUM_UPDATES": config["NUM_UPDATES"],
-        "N_EPOCHS": config["N_EPOCHS"],
-        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
-        "LR": config["LR"],
-        "GAMMA": config["GAMMA"],
-        "GAE_LAMBDA": config["GAE_LAMBDA"],
-        "ENT_COEF": config["ENT_COEF"],
-        "V_COEF": config["V_COEF"],
-        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
-        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
-        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
-        "CLIP_RATIO": config["CLIP_RATIO"],
-        "OPTIMIZER": config["OPTIMIZER"],
-        "N_UNITS": config["N_UNITS"],
-        "ACTIVATION": config["ACTIVATION"],
-        "INCLUDE_CRITIC": config["INCLUDE_CRITIC"],
-        "NORMALIZE_ADVANTAGE": config["NORMALIZE_ADVANTAGE"],
-        "CHKPT_DIR": config["CHKPT_DIR"],
+    ppo_params = {
+        "n_steps": config["AGENT"]["NUM_UPDATES"],
+        "n_epochs": config["AGENT"]["N_EPOCHS"],
+        "batch_size": config["AGENT"]["MINIBATCH_SIZE"],
+        "learning_rate": config["AGENT"]["LR_ACTOR"],
+        # "lr_critic": config["AGENT"]["LR_CRITIC"],
+        "gamma": config["AGENT"]["GAMMA"],
+        "gae_lambda": config["AGENT"]["GAE_LAMBDA"],
+        "ent_coef": config["AGENT"]["ENT_COEF"],
+        "vf_coef": config["AGENT"]["V_COEF"],
+        "max_grad_norm": config["AGENT"]["GRADIENT_CLIP"],
+        "clip_range_vf": config["AGENT"]["CLIP_VALUE_LOSS"],
+        "clip_range": config["AGENT"]["CLIP_RATIO"],
+    }
+    network_params = {
+        "optimizer": config["AGENT"]["OPTIMIZER"],
+        "n_units": config["AGENT"]["N_UNITS"],
+        "activation": config["AGENT"]["ACTIVATION"],
+        "include_critic": config["AGENT"]["INCLUDE_CRITIC"],
+        "checkpoint_dir": config["AGENT"]["CHKPT_DIR"],
     }
 
-def load_hpo_config_from_yaml_file(file_path: str):
-    with open(file_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    return {
-        "N_TRIALS": config["N_TRIALS"],
-        "N_UPDATES": config["N_UPDATES"],
-        "N_EPOCHS": config["N_EPOCHS"],
-        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
-        "BATCHSIZE_MULTIPLIER": config["BATCHSIZE_MULTIPLIER"],
-        "LR": config["LR"],
-        "GAMMA": config["GAMMA"],
-        "GAE_LAMBDA": config["GAE_LAMBDA"],
-        "ENT_COEF": config["ENT_COEF"],
-        "V_COEF": config["V_COEF"],
-        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
-        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
-        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
-        "CLIP_RATIO": config["CLIP_RATIO"],
-    }
-
-
-def create_hpo_agent_config(
-    trial: optuna.trial.Trial, hpo_config: dict, agent_config: dict
-):
-    hyper_params = {
-        "N_UPDATES": trial.suggest_int(
-            "N_UPDATES", hpo_config["N_UPDATES"][0], hpo_config["N_UPDATES"][1]
-        ),
-        "N_EPOCHS": trial.suggest_int(
-            "N_EPOCHS", hpo_config["N_EPOCHS"][0], hpo_config["N_EPOCHS"][1]
-        ),
-        "MINIBATCH_SIZE": trial.suggest_categorical(
-            "MINIBATCH_SIZE", hpo_config["MINIBATCH_SIZE"]
-        ),
-        "BATCHSIZE_MULTIPLIER": trial.suggest_int(
-            "BATCHSIZE_MULTIPLIER",
-            hpo_config["BATCHSIZE_MULTIPLIER"][0],
-            hpo_config["BATCHSIZE_MULTIPLIER"][1],
-        ),
-        "LR": trial.suggest_float(
-            "LR",
-            hpo_config["LR"][0],
-            hpo_config["LR"][1],
-            log=True,
-        ),
-        "GAMMA": trial.suggest_float(
-            "GAMMA", hpo_config["GAMMA"][0], hpo_config["GAMMA"][1]
-        ),
-        "GAE_LAMBDA": trial.suggest_float(
-            "GAE_LAMBDA", hpo_config["GAE_LAMBDA"][0], hpo_config["GAE_LAMBDA"][1]
-        ),
-        "ENT_COEF": trial.suggest_float(
-            "ENT_COEF", hpo_config["ENT_COEF"][0], hpo_config["ENT_COEF"][1]
-        ),
-        "V_COEF": trial.suggest_float(
-            "V_COEF", hpo_config["V_COEF"][0], hpo_config["V_COEF"][1]
-        ),
-        "GRADIENT_CLIP": trial.suggest_float(
-            "GRADIENT_CLIP",
-            hpo_config["GRADIENT_CLIP"][0],
-            hpo_config["GRADIENT_CLIP"][1],
-        ),
-        "CLIP_VALUE_COEF": trial.suggest_float(
-            "CLIP_VALUE_COEF",
-            hpo_config["CLIP_VALUE_COEF"][0],
-            hpo_config["CLIP_VALUE_COEF"][1],
-        ),
-        "CLIP_RATIO": trial.suggest_float(
-            "CLIP_RATIO", hpo_config["CLIP_RATIO"][0], hpo_config["CLIP_RATIO"][1]
-        ),
-    }
-
-    # Dynamically calculate batchsize from minibatch_size and batchsize_multiplier
-    hyper_params["BATCHSIZE"] = (
-        hyper_params["MINIBATCH_SIZE"] * hyper_params["BATCHSIZE_MULTIPLIER"]
-    )
-    # The upper hyperparameters are part of HPO scope
-    hyperparams = list(hyper_params.keys())
-
-    # The following hyperparameters are NOT part of HPO scope
-    hyper_params["CLIP_VALUE_LOSS"] = hpo_config["CLIP_VALUE_LOSS"]
-
-    # Take over attributes from agent_config and populate hyper_params
-    for attr in ["OPTIMIZER", "N_UNITS", "ACTIVATION", "INCLUDE_CRITIC", "NORMALIZE_ADVANTAGE", "CHKPT_DIR", "RUN_NAME"]:
-        hyper_params[attr] = agent_config[attr]
-
-    return hyper_params, hyperparams
+    return ppo_params, network_params
 
 
 def retrieve_backend_info(
