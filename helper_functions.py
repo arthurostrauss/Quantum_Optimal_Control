@@ -515,6 +515,7 @@ def retrieve_primitives(
     config: Union[Dict, QiskitConfig],
     abstraction_level: str = "circuit",
     estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
+    circuit: Optional[QuantumCircuit] = None,
 ) -> (Estimator_type, Sampler_type):
     """
     Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
@@ -568,6 +569,9 @@ def retrieve_primitives(
             if isinstance(backend.options.solver, JaxSolver):
                 estimator: Estimator_type = DynamicsBackendEstimator(
                     backend, options=estimator_options, skip_transpilation=False
+                )
+                backend.options.solver.circuit_macro = lambda: schedule(
+                    circuit, backend
                 )
             else:
                 estimator: Estimator_type = BackendEstimator(
@@ -631,7 +635,7 @@ def set_primitives_transpile_options(
 def handle_session(
     estimator: Estimator_type,
     backend: Backend_type,
-    session_count: Optional[int] = None,
+    counter: Optional[int] = None,
     qc: Optional[QuantumCircuit] = None,
     input_state_circ: Optional[QuantumCircuit] = None,
 ):
@@ -640,28 +644,24 @@ def handle_session(
     Args:
         estimator: Estimator instance
         backend: Backend instance
-        session_count: Optional session counter (for RuntimeEstimator)
+        counter: Optional session counter (for RuntimeEstimator) or circuit macro counter (for DynamicsBackendEstimator)
         qc: Optional QuantumCircuit instance (for DynamicsBackendEstimator)
         input_state_circ: Optional input state QuantumCircuit instance (for DynamicsBackendEstimator)
     """
     if isinstance(estimator, RuntimeEstimator):
+        assert isinstance(
+            backend, RuntimeBackend
+        ), "RuntimeEstimator must be used with RuntimeBackend"
         """Open a new Session if time limit of the ongoing one is reached"""
         if estimator.session.status() == "Closed":
             old_session = estimator.session
-            session_count += 1
-            print(f"New Session opened (#{session_count})")
+            counter += 1
+            print(f"New Session opened (#{counter})")
             session, options = (
                 Session(old_session.service, backend),
                 estimator.options,
             )
             estimator = RuntimeEstimator(session=session, options=dict(options))
-    elif isinstance(
-        backend, IBMBackend
-    ):  # Soon deprecated (backend.run also available in Qiskit Runtime)
-        if not backend.session.active:
-            session_count += 1
-            print(f"New Session opened (#{session_count})")
-            backend.open_session()
     elif isinstance(estimator, DynamicsBackendEstimator):
         if not isinstance(backend, DynamicsBackend) or not isinstance(
             backend.options.solver, JaxSolver
@@ -670,7 +670,10 @@ def handle_session(
                 "DynamicsBackendEstimator can only be used with DynamicsBackend and JaxSolver"
             )
         # Update callable within the jit compiled function
-        backend.options.solver.circuit_macro = lambda: schedule(qc, backend)
+        if counter != backend.options.solver.circuit_macro_counter:
+            backend.options.solver.circuit_macro_counter = counter
+            backend.options.solver.circuit_macro = lambda: schedule(qc, backend)
+
         # Update initial state of DynamicsBackend with input state circuit
         # The initial state is adapted to match the dimensions of the HamiltonianModel
         new_circ = transpile(input_state_circ, backend)
@@ -694,6 +697,8 @@ def handle_session(
         operation = PauliToQuditOperator(initial_rotations, subsystem_dims)
         initial_state = initial_state.evolve(operation)
         backend.set_options(initial_state=initial_state)
+
+    return estimator
 
 
 def get_solver_and_freq_from_backend(
@@ -951,6 +956,7 @@ def load_agent_from_yaml_file(file_path: str):
         "CHKPT_DIR": config["CHKPT_DIR"],
     }
 
+
 def load_hpo_config_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
@@ -1035,7 +1041,15 @@ def create_hpo_agent_config(
     hyper_params["CLIP_VALUE_LOSS"] = hpo_config["CLIP_VALUE_LOSS"]
 
     # Take over attributes from agent_config and populate hyper_params
-    for attr in ["OPTIMIZER", "N_UNITS", "ACTIVATION", "INCLUDE_CRITIC", "NORMALIZE_ADVANTAGE", "CHKPT_DIR", "RUN_NAME"]:
+    for attr in [
+        "OPTIMIZER",
+        "N_UNITS",
+        "ACTIVATION",
+        "INCLUDE_CRITIC",
+        "NORMALIZE_ADVANTAGE",
+        "CHKPT_DIR",
+        "RUN_NAME",
+    ]:
         hyper_params[attr] = agent_config[attr]
 
     return hyper_params, hyperparams

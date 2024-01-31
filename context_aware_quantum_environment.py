@@ -538,10 +538,12 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         else:
             print("Sending job...")
             try:
-                handle_session(
+                self.estimator = handle_session(
                     self.estimator,
                     self.backend,
-                    self._session_counts,
+                    self._session_counts
+                    if isinstance(self.estimator, RuntimeEstimator)
+                    else trunc_index,
                     qc,
                     target_state["input_state_circ"],
                 )

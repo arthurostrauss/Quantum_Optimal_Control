@@ -71,12 +71,10 @@ class HyperparameterOptimizer:
         path_hpo_config: str,
         save_results_path: str,
         log_progress: bool = True,
-        ):
+    ):
         self.q_env = q_env
         # Start with an initial agent configuration and then update it with the hyperparameters later in the workflow
-        self.agent_config_init = load_agent_from_yaml_file(
-            path_agent_config
-        )
+        self.agent_config_init = load_agent_from_yaml_file(path_agent_config)
         self.hpo_config = load_hpo_config_from_yaml_file(path_hpo_config)
         self.save_results_path = save_results_path
         self.log_progress = log_progress
@@ -96,13 +94,15 @@ class HyperparameterOptimizer:
             print_debug=True,
             num_prints=50,
         )
-        if training_results["avg_reward"] != -1.0: # If the training was successful 
+        if training_results["avg_reward"] != -1.0:  # If the training was successful
             # Save important information about the trial
             trial.set_user_attr("action_vector", training_results["best_action_vector"])
             trial.set_user_attr("avg_reward", training_results["avg_reward"])
             trial.set_user_attr("std_action", training_results["std_action"])
             trial.set_user_attr("action_history", training_results["action_history"])
-            trial.set_user_attr("fidelity_history", training_results["fidelity_history"])
+            trial.set_user_attr(
+                "fidelity_history", training_results["fidelity_history"]
+            )
 
         # Use a relevant metric from training_results as the return value
         last_ten_percent = int(0.1 * len(training_results["fidelity_history"]))
@@ -180,7 +180,7 @@ class HyperparameterOptimizer:
         if study.best_trial.value == 0.0:
             logging.warning("ERROR: HPO failed. No trials to save.")
             return {
-                'result': 'ERROR: HPO failed. All hyperparameter trials led to errors in the training process.',
+                "result": "ERROR: HPO failed. All hyperparameter trials led to errors in the training process.",
             }
 
         if self.log_progress:
@@ -193,6 +193,6 @@ class HyperparameterOptimizer:
     @property
     def target_gate(self):
         return {
-            'target_gate': self.q_env.target["gate"],
-            'target_register': self.q_env.target["register"],
+            "target_gate": self.q_env.target["gate"],
+            "target_register": self.q_env.target["register"],
         }

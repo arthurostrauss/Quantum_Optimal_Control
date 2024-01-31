@@ -294,6 +294,7 @@ class QuantumEnvironment(Env):
                 self.config.backend_config,
                 self.abstraction_level,
                 estimator_options,
+                self.circuit_truncations[0],
             )
             # Retrieve physical qubits forming the target register (and additional qubits for the circuit context)
             self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
@@ -512,7 +513,7 @@ class QuantumEnvironment(Env):
             print("Finished benchmarking")
 
         try:
-            handle_session(
+            self.estimator = handle_session(
                 self.estimator, self.backend, self._session_counts, qc, input_state_circ
             )
             # Append input state prep circuit to the custom circuit with front composition

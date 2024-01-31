@@ -18,12 +18,14 @@ from quantumenvironment import QuantumEnvironment
 
 import sys
 import logging
+
 logging.basicConfig(
     level=logging.WARNING,
-    format="%(asctime)s INFO %(message)s", # hardcoded INFO level
+    format="%(asctime)s INFO %(message)s",  # hardcoded INFO level
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
+
 
 def get_module_from_str(module_str):
     module_dict = {
@@ -67,11 +69,11 @@ def get_optimizer_from_str(optim_str):
 
 class CustomPPO:
     def __init__(
-            self,
-            agent_config: Dict,
-            env: QuantumEnvironment,
-            chkpt_dir: Optional[str] = "tmp/ppo",
-            chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+        self,
+        agent_config: Dict,
+        env: QuantumEnvironment,
+        chkpt_dir: Optional[str] = "tmp/ppo",
+        chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
     ):
         """
         Initializes the PPO algorithm with the given hyperparameters
@@ -168,15 +170,15 @@ class CustomPPO:
 
         self.axs[0].clear()
         self.axs[0].plot(np.mean(self.reward_history, axis=1))
-        self.axs[0].set_title('Reward History')
-        self.axs[0].set_xlabel('Iteration')
-        self.axs[0].set_ylabel('Reward')
+        self.axs[0].set_title("Reward History")
+        self.axs[0].set_xlabel("Iteration")
+        self.axs[0].set_ylabel("Reward")
 
         self.axs[1].clear()
         self.axs[1].plot(self.avg_fidelity_history)
-        self.axs[1].set_title('Fidelity History')
-        self.axs[1].set_xlabel('Iteration')
-        self.axs[1].set_ylabel('Fidelity')
+        self.axs[1].set_title("Fidelity History")
+        self.axs[1].set_xlabel("Iteration")
+        self.axs[1].set_ylabel("Fidelity")
 
         plt.draw()
         plt.pause(0.001)
@@ -263,13 +265,13 @@ class CustomPPO:
                         nextnonterminal = 1.0 - dones[t + 1]
                         nextvalues = values[t + 1]
                     delta = (
-                            rewards[t]
-                            + self.gamma * nextvalues * nextnonterminal
-                            - values[t]
+                        rewards[t]
+                        + self.gamma * nextvalues * nextnonterminal
+                        - values[t]
                     )
                     advantages[t] = lastgaelam = (
-                            delta
-                            + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
+                        delta
+                        + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
                     )
                 returns = advantages + values
 
@@ -311,7 +313,7 @@ class CustomPPO:
                     mb_advantages = b_advantages[mb_inds]
                     if self.normalize_advantage:
                         mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                                mb_advantages.std() + 1e-8
+                            mb_advantages.std() + 1e-8
                         )
 
                     # Policy loss
@@ -339,9 +341,9 @@ class CustomPPO:
 
                     entropy_loss = entropy.mean()
                     loss = (
-                            pg_loss
-                            - self.ent_coef * entropy_loss
-                            + v_loss * self.critic_loss_coef
+                        pg_loss
+                        - self.ent_coef * entropy_loss
+                        + v_loss * self.critic_loss_coef
                     )
 
                     self.optimizer.zero_grad()
@@ -410,10 +412,10 @@ class CustomPPO:
 
 
 def make_train_ppo(
-        agent_config: Dict,
-        env: QuantumEnvironment,
-        chkpt_dir: Optional[str] = "tmp/ppo",
-        chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+    agent_config: Dict,
+    env: QuantumEnvironment,
+    chkpt_dir: Optional[str] = "tmp/ppo",
+    chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
 ):
     """
     Creates a training function for PPO algorithm.
@@ -492,9 +494,9 @@ def make_train_ppo(
     )
 
     def train(
-            total_updates: int,
-            print_debug: Optional[bool] = True,
-            num_prints: Optional[int] = 40,
+        total_updates: int,
+        print_debug: Optional[bool] = True,
+        num_prints: Optional[int] = 40,
     ):
         """
         Training function for PPO algorithm
@@ -579,10 +581,12 @@ def make_train_ppo(
                             nextnonterminal = 1.0 - dones[t + 1]
                             nextvalues = values[t + 1]
                         delta = (
-                                rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
+                            rewards[t]
+                            + gamma * nextvalues * nextnonterminal
+                            - values[t]
                         )
                         advantages[t] = lastgaelam = (
-                                delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+                            delta + gamma * gae_lambda * nextnonterminal * lastgaelam
                         )
                     returns = advantages + values
 
@@ -604,9 +608,9 @@ def make_train_ppo(
                         mb_inds = b_inds[start:end]
                         new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
                         new_dist = Normal(new_mean, new_sigma)
-                        new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(
-                            1
-                        ), new_dist.entropy().sum(1)
+                        new_logprob, entropy = new_dist.log_prob(
+                            b_actions[mb_inds]
+                        ).sum(1), new_dist.entropy().sum(1)
                         logratio = new_logprob - b_logprobs[mb_inds]
                         ratio = logratio.exp()
 
@@ -615,13 +619,16 @@ def make_train_ppo(
                             old_approx_kl = (-logratio).mean()
                             approx_kl = ((ratio - 1) - logratio).mean()
                             clipfracs += [
-                                ((ratio - 1.0).abs() > ppo_epsilon).float().mean().item()
+                                ((ratio - 1.0).abs() > ppo_epsilon)
+                                .float()
+                                .mean()
+                                .item()
                             ]
 
                         mb_advantages = b_advantages[mb_inds]
                         if normalize_advantage:  # Normalize advantage
                             mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                                    mb_advantages.std() + 1e-8
+                                mb_advantages.std() + 1e-8
                             )
 
                         # Policy loss
@@ -647,7 +654,11 @@ def make_train_ppo(
                             v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                         entropy_loss = entropy.mean()
-                        loss = pg_loss - ent_coef * entropy_loss + v_loss * critic_loss_coef
+                        loss = (
+                            pg_loss
+                            - ent_coef * entropy_loss
+                            + v_loss * critic_loss_coef
+                        )
 
                         optimizer.zero_grad()
                         loss.backward()
@@ -664,7 +675,8 @@ def make_train_ppo(
                     print("sigma", std_action[0])
                     print("DFE Rewards Mean:", np.mean(env.reward_history, axis=1)[-1])
                     print(
-                        "DFE Rewards standard dev", np.std(env.reward_history, axis=1)[-1]
+                        "DFE Rewards standard dev",
+                        np.std(env.reward_history, axis=1)[-1],
                     )
                     print("Returns Mean:", np.mean(b_returns.numpy()))
                     print("Returns standard dev", np.std(b_returns.numpy()))
@@ -690,14 +702,20 @@ def make_train_ppo(
                 # writer.add_scalar("losses/circuit_fidelity", env.circuit_fidelity_history[-1], global_step)
                 writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
                 writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-                writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+                writer.add_scalar(
+                    "losses/old_approx_kl", old_approx_kl.item(), global_step
+                )
                 writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
                 writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-                writer.add_scalar("losses/explained_variance", explained_var, global_step)
+                writer.add_scalar(
+                    "losses/explained_variance", explained_var, global_step
+                )
 
                 # Collect results
                 avg_reward.append(np.mean(env.reward_history, axis=1)[-1])
-                fidelities.append(env.avg_fidelity_history[-1]) if len(env.avg_fidelity_history) > 0 else None
+                fidelities.append(env.avg_fidelity_history[-1]) if len(
+                    env.avg_fidelity_history
+                ) > 0 else None
                 avg_action_history.append(mean_action[0].numpy())
                 std_actions.append(std_action[0].numpy())
 
@@ -709,13 +727,15 @@ def make_train_ppo(
                 "std_action": std_action[0],
                 "fidelity_history": fidelities,
                 "action_history": avg_action_history,
-                "best_action_vector": np.mean(env.action_history[np.argmax(avg_reward)], axis=0),
+                "best_action_vector": np.mean(
+                    env.action_history[np.argmax(avg_reward)], axis=0
+                ),
             }
         except Exception as e:
-            logging.error(f'An error occured during training: {e}')
+            logging.error(f"An error occured during training: {e}")
             return {
-                'avg_reward': -1.0,
-                'fidelity_history': [0] * total_updates,
+                "avg_reward": -1.0,
+                "fidelity_history": [0] * total_updates,
             }
 
     return train
