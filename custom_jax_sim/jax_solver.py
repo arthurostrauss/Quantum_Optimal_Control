@@ -25,9 +25,6 @@ from scipy.integrate._ivp.ivp import OdeResult
 jit_wrap = wrap(jit, decorator=True)
 
 
-# qd_vmap = wrap(vmap, decorator=True)
-
-
 def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
     """
     This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
@@ -43,12 +40,14 @@ def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
         qud_op = np.identity(dim, dtype=np.complex64)
         qud_op[:2, :2] = op.to_matrix()
         qudit_op_list.append(qud_op)
-    complete_op = qudit_op_list[0]
+    complete_op = Operator(qudit_op_list[0])
     for i in range(1, len(qudit_op_list)):
-        complete_op = np.kron(complete_op, qudit_op_list[i])
-    return Operator(
-        complete_op, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
-    )
+        complete_op = complete_op.tensor(Operator(qudit_op_list[i]))
+    assert complete_op.is_unitary(), "The operator is not unitary"
+    assert (
+        complete_op.input_dims() == complete_op.output_dims() == tuple(subsystem_dims)
+    ), "The operator is not the right dimension"
+    return complete_op
 
 
 class JaxSolver(Solver):
@@ -133,6 +132,8 @@ class JaxSolver(Solver):
             rwa_carrier_freqs,
             validate,
         )
+        self.stored_results = []
+        self.observables = []
         self._schedule_func = schedule_func
         self._jit_func = None
         self._unitary_jit_func = None
@@ -254,19 +255,18 @@ class JaxSolver(Solver):
                     "No circuit macro has been provided, please provide a circuit macro"
                 )
 
-            # print(kwargs["observables"])
             observables_circuits: List[QuantumCircuit] = [
                 circ.remove_final_measurements(inplace=False)
                 for circ in kwargs["observables"]
             ]
-            # print(observables_circuits)
+
             pauli_rotations = [
                 [Operator.from_label("I") for _ in range(circ.num_qubits)]
                 for circ in observables_circuits
             ]
             for i, circuit in enumerate(observables_circuits):
-                qubit_counter = 0
-                qubit_list = []
+                qubit_counter, qubit_list = 0, []
+
                 for circuit_instruction in circuit.data:
                     assert (
                         len(circuit_instruction.qubits) == 1
@@ -283,6 +283,7 @@ class JaxSolver(Solver):
                 PauliToQuditOperator(pauli_rotations[i], subsystem_dims)
                 for i in range(len(pauli_rotations))
             ]
+            self.observables = observables
 
             for key in [
                 "parameter_dicts",
@@ -315,7 +316,6 @@ class JaxSolver(Solver):
             self._batched_sims = batch_results_y
 
             for results_t, results_y in zip(batch_results_t, batch_results_y):
-                print([state_type_wrapper(yi, dims=subsystem_dims) for yi in results_y])
                 for observable in observables:
                     results = OdeResult(
                         t=results_t, y=Array(results_y, backend="jax", dtype=complex)
@@ -327,7 +327,8 @@ class JaxSolver(Solver):
                         ]
 
                         # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables
-                        results.y = [yi.evolve(observable) for yi in results.y]
+                        results.y[-1] = results.y[-1].evolve(observable)
+                        self.stored_results.append(results.y[-1])
                     all_results.append(results)
 
             return all_results
