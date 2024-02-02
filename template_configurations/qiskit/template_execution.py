@@ -1,5 +1,4 @@
-import numpy as np
-from template_configurations.qiskit.pulse_config import (
+from template_configurations.qiskit.pulse_level.pulse_config import (
     q_env_config as pulse_q_env_config,
 )
 from quantumenvironment import QuantumEnvironment

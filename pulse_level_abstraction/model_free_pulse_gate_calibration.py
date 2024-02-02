@@ -12,7 +12,7 @@ from helper_functions import (
     select_optimizer,
     generate_model,
     get_control_channel_map,
-    get_solver_and_freq_from_backend,
+    custom_dynamics_from_backend,
 )
 from qconfig import QiskitConfig
 
@@ -153,7 +153,6 @@ primitive enabling Pauli expectation value sampling. If real device, use qiskit 
 Runtime Service 
 """
 
-
 """Real backend initialization"""
 backend_name = "ibm_perth"
 estimator_options = {"resilience_level": 0}
@@ -181,7 +180,7 @@ target.qubit_properties = fake_backend_v2.qubit_properties(qubit_tgt_register)
 
 # Extract channel frequencies and Solver instance from backend to provide a pulse level simulation enabling
 # fidelity benchmarking
-channel_freq, solver = get_solver_and_freq_from_backend(
+channel_freq, solver = custom_dynamics_from_backend(
     backend=fake_backend,
     subsystem_list=qubit_tgt_register,
     rotating_frame="auto",
@@ -192,7 +191,6 @@ channel_freq, solver = get_solver_and_freq_from_backend(
     dissipator_operators=None,
 )
 calibration_files = None
-
 
 """
 Custom Hamiltonian model for building DynamicsBackend

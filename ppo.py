@@ -161,27 +161,26 @@ class CustomPPO:
         self.reward_history = []
         self.circuit_fidelity_history = []
         self.avg_fidelity_history = []
-        self.fig, self.axs = None, None
+        self.fig, self.ax = None, None
 
     def plot_curves(self):
-        if self.fig is None and self.axs is None:
-            plt.ion()
-            self.fig, self.axs = plt.subplots(2)
-
-        self.axs[0].clear()
-        self.axs[0].plot(np.mean(self.reward_history, axis=1))
-        self.axs[0].set_title("Reward History")
-        self.axs[0].set_xlabel("Iteration")
-        self.axs[0].set_ylabel("Reward")
-
-        self.axs[1].clear()
-        self.axs[1].plot(self.avg_fidelity_history)
-        self.axs[1].set_title("Fidelity History")
-        self.axs[1].set_xlabel("Iteration")
-        self.axs[1].set_ylabel("Fidelity")
-
-        plt.draw()
-        plt.pause(0.001)
+        if self.fig is None:
+            self.fig, self.ax = plt.subplots(1)
+        self.ax.clear()
+        if len(self.reward_history) > 0:
+            self.ax.plot(np.mean(self.reward_history, axis=1), label="Reward")
+            if self.env.do_benchmark():
+                self.ax.plot(
+                    np.array(self.avg_fidelity_history)[:, 0],
+                    label="Fidelity (means of individual fidelities)",
+                )
+                self.ax.plot(
+                    np.array(self.avg_fidelity_history)[:, 1],
+                    label="Fidelity (of averaged process over batch)",
+                )
+            self.ax.set_title("Reward History")
+            self.ax.set_xlabel("Iteration")
+            self.ax.set_ylabel("Reward")
 
     def train(self, total_updates, print_debug=True, num_prints=40):
         """
@@ -371,6 +370,7 @@ class CustomPPO:
                 # print(np.mean(env.reward_history, axis =1)[-1])
                 # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
 
+                self.plot_curves()
                 if global_step % num_prints == 0:
                     clear_output(wait=True)
 

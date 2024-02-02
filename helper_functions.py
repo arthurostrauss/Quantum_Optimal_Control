@@ -10,6 +10,7 @@ from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
+from qiskit.providers.fake_provider import FakeProvider
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
@@ -22,6 +23,7 @@ from qiskit.transpiler import (
     InstructionDurations,
     InstructionProperties,
     Layout,
+    Target,
 )
 from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_dynamics import Solver, RotatingFrame
@@ -50,6 +52,7 @@ from qiskit_ibm_runtime import (
     Estimator as RuntimeEstimator,
     Options as RuntimeOptions,
     Sampler as RuntimeSampler,
+    QiskitRuntimeService,
 )
 
 import optuna
@@ -647,6 +650,9 @@ def handle_session(
         counter: Optional session counter (for RuntimeEstimator) or circuit macro counter (for DynamicsBackendEstimator)
         qc: Optional QuantumCircuit instance (for DynamicsBackendEstimator)
         input_state_circ: Optional input state QuantumCircuit instance (for DynamicsBackendEstimator)
+
+    Returns:
+        Updated Estimator instance
     """
     if isinstance(estimator, RuntimeEstimator):
         assert isinstance(
@@ -678,7 +684,9 @@ def handle_session(
         # The initial state is adapted to match the dimensions of the HamiltonianModel
         new_circ = transpile(input_state_circ, backend)
         subsystem_dims = backend.options.subsystem_dims
-        initial_state = Statevector.from_int(0, dims=subsystem_dims)
+        initial_state = Statevector.from_int(
+            0, dims=tuple(filter(lambda x: x > 1, subsystem_dims))
+        )
         initial_rotations = [
             Operator.from_label("I") for i in range(new_circ.num_qubits)
         ]
@@ -701,7 +709,7 @@ def handle_session(
     return estimator
 
 
-def get_solver_and_freq_from_backend(
+def custom_dynamics_from_backend(
     backend: BackendV1,
     subsystem_list: Optional[List[int]] = None,
     rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
@@ -710,10 +718,15 @@ def get_solver_and_freq_from_backend(
     static_dissipators: Optional[Array] = None,
     dissipator_operators: Optional[Array] = None,
     dissipator_channels: Optional[List[str]] = None,
-) -> Tuple[Dict[str, float], Solver]:
+    **options,
+) -> DynamicsBackend:
     """
-    Method to retrieve solver instance and relevant freq channels information from an IBM
-    backend added with potential dissipation operators, inspired from DynamicsBackend.from_backend() method
+    Method to retrieve custom DynamicsBackend instance from IBMBackend instance
+    added with potential dissipation operators, inspired from DynamicsBackend.from_backend() method.
+    Contrary to the original method, the Solver instance created is the custom JaxSolver tailormade for fast simulation
+    with the Estimator primitive.
+
+    :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
     :param subsystem_list: The list of qubits in the backend to include in the model.
     :param rwa_cutoff_freq: Rotating wave approximation argument for the internal :class:`.Solver`
     :param evaluation_mode: Evaluation mode argument for the internal :class:`.Solver`.
@@ -758,7 +771,7 @@ def get_solver_and_freq_from_backend(
 
     if backend_config.hamiltonian is None:
         raise QiskitError(
-            "get_solver_from_backend requires that backend.configuration() has a "
+            "DynamicsBackend.from_backend requires that backend.configuration() has a "
             "hamiltonian."
         )
 
@@ -766,8 +779,11 @@ def get_solver_and_freq_from_backend(
         static_hamiltonian,
         hamiltonian_operators,
         hamiltonian_channels,
-        subsystem_dims,
+        subsystem_dims_dict,
     ) = parse_backend_hamiltonian_dict(backend_config.hamiltonian, subsystem_list)
+    subsystem_dims = [
+        subsystem_dims_dict.get(idx, 1) for idx in range(backend_num_qubits)
+    ]
 
     # construct model frequencies dictionary from backend
     channel_freqs = _get_backend_channel_freqs(
@@ -776,6 +792,31 @@ def get_solver_and_freq_from_backend(
         backend_defaults=backend_defaults,
         channels=hamiltonian_channels,
     )
+
+    # Add control_channel_map from backend (only if not specified before by user)
+    if "control_channel_map" not in options:
+        if hasattr(backend, "control_channels"):
+            control_channel_map_backend = {
+                qubits: backend.control_channels[qubits][0].index
+                for qubits in backend.control_channels
+            }
+
+        elif hasattr(backend.configuration(), "control_channels"):
+            control_channel_map_backend = {
+                qubits: backend.configuration().control_channels[qubits][0].index
+                for qubits in backend.configuration().control_channels
+            }
+
+        else:
+            control_channel_map_backend = {}
+
+        # Reduce control_channel_map based on which channels are in the model
+        if bool(control_channel_map_backend):
+            control_channel_map = {}
+            for label, idx in control_channel_map_backend.items():
+                if f"u{idx}" in hamiltonian_channels:
+                    control_channel_map[label] = idx
+            options["control_channel_map"] = control_channel_map
 
     # build the solver
     if rotating_frame == "auto":
@@ -791,7 +832,7 @@ def get_solver_and_freq_from_backend(
         # config is guaranteed to have a dt
         dt = backend_config.dt
 
-    solver = Solver(
+    solver = JaxSolver(
         static_hamiltonian=static_hamiltonian,
         hamiltonian_operators=hamiltonian_operators,
         hamiltonian_channels=hamiltonian_channels,
@@ -805,7 +846,12 @@ def get_solver_and_freq_from_backend(
         dissipator_channels=dissipator_channels,
     )
 
-    return channel_freqs, solver
+    return DynamicsBackend(
+        solver=solver,
+        target=Target(dt=dt),
+        subsystem_dims=subsystem_dims,
+        **options,
+    )
 
 
 def build_qubit_space_projector(initial_subsystem_dims: list):
@@ -829,40 +875,34 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
     return projector
 
 
-def projected_statevector(statevector, subsystem_dims):
+def projected_statevector(statevector: np.array, subsystem_dims: List[int]):
     proj = build_qubit_space_projector(subsystem_dims)
     new_dim = 2 ** len(subsystem_dims)
     qubitized_statevector = np.zeros(new_dim, dtype=np.complex128)
     qubit_count = 0
-    new_statevector = proj @ Statevector(statevector, dims=subsystem_dims)
+    new_statevector = Statevector(statevector, dims=subsystem_dims).evolve(proj)
     for i in range(np.prod(subsystem_dims)):
         if new_statevector.data[i] != 0:
             qubitized_statevector[qubit_count] = new_statevector.data[i]
             qubit_count += 1
-    qubitized_statevector = Statevector(
-        qubitized_statevector, dims=(2,) * len(subsystem_dims)
-    )
+    qubitized_statevector = Statevector(qubitized_statevector)
     return qubitized_statevector
 
 
-def qubit_projection(unitary, subsystem_dims):
+def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     """
     Project unitary on qubit space
     """
 
     proj = build_qubit_space_projector(subsystem_dims)
     new_dim = 2 ** len(subsystem_dims)
+    unitary_op = Operator(
+        unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
+    )
     qubitized_unitary = np.zeros((new_dim, new_dim), dtype=np.complex128)
     qubit_count1 = qubit_count2 = 0
-    new_unitary = (
-        proj
-        @ Operator(
-            unitary,
-            input_dims=subsystem_dims,
-            output_dims=subsystem_dims,
-        )
-        @ proj
-    )
+    new_unitary = proj @ unitary_op @ proj
+
     for i in range(np.prod(subsystem_dims)):
         for j in range(np.prod(subsystem_dims)):
             if new_unitary.data[i, j] != 0:
@@ -924,6 +964,7 @@ def load_q_env_from_yaml_file(file_path: str):
         "physical_qubits": config["BACKEND"]["DYNAMICS"]["PHYSICAL_QUBITS"],
         "channel": config["SERVICE"]["CHANNEL"],
         "instance": config["SERVICE"]["INSTANCE"],
+        "solver_options": config["BACKEND"]["DYNAMICS"]["SOLVER_OPTIONS"],
     }
     runtime_options = config["RUNTIME_OPTIONS"]
     check_on_exp = config["ENV"]["CHECK_ON_EXP"]
@@ -1197,3 +1238,39 @@ def generate_model(
             return Model(inputs=input_layer, outputs=[mean_param, sigma_param]), Model(
                 inputs=input_critic, outputs=critic_output
             )
+
+
+def select_backend(
+    real_backend: Optional[bool] = None,
+    channel: Optional[str] = None,
+    instance: Optional[str] = None,
+    backend_name: Optional[str] = None,
+):
+    """
+    Select backend to use for training among real backend or fake backend (Aer Simulator)
+
+    Args:
+        real_backend: Boolean indicating if real backend should be used
+        channel: Channel to use for Runtime Service
+        instance: Instance to use for Runtime Service
+        backend_name: Name of the backend to use for training
+    """
+
+    backend = None
+    if real_backend is not None:
+        if real_backend:
+            service = QiskitRuntimeService(channel=channel, instance=instance)
+            if backend_name is None:
+                backend = service.least_busy(min_num_qubits=2)
+            else:
+                backend = service.get_backend(backend_name)
+
+            # Specify options below if needed
+            # backend.set_options(**options)
+        else:
+            # Fake backend initialization (Aer Simulator)
+            if backend_name is None:
+                backend_name = "fake_jakarta"
+            backend = FakeProvider().get_backend(backend_name)
+
+    return backend

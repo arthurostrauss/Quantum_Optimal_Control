@@ -632,13 +632,15 @@ class QuantumEnvironment(Env):
                 ):
                     # Jax compatible pulse simulation
 
-                    unitaries = np.array(
-                        self.backend.options.solver.unitary_solve(params)
-                    )[:, 1, :, :]
-
+                    unitaries = self.backend.options.solver.unitary_solve(params)[
+                        :, 1, :, :
+                    ]
+                    subsystem_dims = list(
+                        filter(lambda x: x > 1, self.backend.options.subsystem_dims)
+                    )
                     qubitized_unitaries = [
-                        qubit_projection(u, self.backend.options.subsystem_dims)
-                        for u in unitaries
+                        qubit_projection(unitaries[i, :, :], subsystem_dims)
+                        for i in range(self.batch_size)
                     ]
 
                     if self.target_type == "state":
@@ -658,17 +660,17 @@ class QuantumEnvironment(Env):
                         )
 
                     else:  # Gate calibration task
-                        gate = Operator(
-                            transpile(self.baseline_truncations[0], self.backend)
+                        gate = Operator(self.target["gate"])
+
+                        avg_fid_batch = np.mean(
+                            [
+                                average_gate_fidelity(unitary, gate)
+                                for unitary in qubitized_unitaries
+                            ]
                         )
-                        self.avg_fidelity_history.append(
-                            np.mean(
-                                [
-                                    average_gate_fidelity(unitary, gate)
-                                    for unitary in qubitized_unitaries
-                                ]
-                            )
-                        )
+                        avg_unitary = Operator(np.mean(qubitized_unitaries, axis=0))
+                        fid_over_avg = average_gate_fidelity(avg_unitary, gate)
+                        self.avg_fidelity_history.append([avg_fid_batch, fid_over_avg])
                     self.built_unitaries.append(unitaries)
 
                 else:

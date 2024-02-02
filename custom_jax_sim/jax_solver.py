@@ -9,6 +9,7 @@ from qiskit_dynamics.models import HamiltonianModel, LindbladModel
 from qiskit_dynamics.solvers.solver_classes import (
     is_lindblad_model_vectorized,
     is_lindblad_model_not_vectorized,
+    format_final_states,
 )
 from typing import Optional, List, Union, Callable, Tuple, Type, Any
 
@@ -37,15 +38,18 @@ def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
     """
     qudit_op_list = []
     for op, dim in zip(qubit_ops, subsystem_dims):
-        qud_op = np.identity(dim, dtype=np.complex64)
-        qud_op[:2, :2] = op.to_matrix()
-        qudit_op_list.append(qud_op)
+        if dim > 1:
+            qud_op = np.identity(dim, dtype=np.complex64)
+            qud_op[:2, :2] = op.to_matrix()
+            qudit_op_list.append(qud_op)
     complete_op = Operator(qudit_op_list[0])
     for i in range(1, len(qudit_op_list)):
         complete_op = complete_op.tensor(Operator(qudit_op_list[i]))
     assert complete_op.is_unitary(), "The operator is not unitary"
     assert (
-        complete_op.input_dims() == complete_op.output_dims() == tuple(subsystem_dims)
+        complete_op.input_dims()
+        == complete_op.output_dims()
+        == tuple(filter(lambda x: x > 1, subsystem_dims))
     ), "The operator is not the right dimension"
     return complete_op
 
@@ -151,6 +155,13 @@ class JaxSolver(Solver):
         return self._schedule_func
 
     def get_signals(self, params):
+        """
+        This method generates the call to the circuit macro and sets the signals of the model.
+        It also returns the signals of the model before the new signals are set for easy resetting.
+
+        Args:
+            params: The parameters to be assigned to the parametrized schedule
+        """
         parametrized_schedule = self.circuit_macro()
         model_sigs = self.model.signals
         if parametrized_schedule.is_parameterized():
@@ -186,9 +197,7 @@ class JaxSolver(Solver):
             results = solve_lmde(
                 generator=self.model,
                 t_span=t_span,
-                y0=jnp.eye(
-                    np.prod(self._subsystem_dims), np.prod(self._subsystem_dims)
-                ),
+                y0=jnp.eye(np.prod(self._subsystem_dims)),
                 **self._kwargs,
             )
             self.model.signals = model_sigs
@@ -219,7 +228,7 @@ class JaxSolver(Solver):
         batch_results_t, batch_results_y = self._unitary_jit_func(
             Array(self._t_span).data, Array(param_values).data
         )
-        return batch_results_y
+        return np.array(batch_results_y)
 
     def _solve_schedule_list_jax(
         self,
@@ -314,7 +323,6 @@ class JaxSolver(Solver):
             )
 
             self._batched_sims = batch_results_y
-
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:
                     results = OdeResult(
@@ -322,7 +330,9 @@ class JaxSolver(Solver):
                     )
                     if y0_cls is not None and convert_results:
                         results.y = [
-                            state_type_wrapper(yi, dims=subsystem_dims)
+                            state_type_wrapper(
+                                yi, dims=tuple(filter(lambda x: x > 1, subsystem_dims))
+                            )
                             for yi in results.y
                         ]
 
@@ -435,25 +445,3 @@ def validate_and_format_initial_state(
         raise QiskitError("""Shape mismatch for initial state y0 and LindbladModel.""")
 
     return y0, y0_input, y0_cls, wrapper
-
-
-def format_final_states(y, model, y0_input, y0_cls):
-    """Format final states for a single simulation."""
-
-    y = Array(y)
-
-    if y0_cls is DensityMatrix and isinstance(model, HamiltonianModel):
-        # conjugate by unitary
-        return y @ y0_input @ y.conj().transpose((0, 2, 1))
-    elif y0_cls is SuperOp and isinstance(model, HamiltonianModel):
-        # convert to SuperOp and compose
-        return (
-            np.einsum("nka,nlb->nklab", y.conj(), y).reshape(
-                y.shape[0], y.shape[1] ** 2, y.shape[1] ** 2
-            )
-            @ y0_input
-        )
-    elif (y0_cls is DensityMatrix) and is_lindblad_model_vectorized(model):
-        return y.reshape((len(y),) + y0_input.shape, order="F")
-
-    return y
