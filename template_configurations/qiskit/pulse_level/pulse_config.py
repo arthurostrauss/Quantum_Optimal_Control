@@ -56,7 +56,10 @@ def new_params_ecr(
         for sched in ["cr45p", "cr45m"]:
             for i, feature in enumerate(pulse_features):
                 if feature != "duration" and feature in available_features:
-                    new_params[(feature, qubits, sched)] += params[i]
+                    # new_params[(feature, qubits, sched)] += params[i]  # Add the parameter to the pulse baseline calibration
+                    new_params[(feature, qubits, sched)] = (
+                        0.0 + params[i]
+                    )  # Replace baseline calibration with the parameter
                 else:
                     new_params[
                         (feature, qubits, sched)
@@ -97,7 +100,10 @@ def new_params_x(
         )
     for i, feature in enumerate(pulse_features):
         if feature != "duration" and feature in available_features:
-            new_params[(feature, qubits, "x")] += params[i]
+            # new_params[(feature, qubits, "x")] += params[i]  # Add the parameter to the pulse baseline calibration
+            new_params[(feature, qubits, "x")] = (
+                0.0 + params[i]
+            )  # Replace baseline calibration with the parameter
         else:
             new_params[(feature, qubits, "x")] += pulse.builder.seconds_to_samples(
                 duration_window * params[i]

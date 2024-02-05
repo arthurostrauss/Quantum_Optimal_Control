@@ -123,10 +123,8 @@ class ParameterExpression:
             A new expression parameterized by any parameters which were not bound by
             parameter_values.
         """
-
         if not allow_unknown_parameters:
             self._raise_if_passed_unknown_parameters(parameter_values.keys())
-
         jax_tracer = isinstance(jnp.array(0), core.Tracer)
         if not jax_tracer:
             self._raise_if_passed_nan(parameter_values)
@@ -587,25 +585,17 @@ class ParameterExpression:
 
     def is_real(self):
         """Return whether the expression is real"""
-
-        # workaround for symengine behavior that const * (0 + 1 * I) is not real
-        # see https://github.com/symengine/symengine.py/issues/414
-        if _optionals.HAS_SYMENGINE and self._symbol_expr.is_real is None:
-            symbol_expr = self._symbol_expr.evalf()
-        else:
-            symbol_expr = self._symbol_expr
-
-        if not symbol_expr.is_real and symbol_expr.is_real is not None:
+        if not self._symbol_expr.is_real and self._symbol_expr.is_real is not None:
             # Symengine returns false for is_real on the expression if
-            # there is a imaginary component (even if that component is 0),
+            # there is an imaginary component (even if that component is 0),
             # but the parameter will evaluate as real. Check that if the
             # expression's is_real attribute returns false that we have a
             # non-zero imaginary
             if _optionals.HAS_SYMENGINE:
-                if symbol_expr.imag == 0.0:
+                if self._symbol_expr.imag == 0.0:
                     return True
             return False
-        return symbol_expr.is_real
+        return self._symbol_expr.is_real
 
     def sympify(self):
         """Return symbolic expression as a raw Sympy or Symengine object.
