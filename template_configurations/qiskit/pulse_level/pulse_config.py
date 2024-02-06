@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Optional, Dict
 import os
 from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
@@ -10,6 +11,8 @@ from helper_functions import (
     perform_standard_calibrations,
     select_backend,
     custom_dynamics_from_backend,
+    new_params_ecr,
+    new_params_x,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
@@ -35,80 +38,6 @@ Array.set_default_backend("jax")
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_pulse_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
-
-
-def new_params_ecr(
-    params: ParameterVector,
-    qubits: Sequence[int],
-    backend: BackendV1 | BackendV2,
-    pulse_features: List[str],
-    keep_symmetry: bool = True,
-    duration_window: float = 0.1,
-):
-    new_params, available_features, _, _ = get_ecr_params(backend, qubits)
-
-    if keep_symmetry:  # Maintain symmetry between the two GaussianSquare pulses
-        if len(pulse_features) != len(params):
-            raise ValueError(
-                f"Number of pulse features ({len(pulse_features)} and number of parameters ({len(params)}"
-                f"do not match"
-            )
-        for sched in ["cr45p", "cr45m"]:
-            for i, feature in enumerate(pulse_features):
-                if feature != "duration" and feature in available_features:
-                    # new_params[(feature, qubits, sched)] += params[i]  # Add the parameter to the pulse baseline calibration
-                    new_params[(feature, qubits, sched)] = (
-                        0.0 + params[i]
-                    )  # Replace baseline calibration with the parameter
-                else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(duration_window * params[i])
-    else:
-        if 2 * len(pulse_features) != len(params):
-            raise ValueError(
-                f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)} do not "
-                f"match"
-            )
-        num_features = len(pulse_features)
-        for i, sched in enumerate(["cr45p", "cr45m"]):
-            for j, feature in enumerate(pulse_features):
-                if feature != "duration" and feature in available_features:
-                    new_params[(feature, qubits, sched)] += params[i * num_features + j]
-                else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(
-                        duration_window * params[i * num_features + j]
-                    )
-
-    return new_params
-
-
-def new_params_x(
-    params: ParameterVector,
-    qubits: Sequence[int],
-    backend: BackendV1 | BackendV2,
-    pulse_features: List[str],
-    duration_window: float,
-):
-    new_params, available_features, _, _ = get_pulse_params(backend, qubits, "x")
-    if len(pulse_features) != len(params):
-        raise ValueError(
-            f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)}"
-            f" do not match"
-        )
-    for i, feature in enumerate(pulse_features):
-        if feature != "duration" and feature in available_features:
-            # new_params[(feature, qubits, "x")] += params[i]  # Add the parameter to the pulse baseline calibration
-            new_params[(feature, qubits, "x")] = (
-                0.0 + params[i]
-            )  # Replace baseline calibration with the parameter
-        else:
-            new_params[(feature, qubits, "x")] += pulse.builder.seconds_to_samples(
-                duration_window * params[i]
-            )
-    return new_params
 
 
 def custom_schedule(
@@ -220,38 +149,25 @@ def get_backend(
     :param solver_options: Options for the DynamicsBackend solver
     :return: Backend instance
     """
-    # Real backend initialization
 
-    backend = select_backend(real_backend, channel, instance, backend_name)
-
-    if backend is not None:
-        if use_dynamics:
-            if solver_options["hmax"] == "auto":
-                solver_options["hmax"] = backend.configuration().dt
-            for key in ["atol", "rtol"]:
-                solver_options[key] = float(solver_options[key])
-            backend = custom_dynamics_from_backend(
-                backend,
-                subsystem_list=list(physical_qubits),
-                solver_options=solver_options,
-            )
-            _, _ = perform_standard_calibrations(backend)
-        else:
-            raise ValueError(
-                f"No backend was found with name {backend_name}, DynamicsBackend cannot be used"
-            )
-    else:
-        # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        if use_dynamics is not None and use_dynamics:
-            backend = jax_backend
-            # _, _ = perform_standard_calibrations(backend)
-        else:
-            # TODO: Add here your custom backend
-            # For now use FakeJakartaV2 as a safe working custom backend
-            pass
+    backend = select_backend(
+        real_backend,
+        channel,
+        instance,
+        backend_name,
+        use_dynamics,
+        physical_qubits,
+        solver_options,
+    )
 
     if backend is None:
-        Warning("No backend was provided, Statevector simulation will be used")
+        # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
+        # TODO: Add here your custom backend
+        backend = jax_backend
+        # _, _ = perform_standard_calibrations(backend)
+
+    if backend is None:
+        warnings.warn("No backend was provided, Statevector simulation will be used")
     return backend
 
 

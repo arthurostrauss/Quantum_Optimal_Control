@@ -9,7 +9,13 @@ import tensorflow as tf
 import yaml
 from gymnasium.spaces import Box
 from qiskit import pulse, schedule, transpile
-from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
+from qiskit.circuit import (
+    QuantumCircuit,
+    Gate,
+    Parameter,
+    CircuitInstruction,
+    ParameterVector,
+)
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
@@ -53,7 +59,6 @@ from qiskit_experiments.library import (
     RoughXSXAmplitudeCal,
     RoughDragCal,
 )
-from qiskit_ibm_provider import IBMBackend
 
 from qiskit_ibm_runtime import (
     Session,
@@ -135,27 +140,29 @@ def perform_standard_calibrations(
     single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
 
     control_channel_map = backend.options.control_channel_map
+    coupling_map = None
     physical_control_channel_map = None
-    if control_channel_map is not None:
-        physical_control_channel_map = {
-            (qubit_pair[0], qubit_pair[1]): backend.control_channel(
-                (qubit_pair[0], qubit_pair[1])
-            )
-            for qubit_pair in control_channel_map
-        }
-    elif num_qubits > 1:
-        all_to_all_connectivity = tuple(permutations(qubits, 2))
-        control_channel_map = {
-            (q[0], q[1]): index for index, q in enumerate(all_to_all_connectivity)
-        }
-        physical_control_channel_map = {
-            (q[0], q[1]): [pulse.ControlChannel(index)]
-            for index, q in enumerate(all_to_all_connectivity)
-        }
-    backend.set_options(control_channel_map=control_channel_map)
-    coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
-    two_qubit_properties = {qubits: None for qubits in control_channel_map}
-    two_qubit_errors = {qubits: 0.0 for qubits in control_channel_map}
+    if num_qubits > 1:
+        if control_channel_map is not None:
+            physical_control_channel_map = {
+                (qubit_pair[0], qubit_pair[1]): backend.control_channel(
+                    (qubit_pair[0], qubit_pair[1])
+                )
+                for qubit_pair in control_channel_map
+            }
+        else:
+            all_to_all_connectivity = tuple(permutations(qubits, 2))
+            control_channel_map = {
+                (q[0], q[1]): index for index, q in enumerate(all_to_all_connectivity)
+            }
+            physical_control_channel_map = {
+                (q[0], q[1]): [pulse.ControlChannel(index)]
+                for index, q in enumerate(all_to_all_connectivity)
+            }
+        backend.set_options(control_channel_map=control_channel_map)
+        coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
+        two_qubit_properties = {qubits: None for qubits in control_channel_map}
+        two_qubit_errors = {qubits: 0.0 for qubits in control_channel_map}
     standard_gates: Dict[
         str, Gate
     ] = get_standard_gate_name_mapping()  # standard gate library
@@ -178,7 +185,9 @@ def perform_standard_calibrations(
             libraries=[
                 FixedFrequencyTransmon(basis_gates=["x", "sx"]),
                 EchoedCrossResonance(basis_gates=["cr45p", "cr45m", "ecr"]),
-            ],
+            ]
+            if num_qubits > 1
+            else [FixedFrequencyTransmon(basis_gates=["x", "sx"])],
             backend_name=backend.name,
             backend_version=backend.backend_version,
         )
@@ -197,11 +206,15 @@ def perform_standard_calibrations(
             backend._coupling_map = target.build_coupling_map(two_qubit_gates[0])
 
     for qubit in qubits:  # Add calibrations for each qubit
-        control_channels = list(
-            filter(
-                lambda x: x is not None,
-                [control_channel_map.get((i, qubit), None) for i in qubits],
+        control_channels = (
+            list(
+                filter(
+                    lambda x: x is not None,
+                    [control_channel_map.get((i, qubit), None) for i in qubits],
+                )
             )
+            if num_qubits > 1
+            else []
         )
         # Calibration of RZ gate, virtual Z-rotation
         with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
@@ -436,6 +449,99 @@ def get_pulse_params(
     return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
 
 
+def new_params_ecr(
+    params: ParameterVector,
+    qubits: Sequence[int],
+    backend: BackendV1 | BackendV2,
+    pulse_features: List[str],
+    keep_symmetry: bool = True,
+    duration_window: float = 0.1,
+):
+    """
+    Helper function to parametrize a custom ECR gate using Qiskit Experiments Calibrations syntax
+    :param params: Parameters of the Schedule/Custom gate
+    :param qubits: Physical qubits on which custom gate is applied on
+    :param backend: IBM Backend on which schedule shall be added
+    :param pulse_features: List of pulse features to be parametrized
+    :param keep_symmetry: Choose if the two parts of the ECR tone shall be jointly parametrized or not
+    :param duration_window: Duration window for the pulse duration
+    :return: Dictionary of updated ECR parameters
+    """
+    new_params, available_features, _, _ = get_ecr_params(backend, qubits)
+
+    if keep_symmetry:  # Maintain symmetry between the two GaussianSquare pulses
+        if len(pulse_features) != len(params):
+            raise ValueError(
+                f"Number of pulse features ({len(pulse_features)} and number of parameters ({len(params)}"
+                f"do not match"
+            )
+        for sched in ["cr45p", "cr45m"]:
+            for i, feature in enumerate(pulse_features):
+                if feature != "duration" and feature in available_features:
+                    # new_params[(feature, qubits, sched)] += params[i]  # Add the parameter to the pulse baseline calibration
+                    new_params[(feature, qubits, sched)] = (
+                        0.0 + params[i]
+                    )  # Replace baseline calibration with the parameter
+                else:
+                    new_params[
+                        (feature, qubits, sched)
+                    ] += pulse.builder.seconds_to_samples(duration_window * params[i])
+    else:
+        if 2 * len(pulse_features) != len(params):
+            raise ValueError(
+                f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)} do not "
+                f"match"
+            )
+        num_features = len(pulse_features)
+        for i, sched in enumerate(["cr45p", "cr45m"]):
+            for j, feature in enumerate(pulse_features):
+                if feature != "duration" and feature in available_features:
+                    new_params[(feature, qubits, sched)] += params[i * num_features + j]
+                else:
+                    new_params[
+                        (feature, qubits, sched)
+                    ] += pulse.builder.seconds_to_samples(
+                        duration_window * params[i * num_features + j]
+                    )
+
+    return new_params
+
+
+def new_params_x(
+    params: ParameterVector,
+    qubits: Sequence[int],
+    backend: BackendV1 | BackendV2,
+    pulse_features: List[str],
+    duration_window: float,
+):
+    """
+    Helper function to parametrize a custom X gate using Qiskit Experiments Calibrations syntax
+    :param params: Parameters of the Schedule/Custom gate
+    :param qubits: Physical qubits on which custom gate is applied on
+    :param backend: IBM Backend on which schedule shall be added
+    :param pulse_features: List of pulse features to be parametrized
+    :param duration_window: Duration window for the pulse duration
+    :return: Dictionary of updated X parameters
+    """
+    new_params, available_features, _, _ = get_pulse_params(backend, qubits, "x")
+    if len(pulse_features) != len(params):
+        raise ValueError(
+            f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)}"
+            f" do not match"
+        )
+    for i, feature in enumerate(pulse_features):
+        if feature != "duration" and feature in available_features:
+            # new_params[(feature, qubits, "x")] += params[i]  # Add the parameter to the pulse baseline calibration
+            new_params[(feature, qubits, "x")] = (
+                0.0 + params[i]
+            )  # Replace baseline calibration with the parameter
+        else:
+            new_params[(feature, qubits, "x")] += pulse.builder.seconds_to_samples(
+                duration_window * params[i]
+            )
+    return new_params
+
+
 def simulate_pulse_schedule(
     solver_instance: DynamicsBackend | Solver | JaxSolver,
     sched: pulse.Schedule | pulse.ScheduleBlock,
@@ -488,7 +594,7 @@ def simulate_pulse_schedule(
     final_state = initial_state.evolve(output_op)
     projected_statevec = projected_statevector(final_state, subsystem_dims)
     final_results = {
-        "unitary": output_unitary,
+        "unitary": output_op,
         "statevec": final_state,
         "projected_unitary": projected_unitary,
         "projected_statevec": projected_statevec,
@@ -1430,6 +1536,9 @@ def select_backend(
     channel: Optional[str] = None,
     instance: Optional[str] = None,
     backend_name: Optional[str] = None,
+    use_dynamics: Optional[bool] = None,
+    physical_qubits: Optional[List[int]] = None,
+    solver_options: Optional[Dict] = None,
 ):
     """
     Select backend to use for training among real backend or fake backend (Aer Simulator)
@@ -1439,6 +1548,9 @@ def select_backend(
         channel: Channel to use for Runtime Service
         instance: Instance to use for Runtime Service
         backend_name: Name of the backend to use for training
+        use_dynamics: Boolean indicating if DynamicsBackend should be used
+        physical_qubits: Physical qubits on which DynamicsBackend should be used
+        solver_options: Solver options for DynamicsBackend
 
     Returns:
         backend: Backend instance
@@ -1461,4 +1573,20 @@ def select_backend(
                 backend_name = "fake_jakarta"
             backend = FakeProvider().get_backend(backend_name)
 
+    if backend is not None:
+        if use_dynamics:
+            if solver_options["hmax"] == "auto":
+                solver_options["hmax"] = backend.configuration().dt
+            for key in ["atol", "rtol"]:
+                solver_options[key] = float(solver_options[key])
+            backend = custom_dynamics_from_backend(
+                backend,
+                subsystem_list=list(physical_qubits),
+                solver_options=solver_options,
+            )
+            _, _ = perform_standard_calibrations(backend)
+        else:
+            raise ValueError(
+                f"No backend was found with name {backend_name}, DynamicsBackend cannot be used"
+            )
     return backend

@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
 from qiskit_dynamics.array import Array
 from qiskit.quantum_info import Operator
@@ -18,7 +18,8 @@ def custom_backend(
     dims: List[int],
     freqs: List[float],
     anharmonicities: List[float],
-    couplings: Dict[Tuple[float], float],
+    rabi_freqs: List[float],
+    couplings: Optional[Dict[Tuple[int, int], float]] = None,
 ):
     """
     Custom backend for the dynamics simulation.
@@ -28,81 +29,92 @@ def custom_backend(
         freqs: The frequencies of the subsystems.
         anharmonicities: The anharmonicities of the subsystems.
         couplings: The coupling constants between the subsystems.
+        rabi_freqs: The Rabi frequencies of the subsystems.
 
     """
-    a = [np.diag(np.sqrt(np.arange(1, dim)), 1) for dim in dims]
-    adag = np.array([np.diag(np.sqrt(np.arange(1, dim)), -1) for dim in dims])
-    N = np.array([np.diag(np.arange(dim)) for dim in dims])
+    assert (
+        len(dims) == len(freqs) == len(anharmonicities) == len(rabi_freqs)
+    ), "The number of subsystems, frequencies, and anharmonicities must be equal."
+    n_qubits = len(dims)
+    a = [Operator(np.diag(np.sqrt(np.arange(1, dim)), 1)) for dim in dims]
+    adag = [Operator(np.diag(np.sqrt(np.arange(1, dim)), -1)) for dim in dims]
+    N = [Operator(np.diag(np.arange(dim))) for dim in dims]
+    ident = [Operator(np.eye(dim, dtype=complex)) for dim in dims]
 
-    ident = np.array([np.eye(dim, dtype=complex) for dim in dims])
-    full_ident = np.eye(dims[0] ** 2, dtype=complex)
+    full_ident = ident[0]
+    for i in range(1, n_qubits):
+        full_ident = full_ident.tensor(ident[i])
 
-    N0 = np.kron(ident, N)
-    N1 = np.kron(N, ident)
+    N_ops = N
+    a_ops = a
+    adag_ops = adag
+    for i in range(n_qubits):
+        for j in range(n_qubits):
+            if j > i:
+                N_ops[i] = N_ops[i].expand(ident[j])
+                a_ops[i] = a_ops[i].expand(ident[j])
+                adag_ops[i] = adag_ops[i].expand(ident[j])
+            elif j < i:
+                N_ops[i] = N_ops[i].tensor(ident[j])
+                a_ops[i] = a_ops[i].tensor(ident[j])
+                adag_ops[i] = adag_ops[i].tensor(ident[j])
 
-    a0 = np.kron(ident, a)
-    a1 = np.kron(a, ident)
-
-    a0dag = np.kron(ident, adag)
-    a1dag = np.kron(adag, ident)
-
-    static_ham0 = 2 * np.pi * freqs[0] * N0 + np.pi * anharmonicities[0] * N0 * (
-        N0 - full_ident
+    static_ham = Operator(
+        np.zeros((np.prod(dims), np.prod(dims)), dtype=complex),
+        input_dims=tuple(dims),
+        output_dims=tuple(dims),
     )
-    static_ham1 = 2 * np.pi * freqs[1] * N1 + np.pi * anharmonicities[1] * N1 * (
-        N1 - full_ident
-    )
 
-    static_ham_full = (
-        static_ham0
-        + static_ham1
-        + 2 * np.pi * couplings[0] * ((a0 + a0dag) @ (a1 + a1dag))
-    )
+    for i in range(n_qubits):
+        static_ham += 2 * np.pi * freqs[i] * N_ops[i] + np.pi * anharmonicities[
+            i
+        ] * N_ops[i] @ (N_ops[i] - full_ident)
+    drive_ops = [
+        2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_qubits)
+    ]
+    channels = {f"d{i}": freqs[i] for i in range(n_qubits)}
+    ecr_ops = []
+    num_controls = 0
+    if couplings is not None:
+        keys = list(couplings.keys())
+        for i, j in keys:
+            couplings[(j, i)] = couplings[(i, j)]
+        for (i, j), coupling in couplings.items():
+            static_ham += (
+                2
+                * np.pi
+                * coupling
+                * (a_ops[i] + adag_ops[i])
+                @ (a_ops[j] + adag_ops[j])
+            )
+            channels[f"u{num_controls}"] = freqs[j]
+            num_controls += 1
+            ecr_ops.append(drive_ops[i])
 
-    # build solver
     dt = 2.2222e-10
 
     jax_solver = JaxSolver(
-        static_hamiltonian=static_ham_full,
-        hamiltonian_operators=[
-            2 * np.pi * couplings[1] * (a0 + a0dag),
-            2 * np.pi * couplings[2] * (a1 + a1dag),
-            2 * np.pi * couplings[3] * (a0 + a0dag),
-            2 * np.pi * couplings[4] * (a1 + a1dag),
-        ],
-        rotating_frame=static_ham_full,
-        hamiltonian_channels=["d0", "d1", "u0", "u1"],
-        channel_carrier_freqs={
-            "d0": freqs[0],
-            "d1": freqs[1],
-            "u0": freqs[1],
-            "u1": freqs[0],
-        },
+        static_hamiltonian=static_ham,
+        hamiltonian_operators=drive_ops + ecr_ops,
+        rotating_frame=static_ham,
+        hamiltonian_channels=list(channels.keys()),
+        channel_carrier_freqs=channels,
         dt=dt,
         evaluation_mode="dense",
     )
-    # Consistent solver option to use throughout notebook
-    solver_options = {"method": "jax_odeint", "atol": 1e-5, "rtol": 1e-7, "hmax": dt}
 
     solver = Solver(
-        static_hamiltonian=static_ham_full,
-        hamiltonian_operators=[
-            2 * np.pi * couplings[1] * (a0 + a0dag),
-            2 * np.pi * couplings[2] * (a1 + a1dag),
-            2 * np.pi * couplings[3] * (a0 + a0dag),
-            2 * np.pi * couplings[4] * (a1 + a1dag),
-        ],
-        rotating_frame=static_ham_full,
-        hamiltonian_channels=["d0", "d1", "u0", "u1"],
-        channel_carrier_freqs={
-            "d0": freqs[0],
-            "d1": freqs[1],
-            "u0": freqs[1],
-            "u1": freqs[0],
-        },
+        static_hamiltonian=static_ham,
+        hamiltonian_operators=drive_ops + ecr_ops,
+        rotating_frame=static_ham,
+        hamiltonian_channels=list(channels.keys()),
+        channel_carrier_freqs=channels,
         dt=dt,
         evaluation_mode="dense",
     )
+
+    # Consistent solver option to use throughout notebook
+    solver_options = {"method": "jax_odeint", "atol": 1e-5, "rtol": 1e-7, "hmax": dt}
 
     jax_backend = DynamicsBackend(
         solver=jax_solver,
