@@ -182,16 +182,19 @@ class CustomPPO:
             self.ax.set_xlabel("Iteration")
             self.ax.set_ylabel("Reward")
 
-    def train(self, total_updates, print_debug=True, num_prints=40):
+    def train(self, total_updates, print_debug=True, num_prints=40, clear_history=True):
         """
         Training function for PPO algorithm
         :param total_updates: Total number of updates to perform
         :param print_debug: If True, then print debug statements
         :param num_prints: Number of times to print debug statements
         """
-        self.env.clear_history()
-        start = time.time()
-        global_step = 0
+        if clear_history:
+            self.env.clear_history()
+            start = time.time()
+            global_step = 0
+        else:
+            global_step = self.env.step_tracker
 
         obs = torch.zeros(
             (self.num_time_steps, self.batchsize) + self.env.observation_space.shape

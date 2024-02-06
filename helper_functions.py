@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from itertools import permutations
 from typing import Optional, Tuple, List, Union, Dict, Sequence
 
+import jax
 import numpy as np
 import tensorflow as tf
 import yaml
@@ -10,14 +13,20 @@ from qiskit.circuit import QuantumCircuit, Gate, Parameter, CircuitInstruction
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
-from qiskit.providers.fake_provider import FakeProvider
+from qiskit_ibm_runtime.fake_provider import FakeProvider
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
 
 from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
-from qiskit.providers.fake_provider.fake_backend import FakeBackend, FakeBackendV2
-from qiskit.quantum_info import Operator, Statevector, DensityMatrix
+from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackend, FakeBackendV2
+from qiskit.quantum_info import (
+    Operator,
+    Statevector,
+    DensityMatrix,
+    average_gate_fidelity,
+    state_fidelity,
+)
 from qiskit.transpiler import (
     CouplingMap,
     InstructionDurations,
@@ -64,6 +73,7 @@ from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from custom_jax_sim.jax_solver import PauliToQuditOperator
 from qconfig import QiskitConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
+import jax.numpy as jnp
 
 # from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 
@@ -282,6 +292,15 @@ def perform_standard_calibrations(
 def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
     """
     Determine default parameters for ECR gate on provided backend (works even if basis gate of the IBM Backend is CX)
+
+    Args:
+        backend: Backend instance
+        physical_qubits: Physical qubits on which ECR gate is to be performed
+    Returns:
+        default_params: Default parameters for ECR gate
+        pulse_features: Features of the pulse
+        basis_gate_instructions: Instructions for the basis gate
+        instructions_array: Array of instructions for the basis gate
     """
     if not isinstance(backend, (BackendV1, BackendV2)):
         raise TypeError("Backend must be defined")
@@ -386,6 +405,16 @@ def get_pulse_params(
 ):
     """
     Determine default parameters for SX or X gate on provided backend
+
+    Args:
+        backend: Backend instance
+        physical_qubit: Physical qubit on which gate is to be performed
+        name: Name of the gate (X or SX)
+    Returns:
+        default_params: Default parameters for X or SX gate
+        pulse_features: Features of the pulse
+        basis_gate_instructions: Instructions for the basis gate
+        instructions_array: Array of instructions for the basis gate
     """
     if not isinstance(backend, (BackendV1, BackendV2)):
         raise TypeError("Backend must be defined")
@@ -407,6 +436,72 @@ def get_pulse_params(
     return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
 
 
+def simulate_pulse_schedule(
+    solver_instance: DynamicsBackend | Solver | JaxSolver,
+    sched: pulse.Schedule | pulse.ScheduleBlock,
+    solver_options: Optional[Dict] = None,
+    target_unitary: Optional[Operator] = None,
+    target_state: Optional[Statevector | DensityMatrix] = None,
+) -> Dict[str, Union[Operator, Statevector, float]]:
+    """
+    Simulate pulse schedule on provided backend
+
+    :param solver_instance: DynamicsBackend or Solver instance
+    :param sched: Pulse schedule to simulate
+    :param solver_options: Optional solver options
+    :param target_unitary: Optional target unitary for gate fidelity calculation
+    :param target_state: Optional target state for state fidelity calculation
+    :return: Dictionary containing simulated unitary, statevector, projected unitary, projected statevector, gate fidelity, state fidelity
+    """
+
+    if isinstance(solver_instance, DynamicsBackend):
+        solver = solver_instance.options.solver
+        solver_options = solver_instance.options.solver_options
+        dt = solver_instance.dt
+        subsystem_dims = list(
+            filter(lambda x: x > 1, solver_instance.options.subsystem_dims)
+        )
+    else:
+        solver = solver_instance
+        dt = solver._dt
+        subsystem_dims = solver.model.dim
+
+    def jit_func():
+        results = solver.solve(
+            t_span=Array([0, sched.duration * dt]),
+            y0=jnp.eye(solver.model.dim),
+            signals=sched,
+            **solver_options,
+        )
+        return Array(results.y).data
+
+    sim_func = jax.jit(jit_func)
+    results = np.array(sim_func())
+    output_unitary = results[-1]
+    output_op = Operator(
+        output_unitary,
+        input_dims=tuple(subsystem_dims),
+        output_dims=tuple(subsystem_dims),
+    )
+    projected_unitary = qubit_projection(output_unitary, subsystem_dims)
+    initial_state = Statevector.from_int(0, subsystem_dims)
+    final_state = initial_state.evolve(output_op)
+    projected_statevec = projected_statevector(final_state, subsystem_dims)
+    final_results = {
+        "unitary": output_unitary,
+        "statevec": final_state,
+        "projected_unitary": projected_unitary,
+        "projected_statevec": projected_statevec,
+    }
+    if target_unitary is not None:
+        gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
+        final_results["gate_fidelity"] = gate_fid
+    if target_state is not None:
+        state_fid = state_fidelity(projected_statevec, target_state, validate=False)
+        final_results["state_fidelity"] = state_fid
+    return final_results
+
+
 def state_fidelity_from_state_tomography(
     qc_list: List[QuantumCircuit],
     backend: Backend,
@@ -415,6 +510,19 @@ def state_fidelity_from_state_tomography(
     target_state: Optional[QuantumState] = None,
     session: Optional[Session] = None,
 ):
+    """
+    Extract average state fidelity from batch of Quantum Circuit for target state
+
+    Args:
+        qc_list: List of Quantum Circuits
+        backend: Backend instance
+        physical_qubits: Physical qubits on which state tomography is to be performed
+        analysis: Analysis instance
+        target_state: Target state for fidelity calculation
+        session: Runtime session
+    Returns:
+        avg_fidelity: Average state fidelity (over the batch of Quantum Circuits)
+    """
     state_tomo = BatchExperiment(
         [
             StateTomography(
@@ -444,6 +552,14 @@ def state_fidelity_from_state_tomography(
 
 
 def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options=None):
+    """
+    Run batch of Quantum Circuits on provided backend
+
+    Args:
+        session: Runtime session
+        circuits: List of Quantum Circuits
+        run_options: Optional run options
+    """
     jobs = []
     runtime_inputs = {"circuits": circuits, "skip_transpilation": True, **run_options}
     jobs.append(session.run("circuit_runner", inputs=runtime_inputs))
@@ -461,6 +577,14 @@ def gate_fidelity_from_process_tomography(
 ):
     """
     Extract average gate and process fidelities from batch of Quantum Circuit for target gate
+
+    Args:
+        qc_list: List of Quantum Circuits
+        backend: Backend instance
+        target_gate: Target gate for fidelity calculation
+        physical_qubits: Physical qubits on which process tomography is to be performed
+        analysis: Analysis instance
+        session: Runtime session
     """
     # Process tomography
     process_tomo = BatchExperiment(
@@ -500,6 +624,9 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     Get reduced control_channel_map from Backend configuration (needs to be of type BackendV1)
     :param backend: IBM Backend instance, must carry a configuration method
     :param qubit_tgt_register: Subsystem of interest from which to build control_channel_map
+
+    Returns:
+    control_channel_map: Reduced control channel map for the qubit_tgt_register
     """
     control_channel_map = {}
     control_channel_map_backend = {
@@ -522,6 +649,14 @@ def retrieve_primitives(
 ) -> (Estimator_type, Sampler_type):
     """
     Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
+
+    Args:
+        backend: Backend instance
+        layout: Layout instance
+        config: Configuration dictionary
+        abstraction_level: Abstraction level of the circuit
+        estimator_options: Estimator options
+        circuit: Quantum Circuit instance
     """
     if isinstance(
         backend, RuntimeBackend
@@ -601,6 +736,15 @@ def set_primitives_transpile_options(
     skip_transpilation: bool,
     physical_qubits: list,
 ):
+    """
+    Set transpile options for Qiskit primitives
+    Args:
+        estimator: Estimator instance
+        fidelity_checker: ComputeUncompute instance
+        layout: Layout instance
+        skip_transpilation: Skip transpilation flag
+        physical_qubits: Physical qubits on which the
+    """
     if isinstance(estimator, RuntimeEstimator):
         # TODO: Could change resilience level
         estimator.set_options(
@@ -857,6 +1001,9 @@ def custom_dynamics_from_backend(
 def build_qubit_space_projector(initial_subsystem_dims: list):
     """
     Build projector on qubit space from initial subsystem dimensions
+
+    Args:
+        initial_subsystem_dims: Initial subsystem dimensions
     """
     total_dim = np.prod(initial_subsystem_dims)
     projector = Operator(
@@ -876,6 +1023,13 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
 
 
 def projected_statevector(statevector: np.array, subsystem_dims: List[int]):
+    """
+    Project statevector on qubit space
+
+    Args:
+        statevector: Statevector, given as numpy array
+        subsystem_dims: Subsystem dimensions
+    """
     proj = build_qubit_space_projector(subsystem_dims)
     new_dim = 2 ** len(subsystem_dims)
     qubitized_statevector = np.zeros(new_dim, dtype=np.complex128)
@@ -892,6 +1046,10 @@ def projected_statevector(statevector: np.array, subsystem_dims: List[int]):
 def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     """
     Project unitary on qubit space
+
+    Args:
+        unitary: Unitary, given as numpy array
+        subsystem_dims: Subsystem dimensions
     """
 
     proj = build_qubit_space_projector(subsystem_dims)
@@ -923,6 +1081,9 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
 def load_q_env_from_yaml_file(file_path: str):
     """
     Load Qiskit Quantum Environment from yaml file
+
+    Args:
+        file_path: File path
     """
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
@@ -999,6 +1160,12 @@ def load_agent_from_yaml_file(file_path: str):
 
 
 def load_hpo_config_from_yaml_file(file_path: str):
+    """
+    Load HPO configuration from yaml file
+
+    Args:
+        file_path: File path
+    """
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
@@ -1101,6 +1268,17 @@ def retrieve_backend_info(
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration
+
+    Args:
+        backend: Backend instance
+        estimator: Estimator instance
+
+    Returns:
+    dt: Time step
+    coupling_map: Coupling map
+    basis_gates: Basis gates
+    instruction_durations: Instruction durations
+
     """
     backend_data = BackendData(backend)
     dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
@@ -1134,6 +1312,13 @@ def retrieve_backend_info(
 
 
 def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
+    """
+    Retrieve count of target instruction in Quantum Circuit
+
+    Args:
+        qc: Quantum Circuit
+        target: Target in form of {"gate": "X", "register": [0, 1]}
+    """
     tgt_instruction = CircuitInstruction(
         target["gate"], [qc.qubits[i] for i in target["register"]]
     )
@@ -1254,6 +1439,9 @@ def select_backend(
         channel: Channel to use for Runtime Service
         instance: Instance to use for Runtime Service
         backend_name: Name of the backend to use for training
+
+    Returns:
+        backend: Backend instance
     """
 
     backend = None

@@ -206,7 +206,10 @@ def _define_target(target: Dict):
         raise KeyError("target type not identified, must be either gate or state")
 
 
-def retrieve_abstraction_level(qc):
+def retrieve_abstraction_level(qc: QuantumCircuit):
+    """
+    Retrieve the abstraction level of the quantum circuit
+    """
     if qc.calibrations:
         return "pulse"
     else:
