@@ -5,18 +5,14 @@ from typing import Optional, Dict
 import os
 from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 from helper_functions import (
-    get_ecr_params,
-    get_pulse_params,
     load_q_env_from_yaml_file,
     perform_standard_calibrations,
     select_backend,
-    custom_dynamics_from_backend,
     new_params_ecr,
     new_params_x,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
-from qiskit_dynamics import DynamicsBackend
 from qiskit_dynamics.array import Array
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
 from qiskit.providers import BackendV1, BackendV2
@@ -24,9 +20,6 @@ from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from template_configurations.qiskit.pulse_level.dynamics_backends.dynamics_config import (
-    jax_backend,
-)
 from typing import List, Sequence
 import jax
 
@@ -162,9 +155,19 @@ def get_backend(
 
     if backend is None:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
+        from template_configurations.qiskit.pulse_level.dynamics_backends.dynamics_config import (
+            custom_backend,
+        )
+
         # TODO: Add here your custom backend
-        backend = jax_backend
-        # _, _ = perform_standard_calibrations(backend)
+        dims = [3, 3]
+        freqs = [4.86e9, 4.97e9]
+        anharmonicities = [-0.33e9, -0.32e9]
+        rabi_freqs = [0.22e9, 0.26e9]
+        couplings = {(0, 1): 0.002e9}
+
+        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)
+        _, _ = perform_standard_calibrations(backend)
 
     if backend is None:
         warnings.warn("No backend was provided, Statevector simulation will be used")

@@ -439,11 +439,11 @@ def get_pulse_params(
     basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
     ref_pulse = basis_gate_inst.instructions[0][1].pulse
     default_params = {
-        ("amp", physical_qubit, "x"): ref_pulse.amp,
-        ("σ", physical_qubit, "x"): ref_pulse.sigma,
-        ("β", physical_qubit, "x"): ref_pulse.beta,
-        ("duration", physical_qubit, "x"): ref_pulse.duration,
-        ("angle", physical_qubit, "x"): ref_pulse.angle,
+        ("amp", physical_qubit, name): ref_pulse.amp,
+        ("σ", physical_qubit, name): ref_pulse.sigma,
+        ("β", physical_qubit, name): ref_pulse.beta,
+        ("duration", physical_qubit, name): ref_pulse.duration,
+        ("angle", physical_qubit, name): ref_pulse.angle,
     }
     pulse_features = ["amp", "angle", "duration", "σ", "β"]
     return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
@@ -548,6 +548,7 @@ def simulate_pulse_schedule(
     solver_options: Optional[Dict] = None,
     target_unitary: Optional[Operator] = None,
     target_state: Optional[Statevector | DensityMatrix] = None,
+    normalize: bool = True,
 ) -> Dict[str, Union[Operator, Statevector, float]]:
     """
     Simulate pulse schedule on provided backend
@@ -557,6 +558,7 @@ def simulate_pulse_schedule(
     :param solver_options: Optional solver options
     :param target_unitary: Optional target unitary for gate fidelity calculation
     :param target_state: Optional target state for state fidelity calculation
+    :param normalize: Normalize the projected statevector or not
     :return: Dictionary containing simulated unitary, statevector, projected unitary, projected statevector, gate fidelity, state fidelity
     """
 
@@ -592,12 +594,12 @@ def simulate_pulse_schedule(
     projected_unitary = qubit_projection(output_unitary, subsystem_dims)
     initial_state = Statevector.from_int(0, subsystem_dims)
     final_state = initial_state.evolve(output_op)
-    projected_statevec = projected_statevector(final_state, subsystem_dims)
+    projected_statevec = projected_statevector(final_state, subsystem_dims, normalize)
     final_results = {
         "unitary": output_op,
-        "statevec": final_state,
+        "statevector": final_state,
         "projected_unitary": projected_unitary,
-        "projected_statevec": projected_statevec,
+        "projected_statevector": projected_statevec,
     }
     if target_unitary is not None:
         gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
@@ -1110,6 +1112,8 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
 
     Args:
         initial_subsystem_dims: Initial subsystem dimensions
+
+    Returns: Projector on qubit space as a Qiskit Operator object
     """
     total_dim = np.prod(initial_subsystem_dims)
     projector = Operator(
@@ -1128,13 +1132,16 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
     return projector
 
 
-def projected_statevector(statevector: np.array, subsystem_dims: List[int]):
+def projected_statevector(
+    statevector: np.array, subsystem_dims: List[int], normalize: bool = True
+):
     """
     Project statevector on qubit space
 
     Args:
         statevector: Statevector, given as numpy array
         subsystem_dims: Subsystem dimensions
+        normalize: Normalize statevector
     """
     proj = build_qubit_space_projector(subsystem_dims)
     new_dim = 2 ** len(subsystem_dims)
@@ -1145,6 +1152,10 @@ def projected_statevector(statevector: np.array, subsystem_dims: List[int]):
         if new_statevector.data[i] != 0:
             qubitized_statevector[qubit_count] = new_statevector.data[i]
             qubit_count += 1
+    if normalize:
+        qubitized_statevector = qubitized_statevector / np.linalg.norm(
+            qubitized_statevector
+        )
     qubitized_statevector = Statevector(qubitized_statevector)
     return qubitized_statevector
 
@@ -1156,6 +1167,8 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     Args:
         unitary: Unitary, given as numpy array
         subsystem_dims: Subsystem dimensions
+
+    Returns: unitary projected on qubit space as a Qiskit Operator object
     """
 
     proj = build_qubit_space_projector(subsystem_dims)
