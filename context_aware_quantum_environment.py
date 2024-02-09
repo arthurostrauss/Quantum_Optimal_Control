@@ -6,64 +6,45 @@ Author: Arthur Strauss
 Created on 26/06/2023
 """
 
-from itertools import chain, product
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
 
 # Qiskit imports
-from qiskit import transpile, schedule
+from qiskit import transpile
 from qiskit.circuit import (
     QuantumCircuit,
     QuantumRegister,
     ParameterVector,
 )
 from qiskit.circuit.library import ECRGate
-from qiskit.quantum_info.operators import SparsePauliOp, pauli_basis, Operator
+from qiskit.quantum_info.operators import SparsePauliOp
 from qiskit.quantum_info.states import partial_trace
-from qiskit.quantum_info.operators.measures import (
-    average_gate_fidelity,
-    process_fidelity,
-    state_fidelity,
-)
+from qiskit.quantum_info.operators.measures import state_fidelity
+
 from qiskit.quantum_info.states import Statevector, DensityMatrix
-from qiskit.transpiler import Layout, InstructionProperties, Target
+from qiskit.transpiler import Layout, InstructionProperties
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit_aer.noise import NoiseModel
-from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
-from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit_dynamics import DynamicsBackend
-from qiskit_experiments.calibration_management import Calibrations
-from qiskit_experiments.framework import BackendData
-from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
-from qiskit_ibm_provider import IBMBackend
+from qiskit_experiments.calibration_management import (
+    Calibrations,
+    FixedFrequencyTransmon,
+    EchoedCrossResonance,
+)
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
-from qiskit_ibm_runtime import (
-    Estimator as RuntimeEstimator,
-    Sampler,
-    IBMRuntimeError,
-    Session,
-)
-from tensorflow_probability.python.distributions import Categorical
+from qiskit_ibm_runtime import Estimator as RuntimeEstimator
 
-from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from helper_functions import (
-    gate_fidelity_from_process_tomography,
-    retrieve_backend_info,
     get_ecr_params,
     set_primitives_transpile_options,
     handle_session,
-    qubit_projection,
     projected_statevector,
 )
 from qconfig import QEnvConfig
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
-from custom_jax_sim import (
-    DynamicsBackendEstimator,
-    JaxSolver,
-)
+from custom_jax_sim import JaxSolver
 
 ObsType = TypeVar("ObsType")
 ActType = TypeVar("ActType")
@@ -89,7 +70,8 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         context-aware gate calibration. Target gate should be pre-defined through the declaration of a
         QuantumEnvironment, and a circuit in which this gate is used should be provided.
         This class will look for the locations of the target gates in the circuit context and will enable the
-        writing of new parametrized circuits, where each gate instance is replaced by a custom gate defined by the Callable parametrized_circuit_func in QuantumEnvironment.
+        writing of new parametrized circuits, where each gate instance is replaced by a custom gate defined by the
+        Callable parametrized_circuit_func in QuantumEnvironment.
 
         :param training_config: Training configuration containing all hyperparameters characterizing the environment
             for the RL training
@@ -205,7 +187,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
         self._intermediate_rewards = intermediate_rewards
         self._max_return = 0
-        self._best_action = np.zeros((self.batch_size, self.action_space.shape[-1]))
 
     @property
     def done(self):
@@ -389,9 +370,8 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 if isinstance(self.backend, AerBackend):
                     backend = self.backend
                 else:
-                    noise_model = NoiseModel.from_backend(self.backend)
-                    backend = AerSimulator(
-                        method="density_matrix", noise_model=noise_model
+                    backend = AerSimulator.from_backend(
+                        self.backend, method="density_matrix"
                     )
 
                 benchmark_circ.save_density_matrix()
@@ -469,7 +449,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     "arg max circuit fidelity": np.argmax(
                         self.circuit_fidelity_history
                     ),
-                    "best action": self._best_action,
+                    "optimal action": self._optimal_action,
                     "truncation_index": self._trunc_index,
                     "input_state": self._input_circuits[self._index_input_state].name,
                     "observable": self._punctual_observable,
@@ -481,7 +461,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     "average return": np.mean(self.reward_history, axis=1)[-1],
                     "max return": np.max(np.mean(self.reward_history, axis=1)),
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
-                    "best action": self._best_action,
+                    "optimal action": self._optimal_action,
                     "truncation_index": self._trunc_index,
                     "input_state": self._input_circuits[self._index_input_state].name,
                     "observable": self._punctual_observable,
@@ -514,14 +494,17 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         return self.compute_reward()
 
     def compute_reward(self, fidelity_access=False) -> np.ndarray:
+        self._index_input_state = np.random.randint(len(self._input_circuits))
         trunc_index = self._inside_trunc_tracker
         target_state = self._retrieve_target_state(self._index_input_state, trunc_index)
         qc: QuantumCircuit = self.circuit_truncations[trunc_index]
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        observables, pauli_shots = self.retrieve_observables(target_state, qc)
+        self._observables, self._pauli_shots = self.retrieve_observables(
+            target_state, qc
+        )
 
-        self._punctual_observable = observables
+        self._punctual_observable = self._observables
         # self.parametrized_circuit_func(training_circ, self._parameters[:iteration])
 
         reshaped_params = np.reshape(
@@ -552,26 +535,26 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 full_circ = qc.compose(
                     target_state["input_state_circ"], inplace=False, front=True
                 )
-                print(observables)
+                print(self._observables)
 
                 job = self.estimator.run(
                     circuits=[full_circ] * self.batch_size,
-                    observables=[observables] * self.batch_size,
+                    observables=[self._observables] * self.batch_size,
                     parameter_values=reshaped_params,
-                    shots=int(np.max(pauli_shots) * self.n_shots),
+                    shots=int(np.max(self._pauli_shots) * self.n_shots),
                 )
 
                 reward_table = job.result().values
             except Exception as exc:
                 self.close()
                 raise exc
-            scaling_reward_factor = len(observables) / 4 ** len(self.tgt_register)
+            # scaling_reward_factor = len(self._observables) / 4 ** len(self.tgt_register)
             # reward_table *= scaling_reward_factor
             print("Job done")
 
         if np.mean(reward_table) > self._max_return:
             self._max_return = np.mean(reward_table)
-            self._best_action = np.mean(reshaped_params, axis=0)
+            self._optimal_action = np.mean(reshaped_params, axis=0)
         self.reward_history.append(reward_table)
         assert (
             len(reward_table) == self.batch_size
@@ -606,14 +589,12 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self._inside_trunc_tracker = 0
         self._episode_tracker += 1
         self._episode_ended = False
-        self._index_input_state = np.random.randint(len(self._input_circuits))
+
         if isinstance(self.estimator, RuntimeEstimator):
             self.estimator.options.environment["job_tags"] = [
                 f"rl_qoc_step{self._step_tracker}"
             ]
 
-        # TODO: Remove line below when it works for gate fidelity as well
-        # self._index_input_state = 0
         return self._get_obs(), self._get_info()
 
     def step(
@@ -717,8 +698,8 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         :param basis_gates: Basis gates of the backend
         :param coupling_map: Coupling map of the backend
         """
-        if "ecr" not in basis_gates and self.backend_data.num_qubits > 1:
-            target: Target = self.backend.target
+        if "ecr" not in basis_gates and self.backend.num_qubits > 1:
+            target = self.backend.target
             target.add_instruction(
                 ECRGate(),
                 properties={qubits: None for qubits in coupling_map.get_edges()},

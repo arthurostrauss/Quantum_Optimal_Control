@@ -59,6 +59,10 @@ from qiskit_experiments.library import (
     RoughXSXAmplitudeCal,
     RoughDragCal,
 )
+from qiskit_experiments.calibration_management.basis_gate_library import (
+    FixedFrequencyTransmon,
+    EchoedCrossResonance,
+)
 
 from qiskit_ibm_runtime import (
     Session,
@@ -73,14 +77,10 @@ import optuna
 
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Dense
-
-from basis_gate_library import EchoedCrossResonance, FixedFrequencyTransmon
 from custom_jax_sim.jax_solver import PauliToQuditOperator
 from qconfig import QiskitConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
 import jax.numpy as jnp
-
-# from qiskit_experiments.calibration_management.basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
 
 Estimator_type = Union[
     AerEstimator,
@@ -124,7 +124,7 @@ def remove_unused_wires(qc: QuantumCircuit):
 
 
 def perform_standard_calibrations(
-    backend: DynamicsBackend, calibration_files: Optional[List[str]] = None
+    backend: DynamicsBackend, calibration_files: Optional[str] = None
 ):
     """
     Generate baseline single qubit gates (X, SX, RZ, H) for all qubits using traditional calibration experiments
@@ -177,7 +177,7 @@ def perform_standard_calibrations(
 
     phi: Parameter = standard_gates["rz"].params[0]
     if existing_cals:
-        cals = Calibrations.load(files=calibration_files)
+        cals = Calibrations.load(calibration_files)
     else:
         cals = Calibrations(
             coupling_map=coupling_map,
@@ -266,10 +266,6 @@ def perform_standard_calibrations(
             exp_results[qubit] = [rabi_result, drag_result]
 
         # Build Hadamard gate schedule from following equivalence: H = S @ SX @ S
-
-        # sx_schedule = block_to_schedule(cals.get_schedule("sx", (qubit,)))
-        # s_schedule = block_to_schedule(target.get_calibration("s", (qubit,)))
-        # h_schedule = pulse.Schedule(s_schedule, sx_schedule, s_schedule, name="h")
         sx_schedule = cals.get_schedule("sx", (qubit,))
         s_schedule = target.get_calibration("s", (qubit,))
         with pulse.build(backend, name="h") as h_schedule:
@@ -284,7 +280,8 @@ def perform_standard_calibrations(
         )
 
     print("All single qubit calibrations are done")
-    # cals.save(file_type="csv", overwrite=True, file_prefix="Custom" + backend.name)
+    if calibration_files is None:
+        cals.save(overwrite=True, file_prefix="Custom" + backend.name)
     error_dict = {"x": single_qubit_errors, "sx": single_qubit_errors}
     target.update_from_instruction_schedule_map(
         cals.get_inst_map(), error_dict=error_dict
@@ -382,6 +379,9 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
         ("angle", q_c, "x"): x_pulse.angle,
     }
     for sched in ["cr45p", "cr45m"]:
+        rise_fall = (control_pulse.duration - control_pulse.width) / (
+            2 * control_pulse.sigma
+        )
         default_params.update(
             {
                 ("amp", physical_qubits, sched): control_pulse.amp,
@@ -394,10 +394,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
                 else np.angle(np.max(target_pulse.samples)),
                 ("duration", physical_qubits, sched): control_pulse.duration,
                 ("σ", physical_qubits, sched): control_pulse.sigma,
-                ("risefall", physical_qubits, sched): (
-                    control_pulse.duration - control_pulse.width
-                )
-                / (2 * control_pulse.sigma),
+                ("risefall", physical_qubits, sched): rise_fall,
             }
         )
     pulse_features = [
@@ -1245,6 +1242,7 @@ def load_q_env_from_yaml_file(file_path: str):
         "channel": config["SERVICE"]["CHANNEL"],
         "instance": config["SERVICE"]["INSTANCE"],
         "solver_options": config["BACKEND"]["DYNAMICS"]["SOLVER_OPTIONS"],
+        "calibration_files": config["ENV"]["CALIBRATION_FILES"],
     }
     runtime_options = config["RUNTIME_OPTIONS"]
     check_on_exp = config["ENV"]["CHECK_ON_EXP"]
@@ -1552,6 +1550,7 @@ def select_backend(
     use_dynamics: Optional[bool] = None,
     physical_qubits: Optional[List[int]] = None,
     solver_options: Optional[Dict] = None,
+    calibration_files: Optional[str] = None,
 ):
     """
     Select backend to use for training among real backend or fake backend (Aer Simulator)
@@ -1597,7 +1596,9 @@ def select_backend(
                 subsystem_list=list(physical_qubits),
                 solver_options=solver_options,
             )
-            _, _ = perform_standard_calibrations(backend)
+            _, _ = perform_standard_calibrations(
+                backend, calibration_files=calibration_files
+            )
         else:
             raise ValueError(
                 f"No backend was found with name {backend_name}, DynamicsBackend cannot be used"

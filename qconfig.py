@@ -50,7 +50,7 @@ class QiskitConfig(BackendConfig):
         to run simulations for computing exact fidelity benchmark
         channel_freq: Relevant only if dealing with pulse simulation, Dictionary containing information mapping
         the channels and the qubit frequencies
-        calibration_files: Feature not available yet, load existing gate calibrations from csv files for DynamicsBackend
+        calibration_files: load existing gate calibrations from json file for DynamicsBackend
         baseline gate calibrations for running algorithm
 
     """

@@ -20,7 +20,6 @@ from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from typing import List, Sequence
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -128,6 +127,7 @@ def get_backend(
     channel: Optional[str] = None,
     instance: Optional[str] = None,
     solver_options: Optional[Dict] = None,
+    calibration_files: str = None,
 ):
     """
     Define backend on which the calibration is performed.
@@ -137,9 +137,10 @@ def get_backend(
     :param backend_name: Name of the backend to be used, if None, then least busy backend is used
     :param use_dynamics: If True, then DynamicsBackend is used, otherwise standard backend is used
     :param physical_qubits: Physical qubits indices to be used for the calibration
-    :param channel: Qiskit Runtime Channel
-    :param instance: Qiskit Runtime Instance
+    :param channel: Qiskit Runtime Channel  (for real backend)
+    :param instance: Qiskit Runtime Instance (for real backend)
     :param solver_options: Options for the DynamicsBackend solver
+    :param calibration_files: Path to the calibration files (for DynamicsBackend)
     :return: Backend instance
     """
 
@@ -151,6 +152,7 @@ def get_backend(
         use_dynamics,
         physical_qubits,
         solver_options,
+        calibration_files,
     )
 
     if backend is None:
@@ -167,14 +169,14 @@ def get_backend(
         couplings = {(0, 1): 0.002e9}
 
         backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)
-        _, _ = perform_standard_calibrations(backend)
+        _, _ = perform_standard_calibrations(backend, calibration_files)
 
     if backend is None:
-        warnings.warn("No backend was provided, Statevector simulation will be used")
+        warnings.warn("No backend was provided, State vector simulation will be used")
     return backend
 
 
-def get_circuit_context(backend: BackendV1 | BackendV2):
+def get_circuit_context(backend: Optional[BackendV1 | BackendV2] = None):
     """
     Define here the circuit context to be used for the calibration
     """
@@ -182,9 +184,12 @@ def get_circuit_context(backend: BackendV1 | BackendV2):
     circuit.h(0)
     circuit.cx(0, 1)
 
-    # transpiled_circ = transpile(circuit, backend)
+    if backend is not None:
+        circuit = transpile(circuit, backend)
 
-    return None
+    print("Circuit context: ", circuit)
+
+    return circuit
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
