@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from qiskit.circuit import Gate
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
@@ -313,6 +315,7 @@ class JaxSolver(Solver):
                 state_type_wrapper,
             ) = validate_and_format_initial_state(y0_list[0], self.model)
             t_span = self._t_span = t_span_list[0]
+            start_time = time.time()
 
             batch_results_t, batch_results_y = self._jit_func(
                 Array(t_span).data,
@@ -321,7 +324,7 @@ class JaxSolver(Solver):
                 Array(y0_input).data,
                 y0_cls,
             )
-
+            print("Time to run simulation: ", time.time() - start_time)
             self._batched_sims = batch_results_y
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:

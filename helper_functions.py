@@ -453,6 +453,7 @@ def new_params_ecr(
     pulse_features: List[str],
     keep_symmetry: bool = True,
     duration_window: float = 0.1,
+    include_baseline: bool = False,
 ):
     """
     Helper function to parametrize a custom ECR gate using Qiskit Experiments Calibrations syntax
@@ -462,6 +463,7 @@ def new_params_ecr(
     :param pulse_features: List of pulse features to be parametrized
     :param keep_symmetry: Choose if the two parts of the ECR tone shall be jointly parametrized or not
     :param duration_window: Duration window for the pulse duration
+    :param include_baseline: Include baseline calibration in the parameters
     :return: Dictionary of updated ECR parameters
     """
     new_params, available_features, _, _ = get_ecr_params(backend, qubits)
@@ -475,14 +477,26 @@ def new_params_ecr(
         for sched in ["cr45p", "cr45m"]:
             for i, feature in enumerate(pulse_features):
                 if feature != "duration" and feature in available_features:
-                    # new_params[(feature, qubits, sched)] += params[i]  # Add the parameter to the pulse baseline calibration
-                    new_params[(feature, qubits, sched)] = (
-                        0.0 + params[i]
-                    )  # Replace baseline calibration with the parameter
+                    if (
+                        include_baseline
+                    ):  # Add the parameter to the pulse baseline calibration
+                        new_params[(feature, qubits, sched)] += params[i]
+                    else:  # Replace baseline calibration with the parameter
+                        new_params[(feature, qubits, sched)] = 0.0 + params[i]
+
                 else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(duration_window * params[i])
+                    if include_baseline:
+                        new_params[
+                            (feature, qubits, sched)
+                        ] += pulse.builder.seconds_to_samples(
+                            duration_window * params[i]
+                        )
+                    else:
+                        new_params[
+                            (feature, qubits, sched)
+                        ] = pulse.builder.seconds_to_samples(
+                            duration_window * params[i]
+                        )
     else:
         if 2 * len(pulse_features) != len(params):
             raise ValueError(
@@ -566,10 +580,14 @@ def simulate_pulse_schedule(
         subsystem_dims = list(
             filter(lambda x: x > 1, solver_instance.options.subsystem_dims)
         )
-    else:
+    elif isinstance(solver_instance, (Solver, JaxSolver)):
         solver = solver_instance
         dt = solver._dt
         subsystem_dims = solver.model.dim
+    else:
+        raise TypeError(
+            "Solver instance must be defined. Backend is not DynamicsBackend or Solver instance"
+        )
 
     def jit_func():
         results = solver.solve(
@@ -1563,6 +1581,7 @@ def select_backend(
         use_dynamics: Boolean indicating if DynamicsBackend should be used
         physical_qubits: Physical qubits on which DynamicsBackend should be used
         solver_options: Solver options for DynamicsBackend
+        calibration_files: Calibration files for DynamicsBackend
 
     Returns:
         backend: Backend instance
@@ -1599,8 +1618,5 @@ def select_backend(
             _, _ = perform_standard_calibrations(
                 backend, calibration_files=calibration_files
             )
-        else:
-            raise ValueError(
-                f"No backend was found with name {backend_name}, DynamicsBackend cannot be used"
-            )
+
     return backend

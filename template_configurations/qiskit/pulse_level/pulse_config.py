@@ -64,7 +64,13 @@ def custom_schedule(
 
     if len(qubits) == 2:  # Retrieve schedule for ECR gate
         new_params = new_params_ecr(
-            params, qubits, backend, ecr_pulse_features, keep_symmetry, duration_window
+            params,
+            qubits,
+            backend,
+            ecr_pulse_features,
+            keep_symmetry,
+            duration_window,
+            include_baseline=False,
         )
     elif len(qubits) == 1:  # Retrieve schedule for X gate
         new_params = new_params_x(
@@ -73,6 +79,7 @@ def custom_schedule(
             backend,
             x_pulse_features,
             duration_window,
+            include_baseline=True,
         )
     else:
         raise ValueError(

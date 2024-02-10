@@ -38,7 +38,6 @@ from qiskit.transpiler import Layout
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
-from qiskit_ibm_provider import IBMBackend
 
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_experiments.library.tomography.basis import (
@@ -106,7 +105,7 @@ def _define_target(target: Dict):
     layout = None
     if tgt_register is not None:
         if isinstance(tgt_register, List):
-            q_register = QuantumRegister(len(tgt_register))
+            q_register = QuantumRegister(len(tgt_register), "tgt")
             layout = Layout(
                 {q_register[i]: tgt_register[i] for i in range(len(tgt_register))}
             )
@@ -142,7 +141,7 @@ def _define_target(target: Dict):
         n_qubits = dm.num_qubits
 
         if q_register is None:
-            q_register = QuantumRegister(n_qubits)
+            q_register = QuantumRegister(n_qubits, "tgt")
 
         if layout is None:
             layout = Layout.generate_trivial_layout(q_register)
@@ -444,6 +443,7 @@ class QuantumEnvironment(Env):
 
     def check_reward(self):
         if self.training_with_cal:
+            _, _ = self.reset()
             sample_action = np.zeros(self.action_space.shape)
             batch_action = np.tile(sample_action, (self.batch_size, 1))
             batch_rewards = self.perform_action(batch_action)
@@ -522,7 +522,7 @@ class QuantumEnvironment(Env):
             print("Starting benchmarking...")
             self.store_benchmarks(params)
             print("Finished benchmarking")
-
+        print("Sending Estimator job...")
         try:
             self.estimator = handle_session(
                 self.estimator, self.backend, self._session_counts, qc, input_state_circ
@@ -541,6 +541,8 @@ class QuantumEnvironment(Env):
         except Exception as e:
             self.close()
             raise e
+        print("Finished Estimator job")
+
         if np.mean(reward_table) > self._max_return:
             self._max_return = np.mean(reward_table)
             self._optimal_action = np.mean(params, axis=0)
@@ -785,8 +787,6 @@ class QuantumEnvironment(Env):
     def close(self) -> None:
         if isinstance(self.estimator, RuntimeEstimator):
             self.estimator.session.close()
-        elif isinstance(self.backend, IBMBackend):
-            self.backend.cancel_session()
 
     def __repr__(self):
         string = f"QuantumEnvironment composed of {self._n_qubits} qubits, \n"
