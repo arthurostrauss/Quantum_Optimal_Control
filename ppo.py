@@ -164,20 +164,27 @@ class CustomPPO:
         self.fig, self.ax = None, None
 
     def plot_curves(self):
+        plt.ion()
         if self.fig is None:
             self.fig, self.ax = plt.subplots(1)
         self.ax.clear()
         if len(self.reward_history) > 0:
             self.ax.plot(np.mean(self.reward_history, axis=1), label="Reward")
             if self.env.do_benchmark():
-                self.ax.plot(
-                    np.array(self.avg_fidelity_history)[:, 0],
-                    label="Fidelity (means of individual fidelities)",
-                )
-                self.ax.plot(
-                    np.array(self.avg_fidelity_history)[:, 1],
-                    label="Fidelity (of averaged process over batch)",
-                )
+                if hasattr(self.env, "circuit_fidelity_history"):
+                    self.ax.plot(
+                        np.array(self.circuit_fidelity_history)[:, 0],
+                        label="Circuit Fidelity",
+                    )
+                else:
+                    self.ax.plot(
+                        np.array(self.avg_fidelity_history)[:, 0],
+                        label="Fidelity (means of individual fidelities)",
+                    )
+                    self.ax.plot(
+                        np.array(self.avg_fidelity_history)[:, 1],
+                        label="Fidelity (of averaged process over batch)",
+                    )
             self.ax.set_title("Reward History")
             self.ax.set_xlabel("Iteration")
             self.ax.set_ylabel("Reward")
@@ -407,9 +414,10 @@ class CustomPPO:
             )
 
         self.reward_history.append(self.env.reward_history)
-        if hasattr(self.env, "circuit_fidelity_history"):
+        if hasattr(self.env, "circuit_fidelity_history"):  # ContextAwareEnv
             self.circuit_fidelity_history.append(self.env.circuit_fidelity_history)
-        self.avg_fidelity_history.append(self.env.avg_fidelity_history)
+        else:  # QuantumEnvironment
+            self.avg_fidelity_history.append(self.env.avg_fidelity_history)
         self.env.close()
         self.writer.close()
 

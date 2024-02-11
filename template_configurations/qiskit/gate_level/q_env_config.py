@@ -10,7 +10,7 @@ from helper_functions import (
 from qiskit import QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
-from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
 from qiskit.providers import BackendV1, BackendV2
 
 from qconfig import QiskitConfig, QEnvConfig
@@ -96,8 +96,10 @@ def get_backend(
     if backend is None:
         # TODO: Add here your custom backend
         # For now use FakeJakartaV2 as a safe working custom backend
-        backend = FakeProvider().get_backend("fake_jakarta")
+        # backend = FakeProvider().get_backend("fake_jakarta")
+        from qiskit_ibm_runtime.fake_provider import FakeJakartaV2
 
+        backend = FakeJakartaV2()
     if backend is None:
         Warning("No backend was provided, State vector simulation will be used")
     return backend
@@ -111,7 +113,7 @@ def get_circuit_context(backend: Optional[BackendV1 | BackendV2]):
     circuit.h(0)
 
     if backend is not None:
-        circuit = transpile(circuit, backend)
+        circuit = transpile(circuit, backend, optimization_level=1)
     print("Circuit context", circuit)
 
     return circuit
