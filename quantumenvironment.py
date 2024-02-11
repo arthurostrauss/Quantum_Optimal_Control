@@ -733,6 +733,7 @@ class QuantumEnvironment(Env):
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         distribution = Categorical(probs=target_state["Chi"] ** 2)
         k_samples = distribution.sample(self.sampling_Pauli_space)
+
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
         reward_factor = np.round(
             [

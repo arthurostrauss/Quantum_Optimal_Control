@@ -77,10 +77,11 @@ from gymnasium.spaces import Box
 import optuna
 
 import tensorflow as tf
-from tensorflow.keras import Model, Input, Dense
+from tensorflow.keras import Model, Input
+from tensorflow.keras.layers import Dense
 
 from qconfig import QiskitConfig
-from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
+from custom_jax_sim import JaxSolver, DynamicsBackendEstimator, PauliToQuditOperator
 
 Estimator_type = Union[
     AerEstimator,
@@ -1173,34 +1174,6 @@ def custom_dynamics_from_backend(
         subsystem_dims=subsystem_dims,
         **options,
     )
-
-
-def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
-    """
-    This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
-    arbitrary dimension qudit operators that are the equivalent to the Qubit Operators desired.
-
-    This functionality is useful for qudit simulations of standard qubit workflows like state preparation
-    and choosing measurement observables, without losing any information from the simulation.
-
-    All operators produced remain as unitaries.
-    """
-    qudit_op_list = []
-    for op, dim in zip(qubit_ops, subsystem_dims):
-        if dim > 1:
-            qud_op = np.identity(dim, dtype=np.complex64)
-            qud_op[:2, :2] = op.to_matrix()
-            qudit_op_list.append(qud_op)
-    complete_op = Operator(qudit_op_list[0])
-    for i in range(1, len(qudit_op_list)):
-        complete_op = complete_op.tensor(Operator(qudit_op_list[i]))
-    assert complete_op.is_unitary(), "The operator is not unitary"
-    assert (
-        complete_op.input_dims()
-        == complete_op.output_dims()
-        == tuple(filter(lambda x: x > 1, subsystem_dims))
-    ), "The operator is not the right dimension"
-    return complete_op
 
 
 def build_qubit_space_projector(initial_subsystem_dims: list):

@@ -309,6 +309,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                                     custom_circuit_truncations[i],
                                     self._parameters[counts],
                                     self.tgt_register,
+                                    **self._func_args,
                                 )
                             else:
                                 custom_circuit_truncations[i].append(instruction)
@@ -321,6 +322,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                                         gate_circ,
                                         self._parameters[counts],
                                         self.tgt_register,
+                                        **self._func_args,
                                     )
                                 else:
                                     gate_circ.append(self.target_instruction)
