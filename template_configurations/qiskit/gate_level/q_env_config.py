@@ -33,9 +33,8 @@ def apply_parametrized_circuit(
     :param q_reg: Quantum Register formed of target qubits
     :return:
     """
-
-    parametrized_qc = QuantumCircuit(q_reg)
-    my_qc = QuantumCircuit(q_reg, name="custom_cx")
+    target = kwargs["target"]
+    my_qc = QuantumCircuit(q_reg, name=f"custom_{target['gate'].name}")
     # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
     optimal_params = np.pi * np.zeros(7)
 
@@ -54,7 +53,7 @@ def apply_parametrized_circuit(
 
     my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
 
-    qc.append(my_qc.to_instruction(label="custom_cx"), q_reg)
+    qc.append(my_qc.to_instruction(label=my_qc.name), q_reg)
 
 
 def get_backend(

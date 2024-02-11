@@ -20,3 +20,5 @@ sympy>=1.12
 sympy2jax>=0.0.5
 yaml>=0.2.5
 pyyaml>=6.0.1
+ipython~=8.15.0
+optuna~=3.5.0

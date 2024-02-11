@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-from itertools import permutations
-from typing import Optional, Tuple, List, Union, Dict, Sequence
-
-import jax
-import numpy as np
-import tensorflow as tf
-import yaml
-from gymnasium.spaces import Box
 from qiskit import pulse, schedule, transpile
 from qiskit.circuit import (
     QuantumCircuit,
@@ -19,13 +11,9 @@ from qiskit.circuit import (
 from qiskit.circuit.library import get_standard_gate_name_mapping
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
-from qiskit_ibm_runtime.fake_provider import FakeProvider
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
-
-from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
-from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackend, FakeBackendV2
 from qiskit.quantum_info import (
     Operator,
     Statevector,
@@ -40,7 +28,19 @@ from qiskit.transpiler import (
     Layout,
     Target,
 )
-from qiskit_algorithms.state_fidelities import ComputeUncompute
+
+from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
+from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackend, FakeBackendV2
+from qiskit_ibm_runtime import (
+    Session,
+    IBMBackend as RuntimeBackend,
+    Estimator as RuntimeEstimator,
+    Options as RuntimeOptions,
+    Sampler as RuntimeSampler,
+    QiskitRuntimeService,
+)
+
 from qiskit_dynamics import Solver, RotatingFrame
 from qiskit_dynamics.array import Array
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import (
@@ -64,23 +64,23 @@ from qiskit_experiments.calibration_management.basis_gate_library import (
     EchoedCrossResonance,
 )
 
-from qiskit_ibm_runtime import (
-    Session,
-    IBMBackend as RuntimeBackend,
-    Estimator as RuntimeEstimator,
-    Options as RuntimeOptions,
-    Sampler as RuntimeSampler,
-    QiskitRuntimeService,
-)
+from qiskit_algorithms.state_fidelities import ComputeUncompute
 
+from itertools import permutations
+from typing import Optional, Tuple, List, Union, Dict, Sequence
+import yaml
+
+from jax import jit, numpy as jnp
+import numpy as np
+
+from gymnasium.spaces import Box
 import optuna
 
-from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, Dense
-from custom_jax_sim.jax_solver import PauliToQuditOperator
+import tensorflow as tf
+from tensorflow.keras import Model, Input, Dense
+
 from qconfig import QiskitConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator
-import jax.numpy as jnp
 
 Estimator_type = Union[
     AerEstimator,
@@ -91,14 +91,6 @@ Estimator_type = Union[
 ]
 Sampler_type = Union[AerSampler, RuntimeSampler, Sampler, BackendSampler]
 Backend_type = Union[BackendV1, BackendV2]
-
-
-def constrain_mean_value(mu_var):
-    return [tf.clip_by_value(m, -1.0, 1.0) for m in mu_var]
-
-
-def constrain_std_value(std_var):
-    return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
 
 
 def count_gates(qc: QuantumCircuit):
@@ -598,7 +590,7 @@ def simulate_pulse_schedule(
         )
         return Array(results.y).data
 
-    sim_func = jax.jit(jit_func)
+    sim_func = jit(jit_func)
     results = np.array(sim_func())
     output_unitary = results[-1]
     output_op = Operator(
@@ -976,6 +968,68 @@ def handle_session(
     return estimator
 
 
+def select_backend(
+    real_backend: Optional[bool] = None,
+    channel: Optional[str] = None,
+    instance: Optional[str] = None,
+    backend_name: Optional[str] = None,
+    use_dynamics: Optional[bool] = None,
+    physical_qubits: Optional[List[int]] = None,
+    solver_options: Optional[Dict] = None,
+    calibration_files: Optional[str] = None,
+):
+    """
+    Select backend to use for training among real backend or fake backend (Aer Simulator)
+
+    Args:
+        real_backend: Boolean indicating if real backend should be used
+        channel: Channel to use for Runtime Service
+        instance: Instance to use for Runtime Service
+        backend_name: Name of the backend to use for training
+        use_dynamics: Boolean indicating if DynamicsBackend should be used
+        physical_qubits: Physical qubits on which DynamicsBackend should be used
+        solver_options: Solver options for DynamicsBackend
+        calibration_files: Calibration files for DynamicsBackend
+
+    Returns:
+        backend: Backend instance
+    """
+
+    backend = None
+    if real_backend is not None:
+        if real_backend:
+            service = QiskitRuntimeService(channel=channel, instance=instance)
+            if backend_name is None:
+                backend = service.least_busy(min_num_qubits=2)
+            else:
+                backend = service.get_backend(backend_name)
+
+            # Specify options below if needed
+            # backend.set_options(**options)
+        else:
+            # Fake backend initialization (Aer Simulator)
+            if backend_name is None:
+                backend_name = "fake_jakarta"
+            backend = FakeProvider().get_backend(backend_name)
+
+    if backend is not None:
+        if use_dynamics:
+            if solver_options["hmax"] == "auto":
+                solver_options["hmax"] = backend.configuration().dt
+            for key in ["atol", "rtol"]:
+                solver_options[key] = float(solver_options[key])
+            backend = custom_dynamics_from_backend(
+                backend,
+                subsystem_list=list(physical_qubits),
+                solver_options=solver_options,
+            )
+            _, _ = perform_standard_calibrations(
+                backend, calibration_files=calibration_files
+            )
+
+    return backend
+
+
 def custom_dynamics_from_backend(
     backend: BackendV1,
     subsystem_list: Optional[List[int]] = None,
@@ -1119,6 +1173,34 @@ def custom_dynamics_from_backend(
         subsystem_dims=subsystem_dims,
         **options,
     )
+
+
+def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
+    """
+    This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
+    arbitrary dimension qudit operators that are the equivalent to the Qubit Operators desired.
+
+    This functionality is useful for qudit simulations of standard qubit workflows like state preparation
+    and choosing measurement observables, without losing any information from the simulation.
+
+    All operators produced remain as unitaries.
+    """
+    qudit_op_list = []
+    for op, dim in zip(qubit_ops, subsystem_dims):
+        if dim > 1:
+            qud_op = np.identity(dim, dtype=np.complex64)
+            qud_op[:2, :2] = op.to_matrix()
+            qudit_op_list.append(qud_op)
+    complete_op = Operator(qudit_op_list[0])
+    for i in range(1, len(qudit_op_list)):
+        complete_op = complete_op.tensor(Operator(qudit_op_list[i]))
+    assert complete_op.is_unitary(), "The operator is not unitary"
+    assert (
+        complete_op.input_dims()
+        == complete_op.output_dims()
+        == tuple(filter(lambda x: x > 1, subsystem_dims))
+    ), "The operator is not the right dimension"
+    return complete_op
 
 
 def build_qubit_space_projector(initial_subsystem_dims: list):
@@ -1483,6 +1565,14 @@ def select_optimizer(
             )
 
 
+def constrain_mean_value(mu_var):
+    return [tf.clip_by_value(m, -1.0, 1.0) for m in mu_var]
+
+
+def constrain_std_value(std_var):
+    return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
+
+
 def generate_model(
     input_shape: Tuple,
     hidden_units: Union[List, Tuple],
@@ -1558,65 +1648,3 @@ def generate_model(
             return Model(inputs=input_layer, outputs=[mean_param, sigma_param]), Model(
                 inputs=input_critic, outputs=critic_output
             )
-
-
-def select_backend(
-    real_backend: Optional[bool] = None,
-    channel: Optional[str] = None,
-    instance: Optional[str] = None,
-    backend_name: Optional[str] = None,
-    use_dynamics: Optional[bool] = None,
-    physical_qubits: Optional[List[int]] = None,
-    solver_options: Optional[Dict] = None,
-    calibration_files: Optional[str] = None,
-):
-    """
-    Select backend to use for training among real backend or fake backend (Aer Simulator)
-
-    Args:
-        real_backend: Boolean indicating if real backend should be used
-        channel: Channel to use for Runtime Service
-        instance: Instance to use for Runtime Service
-        backend_name: Name of the backend to use for training
-        use_dynamics: Boolean indicating if DynamicsBackend should be used
-        physical_qubits: Physical qubits on which DynamicsBackend should be used
-        solver_options: Solver options for DynamicsBackend
-        calibration_files: Calibration files for DynamicsBackend
-
-    Returns:
-        backend: Backend instance
-    """
-
-    backend = None
-    if real_backend is not None:
-        if real_backend:
-            service = QiskitRuntimeService(channel=channel, instance=instance)
-            if backend_name is None:
-                backend = service.least_busy(min_num_qubits=2)
-            else:
-                backend = service.get_backend(backend_name)
-
-            # Specify options below if needed
-            # backend.set_options(**options)
-        else:
-            # Fake backend initialization (Aer Simulator)
-            if backend_name is None:
-                backend_name = "fake_jakarta"
-            backend = FakeProvider().get_backend(backend_name)
-
-    if backend is not None:
-        if use_dynamics:
-            if solver_options["hmax"] == "auto":
-                solver_options["hmax"] = backend.configuration().dt
-            for key in ["atol", "rtol"]:
-                solver_options[key] = float(solver_options[key])
-            backend = custom_dynamics_from_backend(
-                backend,
-                subsystem_list=list(physical_qubits),
-                solver_options=solver_options,
-            )
-            _, _ = perform_standard_calibrations(
-                backend, calibration_files=calibration_files
-            )
-
-    return backend

@@ -48,7 +48,6 @@ from qiskit_ibm_runtime import Estimator as RuntimeEstimator
 # Tensorflow modules
 from tensorflow_probability.python.distributions import Categorical
 
-from custom_jax_sim import JaxSolver
 from helper_functions import (
     retrieve_primitives,
     Backend_type,
@@ -637,8 +636,8 @@ class QuantumEnvironment(Env):
 
             elif self.abstraction_level == "pulse":
                 # Pulse simulation
-                if isinstance(self.backend, DynamicsBackend) and isinstance(
-                    self.backend.options.solver, JaxSolver
+                if isinstance(self.backend, DynamicsBackend) and hasattr(
+                    self.backend.options.solver, "unitary_solve"
                 ):
                     # Jax compatible pulse simulation
 

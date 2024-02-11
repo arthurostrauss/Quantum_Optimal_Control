@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import time
 
-from qiskit.circuit import Gate
+from qiskit.circuit import Gate, QuantumCircuit
+from qiskit import QiskitError
+from qiskit.quantum_info import Operator, SuperOp, DensityMatrix
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
@@ -15,45 +17,13 @@ from qiskit_dynamics.solvers.solver_classes import (
 )
 from typing import Optional, List, Union, Callable, Tuple, Type, Any
 
-from qiskit import QuantumCircuit, QiskitError
-
-from qiskit.quantum_info import Operator, SuperOp, DensityMatrix
 from qiskit.pulse import Schedule, SymbolicPulse
 from qiskit_dynamics.array import Array
-from qiskit_dynamics.array import wrap
+
 from jax import vmap, jit, numpy as jnp
 import numpy as np
 from scipy.integrate._ivp.ivp import OdeResult
-
-jit_wrap = wrap(jit, decorator=True)
-
-
-def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
-    """
-    This function operates very similarly to SparsePauliOp from Qiskit, except this can produce
-    arbitrary dimension qudit operators that are the equivalent to the Qubit Operators desired.
-
-    This functionality is useful for qudit simulations of standard qubit workflows like state preparation
-    and choosing measurement observables, without losing any information from the simulation.
-
-    All operators produced remain as unitaries.
-    """
-    qudit_op_list = []
-    for op, dim in zip(qubit_ops, subsystem_dims):
-        if dim > 1:
-            qud_op = np.identity(dim, dtype=np.complex64)
-            qud_op[:2, :2] = op.to_matrix()
-            qudit_op_list.append(qud_op)
-    complete_op = Operator(qudit_op_list[0])
-    for i in range(1, len(qudit_op_list)):
-        complete_op = complete_op.tensor(Operator(qudit_op_list[i]))
-    assert complete_op.is_unitary(), "The operator is not unitary"
-    assert (
-        complete_op.input_dims()
-        == complete_op.output_dims()
-        == tuple(filter(lambda x: x > 1, subsystem_dims))
-    ), "The operator is not the right dimension"
-    return complete_op
+from helper_functions import PauliToQuditOperator
 
 
 class JaxSolver(Solver):
