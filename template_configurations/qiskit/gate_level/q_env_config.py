@@ -44,14 +44,14 @@ def apply_parametrized_circuit(
         optimal_params[2] + params[2],
         q_reg[0],
     )
-    my_qc.u(
-        optimal_params[3] + params[3],
-        optimal_params[4] + params[4],
-        optimal_params[5] + params[5],
-        q_reg[1],
-    )
-
-    my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
+    # my_qc.u(
+    #     optimal_params[3] + params[3],
+    #     optimal_params[4] + params[4],
+    #     optimal_params[5] + params[5],
+    #     q_reg[1],
+    # )
+    #
+    # my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
 
     qc.append(my_qc.to_instruction(label=my_qc.name), q_reg)
 
@@ -105,14 +105,14 @@ def get_backend(
     return backend
 
 
-def get_circuit_context(backend: Optional[BackendV1 | BackendV2]):
+def get_circuit_context(backend: Optional[BackendV2]):
     circuit = QuantumCircuit(5)
     circuit.h(0)
     for i in range(1, 5):
         circuit.cx(0, i)
     circuit.h(0)
 
-    if backend is not None:
+    if backend is not None and backend.target.has_calibration("x", (0,)):
         circuit = transpile(circuit, backend, optimization_level=1)
     print("Circuit context", circuit)
 

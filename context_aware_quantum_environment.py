@@ -243,6 +243,16 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
     def _generate_circuit_truncations(
         self,
     ) -> Tuple[List[QuantumCircuit], List[QuantumCircuit]]:
+        """
+        Generate truncated circuits for contextual gate calibration.
+        This method looks for the target gate in the circuit context and replaces it by a custom gate,
+        and performs an additional pruning step to keep only the operations that are relevant to the calibration,
+        that is, the operations that are applied on the target register or its nearest neighbors and second nearest
+        neighbors.
+
+        :return: Tuple of lists of QuantumCircuits, the first list contains the custom circuits, the second list
+            contains the baseline circuits (ideal circuits without custom gates)
+        """
         custom_circuit_truncations = [
             QuantumCircuit(
                 self.tgt_register, self.nn_register, name=f"c_circ_trunc_{i}"
@@ -257,33 +267,38 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         ]
         custom_gates, custom_gate_circ = [], []
         # Build sub-circuit contexts: each circuit goes until target gate and preserves nearest neighbor operations
-        for i in range(self.tgt_instruction_counts):
+        for i in range(self.tgt_instruction_counts):  # Loop over target gates
             counts = 0
             for start_time, instruction in zip(
                 self.circuit_context.op_start_times, self.circuit_context.data
-            ):
+            ):  # Loop over instructions in circuit context
                 qubits_in_vicinity = np.array(
                     [
                         (qubit, qubit in self.tgt_register or qubit in self.nn_register)
                         for qubit in instruction.qubits
                     ]
-                )
+                )  # instruction qubits and boolean indicating if each of those is from target register or nn register
                 other_qubits = [
                     qubit[0]
                     for qubit in qubits_in_vicinity
                     if not qubit[1]
                     and qubit[0] not in custom_circuit_truncations[i].qubits
-                ]
+                ]  # Retrieve qubits in instruction that are not in the target nor nearest nn register
 
                 # if all([qubit in self.tgt_register or qubit in self.nn_register for qubit in instruction.qubits]):
-                if any(qubits_in_vicinity[:, 1]):
+                if any(
+                    qubits_in_vicinity[:, 1]
+                ):  # If instruction involves target or nn qubits
                     if (
                         counts <= i or start_time <= self._target_instruction_timings[i]
-                    ):  # Append until reaching tgt i
-                        if other_qubits:
+                    ):  # If instruction is before or at target gate instance
+                        if (
+                            other_qubits
+                        ):  # If instruction involves qubits not in target or nn register
                             last_reg_name = (
                                 baseline_circuit_truncations[i].qregs[-1].name
                             )
+                            # Add new register (adapt the name if necessary) to the circuit truncation
                             if last_reg_name != "nn":
                                 new_reg = QuantumRegister(
                                     name=last_reg_name

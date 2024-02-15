@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 from qiskit import pulse, schedule, transpile
 from qiskit.circuit import (
     QuantumCircuit,
@@ -8,7 +10,7 @@ from qiskit.circuit import (
     CircuitInstruction,
     ParameterVector,
 )
-from qiskit.circuit.library import get_standard_gate_name_mapping
+from qiskit.circuit.library import get_standard_gate_name_mapping, RZGate
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
 from qiskit.quantum_info.states.quantum_state import QuantumState
@@ -77,6 +79,7 @@ from gymnasium.spaces import Box
 import optuna
 
 import tensorflow as tf
+from scipy.optimize import minimize
 from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import Dense
 
@@ -404,7 +407,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
 
 
 def get_pulse_params(
-    backend: Backend_type, physical_qubit: Sequence[int], name: str = "x"
+    backend: Backend_type, physical_qubit: Sequence[int], gate_name: str = "x"
 ):
     """
     Determine default parameters for SX or X gate on provided backend
@@ -412,7 +415,7 @@ def get_pulse_params(
     Args:
         backend: Backend instance
         physical_qubit: Physical qubit on which gate is to be performed
-        name: Name of the gate (X or SX)
+        gate_name: Name of the gate (X or SX)
     Returns:
         default_params: Default parameters for X or SX gate
         pulse_features: Features of the pulse
@@ -425,15 +428,15 @@ def get_pulse_params(
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
         instruction_schedule_map = backend.target.instruction_schedule_map()
-    basis_gate_inst = instruction_schedule_map.get(name, physical_qubit)
+    basis_gate_inst = instruction_schedule_map.get(gate_name, physical_qubit)
     basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
     ref_pulse = basis_gate_inst.instructions[0][1].pulse
     default_params = {
-        ("amp", physical_qubit, name): ref_pulse.amp,
-        ("σ", physical_qubit, name): ref_pulse.sigma,
-        ("β", physical_qubit, name): ref_pulse.beta,
-        ("duration", physical_qubit, name): ref_pulse.duration,
-        ("angle", physical_qubit, name): ref_pulse.angle,
+        ("amp", physical_qubit, gate_name): ref_pulse.amp,
+        ("σ", physical_qubit, gate_name): ref_pulse.sigma,
+        ("β", physical_qubit, gate_name): ref_pulse.beta,
+        ("duration", physical_qubit, gate_name): ref_pulse.duration,
+        ("angle", physical_qubit, gate_name): ref_pulse.angle,
     }
     pulse_features = ["amp", "angle", "duration", "σ", "β"]
     return default_params, pulse_features, basis_gate_inst, basis_gate_instructions
@@ -511,23 +514,27 @@ def new_params_ecr(
     return new_params
 
 
-def new_params_x(
+def new_params_sq_gate(
     params: ParameterVector,
     qubits: Sequence[int],
     backend: BackendV1 | BackendV2,
     pulse_features: List[str],
     duration_window: float,
+    include_baseline: bool = False,
+    gate_name: str = "x",
 ):
     """
-    Helper function to parametrize a custom X gate using Qiskit Experiments Calibrations syntax
+    Helper function to parametrize a custom X or SX gate using Qiskit Experiments Calibrations syntax
     :param params: Parameters of the Schedule/Custom gate
     :param qubits: Physical qubits on which custom gate is applied on
     :param backend: IBM Backend on which schedule shall be added
     :param pulse_features: List of pulse features to be parametrized
     :param duration_window: Duration window for the pulse duration
+    :param include_baseline: Include baseline calibration in the parameters
+    :param gate_name: Name of the gate ('x' or 'sx')
     :return: Dictionary of updated X parameters
     """
-    new_params, available_features, _, _ = get_pulse_params(backend, qubits, "x")
+    new_params, available_features, _, _ = get_pulse_params(backend, qubits, gate_name)
     if len(pulse_features) != len(params):
         raise ValueError(
             f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)}"
@@ -535,14 +542,20 @@ def new_params_x(
         )
     for i, feature in enumerate(pulse_features):
         if feature != "duration" and feature in available_features:
-            # new_params[(feature, qubits, "x")] += params[i]  # Add the parameter to the pulse baseline calibration
-            new_params[(feature, qubits, "x")] = (
-                0.0 + params[i]
-            )  # Replace baseline calibration with the parameter
+            if include_baseline:  # Add the parameter to the pulse baseline calibration
+                new_params[(feature, qubits, gate_name)] += params[i]
+            else:  # Replace baseline calibration with the parameter
+                new_params[(feature, qubits, gate_name)] = 0.0 + params[i]
+
         else:
-            new_params[(feature, qubits, "x")] += pulse.builder.seconds_to_samples(
-                duration_window * params[i]
-            )
+            if include_baseline:
+                new_params[
+                    (feature, qubits, gate_name)
+                ] += pulse.builder.seconds_to_samples(duration_window * params[i])
+            else:
+                new_params[
+                    (feature, qubits, gate_name)
+                ] = pulse.builder.seconds_to_samples(duration_window * params[i])
     return new_params
 
 
@@ -594,6 +607,7 @@ def simulate_pulse_schedule(
     sim_func = jit(jit_func)
     results = np.array(sim_func())
     output_unitary = results[-1]
+
     output_op = Operator(
         output_unitary,
         input_dims=tuple(subsystem_dims),
@@ -1267,6 +1281,45 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     return qubitized_unitary
 
 
+def rotate_unitary(x, unitary: Operator):
+    """
+    Rotate input unitary with virtual Z rotations on all qubits
+    x: Rotation parameters
+    unitary: Rotated unitary
+    """
+    assert len(x) % 2 == 0, "Rotation parameters should be a pair"
+    ops = [Operator(RZGate(x[i])) for i in range(len(x))]
+    pre_rot, post_rot = ops[0], ops[-1]
+    for i in range(1, len(x) // 2):
+        pre_rot = pre_rot.tensor(ops[i])
+        post_rot = post_rot.expand(ops[-i - 1])
+
+    return pre_rot @ unitary @ post_rot
+
+
+def get_optimal_z_rotation(
+    unitary: Operator, target_gate: Gate | Operator, n_qubits: int
+):
+    """
+    Get optimal Z rotation angles for input unitary to match target gate (minimize gate infidelity)
+    Args:
+        unitary: Unitary to be rotated
+        target_gate: Target gate
+        n_qubits: Number of qubits
+    """
+
+    def cost_function(x):
+        rotated_unitary = rotate_unitary(x, unitary)
+        return 1 - average_gate_fidelity(
+            rotated_unitary,
+            target_gate if isinstance(target_gate, Operator) else Operator(target_gate),
+        )
+
+    x0 = np.zeros(2**n_qubits)
+    res = minimize(cost_function, x0, method="Nelder-Mead")
+    return res
+
+
 def load_q_env_from_yaml_file(file_path: str):
     """
     Load Qiskit Quantum Environment from yaml file
@@ -1279,10 +1332,13 @@ def load_q_env_from_yaml_file(file_path: str):
 
     low = np.array(config["ENV"]["ACTION_SPACE"]["LOW"], dtype=np.float32)
     high = np.array(config["ENV"]["ACTION_SPACE"]["HIGH"], dtype=np.float32)
+    if low.shape != high.shape:
+        raise ValueError(
+            "Low and high arrays in action space should have the same shape"
+        )
+    action_shape = low.shape
     params = {
-        "action_space": Box(
-            low=low, high=high, shape=(config["ENV"]["N_ACTIONS"],), dtype=np.float32
-        ),
+        "action_space": Box(low=low, high=high, shape=action_shape, dtype=np.float32),
         "observation_space": Box(
             low=np.float32(0.0),
             high=np.float32(1.0),
@@ -1454,7 +1510,7 @@ def create_hpo_agent_config(
 
 
 def retrieve_backend_info(
-    backend: Backend, estimator: Optional[RuntimeEstimator] = None
+    backend: Optional[Backend_type] = None, estimator: Optional[RuntimeEstimator] = None
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration
@@ -1470,34 +1526,40 @@ def retrieve_backend_info(
     instruction_durations: Instruction durations
 
     """
-    backend_data = BackendData(backend)
-    dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
-    coupling_map = CouplingMap(backend_data.coupling_map)
-    if (
-        coupling_map.size() == 0
-        and backend_data.num_qubits > 1
-        and estimator is not None
-    ):
-        if isinstance(estimator, RuntimeEstimator):
-            coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
-            if coupling_map is None:
-                raise ValueError(
-                    "To build a local circuit context, backend needs a coupling map"
-                )
 
-    # Check basis_gates and their respective durations of backend (for identifying timing context)
-    if isinstance(backend, BackendV1):
-        instruction_durations = InstructionDurations.from_backend(backend)
-        basis_gates = backend.configuration().basis_gates.copy()
-    elif isinstance(backend, BackendV2):
-        instruction_durations = backend.instruction_durations
-        basis_gates = backend.operation_names.copy()
+    if isinstance(backend, Backend_type):
+        backend_data = BackendData(backend)
+        dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
+        coupling_map = CouplingMap(backend_data.coupling_map)
+        if (
+            coupling_map.size() == 0
+            and backend_data.num_qubits > 1
+            and estimator is not None
+        ):
+            if isinstance(estimator, RuntimeEstimator):
+                coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
+                if coupling_map is None:
+                    raise ValueError(
+                        "To build a local circuit context, backend needs a coupling map"
+                    )
+
+        # Check basis_gates and their respective durations of backend (for identifying timing context)
+        if isinstance(backend, BackendV1):
+            instruction_durations = InstructionDurations.from_backend(backend)
+            basis_gates = backend.configuration().basis_gates.copy()
+        elif isinstance(backend, BackendV2):
+            instruction_durations = backend.instruction_durations
+            basis_gates = backend.operation_names.copy()
+        else:
+            instruction_durations = None
+            basis_gates = None
     else:
-        raise AttributeError("TorchQuantumEnvironment requires a Backend argument")
-    if not instruction_durations.duration_by_name_qubits:
-        raise AttributeError(
-            "InstructionDurations not specified in provided Backend, required for transpilation"
+        warnings.warn(
+            "No Backend was provided, using default values for dt, coupling_map, basis_gates and instruction_durations"
         )
+
+        return 2.222e-10, CouplingMap(), ["x, sx, cx, rz"], None
+
     return dt, coupling_map, basis_gates, instruction_durations
 
 

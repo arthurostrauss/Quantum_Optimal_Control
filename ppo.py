@@ -161,33 +161,28 @@ class CustomPPO:
         self.reward_history = []
         self.circuit_fidelity_history = []
         self.avg_fidelity_history = []
-        self.fig, self.ax = None, None
 
     def plot_curves(self):
-        plt.ion()
-        if self.fig is None:
-            self.fig, self.ax = plt.subplots(1)
-        self.ax.clear()
         if len(self.reward_history) > 0:
-            self.ax.plot(np.mean(self.reward_history, axis=1), label="Reward")
+            plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
             if self.env.do_benchmark():
                 if hasattr(self.env, "circuit_fidelity_history"):
-                    self.ax.plot(
+                    plt.plot(
                         np.array(self.circuit_fidelity_history)[:, 0],
                         label="Circuit Fidelity",
                     )
                 else:
-                    self.ax.plot(
+                    plt.plot(
                         np.array(self.avg_fidelity_history)[:, 0],
                         label="Fidelity (means of individual fidelities)",
                     )
-                    self.ax.plot(
+                    plt.plot(
                         np.array(self.avg_fidelity_history)[:, 1],
                         label="Fidelity (of averaged process over batch)",
                     )
-            self.ax.set_title("Reward History")
-            self.ax.set_xlabel("Iteration")
-            self.ax.set_ylabel("Reward")
+            plt.title("Reward History")
+            plt.xlabel("Iteration")
+            plt.ylabel("Reward")
 
     def train(self, total_updates, print_debug=True, num_prints=40, clear_history=True):
         """
@@ -195,6 +190,7 @@ class CustomPPO:
         :param total_updates: Total number of updates to perform
         :param print_debug: If True, then print debug statements
         :param num_prints: Number of times to print debug statements
+        :param clear_history: If True, then clear the history of the environment
         """
         if clear_history:
             self.env.clear_history()
@@ -259,7 +255,7 @@ class CustomPPO:
                 self.writer.add_scalar(
                     "charts/episodic_return", np.mean(reward.numpy()), global_step
                 )
-                self.writer.add_scalar("charts/episodic_length", num_steps, global_step)
+                # self.writer.add_scalar("charts/episodic_length", num_steps, global_step)
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -380,9 +376,9 @@ class CustomPPO:
                 # print(np.mean(env.reward_history, axis =1)[-1])
                 # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
 
-                self.plot_curves()
-                if global_step % num_prints == 0:
-                    clear_output(wait=True)
+            self.plot_curves()
+            if global_step % num_prints == 0:
+                clear_output(wait=True)
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             self.writer.add_scalar(
@@ -396,22 +392,37 @@ class CustomPPO:
                 np.mean(self.env.reward_history, axis=1)[-1],
                 global_step,
             )
-            # writer.add_scalar("losses/avg_gate_fidelity", env.avg_fidelity_history[-1], global_step)
-            # writer.add_scalar("losses/circuit_fidelity", env.circuit_fidelity_history[-1], global_step)
-            self.writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-            self.writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-            self.writer.add_scalar(
-                "losses/old_approx_kl", old_approx_kl.item(), global_step
-            )
-            self.writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-            self.writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-            self.writer.add_scalar("losses/explained_var", explained_var, global_step)
-            self.writer.add_scalar(
-                "losses/advantage", np.mean(b_advantages.numpy()), global_step
-            )
-            self.writer.add_scalar(
-                "losses/advantage_std", np.std(b_advantages.numpy()), global_step
-            )
+            if self.env.do_benchmark():
+                if hasattr(self.env, "circuit_fidelity_history"):
+                    self.writer.add_scalar(
+                        "losses/circuit_fidelity",
+                        self.env.circuit_fidelity_history[-1],
+                        global_step,
+                    )
+                else:
+                    print(
+                        "Average gate fidelity of last gate:",
+                        self.env.avg_fidelity_history[-1],
+                    )
+                    self.writer.add_scalar(
+                        "losses/avg_gate_fidelity",
+                        self.env.avg_fidelity_history[-1],
+                        global_step,
+                    )
+            # self.writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+            # self.writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+            # self.writer.add_scalar(
+            #     "losses/old_approx_kl", old_approx_kl.item(), global_step
+            # )
+            # self.writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+            # self.writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+            # self.writer.add_scalar("losses/explained_var", explained_var, global_step)
+            # self.writer.add_scalar(
+            #     "losses/advantage", np.mean(b_advantages.numpy()), global_step
+            # )
+            # self.writer.add_scalar(
+            #     "losses/advantage_std", np.std(b_advantages.numpy()), global_step
+            # )
 
         self.reward_history.append(self.env.reward_history)
         if hasattr(self.env, "circuit_fidelity_history"):  # ContextAwareEnv
@@ -696,8 +707,8 @@ def make_train_ppo(
                     # print(np.mean(env.reward_history, axis =1)[-1])
                     # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
 
-                    if global_step % num_prints == 0:
-                        clear_output(wait=True)
+                if global_step % num_prints == 0:
+                    clear_output(wait=True)
 
                 # TRY NOT TO MODIFY: record rewards for plotting purposes
                 writer.add_scalar(

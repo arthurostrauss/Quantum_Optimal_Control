@@ -3,19 +3,22 @@ from __future__ import annotations
 import warnings
 from typing import Optional, Dict
 import os
-from basis_gate_library import FixedFrequencyTransmon, EchoedCrossResonance
+from qiskit_experiments.calibration_management import (
+    FixedFrequencyTransmon,
+    EchoedCrossResonance,
+)
 from helper_functions import (
     load_q_env_from_yaml_file,
     perform_standard_calibrations,
     select_backend,
     new_params_ecr,
-    new_params_x,
+    new_params_sq_gate,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
 from qiskit_dynamics.array import Array
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
-from qiskit.providers import BackendV1, BackendV2
+from qiskit.providers import BackendV1, BackendV2, BackendV2Converter
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
@@ -49,15 +52,16 @@ def custom_schedule(
 
         :return: Parametrized Schedule
     """
-    # Example of custom schedule for Echoed Cross Resonance gate
 
     # Load here all pulse parameters names that should be tuned during model-free calibration.
     # Here we focus on real time tunable pulse parameters (amp, angle, duration)
-    ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]
-    x_pulse_features = ["amp", "angle"]
+
+    ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
+    sq_pulse_features = ["amp", "angle"]  # For single qubit gates
+    sq_name = "sx"  # Name of the single qubit gate baseline to pick
     # Uncomment line below to include pulse duration as tunable parameter
     # ecr_pulse_features.append("duration")
-    # x_pulse_features.append("duration")
+    # sq_pulse_features.append("duration")
 
     duration_window = 0
     qubits = tuple(physical_qubits)
@@ -72,14 +76,15 @@ def custom_schedule(
             duration_window,
             include_baseline=False,
         )
-    elif len(qubits) == 1:  # Retrieve schedule for X gate
-        new_params = new_params_x(
+    elif len(qubits) == 1:  # Retrieve schedule for single qubit gate
+        new_params = new_params_sq_gate(
             params,
             qubits,
             backend,
-            x_pulse_features,
+            sq_pulse_features,
             duration_window,
-            include_baseline=True,
+            include_baseline=False,
+            gate_name=sq_name,
         )
     else:
         raise ValueError(
@@ -95,17 +100,31 @@ def custom_schedule(
         add_parameter_defaults=True,
     )
 
-    gate_name = "ecr" if len(physical_qubits) == 2 else "x"
+    gate_name = "ecr" if len(physical_qubits) == 2 else sq_name
+
     # Retrieve schedule (for now, works only with ECRGate(), as no library yet available for CX)
 
-    return cals.get_schedule(gate_name, qubits, assign_params=new_params)
+    basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
+
+    if isinstance(
+        backend, BackendV1
+    ):  # Convert to BackendV2 if needed (to access Target)
+        backend = BackendV2Converter(backend)
+
+    # Choose which gate to build here
+    with pulse.build(backend, name="custom_sched") as custom_sched:
+        # pulse.call(backend.target.get_calibration("s", qubits))
+        pulse.call(basis_gate_sched)
+        # pulse.call(backend.target.get_calibration("s", qubits))
+
+    return custom_sched
 
 
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: ParameterVector, tgt_register: QuantumRegister, **kwargs
 ):
     """
-    Define ansatz circuit to be played on Quantum Computer. Should be parametrized with qiskit ParameterVector
+    Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
     This function is used to run the QuantumCircuit instance on a Runtime backend
     :param qc: Quantum Circuit instance to add the gate on
     :param params: Parameters of the custom Gate
@@ -114,8 +133,8 @@ def apply_parametrized_circuit(
     """
     target = kwargs["target"]
     backend = kwargs["backend"]
-
     gate, physical_qubits = target["gate"], target["register"]
+
     parametrized_gate = Gate(
         f"custom_{gate.name}", len(tgt_register), params=params.params
     )
@@ -175,7 +194,7 @@ def get_backend(
         rabi_freqs = [0.22e9, 0.26e9]
         couplings = {(0, 1): 0.002e9}
 
-        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)
+        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[0]
         _, _ = perform_standard_calibrations(backend, calibration_files)
 
     if backend is None:
@@ -191,15 +210,16 @@ def get_circuit_context(backend: Optional[BackendV1 | BackendV2] = None):
     circuit.h(0)
     circuit.cx(0, 1)
 
-    if backend is not None:
+    if backend is not None and backend.target.has_calibration("x", (0,)):
         circuit = transpile(circuit, backend)
 
-    print("Circuit context: ", circuit)
+    print("Circuit context: ")
+    print(circuit)
 
     return circuit
 
 
-# Do not touch part below, just retrieve in your notebook training_config and circuit_context
+# Do not touch part below, just import in your notebook q_env_config and circuit_context
 (
     env_params,
     backend_params,
