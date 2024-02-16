@@ -4,7 +4,9 @@ quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
+Last updated: 16/02/2024
 """
+
 from __future__ import annotations
 
 # For compatibility for options formatting between Estimators.
@@ -578,9 +580,11 @@ class QuantumEnvironment(Env):
                             self.backend,
                             self.target["register"],
                             target_state=target,
-                            session=self.estimator.session
-                            if hasattr(self.estimator, "session")
-                            else None,
+                            session=(
+                                self.estimator.session
+                                if hasattr(self.estimator, "session")
+                                else None
+                            ),
                         )
                     )
                     print("Finished state tomography")
@@ -592,9 +596,11 @@ class QuantumEnvironment(Env):
                             self.backend,
                             target,
                             self.target["register"],
-                            session=self.estimator.session
-                            if hasattr(self.estimator, "session")
-                            else None,
+                            session=(
+                                self.estimator.session
+                                if hasattr(self.estimator, "session")
+                                else None
+                            ),
                         )
                     )
                     print("Finished process tomography")
@@ -916,9 +922,11 @@ class QuantumEnvironment(Env):
                 "c_factor": self.c_factor,
                 "reward_history": self.reward_history,
                 "action_history": self.action_history,
-                "fidelity_history": self.avg_fidelity_history
-                if self.target_type == "gate"
-                else self.state_fidelity_history,
+                "fidelity_history": (
+                    self.avg_fidelity_history
+                    if self.target_type == "gate"
+                    else self.state_fidelity_history
+                ),
             }
         )
 

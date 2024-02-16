@@ -2,19 +2,15 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, List, Union, Sequence, Any
-from agent import Agent, ActorNetwork, CriticNetwork
+from typing import Callable, Dict, Optional, List, Any
 
 import torch
-import torch.optim as optim
-import torch.nn as nn
 from gymnasium import Space
 
-from qiskit_ibm_runtime import QiskitRuntimeService, Options
+from qiskit_ibm_runtime import Options
 from qiskit.providers import Backend
 from qiskit.circuit import (
     QuantumCircuit,
-    Parameter,
     ParameterVector,
     QuantumRegister,
     Gate,

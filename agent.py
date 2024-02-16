@@ -3,7 +3,6 @@ from typing import Sequence, Optional
 import torch
 import torch.nn as nn
 from gymnasium import Space
-from stable_baselines3.common.policies import ActorCriticPolicy
 
 
 class ActorNetwork(nn.Module):

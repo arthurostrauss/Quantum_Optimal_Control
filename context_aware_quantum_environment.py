@@ -109,9 +109,11 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             backend=self.backend,
             scheduling_method="asap",
             basis_gates=self.backend_info.basis_gates,
-            coupling_map=self.backend_info.coupling_map
-            if self.backend_info.coupling_map.size() != 0
-            else None,
+            coupling_map=(
+                self.backend_info.coupling_map
+                if self.backend_info.coupling_map.size() != 0
+                else None
+            ),
             instruction_durations=self.backend_info.instruction_durations,
             optimization_level=0,
             dt=self.backend_info.dt,
@@ -227,11 +229,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         #         target_circuit.append(gate)
         return _calculate_chi_target_state(
             {
-                "dm": DensityMatrix(target_circuit)
-                if len(self.physical_neighbor_qubits) == 0
-                else partial_trace(
-                    Statevector(target_circuit),
-                    list(range(self.tgt_register.size, target_circuit.num_qubits)),
+                "dm": (
+                    DensityMatrix(target_circuit)
+                    if len(self.physical_neighbor_qubits) == 0
+                    else partial_trace(
+                        Statevector(target_circuit),
+                        list(range(self.tgt_register.size, target_circuit.num_qubits)),
+                    )
                 ),
                 "circuit": custom_circuit,
                 "target_type": "state",
@@ -541,9 +545,11 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 self.estimator = handle_session(
                     self.estimator,
                     self.backend,
-                    self._session_counts
-                    if isinstance(self.estimator, RuntimeEstimator)
-                    else trunc_index,
+                    (
+                        self._session_counts
+                        if isinstance(self.estimator, RuntimeEstimator)
+                        else trunc_index
+                    ),
                     qc,
                     target_state["input_state_circ"],
                 )

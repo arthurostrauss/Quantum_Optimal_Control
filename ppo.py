@@ -735,9 +735,11 @@ def make_train_ppo(
 
                 # Collect results
                 avg_reward.append(np.mean(env.reward_history, axis=1)[-1])
-                fidelities.append(env.avg_fidelity_history[-1]) if len(
-                    env.avg_fidelity_history
-                ) > 0 else None
+                (
+                    fidelities.append(env.avg_fidelity_history[-1])
+                    if len(env.avg_fidelity_history) > 0
+                    else None
+                )
                 avg_action_history.append(mean_action[0].numpy())
                 std_actions.append(std_action[0].numpy())
 

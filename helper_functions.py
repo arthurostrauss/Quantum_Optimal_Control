@@ -159,9 +159,9 @@ def perform_standard_calibrations(
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
         two_qubit_properties = {qubits: None for qubits in control_channel_map}
         two_qubit_errors = {qubits: 0.0 for qubits in control_channel_map}
-    standard_gates: Dict[
-        str, Gate
-    ] = get_standard_gate_name_mapping()  # standard gate library
+    standard_gates: Dict[str, Gate] = (
+        get_standard_gate_name_mapping()
+    )  # standard gate library
     fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array(
         [1, 0.5, -0.5, 0.25, -0.25]
     )
@@ -178,12 +178,14 @@ def perform_standard_calibrations(
         cals = Calibrations(
             coupling_map=coupling_map,
             control_channel_map=physical_control_channel_map,
-            libraries=[
-                FixedFrequencyTransmon(basis_gates=["x", "sx"]),
-                EchoedCrossResonance(basis_gates=["cr45p", "cr45m", "ecr"]),
-            ]
-            if num_qubits > 1
-            else [FixedFrequencyTransmon(basis_gates=["x", "sx"])],
+            libraries=(
+                [
+                    FixedFrequencyTransmon(basis_gates=["x", "sx"]),
+                    EchoedCrossResonance(basis_gates=["cr45p", "cr45m", "ecr"]),
+                ]
+                if num_qubits > 1
+                else [FixedFrequencyTransmon(basis_gates=["x", "sx"])]
+            ),
             backend_name=backend.name,
             backend_version=backend.backend_version,
         )
@@ -381,13 +383,17 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
         default_params.update(
             {
                 ("amp", physical_qubits, sched): control_pulse.amp,
-                ("tgt_amp", physical_qubits, sched): target_pulse.amp
-                if hasattr(target_pulse, "amp")
-                else np.linalg.norm(np.max(target_pulse.samples)),
+                ("tgt_amp", physical_qubits, sched): (
+                    target_pulse.amp
+                    if hasattr(target_pulse, "amp")
+                    else np.linalg.norm(np.max(target_pulse.samples))
+                ),
                 ("angle", physical_qubits, sched): control_pulse.angle,
-                ("tgt_angle", physical_qubits, sched): target_pulse.angle
-                if hasattr(target_pulse, "angle")
-                else np.angle(np.max(target_pulse.samples)),
+                ("tgt_angle", physical_qubits, sched): (
+                    target_pulse.angle
+                    if hasattr(target_pulse, "angle")
+                    else np.angle(np.max(target_pulse.samples))
+                ),
                 ("duration", physical_qubits, sched): control_pulse.duration,
                 ("σ", physical_qubits, sched): control_pulse.sigma,
                 ("risefall", physical_qubits, sched): rise_fall,
@@ -488,10 +494,10 @@ def new_params_ecr(
                             duration_window * params[i]
                         )
                     else:
-                        new_params[
-                            (feature, qubits, sched)
-                        ] = pulse.builder.seconds_to_samples(
-                            duration_window * params[i]
+                        new_params[(feature, qubits, sched)] = (
+                            pulse.builder.seconds_to_samples(
+                                duration_window * params[i]
+                            )
                         )
     else:
         if 2 * len(pulse_features) != len(params):
@@ -553,9 +559,9 @@ def new_params_sq_gate(
                     (feature, qubits, gate_name)
                 ] += pulse.builder.seconds_to_samples(duration_window * params[i])
             else:
-                new_params[
-                    (feature, qubits, gate_name)
-                ] = pulse.builder.seconds_to_samples(duration_window * params[i])
+                new_params[(feature, qubits, gate_name)] = (
+                    pulse.builder.seconds_to_samples(duration_window * params[i])
+                )
     return new_params
 
 
@@ -617,6 +623,7 @@ def simulate_pulse_schedule(
     initial_state = Statevector.from_int(0, subsystem_dims)
     final_state = initial_state.evolve(output_op)
     projected_statevec = projected_statevector(final_state, subsystem_dims, normalize)
+
     final_results = {
         "unitary": output_op,
         "statevector": final_state,
@@ -624,8 +631,14 @@ def simulate_pulse_schedule(
         "projected_statevector": projected_statevec,
     }
     if target_unitary is not None:
+        optimal_rots = get_optimal_z_rotation(
+            projected_unitary, target_unitary, len(subsystem_dims)
+        )
+        rotated_unitary = rotate_unitary(optimal_rots.x, projected_unitary)
         gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
-        final_results["gate_fidelity"] = gate_fid
+        optimal_gate_fid = average_gate_fidelity(rotated_unitary, target_unitary)
+        final_results["gate_fidelity"] = {"raw": gate_fid, "optimal": optimal_gate_fid}
+
     if target_state is not None:
         state_fid = state_fidelity(projected_statevec, target_state, validate=False)
         final_results["state_fidelity"] = state_fid
@@ -800,9 +813,9 @@ def retrieve_primitives(
         )
 
         if estimator.options.transpilation["initial_layout"] is None:
-            estimator.options.transpilation[
-                "initial_layout"
-            ] = layout.get_physical_bits()
+            estimator.options.transpilation["initial_layout"] = (
+                layout.get_physical_bits()
+            )
             sampler.options.transpilation["initial_layout"] = layout.get_physical_bits()
 
     else:

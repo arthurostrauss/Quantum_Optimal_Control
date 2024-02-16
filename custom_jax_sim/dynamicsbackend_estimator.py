@@ -58,24 +58,26 @@ class DynamicsBackendEstimator(BackendEstimator):
             for i, value in zip(circuits, parameter_values)
         ]
 
-        self.backend.options.solver_options[
-            "parameter_dicts"
-        ] = parameter_dicts  # To be given as PyTree
-        self.backend.options.solver_options[
-            "subsystem_dims"
-        ] = self.backend.options.subsystem_dims
-        self.backend.options.solver_options[
-            "parameter_values"
-        ] = parameter_values  # To be given as PyTree alternatively
+        self.backend.options.solver_options["parameter_dicts"] = (
+            parameter_dicts  # To be given as PyTree
+        )
+        self.backend.options.solver_options["subsystem_dims"] = (
+            self.backend.options.subsystem_dims
+        )
+        self.backend.options.solver_options["parameter_values"] = (
+            parameter_values  # To be given as PyTree alternatively
+        )
         self.backend.options.solver_options["observables"] = transpile(
             self.preprocessed_circuits[0][1], self.backend
         )
         self.backend.set_options(**run_options)
         run_options = {}
         bound_circuits = [
-            transpiled_circuits[circuit_index]
-            if len(p) == 0
-            else transpiled_circuits[circuit_index].bind_parameters(p)
+            (
+                transpiled_circuits[circuit_index]
+                if len(p) == 0
+                else transpiled_circuits[circuit_index].assign_parameters(p)
+            )
             for i, (p, n) in enumerate(zip(parameter_dicts, num_observables))
             for circuit_index in range(accum[i], accum[i] + n)
         ]
