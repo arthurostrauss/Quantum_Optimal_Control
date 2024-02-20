@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import time
 import numpy as np
 from typing import Optional, Dict
 import tqdm
 import warnings
 from IPython.display import clear_output
+from gymnasium import Wrapper
 
 # Torch imports for building RL agent and framework
 from gymnasium.spaces import Box
@@ -71,7 +74,7 @@ class CustomPPO:
     def __init__(
         self,
         agent_config: Dict,
-        env: QuantumEnvironment,
+        env: QuantumEnvironment | Wrapper,
         chkpt_dir: Optional[str] = "tmp/ppo",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
     ):
@@ -86,10 +89,10 @@ class CustomPPO:
         self.env = env
         self.chkpt_dir = chkpt_dir
         self.chkpt_dir_critic = chkpt_dir_critic
-        self.seed = env.seed
-        self.n_actions = env.action_space.shape[-1]
-        self.batchsize = env.batch_size
-        self.num_time_steps = env.tgt_instruction_counts
+        self.seed = env.unwrapped.seed
+        self.n_actions = env.unwrapped.action_space.shape[-1]
+        self.batchsize = env.unwrapped.batch_size
+        self.num_time_steps = env.unwrapped.tgt_instruction_counts
         if hasattr(env, "min_action") and hasattr(env, "max_action"):
             self.min_action = env.min_action
             self.max_action = env.max_action
@@ -165,7 +168,7 @@ class CustomPPO:
     def plot_curves(self):
         if len(self.reward_history) > 0:
             plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
-            if self.env.do_benchmark():
+            if self.env.unwrapped.do_benchmark():
                 if hasattr(self.env, "circuit_fidelity_history"):
                     plt.plot(
                         np.array(self.circuit_fidelity_history)[:, 0],
@@ -193,11 +196,11 @@ class CustomPPO:
         :param clear_history: If True, then clear the history of the environment
         """
         if clear_history:
-            self.env.clear_history()
+            self.env.unwrapped.clear_history()
             start = time.time()
             global_step = 0
         else:
-            global_step = self.env.step_tracker
+            global_step = self.env.unwrapped.step_tracker
 
         obs = torch.zeros(
             (self.num_time_steps, self.batchsize) + self.env.observation_space.shape
@@ -213,7 +216,7 @@ class CustomPPO:
         # Starting Learning
         for _ in tqdm.tqdm(range(1, total_updates + 1)):
             next_obs, _ = self.env.reset(seed=self.seed)
-            num_steps = self.env.episode_length(global_step)
+            num_steps = self.env.unwrapped.episode_length(global_step)
             batch_obs = torch.tile(torch.Tensor(next_obs), (self.batchsize, 1))
             batch_done = torch.zeros_like(dones[0])
 
@@ -364,17 +367,20 @@ class CustomPPO:
             if print_debug:
                 print("mean", mean_action[0])
                 print("sigma", std_action[0])
-                print("DFE Rewards Mean:", np.mean(self.env.reward_history, axis=1)[-1])
+                print(
+                    "DFE Rewards Mean:",
+                    np.mean(self.env.unwrapped.reward_history, axis=1)[-1],
+                )
                 print(
                     "DFE Rewards standard dev",
-                    np.std(self.env.reward_history, axis=1)[-1],
+                    np.std(self.env.unwrapped.reward_history, axis=1)[-1],
                 )
                 print("Returns Mean:", np.mean(b_returns.numpy()))
                 print("Returns standard dev", np.std(b_returns.numpy()))
                 print("Advantages Mean:", np.mean(b_advantages.numpy()))
                 print("Advantages standard dev", np.std(b_advantages.numpy()))
-                # print(np.mean(env.reward_history, axis =1)[-1])
-                # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
+                # print(np.mean(env.unwrapped.reward_history, axis =1)[-1])
+                # print("Circuit fidelity:", env.unwrapped.circuit_fidelity_history[-1])
 
             self.plot_curves()
             if global_step % num_prints == 0:
@@ -389,24 +395,24 @@ class CustomPPO:
             self.writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
             self.writer.add_scalar(
                 "losses/avg_return",
-                np.mean(self.env.reward_history, axis=1)[-1],
+                np.mean(self.env.unwrapped.reward_history, axis=1)[-1],
                 global_step,
             )
-            if self.env.do_benchmark():
+            if self.env.unwrapped.do_benchmark():
                 if hasattr(self.env, "circuit_fidelity_history"):
                     self.writer.add_scalar(
                         "losses/circuit_fidelity",
-                        self.env.circuit_fidelity_history[-1],
+                        self.env.unwrapped.circuit_fidelity_history[-1],
                         global_step,
                     )
                 else:
                     print(
                         "Average gate fidelity of last gate:",
-                        self.env.avg_fidelity_history[-1],
+                        self.env.unwrapped.avg_fidelity_history[-1],
                     )
                     self.writer.add_scalar(
                         "losses/avg_gate_fidelity",
-                        self.env.avg_fidelity_history[-1],
+                        self.env.unwrapped.avg_fidelity_history[-1],
                         global_step,
                     )
             # self.writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
@@ -424,12 +430,14 @@ class CustomPPO:
             #     "losses/advantage_std", np.std(b_advantages.numpy()), global_step
             # )
 
-        self.reward_history.append(self.env.reward_history)
+        self.reward_history.append(self.env.unwrapped.reward_history)
         if hasattr(self.env, "circuit_fidelity_history"):  # ContextAwareEnv
-            self.circuit_fidelity_history.append(self.env.circuit_fidelity_history)
+            self.circuit_fidelity_history.append(
+                self.env.unwrapped.circuit_fidelity_history
+            )
         else:  # QuantumEnvironment
-            self.avg_fidelity_history.append(self.env.avg_fidelity_history)
-        self.env.close()
+            self.avg_fidelity_history.append(self.env.unwrapped.avg_fidelity_history)
+        self.env.unwrapped.close()
         self.writer.close()
 
 
@@ -527,7 +535,7 @@ def make_train_ppo(
         :param num_prints: Number of times to print debug statements
         """
         try:
-            env.clear_history()
+            env.unwrapped.clear_history()
             start = time.time()
             global_step = 0
 
@@ -546,7 +554,7 @@ def make_train_ppo(
             ### Starting Learning ###
             for _ in tqdm.tqdm(range(1, total_updates + 1)):
                 next_obs, _ = env.reset(seed=seed)
-                num_steps = env.episode_length(global_step)  # num_time_steps
+                num_steps = env.unwrapped.episode_length(global_step)  # num_time_steps
                 batch_obs = torch.tile(torch.Tensor(next_obs), (batchsize, 1))
                 batch_done = torch.zeros_like(dones[0])
 
@@ -695,17 +703,20 @@ def make_train_ppo(
                 if print_debug:
                     print("mean", mean_action[0])
                     print("sigma", std_action[0])
-                    print("DFE Rewards Mean:", np.mean(env.reward_history, axis=1)[-1])
+                    print(
+                        "DFE Rewards Mean:",
+                        np.mean(env.unwrapped.reward_history, axis=1)[-1],
+                    )
                     print(
                         "DFE Rewards standard dev",
-                        np.std(env.reward_history, axis=1)[-1],
+                        np.std(env.unwrapped.reward_history, axis=1)[-1],
                     )
                     print("Returns Mean:", np.mean(b_returns.numpy()))
                     print("Returns standard dev", np.std(b_returns.numpy()))
                     print("Advantages Mean:", np.mean(b_advantages.numpy()))
                     print("Advantages standard dev", np.std(b_advantages.numpy()))
-                    # print(np.mean(env.reward_history, axis =1)[-1])
-                    # print("Circuit fidelity:", env.circuit_fidelity_history[-1])
+                    # print(np.mean(env.unwrapped.reward_history, axis =1)[-1])
+                    # print("Circuit fidelity:", env.unwrapped.circuit_fidelity_history[-1])
 
                 if global_step % num_prints == 0:
                     clear_output(wait=True)
@@ -717,11 +728,11 @@ def make_train_ppo(
                 writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
                 writer.add_scalar(
                     "losses/avg_return",
-                    np.mean(env.reward_history, axis=1)[-1],
+                    np.mean(env.unwrapped.reward_history, axis=1)[-1],
                     global_step,
                 )
-                # writer.add_scalar("losses/avg_gate_fidelity", env.avg_fidelity_history[-1], global_step)
-                # writer.add_scalar("losses/circuit_fidelity", env.circuit_fidelity_history[-1], global_step)
+                # writer.add_scalar("losses/avg_gate_fidelity", env.unwrapped.avg_fidelity_history[-1], global_step)
+                # writer.add_scalar("losses/circuit_fidelity", env.unwrapped.circuit_fidelity_history[-1], global_step)
                 writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
                 writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
                 writer.add_scalar(
@@ -734,16 +745,16 @@ def make_train_ppo(
                 )
 
                 # Collect results
-                avg_reward.append(np.mean(env.reward_history, axis=1)[-1])
+                avg_reward.append(np.mean(env.unwrapped.reward_history, axis=1)[-1])
                 (
-                    fidelities.append(env.avg_fidelity_history[-1])
-                    if len(env.avg_fidelity_history) > 0
+                    fidelities.append(env.unwrapped.avg_fidelity_history[-1])
+                    if len(env.unwrapped.avg_fidelity_history) > 0
                     else None
                 )
                 avg_action_history.append(mean_action[0].numpy())
                 std_actions.append(std_action[0].numpy())
 
-            env.close()
+            env.unwrapped.close()
             writer.close()
 
             return {
@@ -751,12 +762,10 @@ def make_train_ppo(
                 "std_action": std_action[0],
                 "fidelity_history": fidelities,
                 "action_history": avg_action_history,
-                "best_action_vector": np.mean(
-                    env.action_history[np.argmax(avg_reward)], axis=0
-                ),
+                "best_action_vector": env.unwrapped.optimal_action,
             }
         except Exception as e:
-            logging.error(f"An error occured during training: {e}")
+            logging.error(f"An error occurred during training: {e}")
             return {
                 "avg_reward": -1.0,
                 "fidelity_history": [0] * total_updates,

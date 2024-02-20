@@ -797,9 +797,9 @@ def retrieve_primitives(
         backend: Backend instance
         layout: Layout instance
         config: Configuration dictionary
-        abstraction_level: Abstraction level of the circuit
+        abstraction_level: Abstraction level ("circuit" or "pulse")
         estimator_options: Estimator options
-        circuit: Quantum Circuit instance
+        circuit: QuantumCircuit instance implementing the custom gate (for DynamicsBackend)
     """
     if isinstance(
         backend, RuntimeBackend
@@ -868,7 +868,15 @@ def retrieve_primitives(
                 _, _ = perform_standard_calibrations(backend, calibration_files)
 
         else:
-            raise TypeError("Backend not recognized")
+            if isinstance(backend, Backend_type):
+                estimator = BackendEstimator(
+                    backend, options=estimator_options, skip_transpilation=False
+                )
+                sampler = BackendSampler(
+                    backend, options=estimator_options, skip_transpilation=False
+                )
+            else:
+                raise TypeError("Backend not recognized")
     return estimator, ComputeUncompute(sampler)
 
 

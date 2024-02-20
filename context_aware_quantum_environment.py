@@ -16,6 +16,7 @@ from qiskit.circuit import (
     QuantumCircuit,
     QuantumRegister,
     ParameterVector,
+    CircuitInstruction,
 )
 from qiskit.circuit.library import ECRGate
 from qiskit.quantum_info.operators import SparsePauliOp
@@ -154,7 +155,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self._d = 2**self.tgt_register.size
 
         # Adjust target register to match it with circuit context
-        self.target_instruction.qubits = tuple(self.tgt_register)
+        self.target_instruction = CircuitInstruction(
+            self.target["gate"], self.tgt_register
+        )
         self._tgt_instruction_counts = self.circuit_context.data.count(
             self.target_instruction
         )
