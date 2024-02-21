@@ -158,7 +158,6 @@ def perform_standard_calibrations(
         backend.set_options(control_channel_map=control_channel_map)
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
         two_qubit_properties = {qubits: None for qubits in control_channel_map}
-        two_qubit_errors = {qubits: 0.0 for qubits in control_channel_map}
     standard_gates: Dict[str, Gate] = (
         get_standard_gate_name_mapping()
     )  # standard gate library
@@ -570,6 +569,7 @@ def simulate_pulse_schedule(
     sched: pulse.Schedule | pulse.ScheduleBlock,
     solver_options: Optional[Dict] = None,
     target_unitary: Optional[Operator] = None,
+    initial_state: Optional[Statevector | DensityMatrix] = None,
     target_state: Optional[Statevector | DensityMatrix] = None,
     normalize: bool = True,
 ) -> Dict[str, Union[Operator, Statevector, float]]:
@@ -580,6 +580,8 @@ def simulate_pulse_schedule(
     :param sched: Pulse schedule to simulate
     :param solver_options: Optional solver options
     :param target_unitary: Optional target unitary for gate fidelity calculation
+    :param initial_state: Optional initial state for state fidelity calculation  (if None and target_state is not None,
+    then initial state is assumed to be |0..0>)
     :param target_state: Optional target state for state fidelity calculation
     :param normalize: Normalize the projected statevector or not
     :return: Dictionary containing simulated unitary, statevector, projected unitary, projected statevector, gate fidelity, state fidelity
@@ -620,7 +622,11 @@ def simulate_pulse_schedule(
         output_dims=tuple(subsystem_dims),
     )
     projected_unitary = qubit_projection(output_unitary, subsystem_dims)
-    initial_state = Statevector.from_int(0, subsystem_dims)
+    initial_state = (
+        Statevector.from_int(0, subsystem_dims)
+        if initial_state is None
+        else initial_state
+    )
     final_state = initial_state.evolve(output_op)
     projected_statevec = projected_statevector(final_state, subsystem_dims, normalize)
 
@@ -637,7 +643,11 @@ def simulate_pulse_schedule(
         rotated_unitary = rotate_unitary(optimal_rots.x, projected_unitary)
         gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
         optimal_gate_fid = average_gate_fidelity(rotated_unitary, target_unitary)
-        final_results["gate_fidelity"] = {"raw": gate_fid, "optimal": optimal_gate_fid}
+        final_results["gate_fidelity"] = {
+            "raw": gate_fid,
+            "optimal": optimal_gate_fid,
+            "rotations": optimal_rots.x,
+        }
 
     if target_state is not None:
         state_fid = state_fidelity(projected_statevec, target_state, validate=False)

@@ -169,7 +169,7 @@ class CustomPPO:
         if len(self.reward_history) > 0:
             plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
             if self.env.unwrapped.do_benchmark():
-                if hasattr(self.env, "circuit_fidelity_history"):
+                if hasattr(self.env.unwrapped, "circuit_fidelity_history"):
                     plt.plot(
                         np.array(self.circuit_fidelity_history)[:, 0],
                         label="Circuit Fidelity",
@@ -431,7 +431,7 @@ class CustomPPO:
             # )
 
         self.reward_history.append(self.env.unwrapped.reward_history)
-        if hasattr(self.env, "circuit_fidelity_history"):  # ContextAwareEnv
+        if hasattr(self.env.unwrapped, "circuit_fidelity_history"):  # ContextAwareEnv
             self.circuit_fidelity_history.append(
                 self.env.unwrapped.circuit_fidelity_history
             )
@@ -455,10 +455,10 @@ def make_train_ppo(
     :param chkpt_dir_critic: Directory where the critic network is saved
     :return: Training function for PPO algorithm
     """
-    seed = env.seed
+    seed = env.unwrapped.seed
     n_actions = env.action_space.shape[-1]
-    batchsize = env.batch_size
-    num_time_steps = env.tgt_instruction_counts
+    batchsize = env.unwrapped.batch_size
+    num_time_steps = env.unwrapped.tgt_instruction_counts
     if hasattr(env, "min_action") and hasattr(env, "max_action"):
         min_action = env.min_action
         max_action = env.max_action

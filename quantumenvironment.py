@@ -37,6 +37,7 @@ from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import Layout, InstructionProperties
+from qiskit_aer import AerSimulator
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
@@ -257,6 +258,9 @@ class QuantumEnvironment(Env):
         self.batch_size = training_config.batch_size
         self._parameters = ParameterVector("a", training_config.action_space.shape[-1])
         self._tgt_instruction_counts = 1  # Number of instructions to calibrate
+        self._target_instruction_timings = [
+            0
+        ]  # Timings for each instruction (here, only one gate starting at t=0)
         self._reward_check_max = 1.1
 
         if isinstance(self.training_config.backend_config, QiskitConfig):
@@ -408,11 +412,15 @@ class QuantumEnvironment(Env):
         return {"episode": self._episode_tracker, "step": self._step_tracker}
 
     def _get_obs(self):
-        return np.array(
-            [
-                self._index_input_state / len(self.target["input_states"]),
-            ]
-        )
+        if self.target_type == "gate":
+            return np.array(
+                [
+                    self._index_input_state / len(self.target["input_states"]),
+                    self._target_instruction_timings[0],
+                ]
+            )
+        else:
+            return np.array([0, 0])
 
     def step(
         self, action: ActType
@@ -553,6 +561,10 @@ class QuantumEnvironment(Env):
         assert (
             len(reward_table) == self.batch_size
         ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
+        assert not np.any(np.isinf(reward_table)) and not np.any(
+            np.isnan(reward_table)
+        ), "Reward table contains NaN or Inf values"
+
         return reward_table  # Shape [batchsize]
 
     def store_benchmarks(self, params: np.array):
@@ -561,7 +573,10 @@ class QuantumEnvironment(Env):
         :param params: List of Action vectors to execute on quantum system
         :return: None
         """
-        qc = self.circuit_truncations[0]
+        qc = self.circuit_truncations[0].copy()
+        n_custom_instructions = 1
+        n_actions = self.action_space.shape[-1]
+
         # Build reference circuit (ideal)
         if self.target_type == "state":  # State preparation task
             target = self.target["dm"]
@@ -613,23 +628,79 @@ class QuantumEnvironment(Env):
             print("Starting simulation benchmark...")
             if self.abstraction_level == "circuit":
                 if self.target_type == "state":
-                    q_state_list = [
-                        Statevector.from_instruction(circ) for circ in qc_list
-                    ]
-                    density_matrix = DensityMatrix(
-                        np.mean(
-                            [
-                                q_state.to_operator().to_matrix()
-                                for q_state in q_state_list
-                            ],
-                            axis=0,
+                    if self.backend is None:
+                        q_state_list = [
+                            Statevector.from_instruction(circ) for circ in qc_list
+                        ]
+                        density_matrix = DensityMatrix(
+                            np.mean(
+                                [
+                                    q_state.to_operator().to_matrix()
+                                    for q_state in q_state_list
+                                ],
+                                axis=0,
+                            )
                         )
-                    )
+                    else:
+                        if isinstance(self.backend, AerSimulator):
+                            aer_backend = self.backend
+                        else:
+                            aer_backend = AerSimulator.from_backend(
+                                self.backend, method="density_matrix"
+                            )
+
+                        qc.save_density_matrix()
+                        states_results = aer_backend.run(
+                            qc.decompose(),
+                            parameter_binds=[
+                                {
+                                    self.parameters[j]: params[:, j]
+                                    for j in range(n_actions)
+                                }
+                            ],
+                        ).result()
+                        output_states = [
+                            states_results.data(i)["density_matrix"]
+                            for i in range(self.batch_size)
+                        ]
+                        density_matrix = DensityMatrix(
+                            np.mean(
+                                [
+                                    state.to_operator().to_matrix()
+                                    for state in output_states
+                                ],
+                                axis=0,
+                            )
+                        )
+
                     self.state_fidelity_history.append(
                         state_fidelity(self.target["dm"], density_matrix)
                     )
                 else:  # Gate calibration task
-                    q_process_list = [Operator(circ) for circ in qc_list]
+                    if self.backend is None:
+                        q_process_list = [Operator(circ) for circ in qc_list]
+                    else:
+                        if isinstance(self.backend, AerSimulator):
+                            aer_backend = self.backend
+                        else:
+                            aer_backend = AerSimulator.from_backend(
+                                self.backend, method="superop"
+                            )
+                        qc.save_superop()
+                        process_results = aer_backend.run(
+                            qc.decompose(),
+                            parameter_binds=[
+                                {
+                                    self.parameters[j]: params[:, j]
+                                    for j in range(n_actions)
+                                }
+                            ],
+                        ).result()
+                        q_process_list = [
+                            process_results.data(i)["superop"]
+                            for i in range(self.batch_size)
+                        ]
+
                     avg_fidelity = np.mean(
                         [
                             average_gate_fidelity(
@@ -773,6 +844,8 @@ class QuantumEnvironment(Env):
     def update_gate_calibration(self):
         """
         Update backend target with the optimal action found during training
+
+        :return: Pulse calibration for the target gate
         """
         if self.abstraction_level == "pulse":
             sched = schedule(
@@ -791,7 +864,7 @@ class QuantumEnvironment(Env):
                     sched,
                     target_unitary=Operator(self.target["gate"]),
                     target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
-                )["gate_fidelity"]
+                )["gate_fidelity"]["optimal"]
 
             else:
                 error = 1.0 - np.max(self.avg_fidelity_history)
@@ -800,6 +873,14 @@ class QuantumEnvironment(Env):
                 self.target["gate"].name,
                 tuple(self.physical_target_qubits),
                 instruction_prop,
+            )
+
+            return self.backend.target.get_calibration(
+                self.target["gate"].name, tuple(self.physical_target_qubits)
+            )
+        else:
+            return self.circuit_truncations[0].assign_parameters(
+                {self.parameters: self._optimal_action}
             )
 
     def __repr__(self):

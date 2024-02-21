@@ -36,7 +36,7 @@ def apply_parametrized_circuit(
     target = kwargs["target"]
     my_qc = QuantumCircuit(q_reg, name=f"custom_{target['gate'].name}")
     # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-    optimal_params = np.pi * np.zeros(7)
+    optimal_params = np.pi * np.zeros(len(params))
 
     my_qc.u(
         optimal_params[0] + params[0],

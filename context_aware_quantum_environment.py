@@ -161,6 +161,8 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         self._tgt_instruction_counts = self.circuit_context.data.count(
             self.target_instruction
         )
+        if self.tgt_instruction_counts == 0:
+            raise ValueError("Target gate not found in circuit context")
 
         self._parameters = [
             ParameterVector(f"a_{j}", self.action_space.shape[-1])
@@ -185,9 +187,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         ) = self._generate_circuit_truncations()
 
         # Storing data
-        self._punctual_avg_fidelities = np.zeros(self.batch_size)
-        self._punctual_circuit_fidelities = np.zeros(self.batch_size)
-        self._punctual_observable: SparsePauliOp = SparsePauliOp("X")
         self.circuit_fidelity_history = []
         self._index_input_state = np.random.randint(len(self.target["input_states"]))
         self._intermediate_rewards = intermediate_rewards
@@ -385,7 +384,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 self.close()
                 raise exc
 
-            self._punctual_circuit_fidelities = circuit_fidelities
             self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
 
         else:  # Perform ideal simulation at circuit or pulse level
@@ -476,7 +474,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     "optimal action": self._optimal_action,
                     "truncation_index": self._trunc_index,
                     "input_state": self._input_circuits[self._index_input_state].name,
-                    "observable": self._punctual_observable,
                 }
             else:
                 info = {
@@ -488,7 +485,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     "optimal action": self._optimal_action,
                     "truncation_index": self._trunc_index,
                     "input_state": self._input_circuits[self._index_input_state].name,
-                    "observable": self._punctual_observable,
                 }
         else:
             info = {
@@ -497,7 +493,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 "gate_index": self._inside_trunc_tracker,
                 "input_state": self._input_circuits[self._index_input_state].name,
                 "truncation_index": self._trunc_index,
-                "observable": self._punctual_observable,
             }
         return info
 
@@ -505,7 +500,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         obs = np.array(
             [
                 self._index_input_state / len(self.target["input_states"]),
-                self._inside_trunc_tracker,
+                self._target_instruction_timings[self._inside_trunc_tracker],
             ]
         )
         # obs = np.array([0., 0])
@@ -528,7 +523,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             target_state, qc
         )
 
-        self._punctual_observable = self._observables
         # self.parametrized_circuit_func(training_circ, self._parameters[:iteration])
 
         reshaped_params = np.reshape(
@@ -540,43 +534,41 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             print("Starting benchmarking...")
             self.store_benchmarks(reshaped_params)
             print("Finished benchmarking")
-        if fidelity_access:
-            reward_table = self._punctual_circuit_fidelities
-        else:
-            print("Sending job...")
-            try:
-                self.estimator = handle_session(
-                    self.estimator,
-                    self.backend,
-                    (
-                        self._session_counts
-                        if isinstance(self.estimator, RuntimeEstimator)
-                        else trunc_index
-                    ),
-                    qc,
-                    target_state["input_state_circ"],
-                )
 
-                # Append input state prep circuit to the custom circuit with front composition
-                full_circ = qc.compose(
-                    target_state["input_state_circ"], inplace=False, front=True
-                )
-                print(self._observables)
+        print("Sending job...")
+        try:
+            self.estimator = handle_session(
+                self.estimator,
+                self.backend,
+                (
+                    self._session_counts
+                    if isinstance(self.estimator, RuntimeEstimator)
+                    else trunc_index
+                ),
+                qc,
+                target_state["input_state_circ"],
+            )
 
-                job = self.estimator.run(
-                    circuits=[full_circ] * self.batch_size,
-                    observables=[self._observables] * self.batch_size,
-                    parameter_values=reshaped_params,
-                    shots=int(np.max(self._pauli_shots) * self.n_shots),
-                )
+            # Append input state prep circuit to the custom circuit with front composition
+            full_circ = qc.compose(
+                target_state["input_state_circ"], inplace=False, front=True
+            )
+            print(self._observables)
 
-                reward_table = job.result().values
-            except Exception as exc:
-                self.close()
-                raise exc
-            # scaling_reward_factor = len(self._observables) / 4 ** len(self.tgt_register)
-            # reward_table *= scaling_reward_factor
-            print("Job done")
+            job = self.estimator.run(
+                circuits=[full_circ] * self.batch_size,
+                observables=[self._observables] * self.batch_size,
+                parameter_values=reshaped_params,
+                shots=int(np.max(self._pauli_shots) * self.n_shots),
+            )
+
+            reward_table = job.result().values
+        except Exception as exc:
+            self.close()
+            raise exc
+        # scaling_reward_factor = len(self._observables) / 4 ** len(self.tgt_register)
+        # reward_table *= scaling_reward_factor
+        print("Job done")
 
         if np.mean(reward_table) > self._max_return:
             self._max_return = np.mean(reward_table)
@@ -585,6 +577,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         assert (
             len(reward_table) == self.batch_size
         ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
+        assert not np.any(np.isinf(reward_table)) and not np.any(
+            np.isnan(reward_table)
+        ), "Reward table contains NaN or Inf values"
 
         return reward_table
 
@@ -713,10 +708,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             batched_dm, Statevector(baseline_circ)
         )
         self.circuit_fidelity_history.append(batched_circuit_fidelity)
-        circuit_fidelities = [
-            state_fidelity(state, Statevector(baseline_circ)) for state in output_states
-        ]
-        self._punctual_circuit_fidelities = np.array(circuit_fidelities)
 
     def _add_ecr_gate(self, basis_gates: Optional[List[str]] = None, coupling_map=None):
         """
