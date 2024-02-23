@@ -31,8 +31,14 @@ from qiskit.transpiler import (
     Target,
 )
 
-from qiskit.providers import BackendV1, Backend, BackendV2, Options as AerOptions
-from qiskit_ibm_runtime.fake_provider import FakeProvider
+from qiskit.providers import (
+    BackendV1,
+    Backend,
+    BackendV2,
+    Options as AerOptions,
+    QiskitBackendNotFoundError,
+)
+from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
 from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackend, FakeBackendV2
 from qiskit_ibm_runtime import (
     Session,
@@ -720,6 +726,72 @@ def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options=None)
     return jobs
 
 
+def fidelity_from_tomography(
+    qc_list: List[QuantumCircuit],
+    backend: Backend,
+    target: Operator | QuantumState,
+    physical_qubits: Optional[Sequence[int]],
+    analysis: Union[BaseAnalysis, None, str] = "default",
+    session: Optional[Session] = None,
+):
+    """
+    Extract average state or gate fidelity from batch of Quantum Circuit for target state or gate
+
+    Args:
+        qc_list: List of Quantum Circuits
+        backend: Backend instance
+        physical_qubits: Physical qubits on which state or process tomography is to be performed
+        analysis: Analysis instance
+        target: Target state or gate for fidelity calculation
+        session: Runtime session
+    Returns:
+        avg_fidelity: Average state or gate fidelity (over the batch of Quantum Circuits)
+    """
+    if isinstance(target, Operator):
+        tomo = ProcessTomography
+        fidelity = "process_fidelity"
+    elif isinstance(target, QuantumState):
+        tomo = StateTomography
+        fidelity = "state_fidelity"
+    else:
+        raise TypeError("Target must be either Operator or QuantumState")
+
+    process_tomo = BatchExperiment(
+        [
+            tomo(
+                qc,
+                physical_qubits=physical_qubits,
+                analysis=analysis,
+                target=target,
+            )
+            for qc in qc_list
+        ],
+        backend=backend,
+        flatten_results=True,
+    )
+
+    if isinstance(backend, RuntimeBackend):
+        circuits = process_tomo._transpiled_circuits()
+        jobs = run_jobs(session, circuits)
+        exp_data = process_tomo._initialize_experiment_data()
+        exp_data.add_jobs(jobs)
+        results = process_tomo.analysis.run(exp_data).block_for_results()
+    else:
+        results = process_tomo.run().block_for_results()
+
+    process_results = [
+        results.analysis_results(fidelity)[i].value for i in range(len(qc_list))
+    ]
+    if isinstance(target, Operator):
+        dim, _ = target.dim
+        avg_gate_fid = np.mean(
+            [(dim * f_pro + 1) / (dim + 1) for f_pro in process_results]
+        )
+        return avg_gate_fid
+    else:  # target is QuantumState
+        return np.mean(process_results)
+
+
 def gate_fidelity_from_process_tomography(
     qc_list: List[QuantumCircuit],
     backend: Backend,
@@ -1056,7 +1128,13 @@ def select_backend(
             # Fake backend initialization (Aer Simulator)
             if backend_name is None:
                 backend_name = "fake_jakarta"
-            backend = FakeProvider().get_backend(backend_name)
+            try:
+                backend = FakeProviderForBackendV2().get_backend(backend_name)
+            except QiskitBackendNotFoundError:
+                try:
+                    backend = FakeProvider().get_backend(backend_name)
+                except QiskitBackendNotFoundError:
+                    raise QiskitError(f"Backend {backend_name} not found")
 
     if backend is not None:
         if use_dynamics:

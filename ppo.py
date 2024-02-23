@@ -399,7 +399,7 @@ class CustomPPO:
                 global_step,
             )
             if self.env.unwrapped.do_benchmark():
-                if hasattr(self.env, "circuit_fidelity_history"):
+                if hasattr(self.env.unwrapped, "circuit_fidelity_history"):
                     self.writer.add_scalar(
                         "losses/circuit_fidelity",
                         self.env.unwrapped.circuit_fidelity_history[-1],

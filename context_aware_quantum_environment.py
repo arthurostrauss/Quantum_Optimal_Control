@@ -6,6 +6,8 @@ Author: Arthur Strauss
 Created on 26/06/2023
 """
 
+import warnings
+from itertools import product
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
@@ -19,11 +21,12 @@ from qiskit.circuit import (
     CircuitInstruction,
 )
 from qiskit.circuit.library import ECRGate
-from qiskit.quantum_info.operators import SparsePauliOp
-from qiskit.quantum_info.states import partial_trace
-from qiskit.quantum_info.operators.measures import state_fidelity
-
-from qiskit.quantum_info.states import Statevector, DensityMatrix
+from qiskit.quantum_info import (
+    partial_trace,
+    state_fidelity,
+    Statevector,
+    DensityMatrix,
+)
 from qiskit.transpiler import Layout, InstructionProperties
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
@@ -33,6 +36,7 @@ from qiskit_experiments.calibration_management import (
     FixedFrequencyTransmon,
     EchoedCrossResonance,
 )
+from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 
 # Qiskit Primitive: for computing Pauli expectation value sampling easily
 from qiskit_ibm_runtime import Estimator as RuntimeEstimator
@@ -130,27 +134,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             ],
             name="nn",
         )
-        # Define layout for transpilation
-        self.layout = Layout(
-            {
-                self.tgt_register[i]: self.physical_target_qubits[i]
-                for i in range(len(self.tgt_register))
-            }
-            | {
-                self.nn_register[j]: self._physical_neighbor_qubits[j]
-                for j in range(len(self.nn_register))
-            }
-        )
-
-        skip_transpilation = False
-
-        set_primitives_transpile_options(
-            self.estimator,
-            self.fidelity_checker,
-            self.layout,
-            skip_transpilation,
-            self.physical_target_qubits + self.physical_neighbor_qubits,
-        )
 
         self._d = 2**self.tgt_register.size
 
@@ -180,6 +163,20 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     self._target_instruction_timings.append(
                         self.circuit_context.op_start_times[i]
                     )
+        # Define layout for transpilation
+        self.layout = [
+            Layout(
+                {
+                    self.tgt_register[i]: self.physical_target_qubits[i]
+                    for i in range(len(self.tgt_register))
+                }
+                | {
+                    self.nn_register[j]: self._physical_neighbor_qubits[j]
+                    for j in range(len(self.nn_register))
+                }
+            )
+            for _ in range(self.tgt_instruction_counts)
+        ]
 
         (
             self.circuit_truncations,
@@ -188,25 +185,21 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
         # Storing data
         self.circuit_fidelity_history = []
-        self._index_input_state = np.random.randint(len(self.target["input_states"]))
         self._intermediate_rewards = intermediate_rewards
         self._max_return = 0
+        self._input_circuits = self.get_input_circuits()
 
-    @property
-    def done(self):
-        return self._episode_ended
-
-    @property
-    def training_steps_per_gate(self):
-        return self._training_steps_per_gate
-
-    @training_steps_per_gate.setter
-    def training_steps_per_gate(self, nb_of_steps: int):
-        try:
-            assert nb_of_steps > 0 and isinstance(nb_of_steps, int)
-            self._training_steps_per_gate = nb_of_steps
-        except AssertionError:
-            raise ValueError("Training steps number should be positive integer.")
+    def get_input_circuits(self):
+        return [
+            [
+                PauliPreparationBasis().circuit(s).decompose()
+                for s in product(
+                    range(4),
+                    repeat=circ.num_qubits,
+                )
+            ]
+            for circ in self.circuit_truncations
+        ]
 
     def _retrieve_target_state(self, input_state_index: int, iteration: int) -> Dict:
         """
@@ -216,7 +209,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         :param iteration: Truncation index of the transpiled contextual circuit
         """
         # input_circuit: QuantumCircuit = self.target["input_states"][input_state_index]["circuit"]
-        input_circuit = self._input_circuits[input_state_index]
+        input_circuit = self._input_circuits[iteration][input_state_index]
         ref_circuit, custom_circuit = (
             self.baseline_truncations[iteration],
             self.circuit_truncations[iteration],
@@ -233,7 +226,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             {
                 "dm": (
                     DensityMatrix(target_circuit)
-                    if len(self.physical_neighbor_qubits) == 0
+                    if target_circuit.num_qubits == self.tgt_register.size
                     else partial_trace(
                         Statevector(target_circuit),
                         list(range(self.tgt_register.size, target_circuit.num_qubits)),
@@ -243,7 +236,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 "target_type": "state",
                 "input_state_circ": input_circuit,
             },
-            n_qubits=len(self.tgt_register),
+            n_qubits=self.tgt_register.size,
         )
 
     def _generate_circuit_truncations(
@@ -259,101 +252,80 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         :return: Tuple of lists of QuantumCircuits, the first list contains the custom circuits, the second list
             contains the baseline circuits (ideal circuits without custom gates)
         """
-        custom_circuit_truncations = [
-            QuantumCircuit(
-                self.tgt_register, self.nn_register, name=f"c_circ_trunc_{i}"
-            )
-            for i in range(self.tgt_instruction_counts)
+        custom_circuits, baseline_circuits = [
+            [
+                QuantumCircuit(self.tgt_register, self.nn_register, name=name + str(i))
+                for i in range(self.tgt_instruction_counts)
+            ]
+            for name in ["c_circ_trunc_", "b_circ_trunc_"]
         ]
-        baseline_circuit_truncations = [
-            QuantumCircuit(
-                self.tgt_register, self.nn_register, name=f"b_circ_trunc_{i}"
-            )
-            for i in range(self.tgt_instruction_counts)
-        ]
-        custom_gates, custom_gate_circ = [], []
         # Build sub-circuit contexts: each circuit goes until target gate and preserves nearest neighbor operations
         for i in range(self.tgt_instruction_counts):  # Loop over target gates
             counts = 0
             for start_time, instruction in zip(
                 self.circuit_context.op_start_times, self.circuit_context.data
             ):  # Loop over instructions in circuit context
-                qubits_in_vicinity = np.array(
+                involves_target_qubits = any(
                     [
-                        (qubit, qubit in self.tgt_register or qubit in self.nn_register)
+                        qubit in self.tgt_register or qubit in self.nn_register
                         for qubit in instruction.qubits
                     ]
-                )  # instruction qubits and boolean indicating if each of those is from target register or nn register
-                other_qubits = [
-                    qubit[0]
-                    for qubit in qubits_in_vicinity
-                    if not qubit[1]
-                    and qubit[0] not in custom_circuit_truncations[i].qubits
-                ]  # Retrieve qubits in instruction that are not in the target nor nearest nn register
+                )
 
-                # if all([qubit in self.tgt_register or qubit in self.nn_register for qubit in instruction.qubits]):
-                if any(
-                    qubits_in_vicinity[:, 1]
-                ):  # If instruction involves target or nn qubits
+                if involves_target_qubits:
+                    other_qubits = [
+                        qubit
+                        for qubit in instruction.qubits
+                        if qubit not in self.tgt_register
+                        and qubit not in self.nn_register
+                        and qubit not in custom_circuits[i].qubits
+                    ]
+                else:
+                    other_qubits = None
+
+                # If instruction involves target or nn qubits and happens before target gate or at the same time
+                if (
+                    counts <= i or start_time <= self._target_instruction_timings[i]
+                ) and involves_target_qubits:
                     if (
-                        counts <= i or start_time <= self._target_instruction_timings[i]
-                    ):  # If instruction is before or at target gate instance
-                        if (
-                            other_qubits
-                        ):  # If instruction involves qubits not in target or nn register
-                            last_reg_name = (
-                                baseline_circuit_truncations[i].qregs[-1].name
+                        other_qubits
+                    ):  # If instruction involves qubits not in target or nn register
+                        last_reg_name = baseline_circuits[i].qregs[-1].name
+                        # Add new register (adapt the name if necessary) to the circuit truncation
+                        new_reg = QuantumRegister(
+                            name=(
+                                last_reg_name + str(int(last_reg_name[-1]) + 1)
+                                if last_reg_name[-1].isdigit()
+                                else "anc_0"
+                            ),
+                            bits=other_qubits,
+                        )
+                        baseline_circuits[i].add_register(new_reg)
+                        custom_circuits[i].add_register(new_reg)
+                        # Add new register to the layout
+                        for qubit in other_qubits:
+                            self.layout[i].add(
+                                qubit, self.circuit_context.layout.initial_layout[qubit]
                             )
-                            # Add new register (adapt the name if necessary) to the circuit truncation
-                            if last_reg_name != "nn":
-                                new_reg = QuantumRegister(
-                                    name=last_reg_name
-                                    + str(int(last_reg_name[-1]) + 1),
-                                    bits=other_qubits,
-                                )
-                            else:
-                                new_reg = QuantumRegister(
-                                    name="anc_0", bits=other_qubits
-                                )
-                            baseline_circuit_truncations[i].add_register(new_reg)
-                            custom_circuit_truncations[i].add_register(new_reg)
-                            # baseline_circuit_truncations[i].add_bits(other_qubits)
-                            # custom_circuit_truncations[i].add_bits(other_qubits)
-                        baseline_circuit_truncations[i].append(instruction)
+                    baseline_circuits[i].append(instruction)
 
-                        if instruction != self.target_instruction:
-                            custom_circuit_truncations[i].append(instruction)
-
-                        else:  # Add custom instruction in place of target gate
-                            if self.parametrized_circuit_func is not None:
-                                self.parametrized_circuit_func(
-                                    custom_circuit_truncations[i],
-                                    self._parameters[counts],
-                                    self.tgt_register,
-                                    **self._func_args,
-                                )
-                            else:
-                                custom_circuit_truncations[i].append(instruction)
-                            op = custom_circuit_truncations[i].data[-1]
-                            if op not in custom_gates:
-                                custom_gates.append(op)
-                                gate_circ = QuantumCircuit(self.tgt_register)
-                                if self.parametrized_circuit_func is not None:
-                                    self.parametrized_circuit_func(
-                                        gate_circ,
-                                        self._parameters[counts],
-                                        self.tgt_register,
-                                        **self._func_args,
-                                    )
-                                else:
-                                    gate_circ.append(self.target_instruction)
-                                custom_gate_circ.append(gate_circ)
-                            counts += 1
+                    if instruction != self.target_instruction:
+                        custom_circuits[i].append(instruction)
+                    else:  # Add custom instruction in place of target gate
+                        try:
+                            self.parametrized_circuit_func(
+                                custom_circuits[i],
+                                self._parameters[counts],
+                                self.tgt_register,
+                                **self._func_args,
+                            )
+                        except TypeError:
+                            raise TypeError("Failed to call parametrized_circuit_func")
+                        counts += 1
 
         return (
-            custom_circuit_truncations,
-            baseline_circuit_truncations,
-            # custom_gate_circ,
+            custom_circuits,
+            baseline_circuits,
         )
 
     def store_benchmarks(self, params: np.array):
@@ -435,85 +407,42 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     raise NotImplementedError(
                         "Pulse simulation not yet implemented for this backend"
                     )
+        print("Fidelity stored", self.circuit_fidelity_history[-1])
 
-    def _select_trunc_index(self):
-        if self._intermediate_rewards:
-            return self.step_tracker % self.tgt_instruction_counts
-        else:
-            return np.min(
-                [
-                    self._step_tracker // self.training_steps_per_gate,
-                    self.tgt_instruction_counts - 1,
-                ]
-            )
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> tuple[ObsType, dict[str, Any]]:
+        """Reset the Environment, chooses a new input state"""
+        super().reset(seed=seed)
 
-    def episode_length(self, global_step: int):
-        """
-        Method to retrieve the length of the current episode, i.e. the gate instance that should be calibrated
-        """
-        assert (
-            global_step == self.step_tracker
-        ), "Given step not synchronized with internal environment step counter"
-        return self._select_trunc_index() + 1
-
-    def _get_info(self) -> Any:
-        step = self._episode_tracker
-        if self._episode_ended:
-            if self.do_benchmark():
-                info = {
-                    "reset_stage": False,
-                    "step": step,
-                    "average return": np.mean(self.reward_history, axis=1)[-1],
-                    "circuit fidelity": self.circuit_fidelity_history[-1],
-                    "max return": np.max(np.mean(self.reward_history, axis=1)),
-                    "max circuit fidelity": np.max(self.circuit_fidelity_history),
-                    "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
-                    "arg max circuit fidelity": np.argmax(
-                        self.circuit_fidelity_history
-                    ),
-                    "optimal action": self._optimal_action,
-                    "truncation_index": self._trunc_index,
-                    "input_state": self._input_circuits[self._index_input_state].name,
-                }
-            else:
-                info = {
-                    "reset_stage": False,
-                    "step": step,
-                    "average return": np.mean(self.reward_history, axis=1)[-1],
-                    "max return": np.max(np.mean(self.reward_history, axis=1)),
-                    "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
-                    "optimal action": self._optimal_action,
-                    "truncation_index": self._trunc_index,
-                    "input_state": self._input_circuits[self._index_input_state].name,
-                }
-        else:
-            info = {
-                "reset_stage": self._inside_trunc_tracker == 0,
-                "step": step,
-                "gate_index": self._inside_trunc_tracker,
-                "input_state": self._input_circuits[self._index_input_state].name,
-                "truncation_index": self._trunc_index,
-            }
-        return info
-
-    def _get_obs(self):
-        obs = np.array(
-            [
-                self._index_input_state / len(self.target["input_states"]),
-                self._target_instruction_timings[self._inside_trunc_tracker],
-            ]
+        self._param_values = create_array(
+            self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0]
         )
-        # obs = np.array([0., 0])
-        return obs
-
-    def perform_action(self, actions):
-        """
-        Perform action on the environment
-        """
-        return self.compute_reward()
-
-    def compute_reward(self, fidelity_access=False) -> np.ndarray:
+        self._inside_trunc_tracker = 0
+        self._episode_tracker += 1
+        self._episode_ended = False
         self._index_input_state = np.random.randint(len(self._input_circuits))
+
+        if isinstance(self.estimator, RuntimeEstimator):
+            self.estimator.options.environment["job_tags"] = [
+                f"rl_qoc_step{self._step_tracker}"
+            ]
+
+        skip_transpilation = False
+
+        set_primitives_transpile_options(
+            self.estimator,
+            self.fidelity_checker,
+            self.layout[self._trunc_index],
+            skip_transpilation,
+            self.physical_target_qubits + self.physical_neighbor_qubits,
+        )
+        return self._get_obs(), self._get_info()
+
+    def compute_reward(self) -> np.ndarray:
         trunc_index = self._inside_trunc_tracker
         target_state = self._retrieve_target_state(self._index_input_state, trunc_index)
         qc: QuantumCircuit = self.circuit_truncations[trunc_index]
@@ -583,41 +512,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
         return reward_table
 
-    def clear_history(self) -> None:
-        """Reset all counters related to training"""
-        self.step_tracker = 0
-        self._episode_tracker = 0
-        self.qc_history.clear()
-        self.action_history.clear()
-        self.reward_history.clear()
-        self.avg_fidelity_history.clear()
-        self.process_fidelity_history.clear()
-        self.built_unitaries.clear()
-        self.circuit_fidelity_history.clear()
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> tuple[ObsType, dict[str, Any]]:
-        """Reset the Environment, chooses a new input state"""
-        super().reset(seed=seed)
-
-        self._param_values = create_array(
-            self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0]
-        )
-        self._inside_trunc_tracker = 0
-        self._episode_tracker += 1
-        self._episode_ended = False
-
-        if isinstance(self.estimator, RuntimeEstimator):
-            self.estimator.options.environment["job_tags"] = [
-                f"rl_qoc_step{self._step_tracker}"
-            ]
-
-        return self._get_obs(), self._get_info()
-
     def step(
         self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
@@ -676,8 +570,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 )
 
         else:
-            terminated = True
-            self._episode_ended = terminated
+            terminated = self._episode_ended = True
             reward_table = self.compute_reward()
             if self._intermediate_rewards:
                 obs = reward_table
@@ -691,6 +584,116 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             reward = -np.log(1.0 - reward)
 
             return obs, reward, terminated, False, self._get_info()
+
+    def _select_trunc_index(self):
+        if self._intermediate_rewards:
+            return self.step_tracker % self.tgt_instruction_counts
+        else:
+            return np.min(
+                [
+                    self._step_tracker // self.training_steps_per_gate,
+                    self.tgt_instruction_counts - 1,
+                ]
+            )
+
+    def episode_length(self, global_step: int):
+        """
+        Method to retrieve the length of the current episode, i.e. the gate instance that should be calibrated
+        """
+        assert (
+            global_step == self.step_tracker
+        ), "Given step not synchronized with internal environment step counter"
+        return 1  # + self._select_trunc_index()
+
+    def _get_info(self) -> Any:
+        step = self._episode_tracker
+        if self._episode_ended:
+            if self.do_benchmark():
+                info = {
+                    "reset_stage": False,
+                    "step": step,
+                    "average return": np.mean(self.reward_history, axis=1)[-1],
+                    "circuit fidelity": self.circuit_fidelity_history[-1],
+                    "max return": np.max(np.mean(self.reward_history, axis=1)),
+                    "max circuit fidelity": np.max(self.circuit_fidelity_history),
+                    "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
+                    "arg max circuit fidelity": np.argmax(
+                        self.circuit_fidelity_history
+                    ),
+                    "optimal action": self._optimal_action,
+                    "truncation_index": self._trunc_index,
+                    "input_state": self._input_circuits[self._trunc_index][
+                        self._index_input_state
+                    ].name,
+                }
+            else:
+                info = {
+                    "reset_stage": False,
+                    "step": step,
+                    "average return": np.mean(self.reward_history, axis=1)[-1],
+                    "max return": np.max(np.mean(self.reward_history, axis=1)),
+                    "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
+                    "optimal action": self._optimal_action,
+                    "truncation_index": self._trunc_index,
+                    "input_state": self._input_circuits[self._trunc_index][
+                        self._index_input_state
+                    ].name,
+                }
+        else:
+            info = {
+                "reset_stage": self._inside_trunc_tracker == 0,
+                "step": step,
+                "gate_index": self._inside_trunc_tracker,
+                "input_state": self._input_circuits[self._trunc_index][
+                    self._index_input_state
+                ].name,
+                "truncation_index": self._trunc_index,
+            }
+        return info
+
+    def _get_obs(self):
+        obs = np.array(
+            [
+                self._index_input_state / len(self._input_circuits[self._trunc_index]),
+                self._target_instruction_timings[self._inside_trunc_tracker],
+            ]
+        )
+        # obs = np.array([0., 0])
+        return obs
+
+    def perform_action(self, actions):
+        """
+        Perform action on the environment
+        """
+        return self.compute_reward()
+
+    def clear_history(self) -> None:
+        """Reset all counters related to training"""
+        self.step_tracker = 0
+        self._episode_tracker = 0
+        self.qc_history.clear()
+        self.action_history.clear()
+        self.reward_history.clear()
+        self.avg_fidelity_history.clear()
+        self.process_fidelity_history.clear()
+        self.built_unitaries.clear()
+        self.circuit_fidelity_history.clear()
+
+    @property
+    def done(self):
+        return self._episode_ended
+
+    @property
+    def training_steps_per_gate(self):
+        return self._training_steps_per_gate
+
+    @training_steps_per_gate.setter
+    def training_steps_per_gate(self, nb_of_steps: int):
+        try:
+            assert nb_of_steps > 0 and isinstance(nb_of_steps, int)
+            self._training_steps_per_gate = nb_of_steps
+        except AssertionError:
+            raise ValueError("Training steps number should be positive integer.")
 
     def __repr__(self):
         string = QuantumEnvironment.__repr__(self)

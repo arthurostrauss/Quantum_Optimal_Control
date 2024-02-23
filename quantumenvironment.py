@@ -43,13 +43,8 @@ from qiskit_aer import AerSimulator
 from qiskit_dynamics import DynamicsBackend
 
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
-from qiskit_experiments.library.tomography.basis import (
-    PauliPreparationBasis,
-)  # , Pauli6PreparationBasis
+from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 from qiskit_ibm_runtime import Estimator as RuntimeEstimator
-
-# Tensorflow modules
-from tensorflow_probability.python.distributions import Categorical
 
 from helper_functions import (
     retrieve_primitives,
@@ -64,6 +59,7 @@ from helper_functions import (
     simulate_pulse_schedule,
     rotate_unitary,
     get_optimal_z_rotation,
+    fidelity_from_tomography,
 )
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
@@ -89,6 +85,7 @@ def _calculate_chi_target_state(target_state: Dict, n_qubits: int):
             np.trace(
                 np.array(target_state["dm"].to_operator()) @ basis[k].to_matrix()
             ).real
+            / np.sqrt(d)
             for k in range(d**2)
         ]
     )
@@ -180,10 +177,6 @@ def _define_target(target: Dict):
                 for s in product(range(4), repeat=len(tgt_register))
             ]
 
-            # target['input_states'] = [{"dm": Pauli6PreparationBasis().matrix(s),
-            #                            "circuit": CircuitOp(Pauli6PreparationBasis().circuit(s).decompose())}
-            #                           for s in product(range(6), repeat=len(tgt_register))]
-
         for i, input_state in enumerate(target["input_states"]):
             if "circuit" not in input_state:
                 raise KeyError("'circuit' key missing in input_state")
@@ -237,7 +230,7 @@ class QiskitBackendInfo:
 
 class QuantumEnvironment(Env):
     metadata = {"render_modes": ["human"]}
-    check_on_exp = True  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
+    check_on_exp = False  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
 
     def __init__(self, training_config: QEnvConfig):
         """
@@ -350,14 +343,7 @@ class QuantumEnvironment(Env):
                 self.target["gate"], self.tgt_register
             )
             # Define input state preparation circuits for the whole circuit context
-            self._input_circuits = [
-                PauliPreparationBasis().circuit(s).decompose()
-                for s in product(
-                    range(4),
-                    repeat=len(self.physical_target_qubits)
-                    + len(self.physical_neighbor_qubits),
-                )
-            ]
+            self._input_circuits = self.get_input_circuits()
             self.process_fidelity_history = []
             self.avg_fidelity_history = []
             self.built_unitaries = []
@@ -574,7 +560,6 @@ class QuantumEnvironment(Env):
         :return: None
         """
         qc = self.circuit_truncations[0].copy()
-        n_custom_instructions = 1
         n_actions = self.action_space.shape[-1]
 
         # Build reference circuit (ideal)
@@ -587,51 +572,35 @@ class QuantumEnvironment(Env):
         if self.check_on_exp:
             # Experiment based fidelity estimation
             try:
-                if self.target_type == "state":  # State preparation task
-                    print("Starting state tomography...")
-                    self.state_fidelity_history.append(
-                        state_fidelity_from_state_tomography(
-                            qc_list,
-                            self.backend,
-                            self.target["register"],
-                            target_state=target,
-                            session=(
-                                self.estimator.session
-                                if hasattr(self.estimator, "session")
-                                else None
-                            ),
-                        )
-                    )
-                    print("Finished state tomography")
-                else:  # Gate calibration task
-                    print("Starting process tomography...")
-                    self.avg_fidelity_history.append(
-                        gate_fidelity_from_process_tomography(
-                            qc_list,
-                            self.backend,
-                            target,
-                            self.target["register"],
-                            session=(
-                                self.estimator.session
-                                if hasattr(self.estimator, "session")
-                                else None
-                            ),
-                        )
-                    )
-                    print("Finished process tomography")
+                print("Starting tomography...")
+                session = (
+                    self.estimator.session
+                    if hasattr(self.estimator, "session")
+                    else None
+                )
+                fid = fidelity_from_tomography(
+                    qc_list,
+                    self.backend,
+                    target,
+                    self.target["register"],
+                    session=session,
+                )
+                print("Finished tomography")
 
             except Exception as e:
                 self.close()
                 raise e
+            if self.target_type == "state":
+                self.state_fidelity_history.append(fid)
+            else:
+                self.avg_fidelity_history.append(fid)
         else:
             # Circuit list for each action of the batch
             print("Starting simulation benchmark...")
             if self.abstraction_level == "circuit":
                 if self.target_type == "state":
                     if self.backend is None:
-                        q_state_list = [
-                            Statevector.from_instruction(circ) for circ in qc_list
-                        ]
+                        q_state_list = [Statevector(circ) for circ in qc_list]
                         density_matrix = DensityMatrix(
                             np.mean(
                                 [
@@ -665,16 +634,13 @@ class QuantumEnvironment(Env):
                         ]
                         density_matrix = DensityMatrix(
                             np.mean(
-                                [
-                                    state.to_operator().to_matrix()
-                                    for state in output_states
-                                ],
+                                [state.data for state in output_states],
                                 axis=0,
                             )
                         )
 
                     self.state_fidelity_history.append(
-                        state_fidelity(self.target["dm"], density_matrix)
+                        state_fidelity(target, density_matrix)
                     )
                 else:  # Gate calibration task
                     if self.backend is None:
@@ -703,9 +669,7 @@ class QuantumEnvironment(Env):
 
                     avg_fidelity = np.mean(
                         [
-                            average_gate_fidelity(
-                                q_process, Operator(self.target["gate"])
-                            )
+                            average_gate_fidelity(q_process, target)
                             for q_process in q_process_list
                         ]
                     )
@@ -744,25 +708,26 @@ class QuantumEnvironment(Env):
                             )
                         )
                         self.state_fidelity_history.append(
-                            state_fidelity(self.target["dm"], density_matrix)
+                            state_fidelity(target, density_matrix)
                         )
 
                     else:  # Gate calibration task
-                        gate = Operator(self.target["gate"])
 
                         fids = [
-                            average_gate_fidelity(unitary, gate)
+                            average_gate_fidelity(unitary, target)
                             for unitary in qubitized_unitaries
                         ]
                         best_unitary = qubitized_unitaries[np.argmax(fids)]
-                        res = get_optimal_z_rotation(best_unitary, gate, self.n_qubits)
+                        res = get_optimal_z_rotation(
+                            best_unitary, target, self.n_qubits
+                        )
                         rotated_unitaries = [
                             rotate_unitary(res.x, unitary)
                             for unitary in qubitized_unitaries
                         ]
                         avg_fid_batch = np.mean(
                             [
-                                average_gate_fidelity(unitary, gate)
+                                average_gate_fidelity(unitary, target)
                                 for unitary in rotated_unitaries
                             ]
                         )
@@ -784,15 +749,15 @@ class QuantumEnvironment(Env):
 
     def retrieve_observables(self, target_state, qc):
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        distribution = Categorical(probs=target_state["Chi"] ** 2)
-        k_samples = distribution.sample(self.sampling_Pauli_space)
+        probabilities = target_state["Chi"] ** 2
+        k_samples = np.random.choice(
+            len(probabilities), size=self.sampling_Pauli_space, p=probabilities
+        )
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
         reward_factor = np.round(
             [
-                self.c_factor
-                * target_state["Chi"][p]
-                / (self._d * distribution.prob(p))
+                self.c_factor * target_state["Chi"][p] / (self._d * probabilities[p])
                 for p in pauli_index
             ],
             5,
@@ -1030,3 +995,13 @@ class QuantumEnvironment(Env):
         else:
             q_env.state_fidelity_history = class_info["fidelity_history"]
         return q_env
+
+    def get_input_circuits(self):
+        return [
+            PauliPreparationBasis().circuit(s).decompose()
+            for s in product(
+                range(4),
+                repeat=len(self.physical_target_qubits)
+                + len(self.physical_neighbor_qubits),
+            )
+        ]

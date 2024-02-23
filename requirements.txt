@@ -1,7 +1,7 @@
 matplotlib>=3.5.2
 qiskit>=1.0.0
 qiskit_aer>=0.13.3
-qiskit_algorithms
+qiskit_algorithms >= 0.3.0
 qiskit_dynamics >= 0.4.5
 qiskit_experiments>=0.6.0
 qiskit_ibm_runtime>=0.19.1
