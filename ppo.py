@@ -161,10 +161,6 @@ class CustomPPO:
             self.agent.parameters(), lr=self.lr, eps=self.optim_eps
         )
 
-        self.reward_history = []
-        self.circuit_fidelity_history = []
-        self.avg_fidelity_history = []
-
     def plot_curves(self):
         if len(self.reward_history) > 0:
             plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
@@ -407,12 +403,12 @@ class CustomPPO:
                     )
                 else:
                     print(
-                        "Average gate fidelity of last gate:",
-                        self.env.unwrapped.avg_fidelity_history[-1],
+                        f"Average fidelity of last {self.env.unwrapped.target_type}:",
+                        self.env.unwrapped.fidelity_history[-1],
                     )
                     self.writer.add_scalar(
-                        "losses/avg_gate_fidelity",
-                        self.env.unwrapped.avg_fidelity_history[-1],
+                        f"losses/avg_{self.env.unwrapped.target_type}_fidelity",
+                        self.env.unwrapped.fidelity_history[-1],
                         global_step,
                     )
             # self.writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
@@ -430,15 +426,16 @@ class CustomPPO:
             #     "losses/advantage_std", np.std(b_advantages.numpy()), global_step
             # )
 
-        self.reward_history.append(self.env.unwrapped.reward_history)
-        if hasattr(self.env.unwrapped, "circuit_fidelity_history"):  # ContextAwareEnv
-            self.circuit_fidelity_history.append(
-                self.env.unwrapped.circuit_fidelity_history
-            )
-        else:  # QuantumEnvironment
-            self.avg_fidelity_history.append(self.env.unwrapped.avg_fidelity_history)
         self.env.unwrapped.close()
         self.writer.close()
+
+    @property
+    def reward_history(self):
+        return self.env.unwrapped.reward_history
+
+    @property
+    def fidelity_history(self):
+        return self.env.unwrapped.fidelity_history
 
 
 def make_train_ppo(

@@ -10,7 +10,7 @@ from qiskit.circuit import (
 
 # from qiskit.circuit.random import random_circuit
 # from qiskit_ibm_provider import IBMProvider
-from qiskit.providers.fake_provider import FakeJakartaV2
+from qiskit_ibm_runtime.fake_provider import FakeJakartaV2
 from qiskit_aer import AerSimulator
 from qiskit.circuit.library import CXGate
 
@@ -29,6 +29,7 @@ import time
 from typing import Optional
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+
 
 # Save your credentials on disk.
 # IBMProvider.save_account(token='<IBM Quantum API key>')
@@ -111,7 +112,6 @@ torch_env = ContextAwareQuantumEnvironment(
     training_steps_per_gate=training_steps_per_gate,
     intermediate_rewards=False,
 )
-
 
 actor_net = ActorNetwork(
     observation_space, [128, 128], n_actions, [nn.ELU(), nn.ELU(), nn.ELU()]

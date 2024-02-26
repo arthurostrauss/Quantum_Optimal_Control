@@ -12,7 +12,14 @@ from qiskit.circuit import (
 )
 from qiskit.circuit.library import get_standard_gate_name_mapping, RZGate
 from qiskit.exceptions import QiskitError
-from qiskit.primitives import BackendEstimator, Estimator, Sampler, BackendSampler
+from qiskit.primitives import (
+    BackendEstimator,
+    Estimator,
+    Sampler,
+    BackendSampler,
+    StatevectorEstimator,
+    StatevectorSampler,
+)
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
@@ -98,8 +105,11 @@ Estimator_type = Union[
     Estimator,
     BackendEstimator,
     DynamicsBackendEstimator,
+    StatevectorEstimator,
 ]
-Sampler_type = Union[AerSampler, RuntimeSampler, Sampler, BackendSampler]
+Sampler_type = Union[
+    AerSampler, RuntimeSampler, Sampler, BackendSampler, StatevectorSampler
+]
 Backend_type = Union[BackendV1, BackendV2]
 
 
@@ -925,6 +935,9 @@ def retrieve_primitives(
             estimator = Estimator(options={"initial_layout": layout})
             sampler = Sampler(options={"initial_layout": layout})
 
+            estimator = StatevectorEstimator()
+            sampler = StatevectorSampler()
+
         elif isinstance(backend, DynamicsBackend):
             assert (
                 abstraction_level == "pulse"
@@ -976,7 +989,7 @@ def set_primitives_transpile_options(
         fidelity_checker: ComputeUncompute instance
         layout: Layout instance
         skip_transpilation: Skip transpilation flag
-        physical_qubits: Physical qubits on which the
+        physical_qubits: Physical qubits on which the transpilation is to be performed
     """
     if isinstance(estimator, RuntimeEstimator):
         # TODO: Could change resilience level

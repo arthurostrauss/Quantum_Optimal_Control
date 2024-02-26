@@ -18,7 +18,7 @@ from qiskit.circuit import (
     ParameterVector,
 )
 from qiskit.providers import BackendV1, BackendV2
-from quantumenvironment import QuantumEnvironment, _calculate_chi_target_state
+from quantumenvironment import QuantumEnvironment, _calculate_chi_target
 
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
@@ -335,13 +335,12 @@ class TFQuantumEnvironment(QuantumEnvironment, PyEnvironment):
         target_circuit.append(input_circuit.to_instruction(), self.tgt_register)
         target_circuit.compose(ref_circuit, inplace=True)
 
-        return _calculate_chi_target_state(
+        return _calculate_chi_target(
             {
                 "dm": DensityMatrix(target_circuit),
                 "circuit": custom_target_circuit,
                 "target_type": "state",
-            },
-            n_qubits=target_circuit.num_qubits,
+            }
         )
 
     def store_benchmarks(self, qc_list: List[QuantumCircuit]):
