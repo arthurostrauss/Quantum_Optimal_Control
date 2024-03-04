@@ -699,13 +699,12 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         ]
 
         for i, input_states in enumerate(self.target["input_states"]):
+            baseline_circuit = self.baseline_truncations[i]
             for j, input_state in enumerate(input_states):
                 input_state["dm"] = DensityMatrix(input_state["circuit"])
-                state_target_circuit = QuantumCircuit(
-                    *self.baseline_truncations[i].qregs
+                state_target_circuit = baseline_circuit.compose(
+                    input_state["circuit"], front=True
                 )
-                state_target_circuit.compose(input_state["circuit"], inplace=True)
-                state_target_circuit.compose(self.baseline_truncations[i], inplace=True)
                 input_state["target_state"] = {
                     "dm": (
                         DensityMatrix(state_target_circuit)
