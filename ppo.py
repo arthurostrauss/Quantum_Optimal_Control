@@ -162,26 +162,17 @@ class CustomPPO:
         )
 
     def plot_curves(self):
+        clear_output(wait=True)
         if len(self.reward_history) > 0:
             plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
             if self.env.unwrapped.do_benchmark():
-                if hasattr(self.env.unwrapped, "circuit_fidelity_history"):
-                    plt.plot(
-                        np.array(self.circuit_fidelity_history)[:, 0],
-                        label="Circuit Fidelity",
-                    )
-                else:
-                    plt.plot(
-                        np.array(self.avg_fidelity_history)[:, 0],
-                        label="Fidelity (means of individual fidelities)",
-                    )
-                    plt.plot(
-                        np.array(self.avg_fidelity_history)[:, 1],
-                        label="Fidelity (of averaged process over batch)",
-                    )
+                plt.plot(np.array(self.fidelity_history), label="Circuit Fidelity")
+
             plt.title("Reward History")
+            plt.legend()
             plt.xlabel("Iteration")
             plt.ylabel("Reward")
+            plt.show()
 
     def train(self, total_updates, print_debug=True, num_prints=40, clear_history=True):
         """
@@ -236,10 +227,11 @@ class CustomPPO:
 
                 actions[step] = action
                 logprobs[step] = logprob
-
+                start_time = time.time()
                 next_obs, reward, terminated, truncated, infos = self.env.step(
                     action.cpu().numpy()
                 )
+                print("Time taken", time.time() - start_time)
                 next_obs = torch.Tensor(next_obs)
                 done = int(np.logical_or(terminated, truncated))
                 reward = torch.Tensor(reward)

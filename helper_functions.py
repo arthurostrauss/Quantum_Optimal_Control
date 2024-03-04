@@ -9,6 +9,7 @@ from qiskit.circuit import (
     Parameter,
     CircuitInstruction,
     ParameterVector,
+    Delay,
 )
 from qiskit.circuit.library import get_standard_gate_name_mapping, RZGate
 from qiskit.exceptions import QiskitError
@@ -120,7 +121,8 @@ def count_gates(qc: QuantumCircuit):
     gate_count = {qubit: 0 for qubit in qc.qubits}
     for gate in qc.data:
         for qubit in gate.qubits:
-            gate_count[qubit] += 1
+            if not isinstance(gate.operation, Delay):
+                gate_count[qubit] += 1
     return gate_count
 
 
@@ -131,6 +133,9 @@ def remove_unused_wires(qc: QuantumCircuit):
     gate_count = count_gates(qc)
     for qubit, count in gate_count.items():
         if count == 0:
+            for instr in qc.data:
+                if qubit in instr.qubits:
+                    qc.data.remove(instr)
             qc.qubits.remove(qubit)
     return qc
 
@@ -936,7 +941,6 @@ def retrieve_primitives(
             sampler = Sampler(options={"initial_layout": layout})
 
             estimator = StatevectorEstimator()
-            sampler = StatevectorSampler()
 
         elif isinstance(backend, DynamicsBackend):
             assert (
