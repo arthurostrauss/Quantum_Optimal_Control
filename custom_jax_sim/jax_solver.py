@@ -223,7 +223,9 @@ class JaxSolver(Solver):
             raise ValueError(
                 "No circuit macro has been provided, please provide a circuit macro"
             )
-
+        assert isinstance(
+            self.model, HamiltonianModel
+        ), "Model must be a HamiltonianModel"
         batch_results_t, batch_results_y = self._unitary_jit_func(
             Array(self._t_span).data, Array(param_values).data
         )

@@ -162,11 +162,18 @@ class CustomPPO:
         )
 
     def plot_curves(self):
-        clear_output(wait=True)
         if len(self.reward_history) > 0:
             plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
             if self.env.unwrapped.do_benchmark():
-                plt.plot(np.array(self.fidelity_history), label="Circuit Fidelity")
+                plt.plot(
+                    np.arange(
+                        1,
+                        self.env.unwrapped.step_tracker,
+                        self.env.unwrapped.benchmark_cycle,
+                    ),
+                    np.array(self.fidelity_history),
+                    label="Circuit Fidelity",
+                )
 
             plt.title("Reward History")
             plt.legend()
@@ -174,7 +181,9 @@ class CustomPPO:
             plt.ylabel("Reward")
             plt.show()
 
-    def train(self, total_updates, print_debug=True, num_prints=40, clear_history=True):
+    def train(
+        self, total_updates: int, print_debug=True, num_prints=40, clear_history=False
+    ):
         """
         Training function for PPO algorithm
         :param total_updates: Total number of updates to perform
@@ -370,9 +379,9 @@ class CustomPPO:
                 # print(np.mean(env.unwrapped.reward_history, axis =1)[-1])
                 # print("Circuit fidelity:", env.unwrapped.circuit_fidelity_history[-1])
 
-            self.plot_curves()
             if global_step % num_prints == 0:
                 clear_output(wait=True)
+                self.plot_curves()
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             self.writer.add_scalar(

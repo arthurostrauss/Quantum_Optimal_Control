@@ -51,9 +51,12 @@ from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackend, FakeBacke
 from qiskit_ibm_runtime import (
     Session,
     IBMBackend as RuntimeBackend,
-    Estimator as RuntimeEstimator,
+    EstimatorV1 as RuntimeEstimatorV1,
+    EstimatorV2 as RuntimeEstimatorV2,
     Options as RuntimeOptions,
-    Sampler as RuntimeSampler,
+    EstimatorOptions as RuntimeEstimatorOptions,
+    SamplerV1 as RuntimeSamplerV1,
+    SamplerV2 as RuntimeSamplerV2,
     QiskitRuntimeService,
 )
 
@@ -102,14 +105,20 @@ from custom_jax_sim import JaxSolver, DynamicsBackendEstimator, PauliToQuditOper
 
 Estimator_type = Union[
     AerEstimator,
-    RuntimeEstimator,
+    RuntimeEstimatorV1,
+    RuntimeEstimatorV2,
     Estimator,
     BackendEstimator,
     DynamicsBackendEstimator,
     StatevectorEstimator,
 ]
 Sampler_type = Union[
-    AerSampler, RuntimeSampler, Sampler, BackendSampler, StatevectorSampler
+    AerSampler,
+    RuntimeSamplerV1,
+    RuntimeSamplerV2,
+    Sampler,
+    BackendSampler,
+    StatevectorSampler,
 ]
 Backend_type = Union[BackendV1, BackendV2]
 
@@ -493,8 +502,8 @@ def new_params_ecr(
     if keep_symmetry:  # Maintain symmetry between the two GaussianSquare pulses
         if len(pulse_features) != len(params):
             raise ValueError(
-                f"Number of pulse features ({len(pulse_features)} and number of parameters ({len(params)}"
-                f"do not match"
+                f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)})"
+                f" do not match"
             )
         for sched in ["cr45p", "cr45m"]:
             for i, feature in enumerate(pulse_features):
@@ -508,17 +517,14 @@ def new_params_ecr(
 
                 else:
                     if include_baseline:
-                        new_params[
-                            (feature, qubits, sched)
-                        ] += pulse.builder.seconds_to_samples(
+                        new_params[(feature, qubits, sched)] += (
                             duration_window * params[i]
                         )
                     else:
                         new_params[(feature, qubits, sched)] = (
-                            pulse.builder.seconds_to_samples(
-                                duration_window * params[i]
-                            )
+                            duration_window * params[i]
                         )
+
     else:
         if 2 * len(pulse_features) != len(params):
             raise ValueError(
@@ -531,9 +537,7 @@ def new_params_ecr(
                 if feature != "duration" and feature in available_features:
                     new_params[(feature, qubits, sched)] += params[i * num_features + j]
                 else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(
+                    new_params[(feature, qubits, sched)] += (
                         duration_window * params[i * num_features + j]
                     )
 
@@ -575,13 +579,10 @@ def new_params_sq_gate(
 
         else:
             if include_baseline:
-                new_params[
-                    (feature, qubits, gate_name)
-                ] += pulse.builder.seconds_to_samples(duration_window * params[i])
+                new_params[(feature, qubits, gate_name)] += duration_window * params[i]
             else:
-                new_params[(feature, qubits, gate_name)] = (
-                    pulse.builder.seconds_to_samples(duration_window * params[i])
-                )
+                new_params[(feature, qubits, gate_name)] = duration_window * params[i]
+
     return new_params
 
 
@@ -901,19 +902,17 @@ def retrieve_primitives(
     if isinstance(
         backend, RuntimeBackend
     ):  # Real backend, or Simulation backend from Runtime Service
-        estimator: Estimator_type = RuntimeEstimator(
-            session=Session(backend.service, backend),
-            options=estimator_options,
+        # estimator: Estimator_type = RuntimeEstimatorV1(
+        #     session=Session(backend.service, backend),
+        #     options=estimator_options,
+        # )
+        # sampler: Sampler_type = RuntimeSamplerV1(
+        #     session=estimator.session, options=estimator_options
+        # )
+        estimator: Estimator_type = RuntimeEstimatorV2(
+            session=Session(backend.service, backend)
         )
-        sampler: Sampler_type = RuntimeSampler(
-            session=estimator.session, options=estimator_options
-        )
-
-        if estimator.options.transpilation["initial_layout"] is None:
-            estimator.options.transpilation["initial_layout"] = (
-                layout.get_physical_bits()
-            )
-            sampler.options.transpilation["initial_layout"] = layout.get_physical_bits()
+        sampler: Sampler_type = RuntimeSamplerV1(session=estimator.session)
 
     else:
         if isinstance(estimator_options, RuntimeOptions):
@@ -995,7 +994,7 @@ def set_primitives_transpile_options(
         skip_transpilation: Skip transpilation flag
         physical_qubits: Physical qubits on which the transpilation is to be performed
     """
-    if isinstance(estimator, RuntimeEstimator):
+    if isinstance(estimator, RuntimeEstimatorV1):
         # TODO: Could change resilience level
         estimator.set_options(
             optimization_level=0,
@@ -1048,7 +1047,7 @@ def handle_session(
     Returns:
         Updated Estimator instance
     """
-    if isinstance(estimator, RuntimeEstimator):
+    if isinstance(estimator, RuntimeEstimatorV1):
         assert isinstance(
             backend, RuntimeBackend
         ), "RuntimeEstimator must be used with RuntimeBackend"
@@ -1061,7 +1060,7 @@ def handle_session(
                 Session(old_session.service, backend),
                 estimator.options,
             )
-            estimator = RuntimeEstimator(session=session, options=dict(options))
+            estimator = RuntimeEstimatorV1(session=session, options=dict(options))
     elif isinstance(estimator, DynamicsBackendEstimator):
         if not isinstance(backend, DynamicsBackend) or not isinstance(
             backend.options.solver, JaxSolver
@@ -1120,6 +1119,7 @@ def select_backend(
         real_backend: Boolean indicating if real backend should be used
         channel: Channel to use for Runtime Service
         instance: Instance to use for Runtime Service
+        token: Token to use for Runtime Service
         backend_name: Name of the backend to use for training
         use_dynamics: Boolean indicating if DynamicsBackend should be used
         physical_qubits: Physical qubits on which DynamicsBackend should be used
@@ -1500,8 +1500,19 @@ def load_q_env_from_yaml_file(file_path: str):
         "calibration_files": config["ENV"]["CALIBRATION_FILES"],
     }
     runtime_options = config["RUNTIME_OPTIONS"]
+    print(runtime_options)
     check_on_exp = config["ENV"]["CHECK_ON_EXP"]
-    return params, backend_params, RuntimeOptions(**runtime_options), check_on_exp
+    return params, backend_params, remove_none_values(runtime_options), check_on_exp
+
+
+def remove_none_values(dictionary):
+    new_dict = {}
+    for k, v in dictionary.items():
+        if isinstance(v, dict):
+            v = remove_none_values(v)
+        if v is not None:
+            new_dict[k] = v
+    return new_dict
 
 
 def load_agent_from_yaml_file(file_path: str):
@@ -1636,7 +1647,8 @@ def create_hpo_agent_config(
 
 
 def retrieve_backend_info(
-    backend: Optional[Backend_type] = None, estimator: Optional[RuntimeEstimator] = None
+    backend: Optional[Backend_type] = None,
+    estimator: Optional[RuntimeEstimatorV1] = None,
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration
@@ -1662,7 +1674,7 @@ def retrieve_backend_info(
             and backend_data.num_qubits > 1
             and estimator is not None
         ):
-            if isinstance(estimator, RuntimeEstimator):
+            if isinstance(estimator, RuntimeEstimatorV1):
                 coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
                 if coupling_map is None:
                     raise ValueError(

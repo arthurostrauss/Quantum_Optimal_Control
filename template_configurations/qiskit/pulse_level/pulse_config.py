@@ -39,7 +39,6 @@ def custom_schedule(
     backend: BackendV1 | BackendV2,
     physical_qubits: list,
     params: ParameterVector,
-    keep_symmetry: bool = True,
 ) -> pulse.ScheduleBlock:
     """
     Define parametrization of the pulse schedule characterizing the target gate.
@@ -48,7 +47,6 @@ def custom_schedule(
         :param backend: IBM Backend on which schedule shall be added
         :param physical_qubits: Physical qubits on which custom gate is applied on
         :param params: Parameters of the Schedule/Custom gate
-        :param keep_symmetry: Choose if the two parts of the ECR tone shall be jointly parametrized or not
 
         :return: Parametrized Schedule
     """
@@ -59,11 +57,18 @@ def custom_schedule(
     ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
     sq_pulse_features = ["amp", "angle"]  # For single qubit gates
     sq_name = "sx"  # Name of the single qubit gate baseline to pick
-    # Uncomment line below to include pulse duration as tunable parameter
-    # ecr_pulse_features.append("duration")
-    # sq_pulse_features.append("duration")
+    keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
+    include_baseline = (
+        False  # Choose if the baseline shall be included in the parametrization
+    )
+    include_duration = (
+        True  # Choose if the pulse duration shall be included in the parametrization
+    )
+    duration_window = 1  # Duration window for the pulse duration
+    if include_duration:
+        ecr_pulse_features.append("duration")
+        sq_pulse_features.append("duration")
 
-    duration_window = 0
     qubits = tuple(physical_qubits)
 
     if len(qubits) == 2:  # Retrieve schedule for ECR gate
@@ -74,7 +79,7 @@ def custom_schedule(
             ecr_pulse_features,
             keep_symmetry,
             duration_window,
-            include_baseline=False,
+            include_baseline,
         )
     elif len(qubits) == 1:  # Retrieve schedule for single qubit gate
         new_params = new_params_sq_gate(
@@ -83,7 +88,7 @@ def custom_schedule(
             backend,
             sq_pulse_features,
             duration_window,
-            include_baseline=False,
+            include_baseline,
             gate_name=sq_name,
         )
     else:
@@ -187,6 +192,7 @@ def get_backend(
             custom_backend,
         )
 
+        print("Custom backend used")
         # TODO: Add here your custom backend
         dims = [3, 3]
         freqs = [4.86e9, 4.97e9]
