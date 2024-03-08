@@ -679,7 +679,9 @@ class QuantumEnvironment(Env):
                         state_fidelity(target, density_matrix)
                     )
                 else:  # Gate calibration task
-                    if self.backend is None:
+                    if self.backend is None or (
+                        isinstance(self.backend, RuntimeBackend)
+                    ):
                         q_process_list = [Operator(circ) for circ in qc_list]
                     else:
                         if isinstance(self.backend, AerSimulator):
@@ -770,7 +772,7 @@ class QuantumEnvironment(Env):
                         ]
                         best_unitary = qubitized_unitaries[np.argmax(fids)]
                         res = get_optimal_z_rotation(
-                            best_unitary, target, self.n_qubits
+                            best_unitary, target, len(subsystem_dims)
                         )
                         rotated_unitaries = [
                             rotate_unitary(res.x, unitary)

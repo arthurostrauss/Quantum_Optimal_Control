@@ -928,10 +928,12 @@ def retrieve_primitives(
                 backend_options=backend.options,
                 transpile_options={"initial_layout": layout},
                 approximation=True,
+                skip_transpilation=True,
             )
             sampler = AerSampler(
                 backend_options=backend.options,
                 transpile_options={"initial_layout": layout},
+                skip_transpilation=True,
             )
         elif backend is None:  # No backend specified, ideal state-vector simulation
             if abstraction_level != "circuit":
@@ -947,18 +949,18 @@ def retrieve_primitives(
             ), "DynamicsBackend works only with pulse level abstraction"
             if isinstance(backend.options.solver, JaxSolver):
                 estimator: Estimator_type = DynamicsBackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=False
+                    backend, options=estimator_options, skip_transpilation=True
                 )
                 backend.options.solver.circuit_macro = lambda: schedule(
                     circuit, backend
                 )
             else:
                 estimator: Estimator_type = BackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=False
+                    backend, options=estimator_options, skip_transpilation=True
                 )
             estimator.set_transpile_options(initial_layout=layout)
             sampler = BackendSampler(
-                backend, options=estimator_options, skip_transpilation=False
+                backend, options=estimator_options, skip_transpilation=True
             )
             if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
                 calibration_files: List[str] = config.calibration_files
@@ -968,10 +970,10 @@ def retrieve_primitives(
         else:
             if isinstance(backend, Backend_type):
                 estimator = BackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=False
+                    backend, options=estimator_options, skip_transpilation=True
                 )
                 sampler = BackendSampler(
-                    backend, options=estimator_options, skip_transpilation=False
+                    backend, options=estimator_options, skip_transpilation=True
                 )
             else:
                 raise TypeError("Backend not recognized")
@@ -1047,7 +1049,7 @@ def handle_session(
     Returns:
         Updated Estimator instance
     """
-    if isinstance(estimator, RuntimeEstimatorV1):
+    if isinstance(estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2)):
         assert isinstance(
             backend, RuntimeBackend
         ), "RuntimeEstimator must be used with RuntimeBackend"
@@ -1060,7 +1062,7 @@ def handle_session(
                 Session(old_session.service, backend),
                 estimator.options,
             )
-            estimator = RuntimeEstimatorV1(session=session, options=dict(options))
+            estimator = type(estimator)(session=session, options=dict(options))
     elif isinstance(estimator, DynamicsBackendEstimator):
         if not isinstance(backend, DynamicsBackend) or not isinstance(
             backend.options.solver, JaxSolver

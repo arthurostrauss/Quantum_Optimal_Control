@@ -6,6 +6,7 @@ from typing import Callable, Dict, Optional, List, Any
 
 import torch
 from gymnasium import Space
+from qiskit import pulse
 
 from qiskit_ibm_runtime import Options
 from qiskit.providers import Backend
@@ -80,6 +81,9 @@ class QuaConfig(BackendConfig):
 
     parametrized_macro: Callable
     hardware_config: QMConfiguration
+    channel_mapping: Dict[
+        str | pulse.channels.Channel, str
+    ]  # channel to quantum element mapping
 
     def __post_init__(self):
         super().__init__(config_type="Qua")
