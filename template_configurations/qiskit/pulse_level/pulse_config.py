@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import os
 from qiskit_experiments.calibration_management import (
     FixedFrequencyTransmon,
@@ -37,7 +37,7 @@ config_file_address = os.path.join(current_dir, config_file_name)
 
 def custom_schedule(
     backend: BackendV1 | BackendV2,
-    physical_qubits: list,
+    physical_qubits: List[int],
     params: ParameterVector,
 ) -> pulse.ScheduleBlock:
     """
@@ -56,13 +56,13 @@ def custom_schedule(
 
     ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
     sq_pulse_features = ["amp", "angle"]  # For single qubit gates
-    sq_name = "sx"  # Name of the single qubit gate baseline to pick
+    sq_name = "x"  # Name of the single qubit gate baseline to pick
     keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
     include_baseline = (
         False  # Choose if the baseline shall be included in the parametrization
     )
     include_duration = (
-        True  # Choose if the pulse duration shall be included in the parametrization
+        False  # Choose if the pulse duration shall be included in the parametrization
     )
     duration_window = 1  # Duration window for the pulse duration
     if include_duration:
@@ -136,12 +136,11 @@ def apply_parametrized_circuit(
     :param tgt_register: Quantum Register formed of target qubits
     :return:
     """
-    target = kwargs["target"]
-    backend = kwargs["backend"]
+    target, backend = kwargs["target"], kwargs["backend"]
     gate, physical_qubits = target["gate"], target["register"]
 
     parametrized_gate = Gate(
-        f"custom_{gate.name}", len(tgt_register), params=params.params
+        f"{gate.name}_cal", len(tgt_register), params=params.params
     )
     parametrized_schedule = custom_schedule(
         backend=backend, physical_qubits=physical_qubits, params=params

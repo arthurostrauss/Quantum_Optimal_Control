@@ -692,7 +692,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         """
         self.target["input_states"] = [
             [
-                {"circuit": PauliPreparationBasis().circuit(s).decompose()}
+                {"circuit": PauliPreparationBasis().circuit(s)}
                 for s in product(range(4), repeat=circ.num_qubits)
             ]
             for circ in self.baseline_truncations

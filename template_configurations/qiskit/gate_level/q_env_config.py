@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Optional, Dict
 import os
 import numpy as np
@@ -97,15 +98,20 @@ def get_backend(
         # TODO: Add here your custom backend
         # For now use FakeJakartaV2 as a safe working custom backend
         # backend = FakeProvider().get_backend("fake_jakarta")
-        from qiskit_ibm_runtime.fake_provider import FakeJakartaV2
+        from qiskit_ibm_runtime.fake_provider import FakeTorontoV2
 
-        backend = FakeJakartaV2()
+        # backend = FakeTorontoV2()
     if backend is None:
-        Warning("No backend was provided, State vector simulation will be used")
+        warnings.warn("No backend was provided, State vector simulation will be used")
     return backend
 
 
 def get_circuit_context(backend: Optional[BackendV2]):
+    """
+    Define the context of the circuit to be used in the training
+    :param backend: Backend instance
+    :return: QuantumCircuit instance
+    """
     circuit = QuantumCircuit(5)
     circuit.h(0)
     for i in range(1, 5):
@@ -113,9 +119,9 @@ def get_circuit_context(backend: Optional[BackendV2]):
     circuit.h(0)
 
     if backend is not None and backend.target.has_calibration("x", (0,)):
-        circuit = transpile(circuit, backend, optimization_level=1)
-    print("Circuit context", circuit)
-
+        circuit = transpile(circuit, backend, optimization_level=1, seed_transpiler=42)
+    print("Circuit context")
+    circuit.draw("mpl")
     return circuit
 
 

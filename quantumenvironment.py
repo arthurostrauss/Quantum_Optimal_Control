@@ -11,6 +11,7 @@ from __future__ import annotations
 
 # For compatibility for options formatting between Estimators.
 import json
+import signal
 from dataclasses import asdict
 from itertools import product, chain
 from typing import Dict, Optional, List, Callable, Any, SupportsFloat
@@ -19,6 +20,7 @@ from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from qiskit import schedule, transpile
+from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -63,7 +65,6 @@ from helper_functions import (
     retrieve_primitives,
     Backend_type,
     Estimator_type,
-    Sampler_type,
     handle_session,
     qubit_projection,
     retrieve_backend_info,
@@ -197,7 +198,7 @@ def _define_target(target: Dict):
         if "input_states" not in target:
             target["input_states"] = [
                 [
-                    {"circuit": PauliPreparationBasis().circuit(s).decompose()}
+                    {"circuit": PauliPreparationBasis().circuit(s)}
                     for s in product(range(4), repeat=len(tgt_register))
                 ]
             ]
@@ -224,7 +225,7 @@ def _define_target(target: Dict):
             input_state["target_state"]["Chi"] = _calculate_chi_target(
                 input_state["target_state"]["dm"]
             )
-        return target, "gate", q_register, n_qubits, layout
+        return target, "gate", q_register, n_qubits, [layout]
     else:
         raise KeyError("target type not identified, must be either gate or state")
 
@@ -336,7 +337,7 @@ class QuantumEnvironment(Env):
                 self.circuit_truncations[0],
             )
             # Retrieve physical qubits forming the target register (and additional qubits for the circuit context)
-            self._physical_target_qubits = list(self.layout.get_physical_bits().keys())
+            self._physical_target_qubits = self.config.target["register"]
             self.backend_info = QiskitBackendInfo(self.backend, self._estimator)
             # Retrieve qubits forming the local circuit context (target qubits + nearest neighbor qubits on the chip)
             self._physical_neighbor_qubits = list(
@@ -374,6 +375,9 @@ class QuantumEnvironment(Env):
         self.reward_history = []
         self.qc_history = []
         self._observables, self._pauli_shots = None, None
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+
         if self.target_type == "gate":
             self._chi_gate = _calculate_chi_target(Operator(self.target["gate"]))
             self._pubs = self.retrieve_observables_and_input_states(
@@ -532,12 +536,13 @@ class QuantumEnvironment(Env):
                 self.estimator, self.backend, counts, qc, input_state_circ
             )
             # Append input state prep circuit to the custom circuit with front composition
-            full_circ = transpile(
-                qc.compose(input_state_circ, inplace=False, front=True),
-                self.backend,
-                initial_layout=self.layout,
+            pm = generate_preset_pass_manager(
                 optimization_level=1,
+                backend=self.backend,
+                initial_layout=self.layout[trunc_index],
             )
+            full_circ = pm.run(qc.compose(input_state_circ, inplace=False, front=True))
+            print(full_circ.calibrations)
             if isinstance(self.estimator, BaseEstimatorV1):
                 print(self._observables)
                 job = self.estimator.run(
@@ -554,6 +559,7 @@ class QuantumEnvironment(Env):
                         self._pubs[i][2] = params
                         self._pubs[i] = tuple(self._pubs[i])
                 else:
+                    print(self._observables)
                     self._pubs = [
                         (
                             full_circ,
@@ -815,7 +821,6 @@ class QuantumEnvironment(Env):
         )
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
-
         reward_factor = self.c_factor / (
             np.sqrt(self._d) * target_state["Chi"][pauli_index]
         )
@@ -995,6 +1000,14 @@ class QuantumEnvironment(Env):
                 and self._episode_tracker > 1
             )
 
+    def signal_handler(self, signum, frame):
+        """Signal handler for SIGTERM and SIGINT signals."""
+        print(f"Received signal {signum}, closing environment...")
+        if self._config_type == "qiskit":
+            self.close()
+        else:
+            pass
+
     def __repr__(self):
         string = f"QuantumEnvironment composed of {self._n_qubits} qubits, \n"
         string += (
@@ -1062,7 +1075,7 @@ class QuantumEnvironment(Env):
         return self._parameters
 
     @property
-    def observables(self):
+    def observables(self) -> SparsePauliOp:
         return self._observables
 
     @property

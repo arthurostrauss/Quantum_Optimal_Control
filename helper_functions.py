@@ -20,6 +20,8 @@ from qiskit.primitives import (
     BackendSampler,
     StatevectorEstimator,
     StatevectorSampler,
+    BaseEstimatorV1,
+    BaseEstimatorV2,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
@@ -1031,7 +1033,7 @@ def set_primitives_transpile_options(
 
 
 def handle_session(
-    estimator: Estimator_type,
+    estimator: BaseEstimatorV1 | BaseEstimatorV2,
     backend: Backend_type,
     counter: Optional[int] = None,
     qc: Optional[QuantumCircuit] = None,
