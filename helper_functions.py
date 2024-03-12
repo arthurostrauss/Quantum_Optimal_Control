@@ -151,6 +151,29 @@ def remove_unused_wires(qc: QuantumCircuit):
     return qc
 
 
+def get_instruction_timings(circuit: QuantumCircuit):
+    # Initialize the timings for each qubit
+    qubit_timings = {i: 0 for i in range(circuit.num_qubits)}
+
+    # Initialize the list of start times
+    start_times = []
+
+    # Loop over each instruction in the circuit
+    for inst, qubits, _ in circuit.data:
+        # Find the maximum time among the qubits involved in the instruction
+        qubit_indices = [circuit.qubits.index(qubit) for qubit in qubits]
+        start_time = max(qubit_timings[i] for i in qubit_indices)
+
+        # Add the start time to the list of start times
+        start_times.append(start_time)
+
+        # Update the time for each qubit involved in the instruction
+        for i in qubit_indices:
+            qubit_timings[i] = start_time + 1
+
+    return start_times
+
+
 def perform_standard_calibrations(
     backend: DynamicsBackend, calibration_files: Optional[str] = None
 ):
@@ -1027,9 +1050,10 @@ def set_primitives_transpile_options(
         fidelity_checker._sampler._skip_transpilation = skip_transpilation
 
     else:
-        raise TypeError(
-            "Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime"
-        )
+        # raise TypeError(
+        #     "Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime"
+        # )
+        pass
 
 
 def handle_session(
@@ -1139,7 +1163,9 @@ def select_backend(
         if real_backend:
             service = QiskitRuntimeService(channel=channel, instance=instance)
             if backend_name is None:
-                backend = service.least_busy(min_num_qubits=2)
+                backend = service.least_busy(
+                    min_num_qubits=2, simulator=False, open_pulse=True
+                )
             else:
                 backend = service.get_backend(backend_name)
 
@@ -1147,15 +1173,15 @@ def select_backend(
             # backend.set_options(**options)
         else:
             # Fake backend initialization (Aer Simulator)
-            if backend_name is None:
-                backend_name = "fake_jakarta"
             try:
-                backend = FakeProviderForBackendV2().get_backend(backend_name)
-            except QiskitBackendNotFoundError:
-                try:
+                if not use_dynamics:
+                    backend = FakeProviderForBackendV2().backend(backend_name)
+                else:
                     backend = FakeProvider().get_backend(backend_name)
-                except QiskitBackendNotFoundError:
-                    raise QiskitError(f"Backend {backend_name} not found")
+            except QiskitBackendNotFoundError:
+                raise QiskitError(
+                    "Backend not found. Please check the backend name and try again."
+                )
 
     if backend is not None:
         if use_dynamics:
