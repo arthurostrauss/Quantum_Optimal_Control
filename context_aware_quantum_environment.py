@@ -480,13 +480,16 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 f"Action batch size {batch_size} does not match environment batch size {self.batch_size}"
             )
         self._param_values[trunc_index][step_status] = params
-
+        params = np.reshape(
+            np.vstack([param_set for param_set in self._param_values[trunc_index]]),
+            (self.batch_size, (trunc_index + 1) * self.action_space.shape[-1]),
+        )
         if step_status < trunc_index:  # Intermediate step within the circuit truncation
             self._inside_trunc_tracker += 1
             terminated = False
 
             if self._intermediate_rewards:
-                reward_table = self.perform_action(action)
+                reward_table = self.perform_action(params)
                 obs = reward_table  # Set observation to obtained reward (might not be the smartest choice here)
                 return obs, reward_table, terminated, False, self._get_info()
             else:
@@ -500,7 +503,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
         else:
             terminated = self._episode_ended = True
-            reward_table = self.perform_action(action)
+            reward_table = self.perform_action(params)
             if self._intermediate_rewards:
                 obs = reward_table
             else:
@@ -579,20 +582,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 "truncation_index": self._trunc_index,
             }
         return info
-
-    def perform_action(self, actions):
-        """
-        Perform action on the environment
-        """
-        trunc_index = self._inside_trunc_tracker
-        params = np.reshape(
-            np.vstack([param_set for param_set in self._param_values[trunc_index]]),
-            (self.batch_size, (trunc_index + 1) * self.action_space.shape[-1]),
-        )
-
-        reward_table = super().perform_action(params)
-
-        return reward_table
 
     def clear_history(self) -> None:
         """Reset all counters related to training"""
@@ -708,16 +697,16 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 input_state["target_state"] = {
                     "dm": (
                         DensityMatrix(state_target_circuit)
-                        if state_target_circuit.num_qubits == self.tgt_register.size
-                        else partial_trace(
-                            Statevector(state_target_circuit),
-                            list(
-                                range(
-                                    self.tgt_register.size,
-                                    state_target_circuit.num_qubits,
-                                )
-                            ),
-                        )
+                        # if state_target_circuit.num_qubits == self.tgt_register.size
+                        # else partial_trace(
+                        #     Statevector(state_target_circuit),
+                        #     list(
+                        #         range(
+                        #             self.tgt_register.size,
+                        #             state_target_circuit.num_qubits,
+                        #         )
+                        #     ),
+                        # )
                     ),
                     "circuit": state_target_circuit,
                     "target_type": "state",

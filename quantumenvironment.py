@@ -520,13 +520,13 @@ class QuantumEnvironment(Env):
             input_state_circ = self.target["input_states"][trunc_index][
                 self._index_input_state
             ]["circuit"]
-
-        if self.do_benchmark():
-            print("Starting benchmarking...")
-            self.store_benchmarks(params)
-            print("Finished benchmarking")
-        print("Sending Estimator job...")
         try:
+            if self.do_benchmark():
+                print("Starting benchmarking...")
+                self.store_benchmarks(params)
+                print("Finished benchmarking")
+            print("Sending Estimator job...")
+
             counts = (
                 self._session_counts
                 if isinstance(self.estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2))
@@ -542,7 +542,6 @@ class QuantumEnvironment(Env):
                 initial_layout=self.layout[trunc_index],
             )
             full_circ = pm.run(qc.compose(input_state_circ, inplace=False, front=True))
-            print(full_circ.calibrations)
             if isinstance(self.estimator, BaseEstimatorV1):
                 print(self._observables)
                 job = self.estimator.run(
@@ -552,7 +551,7 @@ class QuantumEnvironment(Env):
                     parameter_values=params,
                     shots=int(np.max(self._pauli_shots) * self.n_shots),
                 )
-                reward_table = job.result().values
+                reward_table = job.result().values / self._observables.size
             else:  # EstimatorV2
                 if self.channel_estimator:
                     for i in range(len(self._pubs)):
@@ -571,14 +570,14 @@ class QuantumEnvironment(Env):
                 job = self.estimator.run(
                     pubs=self._pubs,
                 )
-                reward_table = np.sum(
-                    [pub_result.data.evs for pub_result in job.result()], axis=0
+                reward_table = (
+                    np.sum([pub_result.data.evs for pub_result in job.result()], axis=0)
+                    / self._observables.size
                 )
-
+            print("Finished Estimator job")
         except Exception as e:
             self.close()
             raise e
-        print("Finished Estimator job")
 
         if np.mean(reward_table) > self._max_return:
             self._max_return = np.mean(reward_table)
@@ -723,14 +722,23 @@ class QuantumEnvironment(Env):
 
             elif self.abstraction_level == "pulse":
                 # Pulse simulation
-                if isinstance(self.backend, DynamicsBackend) and hasattr(
-                    self.backend.options.solver, "unitary_solve"
-                ):
-                    # Jax compatible pulse simulation
+                if isinstance(self.backend, DynamicsBackend):
 
-                    unitaries = self.backend.options.solver.unitary_solve(params)[
-                        :, 1, :, :
-                    ]
+                    if hasattr(self.backend.options.solver, "unitary_solve"):
+                        # Jax compatible pulse simulation
+                        unitaries = self.backend.options.solver.unitary_solve(params)[
+                            :, 1, :, :
+                        ]
+                    else:
+                        scheds = schedule(qc_list, backend=self.backend)
+                        unitaries = np.array(
+                            [
+                                simulate_pulse_schedule(self.backend, sched)[
+                                    "unitary"
+                                ].data
+                                for sched in scheds
+                            ]
+                        )
                     subsystem_dims = list(
                         filter(lambda x: x > 1, self.backend.options.subsystem_dims)
                     )
@@ -854,8 +862,7 @@ class QuantumEnvironment(Env):
         pauli_prep, pauli_meas = zip(
             *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )
-        prep_circuits = []
-        parity = 1
+        prep_circuits, parity = [], 1
         for prep in pauli_prep:
             prep_indices = []
             for pauli_op in reversed(prep.to_label()):

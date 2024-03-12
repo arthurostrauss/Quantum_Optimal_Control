@@ -193,13 +193,19 @@ def get_backend(
 
         print("Custom backend used")
         # TODO: Add here your custom backend
-        dims = [3, 3]
-        freqs = [4.86e9, 4.97e9]
-        anharmonicities = [-0.33e9, -0.32e9]
-        rabi_freqs = [0.22e9, 0.26e9]
-        couplings = {(0, 1): 0.002e9}
+        # dims = [3, 3]
+        # freqs = [4.86e9, 4.97e9]
+        # anharmonicities = [-0.33e9, -0.32e9]
+        # rabi_freqs = [0.22e9, 0.26e9]
+        # couplings = {(0, 1): 0.002e9}
 
-        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[0]
+        dims = [3]
+        freqs = [4.86e9]
+        anharmonicities = [-0.33e9]
+        rabi_freqs = [0.22e9]
+        couplings = None
+
+        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
         _, _ = perform_standard_calibrations(backend, calibration_files)
 
     if backend is None:
@@ -211,9 +217,9 @@ def get_circuit_context(backend: Optional[BackendV1 | BackendV2] = None):
     """
     Define here the circuit context to be used for the calibration
     """
-    circuit = QuantumCircuit(2)
+    circuit = QuantumCircuit(1)
     circuit.h(0)
-    circuit.cx(0, 1)
+    # circuit.cx(0, 1)
 
     if backend is not None and backend.target.has_calibration("x", (0,)):
         circuit = transpile(circuit, backend)
@@ -230,6 +236,7 @@ def get_circuit_context(backend: Optional[BackendV1 | BackendV2] = None):
     backend_params,
     estimator_options,
     check_on_exp,
+    channel_estimator,
 ) = load_q_env_from_yaml_file(config_file_address)
 env_backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
@@ -246,5 +253,8 @@ backend_config = QiskitConfig(
 QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
     check_on_exp
 )
+QuantumEnvironment.channel_estimator = (
+    ContextAwareQuantumEnvironment.channel_estimator
+) = channel_estimator
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context = get_circuit_context(env_backend)

@@ -983,7 +983,7 @@ def retrieve_primitives(
 
 
 def set_primitives_transpile_options(
-    estimator: Estimator_type,
+    estimator: BaseEstimatorV1 | BaseEstimatorV2,
     fidelity_checker: ComputeUncompute,
     layout: Layout,
     skip_transpilation: bool,
@@ -1334,12 +1334,20 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
         np.zeros((total_dim, total_dim), dtype=np.complex128),
         input_dims=tuple(initial_subsystem_dims),
         output_dims=tuple(initial_subsystem_dims),
-    )
-    for i in range(total_dim):
-        s = Statevector.from_int(i, initial_subsystem_dims)
+    )  # Projector initialized in the qudit space
+    for i in range(
+        total_dim
+    ):  # Loop over all computational basis states in the qudit space
+        s = Statevector.from_int(
+            i, initial_subsystem_dims
+        )  # Statevector initialized in the qudit space
         for key in s.to_dict().keys():
-            if all(c in "01" for c in key):
-                projector += s.to_operator()
+            if all(
+                c in "01" for c in key
+            ):  # Check if the statevector is in the qubit space
+                projector += (
+                    s.to_operator()
+                )  # Add the statevector to the projector if it is in the qubit space
                 break
             else:
                 continue
@@ -1357,16 +1365,24 @@ def projected_statevector(
         subsystem_dims: Subsystem dimensions
         normalize: Normalize statevector
     """
-    proj = build_qubit_space_projector(subsystem_dims)
-    new_dim = 2 ** len(subsystem_dims)
+    proj = build_qubit_space_projector(
+        subsystem_dims
+    )  # Projector on qubit space (in qudit space)
+    new_dim = 2 ** len(subsystem_dims)  # Dimension of the qubit space
     qubitized_statevector = np.zeros(new_dim, dtype=np.complex128)
     qubit_count = 0
-    new_statevector = Statevector(statevector, dims=subsystem_dims).evolve(proj)
+    new_statevector = Statevector(statevector, dims=subsystem_dims).evolve(
+        proj
+    )  # Projected statevec (in qudit space)
     for i in range(np.prod(subsystem_dims)):
-        if new_statevector.data[i] != 0:
+        if (
+            new_statevector.data[i] != 0
+        ):  # All zeros components correspond to qudit states (due to projection)
             qubitized_statevector[qubit_count] = new_statevector.data[i]
             qubit_count += 1
-    if normalize:
+    if (
+        normalize
+    ):  # Normalize the projected statevector (which is for now unnormalized due to selection of components)
         qubitized_statevector = qubitized_statevector / np.linalg.norm(
             qubitized_statevector
         )
@@ -1385,21 +1401,31 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     Returns: unitary projected on qubit space as a Qiskit Operator object
     """
 
-    proj = build_qubit_space_projector(subsystem_dims)
-    new_dim = 2 ** len(subsystem_dims)
+    proj = build_qubit_space_projector(
+        subsystem_dims
+    )  # Projector on qubit space (in qudit space)
+    new_dim = 2 ** len(subsystem_dims)  # Dimension of the qubit space
     unitary_op = Operator(
         unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
-    )
+    )  # Unitary operator (in qudit space)
     qubitized_unitary = np.zeros((new_dim, new_dim), dtype=np.complex128)
     qubit_count1 = qubit_count2 = 0
-    new_unitary = proj @ unitary_op @ proj
+    new_unitary = proj @ unitary_op @ proj  # Projected unitary (in qudit space)
 
-    for i in range(np.prod(subsystem_dims)):
+    for i in range(
+        np.prod(subsystem_dims)
+    ):  # Select elements in the projection to build a qubitized unitary
         for j in range(np.prod(subsystem_dims)):
-            if new_unitary.data[i, j] != 0:
-                qubitized_unitary[qubit_count1, qubit_count2] = new_unitary.data[i, j]
+            if (
+                new_unitary.data[i, j] != 0
+            ):  # All zeros components correspond to qudit states (due to projection)
+                qubitized_unitary[qubit_count1, qubit_count2] = new_unitary.data[
+                    i, j
+                ]  # Fill the qubitized unitary
                 qubit_count2 += 1
-                if qubit_count2 == new_dim:
+                if (
+                    qubit_count2 == new_dim
+                ):  # Reset qubit_count2 when it reaches the dimension of the qubit space
                     qubit_count2 = 0
                     qubit_count1 += 1
                     break
@@ -1407,7 +1433,7 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
         qubitized_unitary,
         input_dims=(2,) * len(subsystem_dims),
         output_dims=(2,) * len(subsystem_dims),
-    )
+    )  # Qubitized unitary as a Qiskit Operator object (Note that is actually not unitary at this point, it's a Channel)
     return qubitized_unitary
 
 
@@ -1418,9 +1444,14 @@ def rotate_unitary(x, unitary: Operator):
     unitary: Rotated unitary
     """
     assert len(x) % 2 == 0, "Rotation parameters should be a pair"
-    ops = [Operator(RZGate(x[i])) for i in range(len(x))]
-    pre_rot, post_rot = ops[0], ops[-1]
-    for i in range(1, len(x) // 2):
+    ops = [
+        Operator(RZGate(x[i])) for i in range(len(x))
+    ]  # Virtual Z rotations to be applied on all qubits
+    pre_rot, post_rot = (
+        ops[0],
+        ops[-1],
+    )  # Degrees of freedom before and after the unitary
+    for i in range(1, len(x) // 2):  # Apply virtual Z rotations on all qubits
         pre_rot = pre_rot.tensor(ops[i])
         post_rot = post_rot.expand(ops[-i - 1])
 
@@ -1501,12 +1532,19 @@ def load_q_env_from_yaml_file(file_path: str):
         "channel": config["SERVICE"]["CHANNEL"],
         "instance": config["SERVICE"]["INSTANCE"],
         "solver_options": config["BACKEND"]["DYNAMICS"]["SOLVER_OPTIONS"],
-        "calibration_files": config["ENV"]["CALIBRATION_FILES"],
+        "calibration_files": config["BACKEND"]["DYNAMICS"]["CALIBRATION_FILES"],
     }
     runtime_options = config["RUNTIME_OPTIONS"]
     print(runtime_options)
     check_on_exp = config["ENV"]["CHECK_ON_EXP"]
-    return params, backend_params, remove_none_values(runtime_options), check_on_exp
+    channel_estimator = config["ENV"]["CHANNEL_ESTIMATOR"]
+    return (
+        params,
+        backend_params,
+        remove_none_values(runtime_options),
+        check_on_exp,
+        channel_estimator,
+    )
 
 
 def remove_none_values(dictionary):
@@ -1575,7 +1613,7 @@ def load_hpo_config_from_yaml_file(file_path: str):
 
 
 def create_hpo_agent_config(
-    trial: optuna.trial.Trial, hpo_config: dict, agent_config: dict
+    trial: optuna.trial.Trial, hpo_config: Dict, agent_config: Dict
 ):
     hyper_params = {
         "N_UPDATES": trial.suggest_int(

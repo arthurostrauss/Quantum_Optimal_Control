@@ -45,14 +45,14 @@ def apply_parametrized_circuit(
         optimal_params[2] + params[2],
         q_reg[0],
     )
-    # my_qc.u(
-    #     optimal_params[3] + params[3],
-    #     optimal_params[4] + params[4],
-    #     optimal_params[5] + params[5],
-    #     q_reg[1],
-    # )
-    #
-    # my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
+    my_qc.u(
+        optimal_params[3] + params[3],
+        optimal_params[4] + params[4],
+        optimal_params[5] + params[5],
+        q_reg[1],
+    )
+
+    my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
 
     qc.append(my_qc.to_instruction(label=my_qc.name), q_reg)
 
@@ -126,12 +126,9 @@ def get_circuit_context(backend: Optional[BackendV2]):
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
-(
-    env_params,
-    backend_params,
-    estimator_options,
-    check_on_exp,
-) = load_q_env_from_yaml_file(config_file_address)
+(env_params, backend_params, estimator_options, check_on_exp, channel_estimator) = (
+    load_q_env_from_yaml_file(config_file_address)
+)
 backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
     apply_parametrized_circuit,
@@ -144,5 +141,8 @@ backend_config = QiskitConfig(
 QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
     check_on_exp
 )
+QuantumEnvironment.channel_estimator = (
+    ContextAwareQuantumEnvironment.channel_estimator
+) = channel_estimator
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context = get_circuit_context(backend)
