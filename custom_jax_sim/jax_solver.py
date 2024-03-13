@@ -17,7 +17,7 @@ from qiskit_dynamics.solvers.solver_classes import (
 )
 from typing import Optional, List, Union, Callable, Tuple, Type, Any
 
-from qiskit.pulse import Schedule, SymbolicPulse
+from qiskit.pulse import Schedule, SymbolicPulse, ScheduleBlock
 from qiskit_dynamics.array import Array
 
 from jax import vmap, jit, numpy as jnp
@@ -344,6 +344,42 @@ class JaxSolver(Solver):
                     all_results.append(results)
 
             return all_results
+
+    def solve_param_schedule(
+        self,
+        parameter_values: Array,
+        t_span: Optional[Array] = None,
+        y0: Optional[Array | QuantumState | BaseOperator] = None,
+        schedule: Optional[Schedule | ScheduleBlock] = None,
+        convert_results: bool = True,
+        **kwargs,
+    ):
+        """
+        Solve a parametrized schedule for a given set of parameters.
+
+        Args:
+            parameter_values: The parameter values to use for the simulation.
+            t_span: The time span to simulate over (if not specified, standard [0, sched.duration] is used
+            y0: The initial state to simulate from.
+            schedule: The schedule to simulate.
+            convert_results: Whether to convert the results to the correct state type.
+            kwargs: Additional solver options.
+        """
+        if schedule is not None:
+            self.circuit_macro = lambda: schedule
+        if t_span is not None:
+            self._t_span = t_span
+        if y0 is not None:
+            self._y0 = y0
+        (
+            y0,
+            y0_input,
+            y0_cls,
+            state_type_wrapper,
+        ) = validate_and_format_initial_state(y0, self.model)
+        self._param_values = parameter_values
+
+        return self._jit_func(t_span, y0, parameter_values, y0_input, y0_cls)
 
 
 def initial_state_converter(obj: Any) -> Tuple[Array, Type, Callable]:

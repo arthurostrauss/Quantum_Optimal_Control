@@ -366,6 +366,7 @@ class QuantumEnvironment(Env):
 
         self._session_counts = 0
         self._step_tracker = 0
+        self._total_shots = []
         self._max_return = 0
         self._episode_ended = False
         self._episode_tracker = 0
@@ -494,11 +495,14 @@ class QuantumEnvironment(Env):
             sample_action = np.zeros(self.action_space.shape)
             batch_action = np.tile(sample_action, (self.batch_size, 1))
             batch_rewards = self.perform_action(batch_action)
+            self.clear_history()
             mean_reward = np.mean(batch_rewards)
             if mean_reward > self._reward_check_max:
-                raise ValueError(
-                    f"Current Mean Reward with Config Vals is {mean_reward}, try a C Factor around {self.c_factor / mean_reward}"
-                )
+                self.c_factor = self.c_factor / mean_reward
+                print("C Factor adjusted to ", self.c_factor)
+                # raise ValueError(
+                #     f"Current Mean Reward with Config Vals is {mean_reward}, try a C Factor around {self.c_factor / mean_reward}"
+                # )
         else:
             pass
 
@@ -551,12 +555,22 @@ class QuantumEnvironment(Env):
                     parameter_values=params,
                     shots=int(np.max(self._pauli_shots) * self.n_shots),
                 )
+                self._total_shots.append(
+                    int(np.max(self._pauli_shots) * self.n_shots)
+                    * self.batch_size
+                    * len(self._observables.group_commuting(qubit_wise=True))
+                )
                 reward_table = job.result().values / self._observables.size
             else:  # EstimatorV2
                 if self.channel_estimator:
                     for i in range(len(self._pubs)):
                         self._pubs[i][2] = params
                         self._pubs[i] = tuple(self._pubs[i])
+                        self._total_shots.append(
+                            self.batch_size
+                            * np.sum([pub[3] ** (-2) for pub in self._pubs])
+                            * len(self._pubs)
+                        )
                 else:
                     print(self._observables)
                     self._pubs = [
@@ -567,6 +581,12 @@ class QuantumEnvironment(Env):
                             1 / np.sqrt(self.n_shots * int(np.max(self._pauli_shots))),
                         )
                     ]
+                    self._total_shots.append(
+                        self.batch_size
+                        * len(self._observables.group_commuting(qubit_wise=True))
+                        * int(np.max(self._pauli_shots))
+                        * self.n_shots
+                    )
                 job = self.estimator.run(
                     pubs=self._pubs,
                 )
@@ -589,7 +609,6 @@ class QuantumEnvironment(Env):
         assert not np.any(np.isinf(reward_table)) and not np.any(
             np.isnan(reward_table)
         ), "Reward table contains NaN or Inf values"
-
         return reward_table  # Shape [batchsize]
 
     def store_benchmarks(self, params: np.array):
@@ -824,6 +843,8 @@ class QuantumEnvironment(Env):
         """
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         probabilities = target_state["Chi"] ** 2
+        if np.sum(probabilities) != 1:
+            probabilities = probabilities / np.sum(probabilities)
         k_samples = np.random.choice(
             len(probabilities), size=self.sampling_Pauli_space, p=probabilities
         )
@@ -863,33 +884,51 @@ class QuantumEnvironment(Env):
             *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )
         prep_circuits, parity = [], 1
-        for prep in pauli_prep:
-            prep_indices = []
-            for pauli_op in reversed(prep.to_label()):
-                input = np.random.randint(2)
-                parity *= (-1) ** input
-                if pauli_op == "I" or pauli_op == "Z":
-                    prep_indices.append(input)
-                elif pauli_op == "X":
-                    prep_indices.append(2 + input)
-                else:
-                    prep_indices.append(4 + input)
-            prep_circuits.append(
-                qc.compose(Pauli6PreparationBasis().circuit(prep_indices), front=True)
-            )
+        # for prep in pauli_prep:
+        #     prep_indices = []
+        #     for pauli_op in reversed(prep.to_label()):
+        #         input = np.random.randint(2)
+        #         parity *= (-1) ** input
+        #         if pauli_op == "I" or pauli_op == "Z":
+        #             prep_indices.append(input)
+        #         elif pauli_op == "X":
+        #             prep_indices.append(2 + input)
+        #         else:
+        #             prep_indices.append(4 + input)
+        #     prep_circuits.append(
+        #         qc.compose(Pauli6PreparationBasis().circuit(prep_indices), front=True)
+        #     )
 
-        reward_factor = [
-            self.c_factor * parity / (self._d * self._chi_gate[p]) for p in samples
-        ]
+        reward_factor = [self.c_factor / (self._d * self._chi_gate[p]) for p in samples]
         observables = [
             SparsePauliOp(pauli_meas[i], reward_factor[i]) for i in range(len(samples))
         ]
-        pubs = [
-            [prep_circ, observable, None, 1 / np.sqrt(pauli_shot)]
-            for prep_circ, observable, pauli_shot in zip(
-                prep_circuits, observables, pauli_shots
-            )
-        ]
+        # pubs = [
+        #     [prep_circ, observable, None, 1 / np.sqrt(pauli_shot)]
+        #     for prep_circ, observable, pauli_shot in zip(
+        #         prep_circuits, observables, pauli_shots
+        #     )
+        # ]
+        pubs = []
+        for prep, obs, shot in zip(pauli_prep, observables, pauli_shots):
+            for input_state in range(2**qc.num_qubits):
+                prep_indices = []
+                input = np.unravel_index(input_state, (2,) * qc.num_qubits)
+                parity = (-1) ** np.sum(input)
+                for i, pauli_op in enumerate(reversed(prep.to_label())):
+                    if pauli_op == "I" or pauli_op == "Z":
+                        prep_indices.append(input[i])
+                    elif pauli_op == "X":
+                        prep_indices.append(2 + input[i])
+                    else:
+                        prep_indices.append(4 + input[i])
+
+                prep_circuit = qc.compose(
+                    Pauli6PreparationBasis().circuit(prep_indices), front=True
+                )
+
+                pubs.append([prep_circuit, parity * obs, None, 1 / np.sqrt(shot)])
+
         return pubs
 
     def _generate_circuits(self):
@@ -1084,6 +1123,10 @@ class QuantumEnvironment(Env):
     @property
     def observables(self) -> SparsePauliOp:
         return self._observables
+
+    @property
+    def total_shots(self):
+        return self._total_shots
 
     @property
     def optimal_action(self):

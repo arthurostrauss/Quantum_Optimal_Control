@@ -182,7 +182,12 @@ class CustomPPO:
             plt.show()
 
     def train(
-        self, total_updates: int, print_debug=True, num_prints=40, clear_history=False
+        self,
+        total_updates: int,
+        print_debug=True,
+        num_prints=40,
+        clear_history=False,
+        plot_real_time=True,
     ):
         """
         Training function for PPO algorithm
@@ -190,6 +195,7 @@ class CustomPPO:
         :param print_debug: If True, then print debug statements
         :param num_prints: Number of times to print debug statements
         :param clear_history: If True, then clear the history of the environment
+        :param plot_real_time: If True, then plot the reward history in real time
         """
         if clear_history:
             self.env.unwrapped.clear_history()
@@ -381,7 +387,8 @@ class CustomPPO:
 
             if global_step % num_prints == 0:
                 clear_output(wait=True)
-                self.plot_curves()
+                if plot_real_time:
+                    self.plot_curves()
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             self.writer.add_scalar(

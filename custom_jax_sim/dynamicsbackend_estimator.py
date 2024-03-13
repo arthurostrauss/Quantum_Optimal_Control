@@ -57,16 +57,12 @@ class DynamicsBackendEstimator(BackendEstimator):
             dict(zip(self._parameters[i], value))
             for i, value in zip(circuits, parameter_values)
         ]
-
-        self.backend.options.solver_options["parameter_dicts"] = (
-            parameter_dicts  # To be given as PyTree
-        )
+        # Set JaxSolver options for running the circuits with the given parameters
+        self.backend.options.solver_options["parameter_dicts"] = parameter_dicts
         self.backend.options.solver_options["subsystem_dims"] = (
             self.backend.options.subsystem_dims
         )
-        self.backend.options.solver_options["parameter_values"] = (
-            parameter_values  # To be given as PyTree alternatively
-        )
+        self.backend.options.solver_options["parameter_values"] = parameter_values
         self.backend.options.solver_options["observables"] = transpile(
             self.preprocessed_circuits[0][1], self.backend
         )
@@ -91,6 +87,8 @@ class DynamicsBackendEstimator(BackendEstimator):
         result, metadata = _run_circuits(
             new_bound_circuits, self._backend, **run_options
         )
+
+        # Reset JaxSolver options to avoid any conflict with the next estimator call / Benchmarking
         for option in [
             "parameter_dicts",
             "subsystem_dims",
