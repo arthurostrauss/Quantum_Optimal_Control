@@ -1,5 +1,6 @@
 import sys
 import os
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 from typing import Union, Optional, Dict
 import time
@@ -16,6 +17,7 @@ from helper_functions import (
 from ppo import make_train_ppo
 
 import logging
+
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s INFO %(message)s",  # hardcoded INFO level
@@ -26,32 +28,32 @@ logging.basicConfig(
 
 class HyperparameterOptimizer:
     """
-    A class designed to optimize the hyperparameters of a Proximal Policy Optimization (PPO) 
-    agent operating within a quantum environment, leveraging the Optuna framework for 
+    A class designed to optimize the hyperparameters of a Proximal Policy Optimization (PPO)
+    agent operating within a quantum environment, leveraging the Optuna framework for
     hyperparameter optimization.
 
-    This optimizer facilitates a systematic exploration of the hyperparameter space to identify 
-    configurations that minimize a custom cost function. The cost function is designed to 
-    account not only for the performance of the quantum operation (e.g., infidelity) but also 
-    for the experimental cost associated with certain hyperparameters, such as the number of 
-    shots in quantum measurements or batch sizes during training. The class supports saving 
+    This optimizer facilitates a systematic exploration of the hyperparameter space to identify
+    configurations that minimize a custom cost function. The cost function is designed to
+    account not only for the performance of the quantum operation (e.g., infidelity) but also
+    for the experimental cost associated with certain hyperparameters, such as the number of
+    shots in quantum measurements or batch sizes during training. The class supports saving
     the best found configurations and provides tools for logging the optimization process.
 
     Attributes:
-        q_env (Union[QuantumEnvironment, ContextAwareQuantumEnvironment]): 
-            The quantum environment in which the PPO agent operates. This environment 
-            must comply with either the QuantumEnvironment or 
+        q_env (Union[QuantumEnvironment, ContextAwareQuantumEnvironment]):
+            The quantum environment in which the PPO agent operates. This environment
+            must comply with either the QuantumEnvironment or
             ContextAwareQuantumEnvironment interface.
-        path_agent_config (str): Path to the YAML configuration file for initializing 
+        path_agent_config (str): Path to the YAML configuration file for initializing
             the PPO agent with default parameters.
-        path_hpo_config (str): Path to the YAML configuration file for setting up the 
+        path_hpo_config (str): Path to the YAML configuration file for setting up the
             hyperparameter optimization process, defining the hyperparameter search space.
-        save_results_path (str): The directory path where the results and configurations 
+        save_results_path (str): The directory path where the results and configurations
             of the optimization process will be saved.
-        experimental_penalty_weights (Optional[Dict[str, float]]): A dictionary mapping 
-            hyperparameter names to penalty weights, used to add a penalty to the cost 
+        experimental_penalty_weights (Optional[Dict[str, float]]): A dictionary mapping
+            hyperparameter names to penalty weights, used to add a penalty to the cost
             function for using experimentally costly hyperparameters.
-        log_progress (bool): Indicates whether the progress of the hyperparameter optimization 
+        log_progress (bool): Indicates whether the progress of the hyperparameter optimization
             should be logged. Useful for monitoring the optimization process in real time.
     """
 
@@ -114,18 +116,24 @@ class HyperparameterOptimizer:
         )
         runtime = time.time() - start_time
         if training_results["avg_reward"] != -1.0:  # Check if training was successful
-            trial.set_user_attr('training_results', training_results)
-            trial.set_user_attr('runtime', runtime)
+            trial.set_user_attr("training_results", training_results)
+            trial.set_user_attr("runtime", runtime)
 
-        fidelity_last_ten_percent = training_results["fidelity_history"][-int(0.1 * len(training_results["fidelity_history"]))]
+        fidelity_last_ten_percent = training_results["fidelity_history"][
+            -int(0.1 * len(training_results["fidelity_history"]))
+        ]
         infidelity = 1 - fidelity_last_ten_percent
 
-        experimental_penalty_terms = self._get_penalty(self.experimental_penalty_weights, runtime)
+        experimental_penalty_terms = self._get_penalty(
+            self.experimental_penalty_weights, runtime
+        )
         custom_cost_value = infidelity + experimental_penalty_terms
-        
+
         return custom_cost_value
-    
-    def _get_penalty(self, experimental_penalty_weights: Dict[str, float], runtime: float):
+
+    def _get_penalty(
+        self, experimental_penalty_weights: Dict[str, float], runtime: float
+    ):
         """
         Calculates the penalty for experimentally costly hyperparameters and runtime.
 
@@ -139,17 +147,22 @@ class HyperparameterOptimizer:
         if experimental_penalty_weights is None:
             return 0
         total_penalty = sum(
-            self.agent_config[key.upper()] * experimental_penalty_weights[key] 
-            for key in experimental_penalty_weights 
+            self.agent_config[key.upper()] * experimental_penalty_weights[key]
+            for key in experimental_penalty_weights
             if key != "runtime"
         )
         if "runtime" in experimental_penalty_weights:
             total_penalty += runtime * experimental_penalty_weights["runtime"]
         return total_penalty
-    
+
     def _generate_filename(self):
-        """ Generate the file name where the best configuration will be saved. """
-        return f'custom_cost_value_{round(self.best_trial.value, 6)}' + '_timestamp_' + datetime.now().strftime("%d-%m-%Y-%H-%M-%S") + '.pickle'
+        """Generate the file name where the best configuration will be saved."""
+        return (
+            f"custom_cost_value_{round(self.best_trial.value, 6)}"
+            + "_timestamp_"
+            + datetime.now().strftime("%d-%m-%Y-%H-%M-%S")
+            + ".pickle"
+        )
 
     def _save_best_configuration(self):
         """
@@ -163,15 +176,16 @@ class HyperparameterOptimizer:
             logging.warning(f"Folder '{self.save_results_path}' created.")
         if self.best_trial is not None:
             best_config = {
-                "training_results": self.best_trial.user_attrs.get('training_results', {}),
-                "runtime": self.best_trial.user_attrs.get('runtime', 0),
+                "training_results": self.best_trial.user_attrs.get(
+                    "training_results", {}
+                ),
+                "runtime": self.best_trial.user_attrs.get("runtime", 0),
                 "hyper_params": self.best_trial.params,
                 "custom_cost_value": self.best_trial.values[0],
                 "penalty_weights": self.experimental_penalty_weights,
             }
             pickle_file_name = os.path.join(
-                self.save_results_path,
-                self._generate_filename()
+                self.save_results_path, self._generate_filename()
             )
             with open(pickle_file_name, "wb") as handle:
                 pickle.dump(best_config, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -202,7 +216,11 @@ class HyperparameterOptimizer:
         for key, value in study.best_trial.params.items():
             logging.warning("    {}: {}".format(key, value))
 
-        logging.warning("The best action vector: {}".format(self.best_config['training_results']['best_action_vector']))
+        logging.warning(
+            "The best action vector: {}".format(
+                self.best_config["training_results"]["best_action_vector"]
+            )
+        )
 
     def optimize_hyperparameters(self, num_hpo_trials: int = 1):
         """
@@ -214,7 +232,11 @@ class HyperparameterOptimizer:
         Returns:
         - A dictionary containing the best configuration and its performance metric.
         """
-        self.n_hpo_trials = num_hpo_trials if num_hpo_trials is not None else self.hpo_config.get("n_trials", 1)
+        self.n_hpo_trials = (
+            num_hpo_trials
+            if num_hpo_trials is not None
+            else self.hpo_config.get("n_trials", 1)
+        )
         # Assert that n_hpo_trials is an integer and greater than 0
         assert (
             isinstance(self.n_hpo_trials, int) and self.n_hpo_trials > 0
@@ -225,7 +247,7 @@ class HyperparameterOptimizer:
         logging.warning("---------------- STARTING HPO ----------------")
 
         study = optuna.create_study(
-            direction='minimize',
+            direction="minimize",
             study_name=f'{self.target_gate["target_gate"].name}-calibration_{datetime.now().strftime("%d-%m-%Y-_%H:%M:%S")}',
         )
         study.optimize(self._objective, n_trials=self.n_hpo_trials)

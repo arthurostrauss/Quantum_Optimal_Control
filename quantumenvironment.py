@@ -268,9 +268,9 @@ class QuantumEnvironment(Env):
 
         super().__init__()
 
-        self._trunc_index = self._inside_trunc_tracker = (
-            0  # Index for circuit truncation (always 0 in this env)
-        )
+        self._trunc_index = (
+            self._inside_trunc_tracker
+        ) = 0  # Index for circuit truncation (always 0 in this env)
         self.training_config = training_config
         self.action_space = training_config.action_space
         self.observation_space = training_config.observation_space
@@ -742,7 +742,6 @@ class QuantumEnvironment(Env):
             elif self.abstraction_level == "pulse":
                 # Pulse simulation
                 if isinstance(self.backend, DynamicsBackend):
-
                     if hasattr(self.backend.options.solver, "unitary_solve"):
                         # Jax compatible pulse simulation
                         unitaries = self.backend.options.solver.unitary_solve(params)[
@@ -793,7 +792,6 @@ class QuantumEnvironment(Env):
                         )
 
                     else:  # Gate calibration task
-
                         if target.num_qubits < len(subsystem_dims):
                             qc = QuantumCircuit(len(subsystem_dims))
                             qc.append(self.target["gate"], self.target["register"])

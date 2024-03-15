@@ -250,9 +250,9 @@ backend_config = QiskitConfig(
         "backend": env_backend,
     },
 )
-QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
-    check_on_exp
-)
+QuantumEnvironment.check_on_exp = (
+    ContextAwareQuantumEnvironment.check_on_exp
+) = check_on_exp
 QuantumEnvironment.channel_estimator = (
     ContextAwareQuantumEnvironment.channel_estimator
 ) = channel_estimator

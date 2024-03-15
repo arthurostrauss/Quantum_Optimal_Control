@@ -126,9 +126,13 @@ def get_circuit_context(backend: Optional[BackendV2]):
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
-(env_params, backend_params, estimator_options, check_on_exp, channel_estimator) = (
-    load_q_env_from_yaml_file(config_file_address)
-)
+(
+    env_params,
+    backend_params,
+    estimator_options,
+    check_on_exp,
+    channel_estimator,
+) = load_q_env_from_yaml_file(config_file_address)
 backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
     apply_parametrized_circuit,
@@ -138,9 +142,9 @@ backend_config = QiskitConfig(
     ),
     parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
 )
-QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
-    check_on_exp
-)
+QuantumEnvironment.check_on_exp = (
+    ContextAwareQuantumEnvironment.check_on_exp
+) = check_on_exp
 QuantumEnvironment.channel_estimator = (
     ContextAwareQuantumEnvironment.channel_estimator
 ) = channel_estimator

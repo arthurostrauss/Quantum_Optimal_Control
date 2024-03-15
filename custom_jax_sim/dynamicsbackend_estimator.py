@@ -59,9 +59,9 @@ class DynamicsBackendEstimator(BackendEstimator):
         ]
         # Set JaxSolver options for running the circuits with the given parameters
         self.backend.options.solver_options["parameter_dicts"] = parameter_dicts
-        self.backend.options.solver_options["subsystem_dims"] = (
-            self.backend.options.subsystem_dims
-        )
+        self.backend.options.solver_options[
+            "subsystem_dims"
+        ] = self.backend.options.subsystem_dims
         self.backend.options.solver_options["parameter_values"] = parameter_values
         self.backend.options.solver_options["observables"] = transpile(
             self.preprocessed_circuits[0][1], self.backend
