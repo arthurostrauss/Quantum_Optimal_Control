@@ -168,7 +168,7 @@ class CustomPPO:
                 plt.plot(
                     np.arange(
                         1,
-                        self.env.unwrapped.step_tracker,
+                        self.env.unwrapped.step_tracker + 1,
                         self.env.unwrapped.benchmark_cycle,
                     ),
                     np.array(self.fidelity_history),

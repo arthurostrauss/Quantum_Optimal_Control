@@ -10,6 +10,7 @@ from itertools import product
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
+from gymnasium.spaces import Box
 
 # Qiskit imports
 from qiskit import transpile
@@ -25,6 +26,7 @@ from qiskit.quantum_info import (
     state_fidelity,
     Statevector,
     DensityMatrix,
+    Operator,
 )
 from qiskit.transpiler import Layout, InstructionProperties
 from qiskit_aer.backends import AerSimulator
@@ -60,6 +62,8 @@ def create_array(circ_trunc, batchsize, n_actions):
 
 
 class ContextAwareQuantumEnvironment(QuantumEnvironment):
+    channel_estimator = False
+
     def __init__(
         self,
         training_config: QEnvConfig,
@@ -136,8 +140,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             name="nn",
         )
 
-        self._d = 2**self.tgt_register.size
-
         # Adjust target register to match it with circuit context
         self.target_instruction = CircuitInstruction(
             self.target["gate"], self.tgt_register
@@ -186,6 +188,14 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             self.baseline_truncations,
         ) = self._generate_circuit_truncations()
 
+        n_qubits = max([qc.num_qubits for qc in self.circuit_truncations])
+        d = 2**n_qubits
+        self.observation_space = Box(
+            low=np.array([0, 0] + [-5] * d**2, dtype=np.float32),
+            high=np.array([1, 1] + [5] * d**2, dtype=np.float32),
+        )
+        # self.observation_space = Box(low=np.array([0, 0], dtype=np.float32),
+        #                              high=np.array([1, 1], dtype=np.float32))
         # Storing data
         set_primitives_transpile_options(
             self.estimator,
@@ -542,6 +552,12 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             }
         return info
 
+    def retrieve_observables_and_input_states(self, qc: QuantumCircuit):
+        raise NotImplementedError(
+            "This method is not implemented for this class"
+            " (Reason: channel characteristic function for whole context is too large"
+        )
+
     def clear_history(self) -> None:
         """Reset all counters related to training"""
         self.step_tracker = 0
@@ -638,6 +654,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         Reshape target state for fidelity estimation for all circuit truncations and which include nearest neighbors
         in computation of target states
         """
+        # self._chi_gate = [_calculate_chi_target(Operator(qc)) for qc in self.baseline_truncations]
         self.target["input_states"] = [
             [
                 {"circuit": PauliPreparationBasis().circuit(s)}

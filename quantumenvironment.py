@@ -19,6 +19,7 @@ from typing import Dict, Optional, List, Callable, Any, SupportsFloat
 from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
+from gymnasium.spaces import Box
 from qiskit import schedule, transpile
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
@@ -273,7 +274,6 @@ class QuantumEnvironment(Env):
         ) = 0  # Index for circuit truncation (always 0 in this env)
         self.training_config = training_config
         self.action_space = training_config.action_space
-        self.observation_space = training_config.observation_space
         self.n_shots = training_config.n_shots
         self.sampling_Pauli_space = (
             training_config.sampling_Paulis
@@ -304,9 +304,7 @@ class QuantumEnvironment(Env):
                 self._layout,
             ) = _define_target(training_config.target)
 
-            self._d = 2**self.n_qubits
             self.backend: Backend_type = training_config.backend_config.backend
-
             if self.backend is not None:
                 if self.n_qubits > self.backend.num_qubits:
                     raise ValueError(
@@ -361,9 +359,16 @@ class QuantumEnvironment(Env):
             # TODO: Add a QUA program
 
         self._param_values = np.zeros((self.batch_size, self.action_space.shape[-1]))
-        # Data storage for plotting
+        self.observation_space = Box(
+            low=np.array([0, 0] + [-5] * (2**self.n_qubits) ** 2),
+            high=np.array([1, 1] + [5] * (2**self.n_qubits) ** 2),
+            dtype=np.float32,
+        )
+        self.observation_space = Box(
+            low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
+        )
+        # Data storage
         self._seed = self.training_config.seed
-
         self._session_counts = 0
         self._step_tracker = 0
         self._total_shots = []
@@ -380,13 +385,15 @@ class QuantumEnvironment(Env):
         signal.signal(signal.SIGTERM, self.signal_handler)
 
         if self.target_type == "gate":
-            self._chi_gate = _calculate_chi_target(Operator(self.target["gate"]))
-            self._pubs = self.retrieve_observables_and_input_states(
-                self.circuit_truncations[self._trunc_index]
-            )
-            self._index_input_state = np.random.randint(
-                len(self.target["input_states"][0])
-            )
+            if self.channel_estimator:
+                self._chi_gate = [_calculate_chi_target(Operator(self.target["gate"]))]
+                self._pubs = self.retrieve_observables_and_input_states(
+                    self.circuit_truncations[self._trunc_index]
+                )
+            else:
+                self._index_input_state = np.random.randint(
+                    len(self.target["input_states"][0])
+                )
             self.target_instruction = CircuitInstruction(
                 self.target["gate"], self.tgt_register
             )
@@ -399,12 +406,7 @@ class QuantumEnvironment(Env):
             self.state_fidelity_history = []
 
         # Check the training_config observation space matches that returned by _get_obs
-        example_obs = self._get_obs()
-        if example_obs.shape != self.observation_space.shape:
-            raise ValueError(
-                f"The Training Config observation space: {self.observation_space.shape} does not "
-                f"match the Environment observation shape: {example_obs.shape}"
-            )
+
         self.check_reward()
 
     def reset(
@@ -430,21 +432,27 @@ class QuantumEnvironment(Env):
             self.estimator.options.update(job_tags=[f"rl_qoc_step{self._step_tracker}"])
 
         if self.target_type == "gate":
-            self._index_input_state = np.random.randint(
-                len(self.target["input_states"][self._trunc_index])
-            )
-            input_state = self.target["input_states"][self._trunc_index][
-                self._index_input_state
-            ]
-            target_state = input_state["target_state"]  # (Gate |input>=|target>)
-            self._pubs = self.retrieve_observables_and_input_states(
-                self.circuit_truncations[self._trunc_index]
-            )
+            if self.channel_estimator:
+                self._pubs = self.retrieve_observables_and_input_states(
+                    self.circuit_truncations[self._trunc_index]
+                )
+                target_state = None
+            else:
+                self._index_input_state = np.random.randint(
+                    len(self.target["input_states"][self._trunc_index])
+                )
+                input_state = self.target["input_states"][self._trunc_index][
+                    self._index_input_state
+                ]
+                target_state = input_state["target_state"]  # (Gate |input>=|target>)
+
         else:  # State preparation task
             target_state = self.target
-        self._observables, self._pauli_shots = self.retrieve_observables(
-            target_state, self.circuit_truncations[self._trunc_index]
-        )
+
+        if target_state is not None:
+            self._observables, self._pauli_shots = self.retrieve_observables(
+                target_state, self.circuit_truncations[self._trunc_index]
+            )
 
         return self._get_obs(), self._get_info()
 
@@ -459,6 +467,7 @@ class QuantumEnvironment(Env):
                     / len(self.target["input_states"][self._trunc_index]),
                     self._target_instruction_timings[self._inside_trunc_tracker],
                 ]
+                + list(self._observable_to_observation())
             )
         else:
             return np.array([0, 0])
@@ -491,18 +500,26 @@ class QuantumEnvironment(Env):
 
     def check_reward(self):
         if self.training_with_cal:
-            _, _ = self.reset()
-            sample_action = np.zeros(self.action_space.shape)
-            batch_action = np.tile(sample_action, (self.batch_size, 1))
-            batch_rewards = self.perform_action(batch_action)
-            self.clear_history()
+            example_obs, _ = self.reset()
+            if example_obs.shape != self.observation_space.shape:
+                raise ValueError(
+                    f"Training Config observation space ({self.observation_space.shape}) does not "
+                    f"match Environment observation shape ({example_obs.shape})"
+                )
+            sample_action = np.random.normal(
+                loc=(self.action_space.low + self.action_space.high) / 2,
+                scale=(self.action_space.high - self.action_space.low) / 2,
+                size=(self.batch_size, self.action_space.shape[-1]),
+            )
+
+            batch_rewards = self.perform_action(sample_action)
+            self.store_benchmarks(sample_action)
             mean_reward = np.mean(batch_rewards)
-            if mean_reward > self._reward_check_max:
-                self.c_factor = self.c_factor / mean_reward
+            if not np.isclose(mean_reward, self.fidelity_history[-1], atol=1e-2):
+                self.c_factor *= self.fidelity_history[-1] / mean_reward
+                self.c_factor = np.round(self.c_factor, 1)
                 print("C Factor adjusted to ", self.c_factor)
-                # raise ValueError(
-                #     f"Current Mean Reward with Config Vals is {mean_reward}, try a C Factor around {self.c_factor / mean_reward}"
-                # )
+            self.clear_history()
         else:
             pass
 
@@ -769,9 +786,9 @@ class QuantumEnvironment(Env):
                         density_matrix = DensityMatrix(
                             np.mean(
                                 [
-                                    Statevector.from_int(0, dims=self._d).evolve(
-                                        unitary
-                                    )
+                                    Statevector.from_int(
+                                        0, dims=target["dm"].dims
+                                    ).evolve(unitary)
                                     for unitary in qubitized_unitaries
                                 ],
                                 axis=0,
@@ -849,7 +866,7 @@ class QuantumEnvironment(Env):
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
         reward_factor = self.c_factor / (
-            np.sqrt(self._d) * target_state["Chi"][pauli_index]
+            np.sqrt(target_state["dm"].dim) * target_state["Chi"][pauli_index]
         )
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
@@ -866,7 +883,8 @@ class QuantumEnvironment(Env):
         :return: Observables to sample, input state to prepare
         """
         assert self.target_type == "gate", "Target type should be a gate"
-        probabilities = self._chi_gate**2 / (self._d**2)
+        d = 2**qc.num_qubits
+        probabilities = self._chi_gate[self._trunc_index] ** 2 / (d**2)
         basis = pauli_basis(num_qubits=qc.num_qubits)
         samples, pauli_shots = np.unique(
             np.random.choice(
@@ -875,9 +893,7 @@ class QuantumEnvironment(Env):
             return_counts=True,
         )
 
-        pauli_indices = [
-            np.unravel_index(sample, (self._d**2, self._d**2)) for sample in samples
-        ]
+        pauli_indices = [np.unravel_index(sample, (d**2, d**2)) for sample in samples]
         pauli_prep, pauli_meas = zip(
             *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )
@@ -897,7 +913,9 @@ class QuantumEnvironment(Env):
         #         qc.compose(Pauli6PreparationBasis().circuit(prep_indices), front=True)
         #     )
 
-        reward_factor = [self.c_factor / (self._d * self._chi_gate[p]) for p in samples]
+        reward_factor = [
+            self.c_factor / (d * self._chi_gate[self._trunc_index][p]) for p in samples
+        ]
         observables = [
             SparsePauliOp(pauli_meas[i], reward_factor[i]) for i in range(len(samples))
         ]
@@ -928,6 +946,23 @@ class QuantumEnvironment(Env):
                 pubs.append([prep_circuit, parity * obs, None, 1 / np.sqrt(shot)])
 
         return pubs
+
+    def _observable_to_observation(self):
+        """
+        Convert the observable to an observation to be given to the agent
+        """
+        if not self.channel_estimator:
+            n_qubits = self.observables.num_qubits
+            d = 2**n_qubits
+            pauli_to_index = {pauli: i for i, pauli in enumerate(pauli_basis(n_qubits))}
+            array_obs = np.zeros(d**2)
+            for pauli in self.observables:
+                array_obs[pauli_to_index[pauli.paulis[0]]] = pauli.coeffs[0]
+
+            array_obs = []
+            return array_obs
+        else:
+            raise NotImplementedError("Channel estimator not yet implemented")
 
     def _generate_circuits(self):
         """
@@ -968,6 +1003,8 @@ class QuantumEnvironment(Env):
 
         :return: Pulse calibration for the target gate
         """
+        if not self.target_type == "gate":
+            raise ValueError("Target type should be a gate for gate calibration task.")
         if self.abstraction_level == "pulse":
             sched = schedule(
                 self.circuit_truncations[0], self.backend
