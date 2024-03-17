@@ -1526,12 +1526,6 @@ def load_q_env_from_yaml_file(file_path: str):
     action_shape = low.shape
     params = {
         "action_space": Box(low=low, high=high, shape=action_shape, dtype=np.float32),
-        "observation_space": Box(
-            low=np.float32(0.0),
-            high=np.float32(1.0),
-            shape=(config["ENV"]["OBSERVATION_SPACE"],),
-            dtype=np.float32,
-        ),
         "batch_size": config["ENV"]["BATCH_SIZE"],
         "sampling_Paulis": config["ENV"]["SAMPLING_PAULIS"],
         "n_shots": config["ENV"]["N_SHOTS"],
@@ -1561,7 +1555,8 @@ def load_q_env_from_yaml_file(file_path: str):
         "calibration_files": config["BACKEND"]["DYNAMICS"]["CALIBRATION_FILES"],
     }
     runtime_options = config["RUNTIME_OPTIONS"]
-    print(runtime_options)
+    if backend_params["real_backend"]:
+        print("Runtime Options:", runtime_options)
     check_on_exp = config["ENV"]["CHECK_ON_EXP"]
     channel_estimator = config["ENV"]["CHANNEL_ESTIMATOR"]
     return (

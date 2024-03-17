@@ -36,11 +36,11 @@ RUNTIME_OPTIONS: # Relevant only when using the Qiskit runtime service
     basis_gates: null
 
 BACKEND: # Backend configuration (If all set to null, the user needs to specify its own backend in q_env_config.py's get_backend() function)
-  REAL_BACKEND: null # True: real or False: fake Aer backend
-  NAME: null # Name of the backend
+  REAL_BACKEND: False # True: real or False: fake Aer backend
+  NAME: "fake_jakarta" # Name of the backend
   DYNAMICS: # Use a DynamicsBackend (if fields above are not null, build a DynamicsBackend.from_backend() with the specified backend)
-    USE_DYNAMICS: null # Whether to use a DynamicsBackend
-    PHYSICAL_QUBITS: [ 0, 1 ] # qubit indices of the device to be used for modelling the system
+    USE_DYNAMICS: True # Whether to use a DynamicsBackend
+    PHYSICAL_QUBITS: [ 0 ] # qubit indices of the device to be used for modelling the system
     SOLVER_OPTIONS:
       method: "jax_odeint"
       atol: 1e-5
@@ -62,7 +62,6 @@ ENV: # Environment configuration
   ACTION_SPACE:
     LOW: [ -1., -3.14 ]
     HIGH: [ 1., 3.14 ]
-  OBSERVATION_SPACE: 2 # Shape of the observation space
   BENCHMARK_CYCLE: 10 # Number of steps between two fidelity benchmarks
   SEED: 100
   CHECK_ON_EXP: False # Whether to perform fidelity benchmarking with tomographic experiments or just using simulation

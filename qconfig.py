@@ -114,7 +114,6 @@ class QEnvConfig:
     target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit]
     backend_config: BackendConfig
     action_space: Space
-    observation_space: Space
     batch_size: int = 50
     sampling_Paulis: int = 100
     n_shots: int = 1
