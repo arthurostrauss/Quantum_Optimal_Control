@@ -1577,61 +1577,10 @@ def remove_none_values(dictionary):
             new_dict[k] = v
     return new_dict
 
-
-def load_agent_from_yaml_file(file_path: str):
+def load_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
-
-    return {
-        "RUN_NAME": config["RUN_NAME"],
-        "NUM_UPDATES": config["NUM_UPDATES"],
-        "N_EPOCHS": config["N_EPOCHS"],
-        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
-        "LR": config["LR"],
-        "GAMMA": config["GAMMA"],
-        "GAE_LAMBDA": config["GAE_LAMBDA"],
-        "ENT_COEF": config["ENT_COEF"],
-        "V_COEF": config["V_COEF"],
-        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
-        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
-        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
-        "CLIP_RATIO": config["CLIP_RATIO"],
-        "OPTIMIZER": config["OPTIMIZER"],
-        "N_UNITS": config["N_UNITS"],
-        "ACTIVATION": config["ACTIVATION"],
-        "INCLUDE_CRITIC": config["INCLUDE_CRITIC"],
-        "NORMALIZE_ADVANTAGE": config["NORMALIZE_ADVANTAGE"],
-        "CHKPT_DIR": config["CHKPT_DIR"],
-    }
-
-
-def load_hpo_config_from_yaml_file(file_path: str):
-    """
-    Load HPO configuration from yaml file
-
-    Args:
-        file_path: File path
-    """
-    with open(file_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    return {
-        "N_TRIALS": config["N_TRIALS"],
-        "N_UPDATES": config["N_UPDATES"],
-        "N_EPOCHS": config["N_EPOCHS"],
-        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
-        "BATCHSIZE_MULTIPLIER": config["BATCHSIZE_MULTIPLIER"],
-        "LR": config["LR"],
-        "GAMMA": config["GAMMA"],
-        "GAE_LAMBDA": config["GAE_LAMBDA"],
-        "ENT_COEF": config["ENT_COEF"],
-        "V_COEF": config["V_COEF"],
-        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
-        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
-        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
-        "CLIP_RATIO": config["CLIP_RATIO"],
-    }
-
+    return config
 
 def create_hpo_agent_config(
     trial: optuna.trial.Trial, hpo_config: Dict, agent_config: Dict

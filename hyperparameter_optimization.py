@@ -10,9 +10,8 @@ import optuna
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from helper_functions import (
-    load_agent_from_yaml_file,
+    load_from_yaml_file,
     create_hpo_agent_config,
-    load_hpo_config_from_yaml_file,
 )
 from ppo import make_train_ppo
 
@@ -80,8 +79,8 @@ class HyperparameterOptimizer:
         """
         self.q_env = q_env
         # Start with an initial agent configuration and then update it with the hyperparameters later in the workflow
-        self.agent_config_init = load_agent_from_yaml_file(path_agent_config)
-        self.hpo_config = load_hpo_config_from_yaml_file(path_hpo_config)
+        self.agent_config_init = load_from_yaml_file(path_agent_config)
+        self.hpo_config = load_from_yaml_file(path_hpo_config)
         self.save_results_path = save_results_path
         self.experimental_penalty_weights = experimental_penalty_weights
         self.log_progress = log_progress

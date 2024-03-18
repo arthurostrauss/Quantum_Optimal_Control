@@ -764,7 +764,7 @@ def make_train_ppo(
 
             return {
                 "avg_reward": avg_reward,
-                "std_action": std_action[0],
+                "std_action": std_actions,
                 "fidelity_history": fidelities,
                 "action_history": avg_action_history,
                 "best_action_vector": env.unwrapped.optimal_action,
