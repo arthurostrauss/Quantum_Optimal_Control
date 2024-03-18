@@ -20,7 +20,7 @@ from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule
+from qiskit import schedule, transpile
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 # Qiskit imports
