@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from typing import Optional, Dict
 import os
 import numpy as np
@@ -9,17 +8,36 @@ from helper_functions import (
     select_backend,
 )
 from qiskit import QuantumCircuit, QuantumRegister, transpile
+from qiskit.quantum_info import Operator
 from qiskit.circuit import ParameterVector
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
 from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
 from qiskit.providers import BackendV1, BackendV2
 
+import qiskit_aer.noise as noise
+from qiskit_aer.noise import (
+    pauli_error,
+    phase_amplitude_damping_error,
+    depolarizing_error
+)
+from qiskit_aer.noise.passes.local_noise_pass import LocalNoisePass
+
+from qiskit_aer import AerSimulator
+from qiskit.quantum_info import Operator
+from qiskit.circuit.library import RXGate, SXGate, IGate, CRXGate
+from qiskit_aer.noise.errors import QuantumError
+from qiskit.quantum_info.operators.channel import Kraus
+from scipy.linalg import sqrtm
+
 from qconfig import QiskitConfig, QEnvConfig
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
+from helper_functions import create_circuit_from_own_unitaries
+
+from qiskit.providers.fake_provider import GenericBackendV2
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-config_file_name = "q_env_gate_config.yml"
+config_file_name = 'q_env_gate_config.yaml'
 config_file_address = os.path.join(current_dir, config_file_name)
 
 
@@ -36,8 +54,9 @@ def apply_parametrized_circuit(
     """
     target = kwargs["target"]
     my_qc = QuantumCircuit(q_reg, name=f"custom_{target['gate'].name}")
-    # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-    optimal_params = np.pi * np.zeros(len(params))
+    optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
+    optimal_params += np.array([-0.00020222, -0.00018466,  0.00075005,  0.00248492, -0.00792428, -0.00582522, -0.00161892])
+    # optimal_params = np.pi * np.zeros(len(params))
 
     my_qc.u(
         optimal_params[0] + params[0],
