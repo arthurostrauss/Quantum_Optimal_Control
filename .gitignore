@@ -101,6 +101,7 @@ celerybeat-schedule
 .venv
 env/
 venv/
+venv_*
 ENV/
 env.bak/
 venv.bak/
@@ -123,3 +124,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 .DS_Store
+
+events.out.tfevents.*

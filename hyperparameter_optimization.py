@@ -103,8 +103,10 @@ class HyperparameterOptimizer:
             trial, self.hpo_config, self.agent_config_init
         )
 
-        # Overwrite the batch_size of the (unwrapped) environment with the one from the agent_config
+        # Include batchsize, n_shots, and sampling_Pauli_space in the hpo scope
         self.q_env.unwrapped.batch_size = self.agent_config["BATCHSIZE"]
+        self.q_env.unwrapped.n_shots = self.agent_config["N_SHOTS"]
+        self.q_env.unwrapped.sampling_Pauli_space = self.agent_config["SAMPLE_PAULIS"]
 
         train_fn = make_train_ppo(self.agent_config, self.q_env)
         start_time = time.time()

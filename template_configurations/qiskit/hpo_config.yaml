@@ -1,17 +1,23 @@
 N_TRIALS: 1
 N_UPDATES:
-  - 150 # Min value
-  - 500 # Max value
+  - 250 # Min value
+  - 1000 # Max value
 N_EPOCHS:
   - 8 
-  - 32
-MINIBATCH_SIZE: [4, 6, 8, 12, 16, 24, 32, 40]
+  - 25
+MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
 BATCHSIZE_MULTIPLIER:
   - 2
   - 12
 LR:
   - 0.00005
   - 0.02
+N_SHOTS: 
+  - 1
+  - 1000
+SAMPLE_PAULIS:
+  - 100
+  - 1000
 GAMMA:
   - 0.95
   - 0.999
@@ -19,7 +25,7 @@ GAE_LAMBDA:
   - 0.90
   - 0.999
 ENT_COEF:
-  - 0.0
+  - 0.00005
   - 0.001
 V_COEF:
   - 0.25

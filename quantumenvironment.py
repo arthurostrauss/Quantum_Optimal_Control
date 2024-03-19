@@ -562,7 +562,8 @@ class QuantumEnvironment(Env):
                 backend=self.backend,
                 initial_layout=self.layout[trunc_index],
             )
-            full_circ = pm.run(qc.compose(input_state_circ, inplace=False, front=True))
+            # full_circ = pm.run(qc.compose(input_state_circ, inplace=False, front=True))
+            full_circ = qc.compose(input_state_circ, inplace=False, front=True)
             if isinstance(self.estimator, BaseEstimatorV1):
                 print(self._observables)
                 job = self.estimator.run(

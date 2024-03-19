@@ -717,7 +717,7 @@ def make_train_ppo(
                         np.std(env.unwrapped.reward_history, axis=1)[-1],
                     )
                     print("Returns Mean:", np.mean(b_returns.numpy()))
-                    print("Returns standard dev", np.std(b_returns.numpy()))
+                    print("Returns standard dev:", np.std(b_returns.numpy()))
                     print("Advantages Mean:", np.mean(b_advantages.numpy()))
                     print("Advantages standard dev", np.std(b_advantages.numpy()))
                     # print(np.mean(env.unwrapped.reward_history, axis =1)[-1])
@@ -752,8 +752,8 @@ def make_train_ppo(
                 # Collect results
                 avg_reward.append(np.mean(env.unwrapped.reward_history, axis=1)[-1])
                 (
-                    fidelities.append(env.unwrapped.avg_fidelity_history[-1])
-                    if len(env.unwrapped.avg_fidelity_history) > 0
+                    fidelities.append(env.unwrapped.fidelity_history[-1])
+                    if len(env.unwrapped.fidelity_history) > 0
                     else None
                 )
                 avg_action_history.append(mean_action[0].numpy())
