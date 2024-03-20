@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import warnings
 
 from qiskit import pulse, schedule, transpile
@@ -10,8 +9,6 @@ from qiskit.circuit import (
     CircuitInstruction,
     ParameterVector,
     Delay,
-    Instruction,
-    Qubit,
 )
 from qiskit.circuit.library import get_standard_gate_name_mapping, RZGate
 from qiskit.exceptions import QiskitError
@@ -105,7 +102,6 @@ from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import Dense
 
 from qconfig import QiskitConfig
-from custom_jax_sim import JaxSolver, DynamicsBackendEstimator, PauliToQuditOperator
 
 Estimator_type = Union[
     AerEstimator,
@@ -113,7 +109,6 @@ Estimator_type = Union[
     RuntimeEstimatorV2,
     Estimator,
     BackendEstimator,
-    DynamicsBackendEstimator,
     StatevectorEstimator,
 ]
 Sampler_type = Union[
@@ -613,97 +608,6 @@ def new_params_sq_gate(
     return new_params
 
 
-def simulate_pulse_schedule(
-    solver_instance: DynamicsBackend | Solver | JaxSolver,
-    sched: pulse.Schedule | pulse.ScheduleBlock,
-    solver_options: Optional[Dict] = None,
-    target_unitary: Optional[Operator] = None,
-    initial_state: Optional[Statevector | DensityMatrix] = None,
-    target_state: Optional[Statevector | DensityMatrix] = None,
-    normalize: bool = True,
-) -> Dict[str, Union[Operator, Statevector, float]]:
-    """
-    Simulate pulse schedule on provided backend
-
-    :param solver_instance: DynamicsBackend or Solver instance
-    :param sched: Pulse schedule to simulate
-    :param solver_options: Optional solver options
-    :param target_unitary: Optional target unitary for gate fidelity calculation
-    :param initial_state: Optional initial state for state fidelity calculation  (if None and target_state is not None,
-    then initial state is assumed to be |0..0>)
-    :param target_state: Optional target state for state fidelity calculation
-    :param normalize: Normalize the projected statevector or not
-    :return: Dictionary containing simulated unitary, statevector, projected unitary, projected statevector, gate fidelity, state fidelity
-    """
-
-    if isinstance(solver_instance, DynamicsBackend):
-        solver = solver_instance.options.solver
-        solver_options = solver_instance.options.solver_options
-        dt = solver_instance.dt
-        subsystem_dims = list(
-            filter(lambda x: x > 1, solver_instance.options.subsystem_dims)
-        )
-    elif isinstance(solver_instance, (Solver, JaxSolver)):
-        solver = solver_instance
-        dt = solver._dt
-        subsystem_dims = solver.model.dim
-    else:
-        raise TypeError(
-            "Solver instance must be defined. Backend is not DynamicsBackend or Solver instance"
-        )
-
-    def jit_func():
-        results = solver.solve(
-            t_span=Array([0, sched.duration * dt]),
-            y0=jnp.eye(solver.model.dim),
-            signals=sched,
-            **solver_options,
-        )
-        return Array(results.y).data
-
-    sim_func = jit(jit_func)
-    results = np.array(sim_func())
-    output_unitary = results[-1]
-
-    output_op = Operator(
-        output_unitary,
-        input_dims=tuple(subsystem_dims),
-        output_dims=tuple(subsystem_dims),
-    )
-    projected_unitary = qubit_projection(output_unitary, subsystem_dims)
-    initial_state = (
-        Statevector.from_int(0, subsystem_dims)
-        if initial_state is None
-        else initial_state
-    )
-    final_state = initial_state.evolve(output_op)
-    projected_statevec = projected_statevector(final_state, subsystem_dims, normalize)
-
-    final_results = {
-        "unitary": output_op,
-        "statevector": final_state,
-        "projected_unitary": projected_unitary,
-        "projected_statevector": projected_statevec,
-    }
-    if target_unitary is not None:
-        optimal_rots = get_optimal_z_rotation(
-            projected_unitary, target_unitary, len(subsystem_dims)
-        )
-        rotated_unitary = rotate_unitary(optimal_rots.x, projected_unitary)
-        gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
-        optimal_gate_fid = average_gate_fidelity(rotated_unitary, target_unitary)
-        final_results["gate_fidelity"] = {
-            "raw": gate_fid,
-            "optimal": optimal_gate_fid,
-            "rotations": optimal_rots.x,
-        }
-
-    if target_state is not None:
-        state_fid = state_fidelity(projected_statevec, target_state, validate=False)
-        final_results["state_fidelity"] = state_fid
-    return final_results
-
-
 def state_fidelity_from_state_tomography(
     qc_list: List[QuantumCircuit],
     backend: Backend,
@@ -970,30 +874,6 @@ def retrieve_primitives(
 
             estimator = StatevectorEstimator()
 
-        elif isinstance(backend, DynamicsBackend):
-            assert (
-                abstraction_level == "pulse"
-            ), "DynamicsBackend works only with pulse level abstraction"
-            if isinstance(backend.options.solver, JaxSolver):
-                estimator: Estimator_type = DynamicsBackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=True
-                )
-                backend.options.solver.circuit_macro = lambda: schedule(
-                    circuit, backend
-                )
-            else:
-                estimator: Estimator_type = BackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=True
-                )
-            estimator.set_transpile_options(initial_layout=layout)
-            sampler = BackendSampler(
-                backend, options=estimator_options, skip_transpilation=True
-            )
-            if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
-                calibration_files: List[str] = config.calibration_files
-                print("3")
-                _, _ = perform_standard_calibrations(backend, calibration_files)
-
         else:
             if isinstance(backend, Backend_type):
                 estimator = BackendEstimator(
@@ -1091,43 +971,6 @@ def handle_session(
                 estimator.options,
             )
             estimator = type(estimator)(session=session, options=dict(options))
-    elif isinstance(estimator, DynamicsBackendEstimator):
-        if not isinstance(backend, DynamicsBackend) or not isinstance(
-            backend.options.solver, JaxSolver
-        ):
-            raise TypeError(
-                "DynamicsBackendEstimator can only be used with DynamicsBackend and JaxSolver"
-            )
-        # Update callable within the jit compiled function
-        if counter != backend.options.solver.circuit_macro_counter:
-            backend.options.solver.circuit_macro_counter = counter
-            backend.options.solver.circuit_macro = lambda: schedule(qc, backend)
-
-        # Update initial state of DynamicsBackend with input state circuit
-        # The initial state is adapted to match the dimensions of the HamiltonianModel
-        new_circ = transpile(input_state_circ, backend)
-        subsystem_dims = backend.options.subsystem_dims
-        initial_state = Statevector.from_int(
-            0, dims=tuple(filter(lambda x: x > 1, subsystem_dims))
-        )
-        initial_rotations = [
-            Operator.from_label("I") for i in range(new_circ.num_qubits)
-        ]
-        qubit_counter, qubit_list = 0, []
-        for instruction in new_circ.data:
-            assert (
-                len(instruction.qubits) == 1
-            ), "Input state circuit must be in a tensor product form"
-            if instruction.qubits[0] not in qubit_list:
-                qubit_list.append(instruction.qubits[0])
-                qubit_counter += 1
-            initial_rotations[qubit_counter - 1] = initial_rotations[
-                qubit_counter - 1
-            ].compose(Operator(instruction.operation))
-
-        operation = PauliToQuditOperator(initial_rotations, subsystem_dims)
-        initial_state = initial_state.evolve(operation)
-        backend.set_options(initial_state=initial_state)
 
     return estimator
 
@@ -1191,7 +1034,7 @@ def select_backend(
                 solver_options["hmax"] = backend.configuration().dt
             for key in ["atol", "rtol"]:
                 solver_options[key] = float(solver_options[key])
-            backend = custom_dynamics_from_backend(
+            backend = DynamicsBackend.from_backend(
                 backend,
                 subsystem_list=list(physical_qubits),
                 solver_options=solver_options,
@@ -1201,151 +1044,6 @@ def select_backend(
             )
 
     return backend
-
-
-def custom_dynamics_from_backend(
-    backend: BackendV1,
-    subsystem_list: Optional[List[int]] = None,
-    rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
-    evaluation_mode: str = "dense",
-    rwa_cutoff_freq: Optional[float] = None,
-    static_dissipators: Optional[Array] = None,
-    dissipator_operators: Optional[Array] = None,
-    dissipator_channels: Optional[List[str]] = None,
-    **options,
-) -> DynamicsBackend:
-    """
-    Method to retrieve custom DynamicsBackend instance from IBMBackend instance
-    added with potential dissipation operators, inspired from DynamicsBackend.from_backend() method.
-    Contrary to the original method, the Solver instance created is the custom JaxSolver tailormade for fast simulation
-    with the Estimator primitive.
-
-    :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
-    :param subsystem_list: The list of qubits in the backend to include in the model.
-    :param rwa_cutoff_freq: Rotating wave approximation argument for the internal :class:`.Solver`
-    :param evaluation_mode: Evaluation mode argument for the internal :class:`.Solver`.
-    :param rotating_frame: Rotating frame argument for the internal :class:`.Solver`. Defaults to
-            ``"auto"``, allowing this method to pick a rotating frame.
-    :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
-    :param static_dissipators: static_dissipators: Constant dissipation operators.
-    :param dissipator_operators: Dissipation operators with time-dependent coefficients.
-    :param dissipator_channels: List of channel names in pulse schedules corresponding to dissipator operators.
-
-    :return: Solver instance carrying Hamiltonian information extracted from the IBMBackend instance
-    """
-    # get available target, config, and defaults objects
-    backend_target = getattr(backend, "target", None)
-
-    if not hasattr(backend, "configuration"):
-        raise QiskitError(
-            "DynamicsBackend.from_backend requires that the backend argument has a "
-            "configuration method."
-        )
-    backend_config = backend.configuration()
-
-    backend_defaults = None
-    if hasattr(backend, "defaults"):
-        backend_defaults = backend.defaults()
-
-    # get and parse Hamiltonian string dictionary
-    if backend_target is not None:
-        backend_num_qubits = backend_target.num_qubits
-    else:
-        backend_num_qubits = backend_config.n_qubits
-
-    if subsystem_list is not None:
-        subsystem_list = sorted(subsystem_list)
-        if subsystem_list[-1] >= backend_num_qubits:
-            raise QiskitError(
-                f"subsystem_list contained {subsystem_list[-1]}, which is out of bounds for "
-                f"backend with {backend_num_qubits} qubits."
-            )
-    else:
-        subsystem_list = list(range(backend_num_qubits))
-
-    if backend_config.hamiltonian is None:
-        raise QiskitError(
-            "DynamicsBackend.from_backend requires that backend.configuration() has a "
-            "hamiltonian."
-        )
-
-    (
-        static_hamiltonian,
-        hamiltonian_operators,
-        hamiltonian_channels,
-        subsystem_dims_dict,
-    ) = parse_backend_hamiltonian_dict(backend_config.hamiltonian, subsystem_list)
-    subsystem_dims = [
-        subsystem_dims_dict.get(idx, 1) for idx in range(backend_num_qubits)
-    ]
-
-    # construct model frequencies dictionary from backend
-    channel_freqs = _get_backend_channel_freqs(
-        backend_target=backend_target,
-        backend_config=backend_config,
-        backend_defaults=backend_defaults,
-        channels=hamiltonian_channels,
-    )
-
-    # Add control_channel_map from backend (only if not specified before by user)
-    if "control_channel_map" not in options:
-        if hasattr(backend, "control_channels"):
-            control_channel_map_backend = {
-                qubits: backend.control_channels[qubits][0].index
-                for qubits in backend.control_channels
-            }
-
-        elif hasattr(backend.configuration(), "control_channels"):
-            control_channel_map_backend = {
-                qubits: backend.configuration().control_channels[qubits][0].index
-                for qubits in backend.configuration().control_channels
-            }
-
-        else:
-            control_channel_map_backend = {}
-
-        # Reduce control_channel_map based on which channels are in the model
-        if bool(control_channel_map_backend):
-            control_channel_map = {}
-            for label, idx in control_channel_map_backend.items():
-                if f"u{idx}" in hamiltonian_channels:
-                    control_channel_map[label] = idx
-            options["control_channel_map"] = control_channel_map
-
-    # build the solver
-    if rotating_frame == "auto":
-        if "dense" in evaluation_mode:
-            rotating_frame = static_hamiltonian
-        else:
-            rotating_frame = np.diag(static_hamiltonian)
-
-    # get time step size
-    if backend_target is not None and backend_target.dt is not None:
-        dt = backend_target.dt
-    else:
-        # config is guaranteed to have a dt
-        dt = backend_config.dt
-
-    solver = JaxSolver(
-        static_hamiltonian=static_hamiltonian,
-        hamiltonian_operators=hamiltonian_operators,
-        hamiltonian_channels=hamiltonian_channels,
-        channel_carrier_freqs=channel_freqs,
-        dt=dt,
-        rotating_frame=rotating_frame,
-        evaluation_mode=evaluation_mode,
-        rwa_cutoff_freq=rwa_cutoff_freq,
-        static_dissipators=static_dissipators,
-        dissipator_operators=dissipator_operators,
-        dissipator_channels=dissipator_channels,
-    )
-
-    return DynamicsBackend(
-        solver=solver,
-        target=Target(dt=dt),
-        subsystem_dims=subsystem_dims,
-        **options,
-    )
 
 
 def build_qubit_space_projector(initial_subsystem_dims: list):
@@ -1508,6 +1206,7 @@ def get_optimal_z_rotation(
     res = minimize(cost_function, x0, method="Nelder-Mead")
     return res
 
+
 def load_q_env_from_yaml_file(file_path: str):
     """
     Load Qiskit Quantum Environment from yaml file
@@ -1578,13 +1277,64 @@ def remove_none_values(dictionary):
             new_dict[k] = v
     return new_dict
 
-def load_from_yaml_file(file_path: str):
+
+def load_agent_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
-    return config
+
+    return {
+        "RUN_NAME": config["RUN_NAME"],
+        "NUM_UPDATES": config["NUM_UPDATES"],
+        "N_EPOCHS": config["N_EPOCHS"],
+        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
+        "LR": config["LR"],
+        "GAMMA": config["GAMMA"],
+        "GAE_LAMBDA": config["GAE_LAMBDA"],
+        "ENT_COEF": config["ENT_COEF"],
+        "V_COEF": config["V_COEF"],
+        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
+        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
+        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
+        "CLIP_RATIO": config["CLIP_RATIO"],
+        "OPTIMIZER": config["OPTIMIZER"],
+        "N_UNITS": config["N_UNITS"],
+        "ACTIVATION": config["ACTIVATION"],
+        "INCLUDE_CRITIC": config["INCLUDE_CRITIC"],
+        "NORMALIZE_ADVANTAGE": config["NORMALIZE_ADVANTAGE"],
+        "CHKPT_DIR": config["CHKPT_DIR"],
+    }
+
+
+def load_hpo_config_from_yaml_file(file_path: str):
+    """
+    Load HPO configuration from yaml file
+
+    Args:
+        file_path: File path
+    """
+    with open(file_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    return {
+        "N_TRIALS": config["N_TRIALS"],
+        "N_UPDATES": config["N_UPDATES"],
+        "N_EPOCHS": config["N_EPOCHS"],
+        "MINIBATCH_SIZE": config["MINIBATCH_SIZE"],
+        "BATCHSIZE_MULTIPLIER": config["BATCHSIZE_MULTIPLIER"],
+        "LR": config["LR"],
+        "GAMMA": config["GAMMA"],
+        "GAE_LAMBDA": config["GAE_LAMBDA"],
+        "ENT_COEF": config["ENT_COEF"],
+        "V_COEF": config["V_COEF"],
+        "GRADIENT_CLIP": config["GRADIENT_CLIP"],
+        "CLIP_VALUE_LOSS": config["CLIP_VALUE_LOSS"],
+        "CLIP_VALUE_COEF": config["CLIP_VALUE_COEF"],
+        "CLIP_RATIO": config["CLIP_RATIO"],
+    }
+
 
 def create_hpo_agent_config(
-    trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
+    trial: optuna.trial.Trial, hpo_config: Dict, agent_config: Dict
 ):
     hyper_params = {
         "N_UPDATES": trial.suggest_int(
@@ -1606,12 +1356,6 @@ def create_hpo_agent_config(
             hpo_config["LR"][0],
             hpo_config["LR"][1],
             log=True,
-        ),
-        "N_SHOTS": trial.suggest_int(
-            "N_SHOTS", hpo_config["N_SHOTS"][0], hpo_config["N_SHOTS"][1],
-        ),
-        "SAMPLE_PAULIS": trial.suggest_int(
-            "SAMPLE_PAULIS", hpo_config["SAMPLE_PAULIS"][0], hpo_config["SAMPLE_PAULIS"][1],
         ),
         "GAMMA": trial.suggest_float(
             "GAMMA", hpo_config["GAMMA"][0], hpo_config["GAMMA"][1]
@@ -1651,12 +1395,18 @@ def create_hpo_agent_config(
     hyper_params["CLIP_VALUE_LOSS"] = hpo_config["CLIP_VALUE_LOSS"]
 
     # Take over attributes from agent_config and populate hyper_params
-    agent_config = load_from_yaml_file(path_to_agent_config)
-    final_config = hyper_params.copy()
-    final_config.update(agent_config)
-    final_config.update(hyper_params)
+    for attr in [
+        "OPTIMIZER",
+        "N_UNITS",
+        "ACTIVATION",
+        "INCLUDE_CRITIC",
+        "NORMALIZE_ADVANTAGE",
+        "CHKPT_DIR",
+        "RUN_NAME",
+    ]:
+        hyper_params[attr] = agent_config[attr]
 
-    return final_config, hyperparams
+    return hyper_params, hyperparams
 
 
 def retrieve_backend_info(
@@ -1726,183 +1476,3 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
         target["gate"], [qc.qubits[i] for i in target["register"]]
     )
     return qc.data.count(tgt_instruction)
-
-def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs):
-    """
-    Generates a new quantum circuit, replacing all gates except the specified target gate with custom unitary gates.
-
-    This function iterates through each gate in the provided `circuit_context`, and for each gate that does not match
-    the specified target operation, it extracts its matrix representation and adds a corresponding unitary gate to a new
-    quantum circuit. The target operation, if present, is added unchanged to the new circuit. Each non-target gate in the
-    new circuit is labeled uniquely to indicate its type, the qubits it acts on, and its occurrence count.
-
-    Parameters:
-    - circuit_context (QuantumCircuit): The original quantum circuit from which the gate operations are extracted.
-    - **kwargs: Arbitrary keyword arguments. Expected to contain 'target_gate_info' specifying the target operation to leave
-      unchanged. This should be a dictionary with 'register' (a list of qubit indices the gate acts on) and 'gate' (the gate
-      instruction).
-
-    Returns:
-    - QuantumCircuit: A new quantum circuit where non-target gates are replaced by unitary gates and the target gate is
-      left as in the original circuit. Each unitary gate is labeled to reflect its origin.
-    """
-    new_circuit = QuantumCircuit(circuit_context.num_qubits)
-    gate_count = {}
-    target_gate_instruction = kwargs.get('gate')
-    target_gate_qubits = kwargs.get('register', [])
-
-    for inst, qargs, _ in circuit_context.data:
-        gate_name = inst.name
-        qubits_indices = [circuit_context.find_bit(q).index for q in qargs]
-
-        # Check if the current gate matches the target operation
-        if isinstance(target_gate_instruction, Instruction) and gate_name == target_gate_instruction.name and qubits_indices == target_gate_qubits:
-            # Add the target gate unchanged to the new circuit
-            print('Target gate found')
-            new_circuit.append(instruction=inst, qargs=qargs)
-        else:
-            # Process non-target gates
-            gate_label, qubit_indices = process_gate(inst, qargs, gate_count, circuit_context)
-            matrix_representation = Operator(inst).data
-            new_circuit.unitary(matrix_representation, qubit_indices, label=gate_label)
-
-    return new_circuit
-
-def process_gate(inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_context: QuantumCircuit):
-    """
-    Processes a gate to generate a unique label and determine qubit indices for the new unitary gate.
-
-    Parameters:
-    - inst: The gate instruction from the original circuit.
-    - qargs: Qubit arguments for the gate.
-    - gate_count: A dictionary tracking the occurrence count of each gate label.
-    - circuit_context: The original quantum circuit context.
-
-    Returns:
-    - gate_label (str): A unique label for the gate.
-    - qubit_indices (tuple or int): The qubit indices for the new unitary gate.
-    """
-    gate_name = inst.name
-    qubits_indices = [circuit_context.find_bit(q).index for q in qargs]  # Define qubits_indices here
-
-    if len(qargs) == 2:  # Special handling for two-qubit gates like CNOT
-        control_index, target_index = qubits_indices
-        gate_label = f"{gate_name}_c{control_index}_t{target_index}"
-        qubit_indices = (control_index, target_index)
-    else:  # Handling for single-qubit gates and other types of gates
-        gate_label = f"{gate_name}_q{'_'.join(map(str, qubits_indices))}"
-        qubit_indices = qubits_indices[0] if len(qubits_indices) == 1 else tuple(qubits_indices)
-
-    # Increment gate instance count and update label
-    gate_count[gate_label] = gate_count.get(gate_label, 0) + 1
-    gate_label += f'_o{gate_count[gate_label]}'  # o for occurrences
-
-    return gate_label, qubit_indices
-
-
-def select_optimizer(
-    lr: float,
-    optimizer: str = "Adam",
-    grad_clip: Optional[float] = None,
-    concurrent_optimization: bool = True,
-    lr2: Optional[float] = None,
-):
-    if concurrent_optimization:
-        if optimizer == "Adam":
-            return tf.optimizers.Adam(learning_rate=lr, clipvalue=grad_clip)
-        elif optimizer == "SGD":
-            return tf.optimizers.SGD(learning_rate=lr, clipvalue=grad_clip)
-    else:
-        if optimizer == "Adam":
-            return tf.optimizers.Adam(learning_rate=lr), tf.optimizers.Adam(
-                learning_rate=lr2, clipvalue=grad_clip
-            )
-        elif optimizer == "SGD":
-            return tf.optimizers.SGD(learning_rate=lr), tf.optimizers.SGD(
-                learning_rate=lr2, clipvalue=grad_clip
-            )
-
-
-def constrain_mean_value(mu_var):
-    return [tf.clip_by_value(m, -1.0, 1.0) for m in mu_var]
-
-
-def constrain_std_value(std_var):
-    return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
-
-
-def generate_model(
-    input_shape: Tuple,
-    hidden_units: Union[List, Tuple],
-    n_actions: int,
-    actor_critic_together: bool = True,
-    hidden_units_critic: Optional[Union[List, Tuple]] = None,
-):
-    """
-    Helper function to generate fully connected NN
-    :param input_shape: Input shape of the NN
-    :param hidden_units: List containing number of neurons per hidden layer
-    :param n_actions: Output shape of the NN on the actor part, i.e. dimension of action space
-    :param actor_critic_together: Decide if actor and critic network should be distinct or should be sharing layers
-    :param hidden_units_critic: If actor_critic_together set to False, List containing number of neurons per hidden
-           layer for critic network
-    :return: Model or Tuple of two Models for actor critic network
-    """
-    input_layer = Input(shape=input_shape)
-    Net = Dense(
-        hidden_units[0],
-        activation="relu",
-        input_shape=input_shape,
-        kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-        bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-        name=f"hidden_{0}",
-    )(input_layer)
-    for i in range(1, len(hidden_units)):
-        Net = Dense(
-            hidden_units[i],
-            activation="relu",
-            kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-            bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-            name=f"hidden_{i}",
-        )(Net)
-
-    mean_param = Dense(n_actions, activation="tanh", name="mean_vec")(
-        Net
-    )  # Mean vector output
-    sigma_param = Dense(n_actions, activation="softplus", name="sigma_vec")(
-        Net
-    )  # Diagonal elements of cov matrix
-    # output
-
-    if actor_critic_together:
-        critic_output = Dense(1, activation="linear", name="critic_output")(Net)
-        return Model(
-            inputs=input_layer, outputs=[mean_param, sigma_param, critic_output]
-        )
-    else:
-        assert (
-            hidden_units_critic is not None
-        ), "Network structure for critic network not provided"
-        input_critic = Input(shape=input_shape)
-        Critic_Net = Dense(
-            hidden_units_critic[0],
-            activation="relu",
-            input_shape=input_shape,
-            kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-            bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-            name=f"hidden_{0}",
-        )(input_critic)
-        for i in range(1, len(hidden_units)):
-            Critic_Net = Dense(
-                hidden_units[i],
-                activation="relu",
-                kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-                bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-                name=f"hidden_{i}",
-            )(Critic_Net)
-            critic_output = Dense(1, activation="linear", name="critic_output")(
-                Critic_Net
-            )
-            return Model(inputs=input_layer, outputs=[mean_param, sigma_param]), Model(
-                inputs=input_critic, outputs=critic_output
-            )

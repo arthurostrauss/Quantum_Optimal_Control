@@ -20,7 +20,7 @@ from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule
+from qiskit import schedule, transpile
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 # Qiskit imports
@@ -562,8 +562,7 @@ class QuantumEnvironment(Env):
                 backend=self.backend,
                 initial_layout=self.layout[trunc_index],
             )
-            # full_circ = pm.run(qc.compose(input_state_circ, inplace=False, front=True))
-            full_circ = qc.compose(input_state_circ, inplace=False, front=True)
+            full_circ = pm.run(qc.compose(input_state_circ, inplace=False, front=True))
             if isinstance(self.estimator, BaseEstimatorV1):
                 print(self._observables)
                 job = self.estimator.run(

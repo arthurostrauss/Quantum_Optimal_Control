@@ -26,12 +26,10 @@ from qiskit.quantum_info import (
     state_fidelity,
     Statevector,
     DensityMatrix,
-    Operator,
 )
 from qiskit.transpiler import Layout, InstructionProperties
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.calibration_management import (
     Calibrations,
     FixedFrequencyTransmon,
@@ -42,13 +40,11 @@ from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 from helper_functions import (
     get_ecr_params,
     set_primitives_transpile_options,
-    projected_statevector,
     remove_unused_wires,
     get_instruction_timings,
 )
 from qconfig import QEnvConfig
 from quantumenvironment import QuantumEnvironment, _calculate_chi_target
-from custom_jax_sim import JaxSolver
 
 ObsType = TypeVar("ObsType")
 ActType = TypeVar("ActType")
@@ -190,13 +186,14 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
         n_qubits = max([qc.num_qubits for qc in self.circuit_truncations])
         d = 2**n_qubits
-        
-        # self.observation_space = Box(
-        #     low=np.array([0, 0] + [-5] * d**2, dtype=np.float32),
-        #     high=np.array([1, 1] + [5] * d**2, dtype=np.float32),
-        # )
-        self.observation_space = Box(low=np.array([0, 0], dtype=np.float32),
-                                      high=np.array([1, 1], dtype=np.float32))
+        self.observation_space = Box(
+            low=np.array([0, 0] + [-5] * d**2, dtype=np.float32),
+            high=np.array([1, 1] + [5] * d**2, dtype=np.float32),
+        )
+        self.observation_space = Box(
+            low=np.array([0, 0], dtype=np.float32),
+            high=np.array([1, 1], dtype=np.float32),
+        )
         # Storing data
         set_primitives_transpile_options(
             self.estimator,
@@ -365,26 +362,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
             else:  # Pulse simulation
                 # Calculate circuit fidelity with pulse simulation
-                if isinstance(self.backend, DynamicsBackend) and isinstance(
-                    self.backend.options.solver, JaxSolver
-                ):
-                    # Jax compatible pulse simulation
 
-                    output_states = np.array(self.backend.options.solver.batched_sims)[
-                        :, 1, :
-                    ]
-
-                    output_states = [
-                        projected_statevector(s, self.backend.options.subsystem_dims)
-                        for s in output_states
-                    ]
-
-                    self.update_circuit_fidelity_history(output_states, baseline_circ)
-
-                else:
-                    raise NotImplementedError(
-                        "Pulse simulation not yet implemented for this backend"
-                    )
+                raise NotImplementedError(
+                    "Pulse simulation not yet implemented for this backend"
+                )
         print("Fidelity stored", self.circuit_fidelity_history[-1])
 
     def reset(

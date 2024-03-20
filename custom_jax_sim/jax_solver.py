@@ -135,6 +135,7 @@ class JaxSolver(Solver):
             rwa_carrier_freqs,
             validate,
         )
+        self._y0 = None
         self.stored_results = []
         self.observables = []
         self._schedule_func = schedule_func
