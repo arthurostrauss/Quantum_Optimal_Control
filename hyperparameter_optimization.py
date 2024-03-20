@@ -10,9 +10,8 @@ import optuna
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from helper_functions import (
-    load_agent_from_yaml_file,
+    load_from_yaml_file,
     create_hpo_agent_config,
-    load_hpo_config_from_yaml_file,
 )
 from ppo import make_train_ppo
 
@@ -80,8 +79,8 @@ class HyperparameterOptimizer:
         """
         self.q_env = q_env
         # Start with an initial agent configuration and then update it with the hyperparameters later in the workflow
-        self.agent_config_init = load_agent_from_yaml_file(path_agent_config)
-        self.hpo_config = load_hpo_config_from_yaml_file(path_hpo_config)
+        self.path_agent_config = path_agent_config
+        self.hpo_config = load_from_yaml_file(path_hpo_config)
         self.save_results_path = save_results_path
         self.experimental_penalty_weights = experimental_penalty_weights
         self.log_progress = log_progress
@@ -101,11 +100,13 @@ class HyperparameterOptimizer:
         experimentally costly hyperparameters.
         """
         self.agent_config, self.hyperparams = create_hpo_agent_config(
-            trial, self.hpo_config, self.agent_config_init
+            trial, self.hpo_config, self.path_agent_config
         )
 
-        # Overwrite the batch_size of the (unwrapped) environment with the one from the agent_config
+        # Include batchsize, n_shots, and sampling_Pauli_space in the hpo scope
         self.q_env.unwrapped.batch_size = self.agent_config["BATCHSIZE"]
+        self.q_env.unwrapped.n_shots = self.agent_config["N_SHOTS"]
+        self.q_env.unwrapped.sampling_Pauli_space = self.agent_config["SAMPLE_PAULIS"]
 
         train_fn = make_train_ppo(self.agent_config, self.q_env)
         start_time = time.time()

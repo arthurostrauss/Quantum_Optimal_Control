@@ -190,14 +190,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
         n_qubits = max([qc.num_qubits for qc in self.circuit_truncations])
         d = 2**n_qubits
-        self.observation_space = Box(
-            low=np.array([0, 0] + [-5] * d**2, dtype=np.float32),
-            high=np.array([1, 1] + [5] * d**2, dtype=np.float32),
-        )
-        self.observation_space = Box(
-            low=np.array([0, 0], dtype=np.float32),
-            high=np.array([1, 1], dtype=np.float32),
-        )
+        
+        # self.observation_space = Box(
+        #     low=np.array([0, 0] + [-5] * d**2, dtype=np.float32),
+        #     high=np.array([1, 1] + [5] * d**2, dtype=np.float32),
+        # )
+        self.observation_space = Box(low=np.array([0, 0], dtype=np.float32),
+                                      high=np.array([1, 1], dtype=np.float32))
         # Storing data
         set_primitives_transpile_options(
             self.estimator,
