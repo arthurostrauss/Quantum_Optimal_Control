@@ -1584,7 +1584,7 @@ def load_from_yaml_file(file_path: str):
     return config
 
 def create_hpo_agent_config(
-    trial: optuna.trial.Trial, hpo_config: Dict, agent_config: Dict
+    trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
 ):
     hyper_params = {
         "N_UPDATES": trial.suggest_int(
@@ -1651,18 +1651,12 @@ def create_hpo_agent_config(
     hyper_params["CLIP_VALUE_LOSS"] = hpo_config["CLIP_VALUE_LOSS"]
 
     # Take over attributes from agent_config and populate hyper_params
-    for attr in [
-        "OPTIMIZER",
-        "N_UNITS",
-        "ACTIVATION",
-        "INCLUDE_CRITIC",
-        "NORMALIZE_ADVANTAGE",
-        "CHKPT_DIR",
-        "RUN_NAME",
-    ]:
-        hyper_params[attr] = agent_config[attr]
+    agent_config = load_from_yaml_file(path_to_agent_config)
+    final_config = hyper_params.copy()
+    final_config.update(agent_config)
+    final_config.update(hyper_params)
 
-    return hyper_params, hyperparams
+    return final_config, hyperparams
 
 
 def retrieve_backend_info(
