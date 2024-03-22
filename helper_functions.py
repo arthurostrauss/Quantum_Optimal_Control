@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-
+import copy
 from qiskit import pulse, schedule, transpile
 from qiskit.circuit import (
     QuantumCircuit,
@@ -215,9 +215,9 @@ def perform_standard_calibrations(
         backend.set_options(control_channel_map=control_channel_map)
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
         two_qubit_properties = {qubits: None for qubits in control_channel_map}
-    standard_gates: Dict[str, Gate] = (
-        get_standard_gate_name_mapping()
-    )  # standard gate library
+    standard_gates: Dict[
+        str, Gate
+    ] = get_standard_gate_name_mapping()  # standard gate library
     fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array(
         [1, 0.5, -0.5, 0.25, -0.25]
     )
@@ -1508,7 +1508,167 @@ def get_optimal_z_rotation(
     res = minimize(cost_function, x0, method="Nelder-Mead")
     return res
 
-def get_noise_coupling_neighbours(noise_couplings: Dict = None):
+
+def create_quantum_operators(
+    dims: List[int],
+) -> Tuple[List[Operator], List[Operator], List[Operator], Operator, Operator]:
+    """
+    Creates quantum operators \(a\), \(a^\dagger\), \(N\), and the identity matrix for each subsystem
+    specified by its dimension in `dims`.
+    """
+
+    a = [Operator(np.diag(np.sqrt(np.arange(1, dim)), 1)) for dim in dims]
+    adag = [Operator(np.diag(np.sqrt(np.arange(1, dim)), -1)) for dim in dims]
+    N = [Operator(np.diag(np.arange(dim))) for dim in dims]
+    ident = [Operator(np.eye(dim, dtype=complex)) for dim in dims]
+    return a, adag, N, ident
+
+
+def expand_operators(
+    operators: List[Operator], dims: List[int], ident: List[Operator]
+) -> List[Operator]:
+    """Expands quantum operators across multiple qubits based on dimensions."""
+    expanded_ops = operators.copy()
+    n_qubits = len(dims)
+    for i in range(n_qubits):
+        for j in range(n_qubits):
+            if j > i:
+                expanded_ops[i] = expanded_ops[i].expand(ident[j])
+            elif j < i:
+                expanded_ops[i] = expanded_ops[i].tensor(ident[j])
+    return expanded_ops
+
+
+def get_full_identity(dims: List[int], ident: List[Operator]) -> Operator:
+    """Generates the full identity operator for the given dimensions of subsystems."""
+    full_ident = ident[0]
+    for i in range(1, len(dims)):
+        full_ident = full_ident.tensor(ident[i])
+    return full_ident
+
+
+def construct_static_hamiltonian(
+    dims: List[int],
+    freqs: List[float],
+    anharmonicities: List[float],
+    N_ops: List[Operator],
+    full_ident: Operator,
+) -> Operator:
+    """Constructs the static part of the Hamiltonian."""
+    static_ham = Operator(
+        np.zeros((np.prod(dims), np.prod(dims)), dtype=complex),
+        input_dims=tuple(dims),
+        output_dims=tuple(dims),
+    )
+    n_qubits = len(dims)
+    for i in range(n_qubits):
+        static_ham += 2 * np.pi * freqs[i] * N_ops[i] + np.pi * anharmonicities[
+            i
+        ] * N_ops[i] @ (N_ops[i] - full_ident)
+    return static_ham
+
+
+def get_couplings(
+    couplings: Dict[Tuple[int, int], float],
+    static_ham: Operator,
+    a_ops: List[Operator],
+    adag_ops: List[Operator],
+    channels: Dict[str, float],
+    freqs: List[float],
+    ecr_ops: List[Operator],
+    drive_ops: List[Operator],
+    num_controls: int,
+) -> None:
+    """
+    Processes coupling information to update the static Hamiltonian, control channels, and drive operators with
+    cross-resonance terms.
+    """
+    keys = list(couplings.keys())
+    for i, j in keys:
+        couplings[(j, i)] = couplings[(i, j)]
+    for (i, j), coupling in couplings.items():
+        static_ham += (
+            2 * np.pi * coupling * (a_ops[i] + adag_ops[i]) @ (a_ops[j] + adag_ops[j])
+        )
+        channels[f"u{num_controls}"] = freqs[j]
+        num_controls += 1
+        ecr_ops.append(drive_ops[i])
+
+    return static_ham, channels, ecr_ops, num_controls
+
+
+def noise_coupling_sanity_check(qbit, errors, drive_ops_errorfree, drive_ops_error):
+    # Sum the error contributions from all neighbors for the current qubit
+    total_noise_contribution = sum(errors[qbit]) if qbit in errors else 0
+
+    # Calculate the expected total drive operation with noise for the current qubit
+    expected_total_with_noise = drive_ops_errorfree[qbit] + total_noise_contribution
+
+    # Check if the expected total matches the actual total drive operation with noise
+    if not np.allclose(expected_total_with_noise, drive_ops_error[qbit]):
+        raise ValueError(f"Error in adding noise to drive operators for qubit {qbit}")
+
+
+def get_noise_couplings(
+    noise_couplings: Dict[Tuple[int, int], float],
+    drive_ops_errorfree: List[float],
+    n_qubits: int,
+    rabi_freqs: List[float],
+    a_ops: List[Operator],
+    adag_ops: List[Operator],
+    drive_ops: List[Operator],
+) -> None:
+    keys = list(noise_couplings.keys())
+    # Get the neighbours of each qubit based on the noise couplings dictionary provided
+    neighbours = get_noise_coupling_neighbours(noise_couplings)
+    for i, j in keys:
+        if (j, i) not in noise_couplings:
+            noise_couplings[(j, i)] = noise_couplings[
+                (i, j)
+            ]  # Make the noise coupling symmetric if not specified otherwise
+
+    # Add spill-over error terms to the drive operators
+    errors = {qbit: [] for qbit in range(n_qubits)}
+    for qbit in range(n_qubits):
+        for neighbour in neighbours[qbit]:
+            if (qbit, neighbour) in noise_couplings:
+                noise_strength = noise_couplings[(qbit, neighbour)]
+                noise_contribution = noise_strength * (
+                    2
+                    * np.pi
+                    * rabi_freqs[qbit]
+                    * (a_ops[neighbour] + adag_ops[neighbour])
+                )
+                errors[qbit].append(noise_contribution)
+                drive_ops[qbit] += noise_contribution
+
+    drive_ops_error = copy.deepcopy(drive_ops)
+    # Check if the noise has been added correctly to the drive operators
+    for qbit in range(n_qubits):
+        noise_coupling_sanity_check(qbit, errors, drive_ops_errorfree, drive_ops_error)
+
+    return drive_ops
+
+
+def get_noise_coupling_neighbours(noise_couplings: Dict = None) -> Dict:
+    """
+    This function processes a dictionary of noise couplings between qubits to determine the
+    neighbor relationships among them. Each key in the noise_couplings dictionary is a tuple
+    representing a pair of qubits, and its corresponding value indicates the coupling strength
+    between these qubits. Only positive coupling strengths are considered as valid connections.
+    Self-loops can optionally be included if they exist and have positive coupling strength.
+
+    Parameters:
+    - noise_couplings (Dict, optional): A dictionary where each key is a tuple of two integers
+      representing qubit indices, and each value is a float representing the coupling strength
+      between these qubits. Default is None.
+
+    Returns:
+    - dict: A dictionary where each key is an integer representing a qubit index, and each value
+      is a list of integers representing the indices of its neighboring qubits based on the noise
+      couplings. The neighbors are determined by positive coupling strengths, and each neighbor
+      relationship is bidirectional unless specified otherwise.
+    """
     if noise_couplings is None:
         raise ValueError("Noise couplings dictionary not provided")
     # Initialize neighbor lists for each qubit
@@ -1518,7 +1678,9 @@ def get_noise_coupling_neighbours(noise_couplings: Dict = None):
 
     # Populate the neighbor lists based on the adjacency dictionary
     for (qubit1, qubit2), coupling_strength in noise_couplings.items():
-        if coupling_strength > 0:  # Assuming a positive coupling strength indicates a connection
+        if (
+            coupling_strength > 0
+        ):  # Assuming a positive coupling strength indicates a connection
             if qubit1 != qubit2:  # Optional: Exclude self-loops if not needed
                 # Check if qubit2 is not already a neighbor of qubit1 before adding
                 if qubit2 not in neighbors[qubit1]:
@@ -1532,6 +1694,7 @@ def get_noise_coupling_neighbours(noise_couplings: Dict = None):
                     neighbors[qubit1].append(qubit2)
 
     return neighbors
+
 
 def load_q_env_from_yaml_file(file_path: str):
     """
@@ -1603,10 +1766,12 @@ def remove_none_values(dictionary):
             new_dict[k] = v
     return new_dict
 
+
 def load_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
     return config
+
 
 def create_hpo_agent_config(
     trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
@@ -1633,10 +1798,14 @@ def create_hpo_agent_config(
             log=True,
         ),
         "N_SHOTS": trial.suggest_int(
-            "N_SHOTS", hpo_config["N_SHOTS"][0], hpo_config["N_SHOTS"][1],
+            "N_SHOTS",
+            hpo_config["N_SHOTS"][0],
+            hpo_config["N_SHOTS"][1],
         ),
         "SAMPLE_PAULIS": trial.suggest_int(
-            "SAMPLE_PAULIS", hpo_config["SAMPLE_PAULIS"][0], hpo_config["SAMPLE_PAULIS"][1],
+            "SAMPLE_PAULIS",
+            hpo_config["SAMPLE_PAULIS"][0],
+            hpo_config["SAMPLE_PAULIS"][1],
         ),
         "GAMMA": trial.suggest_float(
             "GAMMA", hpo_config["GAMMA"][0], hpo_config["GAMMA"][1]
@@ -1752,6 +1921,7 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     )
     return qc.data.count(tgt_instruction)
 
+
 def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs):
     """
     Generates a new quantum circuit, replacing all gates except the specified target gate with custom unitary gates.
@@ -1773,27 +1943,36 @@ def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs)
     """
     new_circuit = QuantumCircuit(circuit_context.num_qubits)
     gate_count = {}
-    target_gate_instruction = kwargs.get('gate')
-    target_gate_qubits = kwargs.get('register', [])
+    target_gate_instruction = kwargs.get("gate")
+    target_gate_qubits = kwargs.get("register", [])
 
     for inst, qargs, _ in circuit_context.data:
         gate_name = inst.name
         qubits_indices = [circuit_context.find_bit(q).index for q in qargs]
 
         # Check if the current gate matches the target operation
-        if isinstance(target_gate_instruction, Instruction) and gate_name == target_gate_instruction.name and qubits_indices == target_gate_qubits:
+        if (
+            isinstance(target_gate_instruction, Instruction)
+            and gate_name == target_gate_instruction.name
+            and qubits_indices == target_gate_qubits
+        ):
             # Add the target gate unchanged to the new circuit
-            print('Target gate found')
+            print("Target gate found")
             new_circuit.append(instruction=inst, qargs=qargs)
         else:
             # Process non-target gates
-            gate_label, qubit_indices = process_gate(inst, qargs, gate_count, circuit_context)
+            gate_label, qubit_indices = process_gate(
+                inst, qargs, gate_count, circuit_context
+            )
             matrix_representation = Operator(inst).data
             new_circuit.unitary(matrix_representation, qubit_indices, label=gate_label)
 
     return new_circuit
 
-def process_gate(inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_context: QuantumCircuit):
+
+def process_gate(
+    inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_context: QuantumCircuit
+):
     """
     Processes a gate to generate a unique label and determine qubit indices for the new unitary gate.
 
@@ -1808,7 +1987,9 @@ def process_gate(inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_cont
     - qubit_indices (tuple or int): The qubit indices for the new unitary gate.
     """
     gate_name = inst.name
-    qubits_indices = [circuit_context.find_bit(q).index for q in qargs]  # Define qubits_indices here
+    qubits_indices = [
+        circuit_context.find_bit(q).index for q in qargs
+    ]  # Define qubits_indices here
 
     if len(qargs) == 2:  # Special handling for two-qubit gates like CNOT
         control_index, target_index = qubits_indices
@@ -1816,11 +1997,13 @@ def process_gate(inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_cont
         qubit_indices = (control_index, target_index)
     else:  # Handling for single-qubit gates and other types of gates
         gate_label = f"{gate_name}_q{'_'.join(map(str, qubits_indices))}"
-        qubit_indices = qubits_indices[0] if len(qubits_indices) == 1 else tuple(qubits_indices)
+        qubit_indices = (
+            qubits_indices[0] if len(qubits_indices) == 1 else tuple(qubits_indices)
+        )
 
     # Increment gate instance count and update label
     gate_count[gate_label] = gate_count.get(gate_label, 0) + 1
-    gate_label += f'_o{gate_count[gate_label]}'  # o for occurrences
+    gate_label += f"_o{gate_count[gate_label]}"  # o for occurrences
 
     return gate_label, qubit_indices
 
