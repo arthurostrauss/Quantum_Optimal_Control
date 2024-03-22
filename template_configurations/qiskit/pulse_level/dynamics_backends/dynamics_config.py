@@ -6,7 +6,7 @@ import jax
 from qiskit_dynamics import DynamicsBackend, Solver
 from custom_jax_sim import JaxSolver
 import numpy as np
-from helper_functions import (
+from utils import (
     create_quantum_operators,
     expand_operators,
     get_full_identity,

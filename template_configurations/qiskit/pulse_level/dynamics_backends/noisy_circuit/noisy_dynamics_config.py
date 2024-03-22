@@ -6,13 +6,13 @@ import jax
 from qiskit_dynamics import DynamicsBackend, Solver
 from custom_jax_sim import JaxSolver
 import numpy as np
-from helper_functions import (
+from utils import (
     create_quantum_operators,
     expand_operators,
     get_full_identity,
     construct_static_hamiltonian,
     get_couplings,
-    get_noise_couplings,
+    get_pulse_spillover_noise,
 )
 
 jax.config.update("jax_enable_x64", True)
@@ -28,21 +28,19 @@ def custom_backend(
     anharmonicities: List[float],
     rabi_freqs: List[float],
     couplings: Optional[Dict[Tuple[int, int], float]] = None,
-    noise_couplings: Optional[Dict[Tuple[int, int], float]] = None,
+    pulse_spillover_rates: Optional[Dict[Tuple[int, int], float]] = None,
     solver_options: Optional[Dict] = None,
 ):
     """
     Custom noisy backend for the dynamics simulation.
-    We allow for ZZ-crosstalk noise couplings between neighbouring qubits modeling hardware noise in transmon architectures.
-    This noise occurs when pulses are applied to one qubit and affect the neighbouring qubits as well due to wires being close to each other.
-    See https://journals.aps.org/prapplied/abstract/10.1103/PhysRevApplied.21.024016
+    We allow for pulse-spillover noise arising from signal-leakage between pairs of qubits.
 
     Args:
         dims: The dimensions of the subsystems.
         freqs: The frequencies of the subsystems.
         anharmonicities: The anharmonicities of the subsystems.
         couplings: The coupling constants between the subsystems.
-        noise_couplings: The noise coupling constants between (neighbouring) qubits.
+        noise_couplings: The pulse-spillover rate constants between (neighbouring) qubits.
         rabi_freqs: The Rabi frequencies of the subsystems.
     """
     assert (
@@ -83,11 +81,11 @@ def custom_backend(
             num_controls,
         )
 
-    # ZZ-Crosstalk Noise Couplings
+    # Pulse-spillover noise
     drive_ops_errorfree = copy.deepcopy(drive_ops)
-    if noise_couplings is not None:
-        drive_ops = get_noise_couplings(
-            noise_couplings,
+    if pulse_spillover_rates is not None:
+        drive_ops = get_pulse_spillover_noise(
+            pulse_spillover_rates,
             drive_ops_errorfree,
             n_qubits,
             rabi_freqs,
