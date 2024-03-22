@@ -1508,6 +1508,31 @@ def get_optimal_z_rotation(
     res = minimize(cost_function, x0, method="Nelder-Mead")
     return res
 
+def get_noise_coupling_neighbours(noise_couplings: Dict = None):
+    if noise_couplings is None:
+        raise ValueError("Noise couplings dictionary not provided")
+    # Initialize neighbor lists for each qubit
+    # Assuming the maximum qubit index from the adjacency dictionary
+    max_qubit_index = max(max(pair) for pair in noise_couplings.keys())
+    neighbors = {i: [] for i in range(max_qubit_index + 1)}
+
+    # Populate the neighbor lists based on the adjacency dictionary
+    for (qubit1, qubit2), coupling_strength in noise_couplings.items():
+        if coupling_strength > 0:  # Assuming a positive coupling strength indicates a connection
+            if qubit1 != qubit2:  # Optional: Exclude self-loops if not needed
+                # Check if qubit2 is not already a neighbor of qubit1 before adding
+                if qubit2 not in neighbors[qubit1]:
+                    neighbors[qubit1].append(qubit2)
+                # Check if qubit1 is not already a neighbor of qubit2 before adding
+                if qubit1 not in neighbors[qubit2]:
+                    neighbors[qubit2].append(qubit1)
+            else:
+                # Handle self-loops if necessary, add only if not already present
+                if qubit2 not in neighbors[qubit1]:
+                    neighbors[qubit1].append(qubit2)
+
+    return neighbors
+
 def load_q_env_from_yaml_file(file_path: str):
     """
     Load Qiskit Quantum Environment from yaml file
