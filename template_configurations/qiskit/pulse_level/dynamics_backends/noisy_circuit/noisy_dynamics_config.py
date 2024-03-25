@@ -1,4 +1,6 @@
 from typing import List, Tuple, Dict, Optional
+import copy
+from qiskit_dynamics.array import Array
 from qiskit.quantum_info import Operator
 import jax
 from qiskit_dynamics import DynamicsBackend, Solver
@@ -10,11 +12,14 @@ from utils import (
     get_full_identity,
     construct_static_hamiltonian,
     get_couplings,
+    get_pulse_spillover_noise,
 )
 
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
 jax.config.update("jax_platform_name", "cpu")
+# import Array and set default backend
+Array.set_default_backend("jax")
 
 
 def custom_backend(
@@ -23,18 +28,20 @@ def custom_backend(
     anharmonicities: List[float],
     rabi_freqs: List[float],
     couplings: Optional[Dict[Tuple[int, int], float]] = None,
+    pulse_spillover_rates: Optional[Dict[Tuple[int, int], float]] = None,
     solver_options: Optional[Dict] = None,
 ):
     """
-    Custom backend for the dynamics simulation.
+    Custom noisy backend for the dynamics simulation.
+    We allow for pulse-spillover noise arising from signal-leakage between pairs of qubits.
 
     Args:
         dims: The dimensions of the subsystems.
         freqs: The frequencies of the subsystems.
         anharmonicities: The anharmonicities of the subsystems.
         couplings: The coupling constants between the subsystems.
+        noise_couplings: The pulse-spillover rate constants between (neighbouring) qubits.
         rabi_freqs: The Rabi frequencies of the subsystems.
-
     """
     assert (
         len(dims) == len(freqs) == len(anharmonicities) == len(rabi_freqs)
@@ -72,6 +79,19 @@ def custom_backend(
             ecr_ops,
             drive_ops,
             num_controls,
+        )
+
+    # Pulse-spillover noise
+    drive_ops_errorfree = copy.deepcopy(drive_ops)
+    if pulse_spillover_rates is not None:
+        drive_ops = get_pulse_spillover_noise(
+            pulse_spillover_rates,
+            drive_ops_errorfree,
+            n_qubits,
+            rabi_freqs,
+            a_ops,
+            adag_ops,
+            drive_ops,
         )
 
     dt = 2.2222e-10
