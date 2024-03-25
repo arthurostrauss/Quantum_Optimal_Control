@@ -162,24 +162,28 @@ class CustomPPO:
         )
 
     def plot_curves(self):
-        if len(self.reward_history) > 0:
-            plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
-            if self.env.unwrapped.do_benchmark():
-                plt.plot(
-                    np.arange(
-                        1,
-                        self.env.unwrapped.step_tracker + 1,
-                        self.env.unwrapped.benchmark_cycle,
-                    ),
-                    np.array(self.fidelity_history),
-                    label="Circuit Fidelity",
-                )
+        """
+        Plots the reward history and fidelity history of the environment
+        """
+        reward_curve, epoch = self.env.unwrapped.reward_history, len(
+            self.env.unwrapped.reward_history
+        )
+        fidelity_range = [
+            i * self.env.unwrapped.benchmark_cycle
+            for i in range(len(self.env.unwrapped.fidelity_history))
+        ]
+        plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
+        plt.plot(
+            fidelity_range,
+            self.fidelity_history,
+            label="Circuit Fidelity",
+        )
 
-            plt.title("Reward History")
-            plt.legend()
-            plt.xlabel("Iteration")
-            plt.ylabel("Reward")
-            plt.show()
+        plt.title("Reward History")
+        plt.legend()
+        plt.xlabel("Iteration")
+        plt.ylabel("Reward")
+        plt.show()
 
     def train(
         self,

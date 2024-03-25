@@ -16,7 +16,6 @@ from helper_functions import (
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
-from qiskit_dynamics.array import Array
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
 from qiskit.providers import BackendV1, BackendV2, BackendV2Converter
 from qiskit_experiments.calibration_management import Calibrations
@@ -28,8 +27,6 @@ import jax
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
 jax.config.update("jax_platform_name", "cpu")
-# import Array and set default backend
-Array.set_default_backend("jax")
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_pulse_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
@@ -187,9 +184,7 @@ def get_backend(
 
     if backend is None:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        from template_configurations.qiskit.pulse_level.dynamics_backends.dynamics_config import (
-            custom_backend,
-        )
+        from dynamics_config import custom_backend
 
         print("Custom backend used")
         # TODO: Add here your custom backend

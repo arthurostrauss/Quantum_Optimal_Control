@@ -26,6 +26,7 @@ from qiskit.primitives import (
     BaseEstimatorV2,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
+from qiskit_aer import AerSimulator
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit.quantum_info import (
@@ -50,6 +51,7 @@ from qiskit.providers import (
     Options as AerOptions,
     QiskitBackendNotFoundError,
 )
+from qiskit_ibm_runtime.fake_provider.local_service import QiskitRuntimeLocalService
 from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
 from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackend, FakeBackendV2
 from qiskit_ibm_runtime import (
@@ -64,8 +66,7 @@ from qiskit_ibm_runtime import (
     QiskitRuntimeService,
 )
 
-from qiskit_dynamics import Solver, RotatingFrame
-from qiskit_dynamics.array import Array
+from qiskit_dynamics import Solver, RotatingFrame, ArrayLike
 from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import (
     parse_backend_hamiltonian_dict,
 )
@@ -652,17 +653,13 @@ def simulate_pulse_schedule(
             "Solver instance must be defined. Backend is not DynamicsBackend or Solver instance"
         )
 
-    def jit_func():
-        results = solver.solve(
-            t_span=Array([0, sched.duration * dt]),
-            y0=jnp.eye(solver.model.dim),
-            signals=sched,
-            **solver_options,
-        )
-        return Array(results.y).data
+    results = solver.solve(
+        t_span=[0, sched.duration * dt],
+        y0=jnp.eye(solver.model.dim),
+        signals=sched,
+        **solver_options,
+    )
 
-    sim_func = jit(jit_func)
-    results = np.array(sim_func())
     output_unitary = results[-1]
 
     output_op = Operator(
@@ -912,7 +909,9 @@ def retrieve_primitives(
     layout: Layout,
     config: Union[Dict, QiskitConfig],
     abstraction_level: str = "circuit",
-    estimator_options: Optional[Union[Dict, AerOptions, RuntimeOptions]] = None,
+    estimator_options: Optional[
+        Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
+    ] = None,
     circuit: Optional[QuantumCircuit] = None,
 ) -> (Estimator_type, Sampler_type):
     """
@@ -926,84 +925,57 @@ def retrieve_primitives(
         estimator_options: Estimator options
         circuit: QuantumCircuit instance implementing the custom gate (for DynamicsBackend)
     """
-    if isinstance(
-        backend, RuntimeBackend
-    ):  # Real backend, or Simulation backend from Runtime Service
-        # estimator: Estimator_type = RuntimeEstimatorV1(
-        #     session=Session(backend.service, backend),
-        #     options=estimator_options,
-        # )
-        # sampler: Sampler_type = RuntimeSamplerV1(
-        #     session=estimator.session, options=estimator_options
-        # )
-        estimator: Estimator_type = RuntimeEstimatorV2(
-            session=Session(backend.service, backend)
-        )
-        sampler: Sampler_type = RuntimeSamplerV1(session=estimator.session)
-
-    else:
-        if isinstance(estimator_options, RuntimeOptions):
-            # estimator_options = asdict(estimator_options)
-            estimator_options = None
-        if isinstance(backend, (AerBackend, FakeBackend, FakeBackendV2)):
-            if abstraction_level != "circuit":
-                raise ValueError(
-                    "AerSimulator only works at circuit level, and a pulse gate calibration is provided"
-                )
-            # Estimator taking noise model into consideration, have to provide an AerSimulator backend
-            estimator = AerEstimator(
-                backend_options=backend.options,
-                transpile_options={"initial_layout": layout},
-                approximation=True,
-                skip_transpilation=True,
-            )
-            sampler = AerSampler(
-                backend_options=backend.options,
-                transpile_options={"initial_layout": layout},
-                skip_transpilation=True,
-            )
-        elif backend is None:  # No backend specified, ideal state-vector simulation
-            if abstraction_level != "circuit":
-                raise ValueError("Statevector simulation only works at circuit level")
-            estimator = Estimator(options={"initial_layout": layout})
-            sampler = Sampler(options={"initial_layout": layout})
-
-            estimator = StatevectorEstimator()
-
-        elif isinstance(backend, DynamicsBackend):
+    if backend is not None:
+        if isinstance(backend, DynamicsBackend) and isinstance(
+            backend.options.solver, JaxSolver
+        ):
             assert (
                 abstraction_level == "pulse"
             ), "DynamicsBackend works only with pulse level abstraction"
-            if isinstance(backend.options.solver, JaxSolver):
-                estimator: Estimator_type = DynamicsBackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=True
-                )
-                backend.options.solver.circuit_macro = lambda: schedule(
-                    circuit, backend
-                )
-            else:
-                estimator: Estimator_type = BackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=True
-                )
-            estimator.set_transpile_options(initial_layout=layout)
-            sampler = BackendSampler(
+            estimator: Estimator_type = DynamicsBackendEstimator(
                 backend, options=estimator_options, skip_transpilation=True
             )
-            if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
-                calibration_files: List[str] = config.calibration_files
-                print("3")
-                _, _ = perform_standard_calibrations(backend, calibration_files)
+            backend.options.solver.circuit_macro = lambda: schedule(circuit, backend)
 
+            if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
+                calibration_files = config.calibration_files
+                _, _ = perform_standard_calibrations(backend, calibration_files)
         else:
-            if isinstance(backend, Backend_type):
-                estimator = BackendEstimator(
-                    backend, options=estimator_options, skip_transpilation=True
-                )
-                sampler = BackendSampler(
-                    backend, options=estimator_options, skip_transpilation=True
+            if abstraction_level == "circuit":
+                if isinstance(backend, (FakeBackend, FakeBackendV2)):
+                    backend = AerSimulator.from_backend(backend)
+                estimator: Estimator_type = RuntimeEstimatorV2(
+                    session=Session(
+                        (
+                            backend.service
+                            if hasattr(backend, "service")
+                            else QiskitRuntimeLocalService()
+                        ),
+                        backend,
+                        estimator_options,
+                    )
                 )
             else:
-                raise TypeError("Backend not recognized")
+                # TODO: Pulse gates do not work yet on Qiskit Runtime
+                estimator: Estimator_type = RuntimeEstimatorV1(
+                    session=Session(
+                        (
+                            backend.service
+                            if hasattr(backend, "service")
+                            else QiskitRuntimeLocalService()
+                        ),
+                        backend,
+                        estimator_options,
+                    )
+                )
+        sampler: Sampler_type = RuntimeSamplerV1(session=estimator.session)
+
+    else:  # No backend specified, ideal state-vector simulation
+        if abstraction_level != "circuit":
+            raise ValueError("Statevector simulation only works at circuit level")
+        sampler = Sampler(options={"initial_layout": layout})
+        estimator = StatevectorEstimator()
+
     return estimator, ComputeUncompute(sampler)
 
 
@@ -1077,20 +1049,18 @@ def handle_session(
     Returns:
         Updated Estimator instance
     """
-    if isinstance(estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2)):
-        assert isinstance(
-            backend, RuntimeBackend
-        ), "RuntimeEstimator must be used with RuntimeBackend"
-        """Open a new Session if time limit of the ongoing one is reached"""
-        if estimator.session.status() == "Closed":
-            old_session = estimator.session
-            counter += 1
-            print(f"New Session opened (#{counter})")
-            session, options = (
-                Session(old_session.service, backend),
-                estimator.options,
-            )
-            estimator = type(estimator)(session=session, options=dict(options))
+    if (
+        isinstance(estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2))
+        and estimator.session.status() == "Closed"
+    ):
+        old_session = estimator.session
+        counter += 1
+        print(f"New Session opened (#{counter})")
+        session, options = (
+            Session(old_session.service, backend),
+            estimator.options,
+        )
+        estimator = type(estimator)(session=session, options=dict(options))
     elif isinstance(estimator, DynamicsBackendEstimator):
         if not isinstance(backend, DynamicsBackend) or not isinstance(
             backend.options.solver, JaxSolver
@@ -1166,7 +1136,7 @@ def select_backend(
             service = QiskitRuntimeService(channel=channel, instance=instance)
             if backend_name is None:
                 backend = service.least_busy(
-                    min_num_qubits=2, simulator=False, open_pulse=True
+                    min_num_qubits=2, simulator=False, operational=True, open_pulse=True
                 )
             else:
                 backend = service.get_backend(backend_name)
@@ -1206,11 +1176,12 @@ def select_backend(
 def custom_dynamics_from_backend(
     backend: BackendV1,
     subsystem_list: Optional[List[int]] = None,
-    rotating_frame: Optional[Union[Array, RotatingFrame, str]] = "auto",
-    evaluation_mode: str = "dense",
+    rotating_frame: Optional[Union[ArrayLike, RotatingFrame, str]] = "auto",
+    array_library: Optional[str] = "jax",
+    vectorized: Optional[bool] = None,
     rwa_cutoff_freq: Optional[float] = None,
-    static_dissipators: Optional[Array] = None,
-    dissipator_operators: Optional[Array] = None,
+    static_dissipators: Optional[ArrayLike] = None,
+    dissipator_operators: Optional[ArrayLike] = None,
     dissipator_channels: Optional[List[str]] = None,
     **options,
 ) -> DynamicsBackend:
@@ -1223,7 +1194,13 @@ def custom_dynamics_from_backend(
     :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
     :param subsystem_list: The list of qubits in the backend to include in the model.
     :param rwa_cutoff_freq: Rotating wave approximation argument for the internal :class:`.Solver`
-    :param evaluation_mode: Evaluation mode argument for the internal :class:`.Solver`.
+    :param array_library: Array library to use for storing operators of underlying model. See the
+        :ref:`model evaluation section of the Models API documentation <model evaluation>`
+        for a more detailed description of this argument.
+    :param vectorized: If including dissipator terms, whether or not to construct the
+        :class:`.LindbladModel` in vectorized form. See the
+        :ref:`model evaluation section of the Models API documentation <model evaluation>`
+        for a more detailed description of this argument.
     :param rotating_frame: Rotating frame argument for the internal :class:`.Solver`. Defaults to
             ``"auto"``, allowing this method to pick a rotating frame.
     :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
@@ -1314,10 +1291,10 @@ def custom_dynamics_from_backend(
 
     # build the solver
     if rotating_frame == "auto":
-        if "dense" in evaluation_mode:
-            rotating_frame = static_hamiltonian
-        else:
+        if array_library is not None and "sparse" in array_library:
             rotating_frame = np.diag(static_hamiltonian)
+        else:
+            rotating_frame = static_hamiltonian
 
     # get time step size
     if backend_target is not None and backend_target.dt is not None:
@@ -1333,7 +1310,8 @@ def custom_dynamics_from_backend(
         channel_carrier_freqs=channel_freqs,
         dt=dt,
         rotating_frame=rotating_frame,
-        evaluation_mode=evaluation_mode,
+        array_library=array_library,
+        vectorized=vectorized,
         rwa_cutoff_freq=rwa_cutoff_freq,
         static_dissipators=static_dissipators,
         dissipator_operators=dissipator_operators,
@@ -1508,6 +1486,7 @@ def get_optimal_z_rotation(
     res = minimize(cost_function, x0, method="Nelder-Mead")
     return res
 
+
 def load_q_env_from_yaml_file(file_path: str):
     """
     Load Qiskit Quantum Environment from yaml file
@@ -1578,10 +1557,12 @@ def remove_none_values(dictionary):
             new_dict[k] = v
     return new_dict
 
+
 def load_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
     return config
+
 
 def create_hpo_agent_config(
     trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
@@ -1608,10 +1589,14 @@ def create_hpo_agent_config(
             log=True,
         ),
         "N_SHOTS": trial.suggest_int(
-            "N_SHOTS", hpo_config["N_SHOTS"][0], hpo_config["N_SHOTS"][1],
+            "N_SHOTS",
+            hpo_config["N_SHOTS"][0],
+            hpo_config["N_SHOTS"][1],
         ),
         "SAMPLE_PAULIS": trial.suggest_int(
-            "SAMPLE_PAULIS", hpo_config["SAMPLE_PAULIS"][0], hpo_config["SAMPLE_PAULIS"][1],
+            "SAMPLE_PAULIS",
+            hpo_config["SAMPLE_PAULIS"][0],
+            hpo_config["SAMPLE_PAULIS"][1],
         ),
         "GAMMA": trial.suggest_float(
             "GAMMA", hpo_config["GAMMA"][0], hpo_config["GAMMA"][1]
@@ -1727,6 +1712,7 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     )
     return qc.data.count(tgt_instruction)
 
+
 def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs):
     """
     Generates a new quantum circuit, replacing all gates except the specified target gate with custom unitary gates.
@@ -1748,27 +1734,36 @@ def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs)
     """
     new_circuit = QuantumCircuit(circuit_context.num_qubits)
     gate_count = {}
-    target_gate_instruction = kwargs.get('gate')
-    target_gate_qubits = kwargs.get('register', [])
+    target_gate_instruction = kwargs.get("gate")
+    target_gate_qubits = kwargs.get("register", [])
 
     for inst, qargs, _ in circuit_context.data:
         gate_name = inst.name
         qubits_indices = [circuit_context.find_bit(q).index for q in qargs]
 
         # Check if the current gate matches the target operation
-        if isinstance(target_gate_instruction, Instruction) and gate_name == target_gate_instruction.name and qubits_indices == target_gate_qubits:
+        if (
+            isinstance(target_gate_instruction, Instruction)
+            and gate_name == target_gate_instruction.name
+            and qubits_indices == target_gate_qubits
+        ):
             # Add the target gate unchanged to the new circuit
-            print('Target gate found')
+            print("Target gate found")
             new_circuit.append(instruction=inst, qargs=qargs)
         else:
             # Process non-target gates
-            gate_label, qubit_indices = process_gate(inst, qargs, gate_count, circuit_context)
+            gate_label, qubit_indices = process_gate(
+                inst, qargs, gate_count, circuit_context
+            )
             matrix_representation = Operator(inst).data
             new_circuit.unitary(matrix_representation, qubit_indices, label=gate_label)
 
     return new_circuit
 
-def process_gate(inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_context: QuantumCircuit):
+
+def process_gate(
+    inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_context: QuantumCircuit
+):
     """
     Processes a gate to generate a unique label and determine qubit indices for the new unitary gate.
 
@@ -1783,7 +1778,9 @@ def process_gate(inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_cont
     - qubit_indices (tuple or int): The qubit indices for the new unitary gate.
     """
     gate_name = inst.name
-    qubits_indices = [circuit_context.find_bit(q).index for q in qargs]  # Define qubits_indices here
+    qubits_indices = [
+        circuit_context.find_bit(q).index for q in qargs
+    ]  # Define qubits_indices here
 
     if len(qargs) == 2:  # Special handling for two-qubit gates like CNOT
         control_index, target_index = qubits_indices
@@ -1791,11 +1788,13 @@ def process_gate(inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_cont
         qubit_indices = (control_index, target_index)
     else:  # Handling for single-qubit gates and other types of gates
         gate_label = f"{gate_name}_q{'_'.join(map(str, qubits_indices))}"
-        qubit_indices = qubits_indices[0] if len(qubits_indices) == 1 else tuple(qubits_indices)
+        qubit_indices = (
+            qubits_indices[0] if len(qubits_indices) == 1 else tuple(qubits_indices)
+        )
 
     # Increment gate instance count and update label
     gate_count[gate_label] = gate_count.get(gate_label, 0) + 1
-    gate_label += f'_o{gate_count[gate_label]}'  # o for occurrences
+    gate_label += f"_o{gate_count[gate_label]}"  # o for occurrences
 
     return gate_label, qubit_indices
 

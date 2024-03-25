@@ -20,7 +20,7 @@ from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule
+from qiskit import schedule, transpile
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 # Qiskit imports
@@ -518,7 +518,7 @@ class QuantumEnvironment(Env):
             if not np.isclose(mean_reward, self.fidelity_history[-1], atol=1e-2):
                 self.c_factor *= self.fidelity_history[-1] / mean_reward
                 self.c_factor = np.round(self.c_factor, 1)
-                print("C Factor adjusted to ", self.c_factor)
+                print("C Factor adjusted to", self.c_factor)
             self.clear_history()
         else:
             pass
@@ -562,8 +562,14 @@ class QuantumEnvironment(Env):
                 backend=self.backend,
                 initial_layout=self.layout[trunc_index],
             )
-            # full_circ = pm.run(qc.compose(input_state_circ, inplace=False, front=True))
             full_circ = qc.compose(input_state_circ, inplace=False, front=True)
+            full_circ = transpile(
+                full_circ,
+                self.backend,
+                initial_layout=self.layout[trunc_index],
+                optimization_level=1,
+            )
+
             if isinstance(self.estimator, BaseEstimatorV1):
                 print(self._observables)
                 job = self.estimator.run(
@@ -640,9 +646,9 @@ class QuantumEnvironment(Env):
 
         # Build reference circuit (ideal)
         if self.target_type == "state":  # State preparation task
-            target = self.target["dm"].copy()
+            target: DensityMatrix = self.target["dm"].copy()
         else:  # Gate calibration task
-            target = Operator(self.target["gate"])
+            target: Operator = Operator(self.target["gate"])
 
         qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
         if self.check_on_exp:
@@ -787,9 +793,9 @@ class QuantumEnvironment(Env):
                         density_matrix = DensityMatrix(
                             np.mean(
                                 [
-                                    Statevector.from_int(
-                                        0, dims=target["dm"].dims
-                                    ).evolve(unitary)
+                                    Statevector.from_int(0, dims=target.dims()).evolve(
+                                        unitary
+                                    )
                                     for unitary in qubitized_unitaries
                                 ],
                                 axis=0,
@@ -806,7 +812,7 @@ class QuantumEnvironment(Env):
                             )
 
                         self.state_fidelity_history.append(
-                            state_fidelity(target, density_matrix)
+                            state_fidelity(target, density_matrix, validate=False)
                         )
 
                     else:  # Gate calibration task
@@ -836,8 +842,6 @@ class QuantumEnvironment(Env):
 
                         self.avg_fidelity_history.append(avg_fid_batch)
                         unitaries = rotated_unitaries
-
-                    self.built_unitaries.append(unitaries)
 
                 else:
                     raise NotImplementedError(
@@ -1074,13 +1078,7 @@ class QuantumEnvironment(Env):
         Check if benchmarking should be performed at current step
         :return:
         """
-        if self.benchmark_cycle == 0:
-            return False
-        else:
-            return (
-                self._episode_tracker % self.benchmark_cycle == 0
-                and self._episode_tracker > 1
-            )
+        return self._episode_tracker % self.benchmark_cycle == 0
 
     def signal_handler(self, signum, frame):
         """Signal handler for SIGTERM and SIGINT signals."""

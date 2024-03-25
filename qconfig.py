@@ -66,7 +66,7 @@ class QiskitConfig(BackendConfig):
     estimator_options: Optional[Options] = None
     solver: Optional[Solver] = None
     channel_freq: Optional[Dict] = field(default_factory=dict)
-    calibration_files: Optional[List[str]] = None
+    calibration_files: Optional[str] = None
     do_calibrations: bool = True
 
     def __post_init__(self):

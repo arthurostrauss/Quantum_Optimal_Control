@@ -16,7 +16,6 @@ from helper_functions import (
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
-from qiskit_dynamics.array import Array
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
 from qiskit.providers import BackendV1, BackendV2, BackendV2Converter
 from qiskit_experiments.calibration_management import Calibrations
@@ -28,8 +27,6 @@ import jax
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
 jax.config.update("jax_platform_name", "cpu")
-# import Array and set default backend
-Array.set_default_backend("jax")
 current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_pulse_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
@@ -137,10 +134,12 @@ def apply_parametrized_circuit(
     :return:
     """
     target, backend = kwargs["target"], kwargs["backend"]
-    gate, physical_qubits = target["gate"], target["register"]
+    gate, physical_qubits = target.get("gate", None), target["register"]
 
     parametrized_gate = Gate(
-        f"{gate.name}_cal", len(tgt_register), params=params.params
+        f"{gate.name if gate is not None else 'G'}_cal",
+        len(tgt_register),
+        params=params.params,
     )
     parametrized_schedule = custom_schedule(
         backend=backend, physical_qubits=physical_qubits, params=params

@@ -4,7 +4,7 @@ import time
 
 from qiskit.circuit import Gate, QuantumCircuit
 from qiskit import QiskitError
-from qiskit.quantum_info import Operator, SuperOp, DensityMatrix
+from qiskit.quantum_info import Operator, SuperOp, DensityMatrix, Statevector
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
@@ -14,11 +14,16 @@ from qiskit_dynamics.solvers.solver_classes import (
     is_lindblad_model_vectorized,
     is_lindblad_model_not_vectorized,
     format_final_states,
+    initial_state_converter,
+    validate_and_format_initial_state,
 )
 from typing import Optional, List, Union, Callable, Tuple, Type, Any
 
 from qiskit.pulse import Schedule, SymbolicPulse, ScheduleBlock
-from qiskit_dynamics.array import Array
+from qiskit_dynamics import DYNAMICS_NUMPY as unp
+from qiskit_dynamics import DYNAMICS_NUMPY_ALIAS as numpy_alias
+from qiskit_dynamics.arraylias.alias import _isArrayLike
+from qiskit_dynamics import ArrayLike
 
 from jax import vmap, jit, numpy as jnp
 import numpy as np
@@ -60,19 +65,22 @@ class JaxSolver(Solver):
 
     def __init__(
         self,
-        static_hamiltonian: Optional[Array] = None,
-        hamiltonian_operators: Optional[Array] = None,
-        static_dissipators: Optional[Array] = None,
-        dissipator_operators: Optional[Array] = None,
+        static_hamiltonian: Optional[ArrayLike] = None,
+        hamiltonian_operators: Optional[ArrayLike] = None,
+        static_dissipators: Optional[ArrayLike] = None,
+        dissipator_operators: Optional[ArrayLike] = None,
         hamiltonian_channels: Optional[List[str]] = None,
         dissipator_channels: Optional[List[str]] = None,
         channel_carrier_freqs: Optional[dict] = None,
         dt: Optional[float] = None,
-        rotating_frame: Optional[Union[Array, RotatingFrame]] = None,
+        rotating_frame: Optional[Union[ArrayLike, RotatingFrame]] = None,
         in_frame_basis: bool = False,
-        evaluation_mode: str = "dense",
+        array_library: Optional[str] = None,
+        vectorized: Optional[bool] = None,
         rwa_cutoff_freq: Optional[float] = None,
-        rwa_carrier_freqs: Optional[Union[Array, Tuple[Array, Array]]] = None,
+        rwa_carrier_freqs: Optional[
+            Union[ArrayLike, Tuple[ArrayLike, ArrayLike]]
+        ] = None,
         validate: bool = True,
         schedule_func: Optional[Callable[[], Schedule]] = None,
     ):
@@ -80,39 +88,39 @@ class JaxSolver(Solver):
 
         Args:
             static_hamiltonian: Constant Hamiltonian term. If a ``rotating_frame``
-                                is specified, the ``frame_operator`` will be subtracted from
-                                the static_hamiltonian.
+                is specified, the ``frame_operator`` will be subtracted from the static_hamiltonian.
             hamiltonian_operators: Hamiltonian operators.
             static_dissipators: Constant dissipation operators.
             dissipator_operators: Dissipation operators with time-dependent coefficients.
             hamiltonian_channels: List of channel names in pulse schedules corresponding to
-                                  Hamiltonian operators.
+                Hamiltonian operators.
             dissipator_channels: List of channel names in pulse schedules corresponding to
-                                 dissipator operators.
-            channel_carrier_freqs: Dictionary mapping channel names to floats which represent
-                                   the carrier frequency of the pulse channel with the
-                                   corresponding name.
+                dissipator operators.
+            channel_carrier_freqs: Dictionary mapping channel names to floats which represent the
+                carrier frequency of the pulse channel with the corresponding name.
             dt: Sample rate for simulating pulse schedules.
-            rotating_frame: Rotating frame to transform the model into. Rotating frames which
-                            are diagonal can be supplied as a 1d array of the diagonal elements,
-                            to explicitly indicate that they are diagonal.
+            rotating_frame: Rotating frame to transform the model into. Rotating frames which are
+                diagonal can be supplied as a 1d array of the diagonal elements, to explicitly
+                indicate that they are diagonal.
             in_frame_basis: Whether to represent the model in the basis in which the rotating
-                            frame operator is diagonalized. See class documentation for a more
-                            detailed explanation on how this argument affects object behaviour.
-            evaluation_mode: Method for model evaluation. See documentation for
-                             ``HamiltonianModel.evaluation_mode`` or
-                             ``LindbladModel.evaluation_mode``.
-                             (if dissipators in model) for valid modes.
+                frame operator is diagonalized. See class documentation for a more detailed
+                explanation on how this argument affects object behaviour.
+            array_library: Array library to use for storing operators of underlying model. See the
+                :ref:`model evaluation section of the Models API documentation <model evaluation>`
+                for a more detailed description of this argument.
+            vectorized: If including dissipator terms, whether or not to construct the
+                :class:`.LindbladModel` in vectorized form. See the
+                :ref:`model evaluation section of the Models API documentation <model evaluation>`
+                for a more detailed description of this argument.
             rwa_cutoff_freq: Rotating wave approximation cutoff frequency. If ``None``, no
-                             approximation is made.
+                approximation is made.
             rwa_carrier_freqs: Carrier frequencies to use for rotating wave approximation.
-                               If no time dependent coefficients in model leave as ``None``,
-                               if no time-dependent dissipators specify as a list of frequencies
-                               for each Hamiltonian operator, and if time-dependent dissipators
-                               present specify as a tuple of lists of frequencies, one for
-                               Hamiltonian operators and one for dissipators.
+                If no time dependent coefficients in model leave as ``None``, if no time-dependent
+                dissipators specify as a list of frequencies for each Hamiltonian operator, and if
+                time-dependent dissipators present specify as a tuple of lists of frequencies, one
+                for Hamiltonian operators and one for dissipators.
             validate: Whether or not to validate Hamiltonian operators as being Hermitian.
-            jittable_func: Callable or list of Callables taking as inputs arrays such that parametrized pulse simulation can be done in an
+            schedule_func: Callable or list of Callables taking as inputs arrays such that parametrized pulse simulation can be done in an
                            optimized manner
 
         Raises:
@@ -130,7 +138,8 @@ class JaxSolver(Solver):
             dt,
             rotating_frame,
             in_frame_basis,
-            evaluation_mode,
+            array_library,
+            vectorized,
             rwa_cutoff_freq,
             rwa_carrier_freqs,
             validate,
@@ -190,7 +199,7 @@ class JaxSolver(Solver):
             results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
             self.model.signals = model_sigs
 
-            return Array(results.t).data, Array(results.y).data
+            return results.t, results.y
 
         def unitary_sim_function(t_span, params):
             model_sigs = self.get_signals(params)
@@ -200,9 +209,13 @@ class JaxSolver(Solver):
                 y0=jnp.eye(np.prod(self._subsystem_dims)),
                 **self._kwargs,
             )
+
+            results.y.at[-1].set(
+                self.model.rotating_frame.state_out_of_frame(t_span[-1], results.y[-1])
+            )
             self.model.signals = model_sigs
 
-            return Array(results.t).data, Array(results.y).data
+            return results.t, results.y
 
         self._jit_func = jit(
             vmap(run_sim_function, in_axes=(None, None, 0, None, None)),
@@ -214,7 +227,7 @@ class JaxSolver(Solver):
     def batched_sims(self):
         return self._batched_sims
 
-    def unitary_solve(self, param_values: Optional[Array] = None):
+    def unitary_solve(self, param_values: Optional[ArrayLike] = None):
         """
         This method is used to solve the unitary evolution of the system and get the total unitary
         (not just the final state)
@@ -228,14 +241,15 @@ class JaxSolver(Solver):
             self.model, HamiltonianModel
         ), "Model must be a HamiltonianModel"
         batch_results_t, batch_results_y = self._unitary_jit_func(
-            Array(self._t_span).data, Array(param_values).data
+            self._t_span, param_values
         )
+
         return np.array(batch_results_y)
 
     def _solve_schedule_list_jax(
         self,
-        t_span_list: List[Array],
-        y0_list: List[Union[Array, QuantumState, BaseOperator]],
+        t_span_list: List[ArrayLike],
+        y0_list: List[Union[ArrayLike, QuantumState, BaseOperator]],
         schedule_list: List[Schedule],
         convert_results: bool = True,
         **kwargs,
@@ -318,26 +332,19 @@ class JaxSolver(Solver):
             start_time = time.time()
 
             batch_results_t, batch_results_y = self._jit_func(
-                Array(t_span).data,
-                Array(y0).data,
-                Array(param_values).data,
-                Array(y0_input).data,
+                unp.asarray(t_span),
+                unp.asarray(y0),
+                unp.asarray(param_values),
+                unp.asarray(y0_input),
                 y0_cls,
             )
             print("Time to run simulation: ", time.time() - start_time)
             self._batched_sims = batch_results_y
             for results_t, results_y in zip(batch_results_t, batch_results_y):
                 for observable in observables:
-                    results = OdeResult(
-                        t=results_t, y=Array(results_y, backend="jax", dtype=complex)
-                    )
+                    results = OdeResult(t=results_t, y=results_y)
                     if y0_cls is not None and convert_results:
-                        results.y = [
-                            state_type_wrapper(
-                                yi, dims=tuple(filter(lambda x: x > 1, subsystem_dims))
-                            )
-                            for yi in results.y
-                        ]
+                        results.y = [state_type_wrapper(yi) for yi in results.y]
 
                         # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables
                         results.y[-1] = results.y[-1].evolve(observable)
@@ -348,9 +355,9 @@ class JaxSolver(Solver):
 
     def solve_param_schedule(
         self,
-        parameter_values: Array,
-        t_span: Optional[Array] = None,
-        y0: Optional[Array | QuantumState | BaseOperator] = None,
+        parameter_values: ArrayLike,
+        t_span: Optional[ArrayLike] = None,
+        y0: Optional[ArrayLike | QuantumState | BaseOperator] = None,
         schedule: Optional[Schedule | ScheduleBlock] = None,
         convert_results: bool = True,
         **kwargs,
@@ -372,6 +379,10 @@ class JaxSolver(Solver):
             self._t_span = t_span
         if y0 is not None:
             self._y0 = y0
+        if self._y0 is None:
+            self._y0 = Statevector.from_int(0, self.model.dim)
+        if self._t_span is None:
+            self._t_span = [0, schedule.duration]
         (
             y0,
             y0_input,
@@ -381,106 +392,3 @@ class JaxSolver(Solver):
         self._param_values = parameter_values
 
         return self._jit_func(t_span, y0, parameter_values, y0_input, y0_cls)
-
-
-def initial_state_converter(obj: Any) -> Tuple[Array, Type, Callable]:
-    """Convert initial state object to an Array, the type of the initial input, and return
-    function for constructing a state of the same type.
-
-    Args:
-        obj: An initial state.
-
-    Returns:
-        tuple: (Array, Type, Callable)
-    """
-    # pylint: disable=invalid-name
-    y0_cls = None
-    if isinstance(obj, Array):
-        y0, y0_cls, wrapper = obj, None, lambda x: x
-    if isinstance(obj, QuantumState):
-        y0, y0_cls = Array(obj.data), obj.__class__
-        wrapper = lambda x, dims=None: y0_cls(
-            np.array(x), dims=obj.dims() if dims is None else dims
-        )
-    elif isinstance(obj, QuantumChannel):
-        y0, y0_cls = Array(SuperOp(obj).data), SuperOp
-        wrapper = lambda x: SuperOp(
-            np.array(x), input_dims=obj.input_dims(), output_dims=obj.output_dims()
-        )
-    elif isinstance(obj, (BaseOperator, Gate, QuantumCircuit)):
-        y0, y0_cls = Array(Operator(obj.data)), Operator
-        wrapper = lambda x: Operator(
-            np.array(x), input_dims=obj.input_dims(), output_dims=obj.output_dims()
-        )
-    else:
-        y0, y0_cls, wrapper = Array(obj), None, lambda x: x
-
-    return y0, y0_cls, wrapper
-
-
-def validate_and_format_initial_state(
-    y0: any, model: Union[HamiltonianModel, LindbladModel]
-):
-    """Format initial state for simulation. This function encodes the logic of how
-    simulations are run based on initial state type.
-
-    Args:
-        y0: The user-specified input state.
-        model: The model contained in the solver.
-
-    Returns:
-        Tuple containing the input state to pass to the solver, the user-specified input
-        as an array, the class of the user specified input, and a function for converting
-        the output states to the right class.
-
-    Raises:
-        QiskitError: Initial state ``y0`` is of invalid shape relative to the model.
-    """
-
-    if isinstance(y0, QuantumState) and isinstance(model, LindbladModel):
-        y0 = DensityMatrix(y0)
-
-    y0, y0_cls, wrapper = initial_state_converter(y0)
-
-    y0_input = y0
-
-    # validate types
-    if (y0_cls is SuperOp) and is_lindblad_model_not_vectorized(model):
-        raise QiskitError(
-            """Simulating SuperOp for a LindbladModel requires setting
-            vectorized evaluation. Set LindbladModel.evaluation_mode to a vectorized option.
-            """
-        )
-
-    # if Simulating density matrix or SuperOp with a HamiltonianModel, simulate the unitary
-    if y0_cls in [DensityMatrix, SuperOp] and isinstance(model, HamiltonianModel):
-        y0 = np.eye(model.dim, dtype=complex)
-    # if LindbladModel is vectorized and simulating a density matrix, flatten
-    elif (
-        (y0_cls is DensityMatrix)
-        and isinstance(model, LindbladModel)
-        and "vectorized" in model.evaluation_mode
-    ):
-        y0 = y0.flatten(order="F")
-
-    # validate y0 shape before passing to solve_lmde
-    if isinstance(model, HamiltonianModel) and (
-        y0.shape[0] != model.dim or y0.ndim > 2
-    ):
-        raise QiskitError(
-            """Shape mismatch for initial state y0 and HamiltonianModel."""
-        )
-    if is_lindblad_model_vectorized(model) and (
-        y0.shape[0] != model.dim**2 or y0.ndim > 2
-    ):
-        raise QiskitError(
-            """Shape mismatch for initial state y0 and LindbladModel
-                             in vectorized evaluation mode."""
-        )
-    if is_lindblad_model_not_vectorized(model) and y0.shape[-2:] != (
-        model.dim,
-        model.dim,
-    ):
-        raise QiskitError("""Shape mismatch for initial state y0 and LindbladModel.""")
-
-    return y0, y0_input, y0_cls, wrapper
