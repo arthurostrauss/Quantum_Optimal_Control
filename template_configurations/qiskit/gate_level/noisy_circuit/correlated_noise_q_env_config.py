@@ -29,7 +29,7 @@ from helper_functions import create_circuit_from_own_unitaries
 from qiskit.providers.fake_provider import GenericBackendV2
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-config_file_name = 'noise_q_env_gate_config.yml'
+config_file_name = "noise_q_env_gate_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
 
 
@@ -47,7 +47,17 @@ def apply_parametrized_circuit(
     target = kwargs["target"]
     my_qc = QuantumCircuit(q_reg, name=f"custom_{target['gate'].name}")
     optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-    optimal_params += np.array([-0.00020222, -0.00018466,  0.00075005,  0.00248492, -0.00792428, -0.00582522, -0.00161892])
+    optimal_params += np.array(
+        [
+            -0.00020222,
+            -0.00018466,
+            0.00075005,
+            0.00248492,
+            -0.00792428,
+            -0.00582522,
+            -0.00161892,
+        ]
+    )
     # optimal_params = np.pi * np.zeros(len(params))
 
     my_qc.u(
@@ -113,20 +123,21 @@ def get_backend(
     # noise_model = NoiseModel()
     # noise_model.add_all_qubit_quantum_error(kraus_ops_eps, ['rzx'])
 
-
     ### Custom spillover noise model ###
     global phi, gamma, custom_rx_gate_label
 
     noise_model = noise.NoiseModel()
-    coherent_crx_noise = noise.coherent_unitary_error(CRXGate(gamma*phi))
+    coherent_crx_noise = noise.coherent_unitary_error(CRXGate(gamma * phi))
     noise_model.add_quantum_error(coherent_crx_noise, [custom_rx_gate_label], [0, 1])
-    noise_model.add_basis_gates(['unitary'])
-    print('\n', noise_model, '\n')
+    noise_model.add_basis_gates(["unitary"])
+    print("\n", noise_model, "\n")
 
-    generic_backend = GenericBackendV2(num_qubits=2, dtm=2.2222*1e-10, basis_gates=["cx", "id", "rz", "sx", "x", "crx"])
-    backend = AerSimulator.from_backend(
-        generic_backend,
-        noise_model=noise_model)
+    generic_backend = GenericBackendV2(
+        num_qubits=2,
+        dtm=2.2222 * 1e-10,
+        basis_gates=["cx", "id", "rz", "sx", "x", "crx"],
+    )
+    backend = AerSimulator.from_backend(generic_backend, noise_model=noise_model)
 
     if backend is None:
         # TODO: Add here your custom backend
@@ -139,10 +150,12 @@ def get_backend(
         warnings.warn("No backend was provided, State vector simulation will be used")
     return backend
 
+
 ### Custom spillover noise model
-phi = np.pi/4 # rotation angle
-gamma = 0.01 # spillover rate for the CRX gate
-custom_rx_gate_label = 'custom_kron(rx,ident)_gate'
+phi = np.pi / 4  # rotation angle
+gamma = 0.01  # spillover rate for the CRX gate
+custom_rx_gate_label = "custom_kron(rx,ident)_gate"
+
 
 def get_circuit_context(backend: Optional[BackendV2]):
     """
@@ -151,7 +164,7 @@ def get_circuit_context(backend: Optional[BackendV2]):
     :return: QuantumCircuit instance
     """
     global phi, gamma, custom_rx_gate_label
-    
+
     circuit = QuantumCircuit(2)
     rx_op = Operator(RXGate(phi))
     identity_op = Operator(IGate())

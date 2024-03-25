@@ -4,13 +4,6 @@ import jax
 from qiskit_dynamics import DynamicsBackend, Solver
 from custom_jax_sim import JaxSolver
 import numpy as np
-from utils import (
-    create_quantum_operators,
-    expand_operators,
-    get_full_identity,
-    construct_static_hamiltonian,
-    get_couplings,
-)
 
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
@@ -40,21 +33,39 @@ def custom_backend(
         len(dims) == len(freqs) == len(anharmonicities) == len(rabi_freqs)
     ), "The number of subsystems, frequencies, and anharmonicities must be equal."
     n_qubits = len(dims)
-    # Create operators
-    a, adag, N, ident = create_quantum_operators(dims)
+    a = [Operator(np.diag(np.sqrt(np.arange(1, dim)), 1)) for dim in dims]
+    adag = [Operator(np.diag(np.sqrt(np.arange(1, dim)), -1)) for dim in dims]
+    N = [Operator(np.diag(np.arange(dim))) for dim in dims]
+    ident = [Operator(np.eye(dim, dtype=complex)) for dim in dims]
 
-    # Expand operators across qudits
-    N_ops = expand_operators(N, dims, ident)
-    a_ops = expand_operators(a, dims, ident)
-    adag_ops = expand_operators(adag, dims, ident)
+    full_ident = ident[0]
+    for i in range(1, n_qubits):
+        full_ident = full_ident.tensor(ident[i])
 
-    full_ident = get_full_identity(dims, ident)
+    N_ops = N
+    a_ops = a
+    adag_ops = adag
+    for i in range(n_qubits):
+        for j in range(n_qubits):
+            if j > i:
+                N_ops[i] = N_ops[i].expand(ident[j])
+                a_ops[i] = a_ops[i].expand(ident[j])
+                adag_ops[i] = adag_ops[i].expand(ident[j])
+            elif j < i:
+                N_ops[i] = N_ops[i].tensor(ident[j])
+                a_ops[i] = a_ops[i].tensor(ident[j])
+                adag_ops[i] = adag_ops[i].tensor(ident[j])
 
-    # Construct the static part of the Hamiltonian
-    static_ham = construct_static_hamiltonian(
-        dims, freqs, anharmonicities, N_ops, full_ident
+    static_ham = Operator(
+        np.zeros((np.prod(dims), np.prod(dims)), dtype=complex),
+        input_dims=tuple(dims),
+        output_dims=tuple(dims),
     )
 
+    for i in range(n_qubits):
+        static_ham += 2 * np.pi * freqs[i] * N_ops[i] + np.pi * anharmonicities[
+            i
+        ] * N_ops[i] @ (N_ops[i] - full_ident)
     drive_ops = [
         2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_qubits)
     ]
@@ -62,17 +73,20 @@ def custom_backend(
     ecr_ops = []
     num_controls = 0
     if couplings is not None:
-        static_ham, channels, ecr_ops, num_controls = get_couplings(
-            couplings,
-            static_ham,
-            a_ops,
-            adag_ops,
-            channels,
-            freqs,
-            ecr_ops,
-            drive_ops,
-            num_controls,
-        )
+        keys = list(couplings.keys())
+        for i, j in keys:
+            couplings[(j, i)] = couplings[(i, j)]
+        for (i, j), coupling in couplings.items():
+            static_ham += (
+                2
+                * np.pi
+                * coupling
+                * (a_ops[i] + adag_ops[i])
+                @ (a_ops[j] + adag_ops[j])
+            )
+            channels[f"u{num_controls}"] = freqs[j]
+            num_controls += 1
+            ecr_ops.append(drive_ops[i])
 
     dt = 2.2222e-10
 
