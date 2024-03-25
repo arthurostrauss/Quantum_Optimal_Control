@@ -37,8 +37,7 @@ def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs)
 
         # Check if the current gate matches the target operation
         if (
-            isinstance(target_gate_instruction, Instruction)
-            and gate_name == target_gate_instruction.name
+            gate_name == target_gate_instruction.name
             and qubits_indices == target_gate_qubits
         ):
             # Add the target gate unchanged to the new circuit

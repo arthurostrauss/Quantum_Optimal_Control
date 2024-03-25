@@ -118,7 +118,6 @@ def get_pulse_spillover_noise(
     """
     This function describes the noise effect of pulse-spillover for qubit-pairs specified in noise_couplings. This noise only occurs when a pulse (intended for qubit i) leaks
     into another qubit j. So, it only affects the drive operators of a qubit.
-    This is a common noise source in superconducting qubits.
     """
     neighbours = get_pulse_spillover_noise_neighbours(pulse_spillover_rates)
     for i, j in keys:
