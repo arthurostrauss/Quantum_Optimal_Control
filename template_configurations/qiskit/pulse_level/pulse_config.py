@@ -186,9 +186,7 @@ def get_backend(
 
     if backend is None:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        from template_configurations.qiskit.pulse_level.dynamics_backends.dynamics_config import (
-            custom_backend,
-        )
+        from dynamics_backends import custom_backend, single_qubit_backend
 
         print("Custom backend used")
         # TODO: Add here your custom backend
@@ -198,13 +196,14 @@ def get_backend(
         # rabi_freqs = [0.22e9, 0.26e9]
         # couplings = {(0, 1): 0.002e9}
 
-        dims = [3]
+        dims = [2]
         freqs = [4.86e9]
         anharmonicities = [-0.33e9]
         rabi_freqs = [0.22e9]
         couplings = None
 
-        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
+        # backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
+        backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
         _, _ = perform_standard_calibrations(backend, calibration_files)
 
     if backend is None:

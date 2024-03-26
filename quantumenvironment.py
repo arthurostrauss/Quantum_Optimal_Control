@@ -177,7 +177,7 @@ def _define_target(target: Dict):
             "state",
             q_register,
             n_qubits,
-            layout,
+            [layout],
         )
 
     elif "gate" in target:  # Gate calibration task
@@ -259,6 +259,7 @@ class QuantumEnvironment(Env):
     metadata = {"render_modes": ["human"]}
     check_on_exp = False  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
     channel_estimator = False  # Indicate if channel estimator should be used (otherwise the state estimator is used)
+    fidelity_access = False  # Indicate if fidelity should be accessed as a reward
 
     def __init__(self, training_config: QEnvConfig):
         """
@@ -399,7 +400,6 @@ class QuantumEnvironment(Env):
             )
             self.process_fidelity_history = []
             self.avg_fidelity_history = []
-            self.built_unitaries = []
             self._optimal_action = np.zeros(self.action_space.shape[-1])
 
         else:
@@ -641,16 +641,14 @@ class QuantumEnvironment(Env):
         :param params: List of Action vectors to execute on quantum system
         :return: None
         """
-        qc = self.circuit_truncations[0].copy()
+        qc = self.circuit_truncations[0]
         n_actions = self.action_space.shape[-1]
-
-        # Build reference circuit (ideal)
-        if self.target_type == "state":  # State preparation task
-            target: DensityMatrix = self.target["dm"].copy()
-        else:  # Gate calibration task
-            target: Operator = Operator(self.target["gate"])
-
+        key, cls = (
+            ("dm", DensityMatrix) if self.target_type == "state" else ("gate", Operator)
+        )
+        target: DensityMatrix | Operator = cls(self.target[key])
         qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
+
         if self.check_on_exp:
             # Experiment based fidelity estimation
             try:
@@ -765,6 +763,9 @@ class QuantumEnvironment(Env):
 
             elif self.abstraction_level == "pulse":
                 # Pulse simulation
+                subsystem_dims = list(
+                    filter(lambda x: x > 1, self.backend.options.subsystem_dims)
+                )
                 if isinstance(self.backend, DynamicsBackend):
                     if hasattr(self.backend.options.solver, "unitary_solve"):
                         # Jax compatible pulse simulation
@@ -773,17 +774,16 @@ class QuantumEnvironment(Env):
                         ]
                     else:
                         scheds = schedule(qc_list, backend=self.backend)
-                        unitaries = np.array(
-                            [
-                                simulate_pulse_schedule(self.backend, sched)[
-                                    "unitary"
-                                ].data
-                                for sched in scheds
-                            ]
+                        dt = self.backend.dt
+                        max_duration = max([sched.duration for sched in scheds])
+                        results = self.backend.solve(
+                            scheds,
+                            [0, max_duration * dt],
+                            y0=np.eye(np.prod(subsystem_dims)),
+                            convert_results=False,
                         )
-                    subsystem_dims = list(
-                        filter(lambda x: x > 1, self.backend.options.subsystem_dims)
-                    )
+                        unitaries = np.array([result.y[-1] for result in results])
+
                     qubitized_unitaries = [
                         qubit_projection(unitaries[i, :, :], subsystem_dims)
                         for i in range(self.batch_size)
@@ -992,7 +992,6 @@ class QuantumEnvironment(Env):
         if self.target_type == "gate":
             self.avg_fidelity_history.clear()
             self.process_fidelity_history.clear()
-            self.built_unitaries.clear()
 
         else:
             self.state_fidelity_history.clear()
@@ -1050,9 +1049,6 @@ class QuantumEnvironment(Env):
         """
         Return episode length (here defined as 1 as only one gate is calibrated per episode)
         """
-        assert (
-            global_step == self.step_tracker
-        ), "Given step not synchronized with internal environment step counter"
         return 1
 
     @property
@@ -1078,7 +1074,10 @@ class QuantumEnvironment(Env):
         Check if benchmarking should be performed at current step
         :return:
         """
-        return self._episode_tracker % self.benchmark_cycle == 0
+        if self.fidelity_access:
+            return True
+        else:
+            return self._episode_tracker % self.benchmark_cycle == 0
 
     def signal_handler(self, signum, frame):
         """Signal handler for SIGTERM and SIGINT signals."""

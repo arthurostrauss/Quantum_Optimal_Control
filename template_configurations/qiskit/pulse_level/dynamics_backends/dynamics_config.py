@@ -4,7 +4,7 @@ import jax
 from qiskit_dynamics import DynamicsBackend, Solver
 from custom_jax_sim import JaxSolver
 import numpy as np
-from utils import (
+from .utils import (
     create_quantum_operators,
     expand_operators,
     get_full_identity,
@@ -114,4 +114,48 @@ def custom_backend(
         subsystem_dims=dims,  # for computing measurement data
         solver_options=solver_options,  # to be used every time run is called
     )
+    return jax_backend, dynamics_backend
+
+
+def single_qubit_backend(w, r, dt):
+    """
+    Custom single qubit backend for the dynamics simulation.
+    """
+    X = Operator.from_label("X")
+    Z = Operator.from_label("Z")
+
+    drift = 2 * np.pi * w * Z / 2
+    operators = [2 * np.pi * r * X / 2]
+
+    # construct the solver
+    solver = Solver(
+        static_hamiltonian=drift,
+        hamiltonian_operators=operators,
+        rotating_frame=drift,
+        rwa_cutoff_freq=2 * 5.0,
+        hamiltonian_channels=["d0"],
+        channel_carrier_freqs={"d0": w},
+        dt=dt,
+    )
+
+    jax_solver = JaxSolver(
+        static_hamiltonian=drift,
+        hamiltonian_operators=operators,
+        rotating_frame=drift,
+        rwa_cutoff_freq=2 * 5.0,
+        hamiltonian_channels=["d0"],
+        channel_carrier_freqs={"d0": w},
+        dt=dt,
+    )
+
+    jax_backend = DynamicsBackend(
+        solver=jax_solver,
+        subsystem_dims=[2],
+    )
+
+    dynamics_backend = DynamicsBackend(
+        solver=solver,
+        subsystem_dims=[2],
+    )
+
     return jax_backend, dynamics_backend

@@ -34,8 +34,9 @@ def apply_parametrized_circuit(
     :param q_reg: Quantum Register formed of target qubits
     :return:
     """
-    target = kwargs["target"]
-    my_qc = QuantumCircuit(q_reg, name=f"custom_{target['gate'].name}")
+    target, backend = kwargs["target"], kwargs["backend"]
+    gate, physical_qubits = target.get("gate", None), target["register"]
+    my_qc = QuantumCircuit(q_reg, name=f"{gate.name if gate is not None else 'G'}_cal")
     # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
     optimal_params = np.pi * np.zeros(len(params))
 
