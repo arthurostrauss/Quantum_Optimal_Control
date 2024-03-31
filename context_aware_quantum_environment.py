@@ -316,7 +316,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         n_custom_instructions = (
             self._trunc_index + 1
         )  # Count custom instructions present in the current truncation
-        benchmark_circ = self.circuit_truncations[self._trunc_index].copy(name="b_circ")
+        benchmark_circ = self.circuit_truncations[self._trunc_index]
         baseline_circ = self.baseline_truncations[self._trunc_index]
 
         if (
@@ -347,10 +347,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     backend = AerSimulator.from_backend(
                         self.backend, method="density_matrix"
                     )
-
-                benchmark_circ.save_density_matrix()
+                circ = transpile(benchmark_circ, backend=backend, optimization_level=0)
+                circ.save_density_matrix()
                 states_result = backend.run(
-                    benchmark_circ.decompose(),
+                    circ,
                     parameter_binds=[
                         {
                             self._parameters[i][j]: params[:, i * n_actions + j]

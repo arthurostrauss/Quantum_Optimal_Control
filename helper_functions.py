@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-import copy
 from qiskit import pulse, schedule, transpile
 from qiskit.circuit import (
     QuantumCircuit,
@@ -10,10 +9,8 @@ from qiskit.circuit import (
     CircuitInstruction,
     ParameterVector,
     Delay,
-    Instruction,
-    Qubit,
 )
-from qiskit.circuit.library import get_standard_gate_name_mapping, RZGate
+from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map, RZGate
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import (
     BackendEstimator,
@@ -28,7 +25,6 @@ from qiskit.primitives import (
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer import AerSimulator
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
-from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit.quantum_info import (
     Operator,
     Statevector,
@@ -94,7 +90,6 @@ from itertools import permutations
 from typing import Optional, Tuple, List, Union, Dict, Sequence
 import yaml
 
-from jax import jit, numpy as jnp
 import numpy as np
 
 from gymnasium.spaces import Box
@@ -220,9 +215,7 @@ def perform_standard_calibrations(
         backend.set_options(control_channel_map=control_channel_map)
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
         two_qubit_properties = {qubits: None for qubits in control_channel_map}
-    standard_gates: Dict[str, Gate] = (
-        get_standard_gate_name_mapping()
-    )  # standard gate library
+    standard_gates: Dict[str, Gate] = gate_map()  # standard gate library
     fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array(
         [1, 0.5, -0.5, 0.25, -0.25]
     )
@@ -659,12 +652,12 @@ def simulate_pulse_schedule(
 
     results = solver.solve(
         t_span=[0, sched.duration * dt],
-        y0=jnp.eye(solver.model.dim),
+        y0=np.eye(solver.model.dim),
         signals=sched,
         **solver_options,
     )
 
-    output_unitary = results.y[-1]
+    output_unitary = np.array(results.y[-1])
 
     output_op = Operator(
         output_unitary,
@@ -679,6 +672,7 @@ def simulate_pulse_schedule(
     )
     final_state = initial_state.evolve(output_op)
     projected_statevec = projected_statevector(final_state, subsystem_dims, normalize)
+    rotated_state = None
 
     final_results = {
         "unitary": output_op,
@@ -691,17 +685,24 @@ def simulate_pulse_schedule(
             projected_unitary, target_unitary, len(subsystem_dims)
         )
         rotated_unitary = rotate_unitary(optimal_rots.x, projected_unitary)
+        rotated_state = initial_state.evolve(Operator(rotated_unitary))
         gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
         optimal_gate_fid = average_gate_fidelity(rotated_unitary, target_unitary)
         final_results["gate_fidelity"] = {
             "raw": gate_fid,
             "optimal": optimal_gate_fid,
             "rotations": optimal_rots.x,
+            "rotated_unitary": rotated_unitary,
         }
 
     if target_state is not None:
-        state_fid = state_fidelity(projected_statevec, target_state, validate=False)
-        final_results["state_fidelity"] = state_fid
+        state_fid1 = state_fidelity(projected_statevec, target_state, validate=False)
+        state_fid2 = state_fidelity(rotated_state, target_state, validate=False)
+        final_results["state_fidelity"] = {
+            "raw": state_fid1,
+            "optimal": state_fid2,
+            "rotated_state": rotated_state,
+        }
     return final_results
 
 
@@ -1439,9 +1440,7 @@ def load_q_env_from_yaml_file(file_path: str):
         },
     }
     if "GATE" in config["TARGET"]:
-        params["target"]["gate"] = get_standard_gate_name_mapping()[
-            config["TARGET"]["GATE"].lower()
-        ]
+        params["target"]["gate"] = gate_map()[config["TARGET"]["GATE"].lower()]
     else:
         params["target"]["dm"] = DensityMatrix.from_label(config["TARGET"]["STATE"])
 

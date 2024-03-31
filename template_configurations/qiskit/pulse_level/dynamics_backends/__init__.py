@@ -1,4 +1,8 @@
-from .dynamics_config import custom_backend, single_qubit_backend
+from .dynamics_config import (
+    custom_backend,
+    single_qubit_backend,
+    surface_code_plaquette,
+)
 from .utils import (
     create_quantum_operators,
     expand_operators,

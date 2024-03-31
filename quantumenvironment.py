@@ -60,6 +60,7 @@ from qiskit_ibm_runtime import (
     EstimatorV1 as RuntimeEstimatorV1,
     EstimatorV2 as RuntimeEstimatorV2,
     IBMBackend as RuntimeBackend,
+    QiskitRuntimeService,
 )
 
 from helper_functions import (
@@ -699,10 +700,10 @@ class QuantumEnvironment(Env):
                             aer_backend = AerSimulator.from_backend(
                                 self.backend, method="density_matrix"
                             )
-
-                        qc.save_density_matrix()
+                        circ = transpile(qc, backend=aer_backend, optimization_level=0)
+                        circ.save_density_matrix()
                         states_results = aer_backend.run(
-                            qc.decompose(),
+                            circ,
                             parameter_binds=[
                                 {
                                     self.parameters[j]: params[:, j]
@@ -736,9 +737,10 @@ class QuantumEnvironment(Env):
                             aer_backend = AerSimulator.from_backend(
                                 self.backend, method="superop"
                             )
-                        qc.save_superop()
+                        circ = transpile(qc, backend=aer_backend, optimization_level=0)
+                        circ.save_superop()
                         process_results = aer_backend.run(
-                            qc.decompose(),
+                            circ,
                             parameter_binds=[
                                 {
                                     self.parameters[j]: params[:, j]
@@ -998,7 +1000,9 @@ class QuantumEnvironment(Env):
             self.density_matrix_history.clear()
 
     def close(self) -> None:
-        if isinstance(self.estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2)):
+        if isinstance(
+            self.estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2)
+        ) and isinstance(self.estimator.session.service, QiskitRuntimeService):
             self.estimator.session.close()
 
     def update_gate_calibration(self):

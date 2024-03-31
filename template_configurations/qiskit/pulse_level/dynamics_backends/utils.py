@@ -74,11 +74,12 @@ def get_couplings(
     ecr_ops: List[Operator],
     drive_ops: List[Operator],
     num_controls: int,
-) -> None:
+):
     """
     Processes coupling information to update the static Hamiltonian, control channels, and drive operators with
     cross-resonance terms.
     """
+    control_channel_map = {}
     keys = list(couplings.keys())
     for i, j in keys:
         couplings[(j, i)] = couplings[(i, j)]
@@ -87,10 +88,11 @@ def get_couplings(
             2 * np.pi * coupling * (a_ops[i] + adag_ops[i]) @ (a_ops[j] + adag_ops[j])
         )
         channels[f"u{num_controls}"] = freqs[j]
+        control_channel_map[(i, j)] = num_controls
         num_controls += 1
         ecr_ops.append(drive_ops[i])
 
-    return static_ham, channels, ecr_ops, num_controls
+    return static_ham, channels, ecr_ops, num_controls, control_channel_map
 
 
 def noise_coupling_sanity_check(qbit, errors, drive_ops_errorfree, drive_ops_error):

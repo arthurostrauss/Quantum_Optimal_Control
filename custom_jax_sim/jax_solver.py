@@ -271,50 +271,52 @@ class JaxSolver(Solver):
                 t_span_list, y0_list, schedule_list, convert_results, **kwargs
             )
         else:
-            # Otherwise, we need to load the parameters and observables from the solver options
+            estimator_usage = False  # Flag to check if the estimator is being used
+            if "observables" in kwargs and "subsystem_dims" in kwargs:
+                estimator_usage = True
+                observables_circuits: List[QuantumCircuit] = [
+                    circ.remove_final_measurements(inplace=False)
+                    for circ in kwargs["observables"]
+                ]
+
+                pauli_rotations = [
+                    [Operator.from_label("I") for _ in range(circ.num_qubits)]
+                    for circ in observables_circuits
+                ]
+                for i, circuit in enumerate(observables_circuits):
+                    qubit_counter, qubit_list = 0, []
+
+                    for circuit_instruction in circuit.data:
+                        assert (
+                            len(circuit_instruction.qubits) == 1
+                        ), "Operation non local, need local rotations"
+                        if circuit_instruction.qubits[0] not in qubit_list:
+                            qubit_list.append(circuit_instruction.qubits[0])
+                            qubit_counter += 1
+
+                        pauli_rotations[i][qubit_counter - 1] = pauli_rotations[i][
+                            qubit_counter - 1
+                        ].compose(Operator(circuit_instruction.operation))
+                subsystem_dims = self._subsystem_dims = kwargs["subsystem_dims"]
+                observables = [
+                    PauliToQuditOperator(pauli_rotations[i], subsystem_dims)
+                    for i in range(len(pauli_rotations))
+                ]
+                self.observables = observables
+                kwargs.pop("observables")
+                kwargs.pop("subsystem_dims")
+
             self._param_names = kwargs["parameter_dicts"][0].keys()
             param_values = self._param_values = kwargs["parameter_values"]
-            subsystem_dims = self._subsystem_dims = kwargs["subsystem_dims"]
+
             if self.circuit_macro is None:
                 raise ValueError(
                     "No circuit macro has been provided, please provide a circuit macro"
                 )
 
-            observables_circuits: List[QuantumCircuit] = [
-                circ.remove_final_measurements(inplace=False)
-                for circ in kwargs["observables"]
-            ]
-
-            pauli_rotations = [
-                [Operator.from_label("I") for _ in range(circ.num_qubits)]
-                for circ in observables_circuits
-            ]
-            for i, circuit in enumerate(observables_circuits):
-                qubit_counter, qubit_list = 0, []
-
-                for circuit_instruction in circuit.data:
-                    assert (
-                        len(circuit_instruction.qubits) == 1
-                    ), "Operation non local, need local rotations"
-                    if circuit_instruction.qubits[0] not in qubit_list:
-                        qubit_list.append(circuit_instruction.qubits[0])
-                        qubit_counter += 1
-
-                    pauli_rotations[i][qubit_counter - 1] = pauli_rotations[i][
-                        qubit_counter - 1
-                    ].compose(Operator(circuit_instruction.operation))
-
-            observables = [
-                PauliToQuditOperator(pauli_rotations[i], subsystem_dims)
-                for i in range(len(pauli_rotations))
-            ]
-            self.observables = observables
-
             for key in [
                 "parameter_dicts",
                 "parameter_values",
-                "observables",
-                "subsystem_dims",
             ]:
                 kwargs.pop(key)
             self._kwargs = kwargs
@@ -340,15 +342,25 @@ class JaxSolver(Solver):
             )
             print("Time to run simulation: ", time.time() - start_time)
             self._batched_sims = batch_results_y
-            for results_t, results_y in zip(batch_results_t, batch_results_y):
-                for observable in observables:
+            if estimator_usage:
+                for results_t, results_y in zip(batch_results_t, batch_results_y):
+                    for observable in observables:
+                        results = OdeResult(t=results_t, y=results_y)
+                        if y0_cls is not None and convert_results:
+                            results.y = [
+                                y0_cls(np.array(yi), dims=subsystem_dims)
+                                for yi in results.y
+                            ]
+
+                            # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables
+                            results.y[-1] = results.y[-1].evolve(observable)
+                            self.stored_results.append(results.y[-1])
+                        all_results.append(results)
+            else:
+                for results_t, results_y in zip(batch_results_t, batch_results_y):
                     results = OdeResult(t=results_t, y=results_y)
                     if y0_cls is not None and convert_results:
-                        results.y = [state_type_wrapper(yi) for yi in results.y]
-
-                        # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables
-                        results.y[-1] = results.y[-1].evolve(observable)
-                        self.stored_results.append(results.y[-1])
+                        results.y = [y0_cls(np.array(yi)) for yi in results.y]
                     all_results.append(results)
 
             return all_results
