@@ -47,35 +47,35 @@ def apply_parametrized_circuit(
     target = kwargs["target"]
     my_qc = QuantumCircuit(q_reg, name=f"{target['gate'].name}_cal")
     optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-    optimal_params += np.array(
-        [
-            -0.00020222,
-            -0.00018466,
-            0.00075005,
-            0.00248492,
-            -0.00792428,
-            -0.00582522,
-            -0.00161892,
-        ]
-    )
+    # optimal_params += np.array(
+    #     [
+    #         -0.00020222,
+    #         -0.00018466,
+    #         0.00075005,
+    #         0.00248492,
+    #         -0.00792428,
+    #         -0.00582522,
+    #         -0.00161892,
+    #     ]
+    # )
     # optimal_params = np.pi * np.zeros(len(params))
 
-    my_qc.u(
+    qc.u(
         optimal_params[0] + params[0],
         optimal_params[1] + params[1],
         optimal_params[2] + params[2],
         q_reg[0],
     )
-    my_qc.u(
+    qc.u(
         optimal_params[3] + params[3],
         optimal_params[4] + params[4],
         optimal_params[5] + params[5],
         q_reg[1],
     )
 
-    my_qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
+    qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
 
-    qc.append(my_qc.to_instruction(label=my_qc.name), q_reg)
+    # qc.append(my_qc.to_instruction(label=my_qc.name), q_reg) # qc.append(my_qc.to_instruction(label=my_qc.name), q_reg)
 
 
 def get_backend(
@@ -135,9 +135,9 @@ def get_backend(
     generic_backend = GenericBackendV2(
         num_qubits=2,
         dtm=2.2222 * 1e-10,
-        basis_gates=["cx", "id", "rz", "sx", "x", "crx"],
+        basis_gates=["cx", "id", "rz", "sx", "x"],
     )
-    backend = AerSimulator.from_backend(generic_backend, noise_model=noise_model)
+    backend = AerSimulator(noise_model=noise_model) # .from_backend(generic_backend, noise_model=noise_model)
 
     if backend is None:
         # TODO: Add here your custom backend
@@ -152,7 +152,7 @@ def get_backend(
 
 
 ### Custom spillover noise model
-phi = np.pi / 4  # rotation angle
+phi = np.pi / 4 # rotation angle
 gamma = 0.01  # spillover rate for the CRX gate
 custom_rx_gate_label = "custom_kron(rx,ident)_gate"
 
@@ -171,13 +171,34 @@ def get_circuit_context(backend: Optional[BackendV2]):
     rx_op_2q = Operator(identity_op.tensor(rx_op))
     circuit.unitary(rx_op_2q, [0, 1], label=custom_rx_gate_label)
 
+    # Define the gate time for our custom gate (essentially it's a single-qubit gate RX(phi))
+    single_qubit_gate_time = 1.6e-7
+    two_qubit_gate_time = 5.3e-7
+    readout_time = 1.2e-6
+    reset_time = 1.0e-6
+
+    gates_done_by_software = ['rz', 's', 't']
+
+    circuit_gate_times = {
+        custom_rx_gate_label: single_qubit_gate_time,
+        'x': single_qubit_gate_time,
+        'sx': single_qubit_gate_time,
+        'h': single_qubit_gate_time,
+        'u': single_qubit_gate_time,
+        'rzx': two_qubit_gate_time,
+        'reset': reset_time,
+        'measure': readout_time,
+    }
+    circuit_gate_times.update({gate: 0.0 for gate in gates_done_by_software})
+
+        
     circuit.cx(0, 1)
 
     if backend is not None and backend.target.has_calibration("x", (0,)):
         circuit = transpile(circuit, backend, optimization_level=1, seed_transpiler=42)
     print("Circuit context")
     print(circuit)
-    return circuit
+    return circuit, circuit_gate_times
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
@@ -207,4 +228,4 @@ QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_acc
 )
 QuantumEnvironment.channel_estimator = channel_estimator
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
-circuit_context = get_circuit_context(backend)
+circuit_context, circuit_gate_times = get_circuit_context(backend)
