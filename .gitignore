@@ -124,3 +124,8 @@ dmypy.json
 .pyre/
 .DS_Store
 *.xml
+
+*.pickle
+venv_qiskit10/
+
+events.out.tfevents.*
