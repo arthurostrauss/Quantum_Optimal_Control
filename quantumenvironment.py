@@ -668,15 +668,18 @@ class QuantumEnvironment(Env):
                     * self.batch_size
                     * len(self._observables.group_commuting(qubit_wise=True))
                 )
+                )  
                 reward_table = job.result().values / self._observables.size
             else:  # EstimatorV2
                 if self.channel_estimator:
-                    self._pubs, total_shots = (
-                        self.retrieve_observables_and_input_states(
-                            self.circuit_truncations[self._trunc_index], params
+                    for i in range(len(self._pubs)):
+                        self._pubs[i][2] = params
+                        self._pubs[i] = tuple(self._pubs[i])
+                        self._total_shots.append(
+                            self.batch_size
+                            * np.sum([pub[3] ** (-2) for pub in self._pubs])
+                            * len(self._pubs)
                         )
-                    )
-                    self._total_shots.append(total_shots)
                 else:
                     print(self._observables)
                     self._pubs = [
@@ -692,7 +695,10 @@ class QuantumEnvironment(Env):
                         )
                     ]
                     self._total_shots.append(
-                        self.batch_size * np.sum(self._pauli_shots * self.n_shots)
+                        self.batch_size
+                        * len(self._observables.group_commuting(qubit_wise=True))
+                        * int(np.max(self._pauli_shots))
+                        * self.n_shots
                     )
                 job = self.estimator.run(
                     pubs=self._pubs,
@@ -1033,6 +1039,7 @@ class QuantumEnvironment(Env):
             return array_obs
         else:
             raise NotImplementedError("Channel estimator not yet implemented")
+        
 
     def _generate_circuits(self):
         """

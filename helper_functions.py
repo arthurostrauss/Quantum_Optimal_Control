@@ -1357,6 +1357,33 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     )  # Qubitized unitary as a Qiskit Operator object (Note that is actually not unitary at this point, it's a Channel)
     return qubitized_unitary
 
+def get_hardware_runtime_single_circuit(qc: QuantumCircuit, circuit_gate_times: Dict) -> float:
+        """
+        Return a worst-case estimate of the runtime for a single execution of the circuit on the hardware
+
+        :param qc: QuantumCircuit to be executed
+        """
+        if len(circuit_gate_times) == 0:
+            raise ValueError('Empty circuit_gate_time dictionary received. Please add durations for your gates.')
+
+        total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
+        for instruction in qc.data:
+            for qubit in instruction.qubits:
+                # Custom gates only appear in the circuit context for the CAQEnv case
+                if instruction.operation.label in circuit_gate_times:
+                    total_time_per_qubit[qubit] += circuit_gate_times[instruction.operation.label]
+                else:
+                    total_time_per_qubit[qubit] += circuit_gate_times[instruction.operation.name]
+
+        # Find the maximum execution time among all qubits
+        total_execution_time = max(total_time_per_qubit.values()) + circuit_gate_times['reset'] + circuit_gate_times['measure']
+        
+        return total_execution_time
+
+def get_hardware_runtime_cumsum(qc: QuantumCircuit, circuit_gate_times: Dict, total_shots: List[int]) -> List[float]:
+    return np.cumsum(
+        get_hardware_runtime_single_circuit(qc, circuit_gate_times) * np.array(total_shots)
+    )
 
 def rotate_unitary(x, unitary: Operator):
     """
