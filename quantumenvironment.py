@@ -8,11 +8,12 @@ Last updated: 16/02/2024
 """
 
 from __future__ import annotations
+from abc import ABC
 
 # For compatibility for options formatting between Estimators.
 import json
 import signal
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from itertools import product, chain
 from typing import Dict, Optional, List, Callable, Any, SupportsFloat
 
@@ -47,6 +48,7 @@ from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import Layout, InstructionProperties
 from qiskit_aer import AerSimulator
+from qiskit_aer.noise import NoiseModel
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
@@ -74,6 +76,7 @@ from helper_functions import (
     rotate_unitary,
     get_optimal_z_rotation,
     fidelity_from_tomography,
+    remove_unused_wires,
 )
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
@@ -120,118 +123,6 @@ def _calculate_chi_target(target: DensityMatrix | Operator):
     return chi
 
 
-def _define_target(target: Dict):
-    """
-    Define target for the quantum environment
-    This function is used to define the target for the quantum environment, and to check that the target is well defined
-    It prepares the target for the environment, and returns the necessary information for the environment to be built
-    :param target: Dictionary containing target information (gate or state)
-    """
-    tgt_register = target.get("register", None)
-    q_register = None
-    layout = None
-    if tgt_register is not None:
-        if isinstance(tgt_register, List):
-            q_register = QuantumRegister(len(tgt_register), "tgt")
-            layout = Layout(
-                {q_register[i]: tgt_register[i] for i in range(len(tgt_register))}
-            )
-        elif isinstance(tgt_register, QuantumRegister):  # QuantumRegister or None
-            q_register = tgt_register
-        else:
-            raise TypeError("Register should be of type List[int] or QuantumRegister")
-
-    if "gate" not in target and "circuit" not in target and "dm" not in target:
-        raise KeyError(
-            "No target provided, need to have one of the following: 'gate' for gate calibration,"
-            " 'circuit' or 'dm' for state preparation"
-        )
-    elif ("gate" in target and "circuit" in target) or (
-        "gate" in target and "dm" in target
-    ):
-        raise KeyError("Cannot have simultaneously a gate target and a state target")
-    if "circuit" in target or "dm" in target:  # State preparation task
-        target["target_type"] = "state"
-        if "circuit" in target:
-            assert isinstance(target["circuit"], QuantumCircuit), (
-                "Provided circuit is not a qiskit.QuantumCircuit " "object"
-            )
-            target["dm"] = DensityMatrix(target["circuit"])
-
-        assert (
-            "dm" in target
-        ), "no DensityMatrix or circuit argument provided to target dictionary"
-        assert isinstance(
-            target["dm"], DensityMatrix
-        ), "Provided dm is not a DensityMatrix object"
-        dm: DensityMatrix = target["dm"]
-        n_qubits = dm.num_qubits
-
-        if q_register is None:
-            q_register = QuantumRegister(n_qubits, "tgt")
-
-        if layout is None:
-            layout = Layout.generate_trivial_layout(q_register)
-        target["Chi"] = _calculate_chi_target(dm)
-        return (
-            target,
-            "state",
-            q_register,
-            n_qubits,
-            [layout],
-        )
-
-    elif "gate" in target:  # Gate calibration task
-        target["target_type"] = "gate"
-        assert isinstance(
-            target["gate"], Gate
-        ), "Provided gate is not a qiskit.circuit.Gate operation"
-        gate: Gate = target["gate"]
-        n_qubits = gate.num_qubits
-        if q_register is None:
-            q_register = QuantumRegister(n_qubits)
-        if layout is None:
-            layout = Layout.generate_trivial_layout(q_register)
-
-        assert gate.num_qubits == len(q_register), (
-            f"Target gate number of qubits ({gate.num_qubits}) "
-            f"incompatible with indicated 'register' ({len(q_register)})"
-        )
-        if "input_states" not in target:
-            target["input_states"] = [
-                [
-                    {"circuit": PauliPreparationBasis().circuit(s)}
-                    for s in product(range(4), repeat=len(tgt_register))
-                ]
-            ]
-
-        for i, input_state in enumerate(target["input_states"][0]):
-            if "circuit" not in input_state:
-                raise KeyError("'circuit' key missing in input_state")
-            assert isinstance(input_state["circuit"], QuantumCircuit), (
-                "Provided circuit is not a" "qiskit.QuantumCircuit object"
-            )
-
-            input_circuit: QuantumCircuit = input_state["circuit"]
-            input_state["dm"] = DensityMatrix(input_circuit)
-
-            state_target_circuit = QuantumCircuit(q_register)
-            state_target_circuit.compose(input_circuit, inplace=True)
-            state_target_circuit.append(CircuitInstruction(gate, q_register))
-
-            input_state["target_state"] = {
-                "dm": DensityMatrix(state_target_circuit),
-                "circuit": state_target_circuit,
-                "target_type": "state",
-            }
-            input_state["target_state"]["Chi"] = _calculate_chi_target(
-                input_state["target_state"]["dm"]
-            )
-        return target, "gate", q_register, n_qubits, [layout]
-    else:
-        raise KeyError("target type not identified, must be either gate or state")
-
-
 def retrieve_abstraction_level(qc: QuantumCircuit):
     """
     Retrieve the abstraction level of the quantum circuit
@@ -240,6 +131,167 @@ def retrieve_abstraction_level(qc: QuantumCircuit):
         return "pulse"
     else:
         return "circuit"
+
+
+@dataclass
+class BaseTarget(ABC):
+    """
+    Base class for the target of the quantum environment
+    """
+
+    def __init__(self, physical_qubits: int | List[int], target_type: str):
+        self.physical_qubits = (
+            list(range(physical_qubits))
+            if isinstance(physical_qubits, int)
+            else physical_qubits
+        )
+        self.target_type = target_type
+        self._tgt_register = QuantumRegister(len(self.physical_qubits), "tgt")
+        self._layout: List[Layout] = [
+            Layout(
+                {
+                    self._tgt_register[i]: self.physical_qubits[i]
+                    for i in range(len(self.physical_qubits))
+                }
+            )
+        ]
+        self._n_qubits = len(self.physical_qubits)
+
+    @property
+    def tgt_register(self):
+        return self._tgt_register
+
+    @property
+    def layout(self) -> List[Layout]:
+        return self._layout
+
+    @layout.setter
+    def layout(self, layout: List[Layout] | Layout):
+        if isinstance(layout, Layout):
+            layout = [layout]
+        self._layout = layout
+
+    @property
+    def n_qubits(self):
+        return self._n_qubits
+
+
+class StateTarget(BaseTarget):
+    """
+    Class to represent the state target for the quantum environment
+    """
+
+    def __init__(
+        self,
+        dm: Optional[DensityMatrix] = None,
+        circuit: Optional[QuantumCircuit] = None,
+        physical_qubits: Optional[List[int]] = None,
+    ):
+
+        if dm is None and circuit is None:
+            raise ValueError("No target provided")
+        if dm is not None and circuit is not None:
+            assert (
+                DensityMatrix(circuit) == dm
+            ), "Provided circuit does not generate the provided density matrix"
+        self.dm = DensityMatrix(circuit) if dm is None else dm
+        self.circuit = circuit if isinstance(circuit, QuantumCircuit) else None
+        self.Chi = _calculate_chi_target(self.dm)
+        super().__init__(
+            self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
+        )
+
+
+class InputState(StateTarget):
+    """
+    Class to represent the input state for the quantum environment
+    """
+
+    def __init__(
+        self,
+        input_circuit: QuantumCircuit,
+        target_op: Gate | QuantumCircuit,
+        tgt_register: QuantumRegister,
+        n_reps: int = 1,
+    ):
+        """
+        Initialize the input state for the quantum environment
+        :param circuit: Quantum circuit representing the input state
+        :param target_op: Gate to be calibrated
+        :param tgt_register: Quantum register for the target gate
+        :param n_reps: Number of repetitions of the target gate
+        """
+
+        if isinstance(target_op, Gate):
+            circ = QuantumCircuit(tgt_register)
+        else:
+            circ = target_op.copy_empty_like()
+
+        circ.compose(input_circuit, inplace=True)
+        super().__init__(circuit=input_circuit)
+        for _ in range(n_reps):
+            if isinstance(target_op, Gate):
+                circ.append(target_op, tgt_register)
+            else:
+                for instr in target_op.data:
+                    circ.append(instr)
+                # circ.compose(target_op, inplace=True)
+        self.target_state = StateTarget(circuit=circ)
+
+    @property
+    def layout(self):
+        raise AttributeError("Input state does not have a layout")
+
+    @layout.setter
+    def layout(self, layout: List[Layout] | Layout):
+        raise AttributeError("Input state does not have a layout")
+
+    @property
+    def tgt_register(self):
+        raise AttributeError("Input state does not have a target register")
+
+
+class GateTarget(BaseTarget):
+    """
+    Class to represent the gate target for the quantum environment
+    """
+
+    def __init__(
+        self,
+        gate: Gate,
+        physical_qubits: Optional[List[int]] = None,
+        n_reps: int = 1,
+        input_states: Optional[List[List[InputState]]] = None,
+    ):
+        """
+        Initialize the gate target for the quantum environment
+        :param gate: Gate to be calibrated
+        :param physical_qubits: Physical qubits forming the target gate
+        :param n_reps: Number of repetitions of the target gate
+        :param input_states: List of input states to be used for calibration
+        """
+        self.gate = gate
+        super().__init__(
+            gate.num_qubits if physical_qubits is None else physical_qubits, "gate"
+        )
+        if input_states is None:
+            input_circuits = [
+                PauliPreparationBasis().circuit(s)
+                for s in product(range(4), repeat=self.n_qubits)
+            ]
+            input_states = [
+                [
+                    InputState(
+                        input_circuit=circ,
+                        target_op=gate,
+                        tgt_register=self.tgt_register,
+                        n_reps=n_reps,
+                    )
+                    for circ in input_circuits
+                ]
+            ]
+        self.input_states = input_states
+        self.Chi = _calculate_chi_target(Operator(gate))
 
 
 class QiskitBackendInfo:
@@ -254,6 +306,26 @@ class QiskitBackendInfo:
             self.basis_gates,
             self.instruction_durations,
         ) = retrieve_backend_info(backend, estimator)
+        self.backend = backend
+
+    def custom_transpile(self, qc: QuantumCircuit | List[QuantumCircuit]):
+        """
+        Custom transpile function to transpile the quantum circuit
+        """
+        return transpile(
+            (
+                qc.remove_final_measurements(inplace=False)
+                if isinstance(qc, QuantumCircuit)
+                else [circ.remove_final_measurements(inplace=False) for circ in qc]
+            ),
+            backend=self.backend,
+            scheduling_method="asap",
+            basis_gates=self.basis_gates,
+            coupling_map=(self.coupling_map if self.coupling_map.size() != 0 else None),
+            instruction_durations=self.instruction_durations,
+            optimization_level=0,
+            dt=self.dt,
+        )
 
 
 class QuantumEnvironment(Env):
@@ -277,6 +349,7 @@ class QuantumEnvironment(Env):
         self.training_config = training_config
         self.action_space = training_config.action_space
         self.n_shots = training_config.n_shots
+        self.n_reps = training_config.n_reps
         self.sampling_Pauli_space = (
             training_config.sampling_Paulis
         )  # Number of Pauli observables to sample
@@ -285,7 +358,9 @@ class QuantumEnvironment(Env):
         self.batch_size = (
             training_config.batch_size
         )  # Batch size == number of circuits sent in one job
-        self._parameters = ParameterVector("a", training_config.action_space.shape[-1])
+        self._parameters = [
+            ParameterVector("a", training_config.action_space.shape[-1])
+        ]
         self._tgt_instruction_counts = (
             1  # Number of instructions to calibrate (here, only one gate)
         )
@@ -297,20 +372,18 @@ class QuantumEnvironment(Env):
         if isinstance(self.training_config.backend_config, QiskitConfig):
             # Qiskit backend
             self._config_type = "qiskit"
-
-            (
-                self.target,
-                self.target_type,
-                self.tgt_register,
-                self._n_qubits,
-                self._layout,
-            ) = _define_target(training_config.target)
+            if "gate" in training_config.target:
+                self.target: BaseTarget = GateTarget(
+                    n_reps=self.n_reps, **training_config.target
+                )
+            else:
+                self.target: BaseTarget = StateTarget(**training_config.target)
 
             self.backend: Backend_type = training_config.backend_config.backend
             if self.backend is not None:
                 if self.n_qubits > self.backend.num_qubits:
                     raise ValueError(
-                        f"Target contains more qubits ({self._n_qubits}) than backend ({self.backend.num_qubits})"
+                        f"Target contains more qubits ({self.n_qubits}) than backend ({self.backend.num_qubits})"
                     )
 
             self.parametrized_circuit_func: Callable = (
@@ -337,7 +410,7 @@ class QuantumEnvironment(Env):
                 self.circuit_truncations[0],
             )
             # Retrieve physical qubits forming the target register (and additional qubits for the circuit context)
-            self._physical_target_qubits = self.config.target["register"]
+            self._physical_target_qubits = self.target.physical_qubits
             self.backend_info = QiskitBackendInfo(self.backend, self._estimator)
             # Retrieve qubits forming the local circuit context (target qubits + nearest neighbor qubits on the chip)
             self._physical_neighbor_qubits = list(
@@ -347,6 +420,19 @@ class QuantumEnvironment(Env):
                         *[
                             list(self.backend_info.coupling_map.neighbors(target_qubit))
                             for target_qubit in self.physical_target_qubits
+                        ]
+                    ),
+                )
+            )
+            self._physical_next_neighbor_qubits = list(
+                filter(
+                    lambda x: x
+                    not in self.physical_target_qubits + self.physical_neighbor_qubits,
+                    chain(
+                        *[
+                            list(self.backend_info.coupling_map.neighbors(target_qubit))
+                            for target_qubit in self.physical_target_qubits
+                            + self.physical_neighbor_qubits
                         ]
                     ),
                 )
@@ -386,18 +472,19 @@ class QuantumEnvironment(Env):
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-        if self.target_type == "gate":
+        if isinstance(self.target, GateTarget):
             if self.channel_estimator:
-                self._chi_gate = [_calculate_chi_target(Operator(self.target["gate"]))]
+                self._chi_gate = [_calculate_chi_target(Operator(self.target.gate))]
                 self._pubs = self.retrieve_observables_and_input_states(
                     self.circuit_truncations[self._trunc_index]
                 )
             else:
                 self._index_input_state = np.random.randint(
-                    len(self.target["input_states"][0])
+                    len(self.target.input_states[0])
                 )
+                self._input_state = self.target.input_states[0][self._index_input_state]
             self.target_instruction = CircuitInstruction(
-                self.target["gate"], self.tgt_register
+                self.target.gate, self.target.tgt_register
             )
             self.process_fidelity_history = []
             self.avg_fidelity_history = []
@@ -432,20 +519,17 @@ class QuantumEnvironment(Env):
         elif isinstance(self.estimator, RuntimeEstimatorV2):
             self.estimator.options.update(job_tags=[f"rl_qoc_step{self._step_tracker}"])
 
-        if self.target_type == "gate":
+        if isinstance(self.target, GateTarget):
             if self.channel_estimator:
                 self._pubs = self.retrieve_observables_and_input_states(
                     self.circuit_truncations[self._trunc_index]
                 )
                 target_state = None
             else:
-                self._index_input_state = np.random.randint(
-                    len(self.target["input_states"][self._trunc_index])
-                )
-                input_state = self.target["input_states"][self._trunc_index][
-                    self._index_input_state
-                ]
-                target_state = input_state["target_state"]  # (Gate |input>=|target>)
+                input_states = self.target.input_states[self._trunc_index]
+                self._index_input_state = np.random.randint(len(input_states))
+                self._input_state = input_states[self._index_input_state]
+                target_state = self._input_state.target_state  # (Gate |input>=|target>)
 
         else:  # State preparation task
             target_state = self.target
@@ -461,11 +545,11 @@ class QuantumEnvironment(Env):
         return {"episode": self._episode_tracker, "step": self._step_tracker}
 
     def _get_obs(self):
-        if self.target_type == "gate":
+        if isinstance(self.target, GateTarget):
             return np.array(
                 [
                     self._index_input_state
-                    / len(self.target["input_states"][self._trunc_index]),
+                    / len(self.target.input_states[self._trunc_index]),
                     self._target_instruction_timings[self._inside_trunc_tracker],
                 ]
                 + list(self._observable_to_observation())
@@ -531,23 +615,26 @@ class QuantumEnvironment(Env):
         :return: Reward table (reward for each run in the batch)
         """
         trunc_index = self._inside_trunc_tracker
-        qc = self.circuit_truncations[trunc_index]
-        input_state_circ = QuantumCircuit(self.tgt_register)
-
+        qc = self.circuit_truncations[trunc_index].copy()
+        input_state_circ = None
         params, batch_size = np.array(actions), actions.shape[0]
         if batch_size != self.batch_size:
             raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
-        if self.target_type == "gate":
-            # Pick random input state from the list of possible input states (forming a tomographically complete set)
-            input_state_circ = self.target["input_states"][trunc_index][
-                self._index_input_state
-            ]["circuit"]
-        try:
-            if self.do_benchmark():
-                print("Starting benchmarking...")
-                self.store_benchmarks(params)
-                print("Finished benchmarking")
-            print("Sending Estimator job...")
+
+        if (
+            self.do_benchmark() or self.fidelity_access
+        ):  # Benchmarking or fidelity access
+            fids = self.store_benchmarks(params)
+
+        if not self.fidelity_access:
+            if isinstance(self.target, GateTarget):
+                # Pick random input state
+                input_state_circ = self._input_state.circuit
+                for _ in range(self.n_reps - 1):  # Repeat the gate n_reps times
+                    qc.compose(self.circuit_truncations[trunc_index], inplace=True)
+                qc.compose(
+                    input_state_circ, inplace=True, front=True
+                )  # Prepend input state preparation circuit
 
             counts = (
                 self._session_counts
@@ -558,19 +645,13 @@ class QuantumEnvironment(Env):
                 self.estimator, self.backend, counts, qc, input_state_circ
             )
             # Append input state prep circuit to the custom circuit with front composition
-            pm = generate_preset_pass_manager(
-                optimization_level=1,
-                backend=self.backend,
-                initial_layout=self.layout[trunc_index],
-            )
-            full_circ = qc.compose(input_state_circ, inplace=False, front=True)
             full_circ = transpile(
-                full_circ,
+                qc,
                 self.backend,
                 initial_layout=self.layout[trunc_index],
                 optimization_level=1,
             )
-
+            print("Sending Estimator job...")
             if isinstance(self.estimator, BaseEstimatorV1):
                 print(self._observables)
                 job = self.estimator.run(
@@ -620,9 +701,8 @@ class QuantumEnvironment(Env):
                     / self._observables.size
                 )
             print("Finished Estimator job")
-        except Exception as e:
-            self.close()
-            raise e
+        else:
+            reward_table = fids
 
         if np.mean(reward_table) > self._max_return:
             self._max_return = np.mean(reward_table)
@@ -642,28 +722,38 @@ class QuantumEnvironment(Env):
         :param params: List of Action vectors to execute on quantum system
         :return: None
         """
-        qc = self.circuit_truncations[0]
-        n_actions = self.action_space.shape[-1]
-        key, cls = (
-            ("dm", DensityMatrix) if self.target_type == "state" else ("gate", Operator)
-        )
-        target: DensityMatrix | Operator = cls(self.target[key])
-        qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
+        qc = self.circuit_truncations[self._trunc_index].copy()
+        n_actions = params.shape[-1]
+        if isinstance(self.target, StateTarget):
+            key, cls = "dm", DensityMatrix
+            benchmark = state_fidelity
+            method_str = "statevector" if self.backend is None else "density_matrix"
+            method_qc = (
+                qc.save_statevector if self.backend is None else qc.save_density_matrix
+            )
+        else:
+            key, cls = "gate", Operator
+            benchmark = average_gate_fidelity
+            method_str = "unitary" if self.backend is None else "superop"
+            method_qc = qc.save_unitary if self.backend is None else qc.save_superop
+
+        target: DensityMatrix | Operator = cls(getattr(self.target, key))
 
         if self.check_on_exp:
             # Experiment based fidelity estimation
             try:
+                qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
                 print("Starting tomography...")
                 session = (
                     self.estimator.session
                     if hasattr(self.estimator, "session")
                     else None
                 )
-                fid = fidelity_from_tomography(
+                fids = fidelity_from_tomography(
                     qc_list,
                     self.backend,
                     target,
-                    self.target["register"],
+                    self.target.physical_qubits,
                     session=session,
                 )
                 print("Finished tomography")
@@ -671,100 +761,51 @@ class QuantumEnvironment(Env):
             except Exception as e:
                 self.close()
                 raise e
-            if self.target_type == "state":
-                self.state_fidelity_history.append(fid)
+            if isinstance(self.target, StateTarget):
+                self.state_fidelity_history.append(np.mean(fids))
             else:
-                self.avg_fidelity_history.append(fid)
-        else:
-            # Circuit list for each action of the batch
+                self.avg_fidelity_history.append(np.mean(fids))
+
+        else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
             print("Starting simulation benchmark...")
             if self.abstraction_level == "circuit":
-                if self.target_type == "state":
-                    if self.backend is None or (
-                        isinstance(self.backend, RuntimeBackend)
-                    ):
-                        q_state_list = [Statevector(circ) for circ in qc_list]
-                        density_matrix = DensityMatrix(
-                            np.mean(
-                                [
-                                    q_state.to_operator().to_matrix()
-                                    for q_state in q_state_list
-                                ],
-                                axis=0,
-                            )
-                        )
-                    else:
-                        if isinstance(self.backend, AerSimulator):
-                            aer_backend = self.backend
-                        else:
-                            aer_backend = AerSimulator.from_backend(
-                                self.backend, method="density_matrix"
-                            )
-                        circ = transpile(qc, backend=aer_backend, optimization_level=0)
-                        circ.save_density_matrix()
-                        states_results = aer_backend.run(
-                            circ,
-                            parameter_binds=[
-                                {
-                                    self.parameters[j]: params[:, j]
-                                    for j in range(n_actions)
-                                }
-                            ],
-                        ).result()
-                        output_states = [
-                            states_results.data(i)["density_matrix"]
-                            for i in range(self.batch_size)
-                        ]
-                        density_matrix = DensityMatrix(
-                            np.mean(
-                                [state.data for state in output_states],
-                                axis=0,
-                            )
-                        )
-
-                    self.state_fidelity_history.append(
-                        state_fidelity(target, density_matrix)
+                if isinstance(self.backend, AerSimulator):
+                    aer_backend = self.backend
+                else:
+                    noise_model = (
+                        NoiseModel.from_backend(self.backend)
+                        if self.backend is not None
+                        else None
                     )
-                else:  # Gate calibration task
-                    if self.backend is None or (
-                        isinstance(self.backend, RuntimeBackend)
-                    ):
-                        q_process_list = [Operator(circ) for circ in qc_list]
-                    else:
-                        if isinstance(self.backend, AerSimulator):
-                            aer_backend = self.backend
-                        else:
-                            aer_backend = AerSimulator.from_backend(
-                                self.backend, method="superop"
-                            )
-                        circ = transpile(qc, backend=aer_backend, optimization_level=0)
-                        circ.save_superop()
-                        process_results = aer_backend.run(
-                            circ,
-                            parameter_binds=[
-                                {
-                                    self.parameters[j]: params[:, j]
-                                    for j in range(n_actions)
-                                }
-                            ],
-                        ).result()
-                        q_process_list = [
-                            process_results.data(i)["superop"]
-                            for i in range(self.batch_size)
-                        ]
-
-                    avg_fidelity = np.mean(
-                        [
-                            average_gate_fidelity(q_process, target)
-                            for q_process in q_process_list
-                        ]
+                    aer_backend = AerSimulator(
+                        noise_model=noise_model, method=method_str
                     )
-                    self.avg_fidelity_history.append(
-                        avg_fidelity
-                    )  # Avg gate fidelity over the action batch
 
-            elif self.abstraction_level == "pulse":
-                # Pulse simulation
+                method_qc()
+                circ = transpile(qc, backend=aer_backend, optimization_level=0)
+                job = aer_backend.run(
+                    circ,
+                    False,
+                    [
+                        {
+                            self.parameters[self._trunc_index][j]: params[:, j]
+                            for j in range(n_actions)
+                        }
+                    ],
+                )
+                result = job.result()
+                output_states = [
+                    result.data(i)[method_str] for i in range(self.batch_size)
+                ]
+
+                fids = [benchmark(state, target) for state in output_states]
+
+                if isinstance(self.target, StateTarget):
+                    self.state_fidelity_history.append(np.mean(fids))
+                else:
+                    self.avg_fidelity_history.append(np.mean(fids))
+
+            else:  # Pulse simulation
                 subsystem_dims = list(
                     filter(lambda x: x > 1, self.backend.options.subsystem_dims)
                 )
@@ -775,6 +816,9 @@ class QuantumEnvironment(Env):
                             :, 1, :, :
                         ]
                     else:
+                        qc_list = [
+                            qc.assign_parameters(angle_set) for angle_set in params
+                        ]
                         scheds = schedule(qc_list, backend=self.backend)
                         dt = self.backend.dt
                         max_duration = max([sched.duration for sched in scheds])
@@ -791,36 +835,45 @@ class QuantumEnvironment(Env):
                         for i in range(self.batch_size)
                     ]
 
-                    if self.target_type == "state":
-                        density_matrix = DensityMatrix(
-                            np.mean(
-                                [
-                                    Statevector.from_int(0, dims=target.dims()).evolve(
-                                        unitary
-                                    )
-                                    for unitary in qubitized_unitaries
-                                ],
-                                axis=0,
-                            )
-                        )
+                    if self.target.target_type == "state":
+                        states = [
+                            Statevector.from_int(0, dims=subsystem_dims).evolve(unitary)
+                            for unitary in qubitized_unitaries
+                        ]
+                        density_matrix = DensityMatrix(np.mean(states, axis=0))
                         if target.num_qubits != density_matrix.num_qubits:
+                            states = [
+                                partial_trace(
+                                    state,
+                                    [
+                                        qubit
+                                        for qubit in range(state.num_qubits)
+                                        if qubit not in self.target.physical_qubits
+                                    ],
+                                )
+                                for state in states
+                            ]
                             density_matrix = partial_trace(
                                 density_matrix,
                                 [
                                     qubit
                                     for qubit in list(range(density_matrix.num_qubits))
-                                    if qubit not in self.target["register"]
+                                    if qubit not in self.target.physical_qubits
                                 ],
                             )
 
                         self.state_fidelity_history.append(
                             state_fidelity(target, density_matrix, validate=False)
                         )
+                        fids = [
+                            state_fidelity(target, state, validate=False)
+                            for state in states
+                        ]
 
                     else:  # Gate calibration task
                         if target.num_qubits < len(subsystem_dims):
                             qc = QuantumCircuit(len(subsystem_dims))
-                            qc.append(self.target["gate"], self.target["register"])
+                            qc.append(self.target.gate, self.target.physical_qubits)
                             target = Operator(qc)
 
                         fids = [
@@ -835,27 +888,26 @@ class QuantumEnvironment(Env):
                             rotate_unitary(res.x, unitary)
                             for unitary in qubitized_unitaries
                         ]
-                        avg_fid_batch = np.mean(
-                            [
-                                average_gate_fidelity(unitary, target)
-                                for unitary in rotated_unitaries
-                            ]
-                        )
+                        fids = [
+                            average_gate_fidelity(unitary, target)
+                            for unitary in rotated_unitaries
+                        ]
+                        avg_fid_batch = np.mean(fids)
 
                         self.avg_fidelity_history.append(avg_fid_batch)
-                        unitaries = rotated_unitaries
-
                 else:
                     raise NotImplementedError(
                         "Pulse simulation not yet implemented for this backend"
                     )
-            if self.target_type == "state":
+
+            if self.target.target_type == "state":
                 print("State fidelity:", self.state_fidelity_history[-1])
             else:
                 print("Avg gate fidelity:", self.avg_fidelity_history[-1])
             print("Finished simulation benchmark")
+            return fids
 
-    def retrieve_observables(self, target_state: Dict, qc: QuantumCircuit):
+    def retrieve_observables(self, target_state: StateTarget, qc: QuantumCircuit):
         """
         Retrieve observables to sample for the DFE protocol for the given target state
 
@@ -864,7 +916,7 @@ class QuantumEnvironment(Env):
         :return: Observables to sample, number of shots for each observable
         """
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        probabilities = target_state["Chi"] ** 2
+        probabilities = target_state.Chi**2
         if np.sum(probabilities) != 1:
             probabilities = probabilities / np.sum(probabilities)
         k_samples = np.random.choice(
@@ -873,7 +925,7 @@ class QuantumEnvironment(Env):
 
         pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
         reward_factor = self.c_factor / (
-            np.sqrt(target_state["dm"].dim) * target_state["Chi"][pauli_index]
+            np.sqrt(target_state.dm.dim) * target_state.Chi[pauli_index]
         )
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
@@ -889,7 +941,7 @@ class QuantumEnvironment(Env):
         :param qc: Quantum circuit to be executed on quantum system
         :return: Observables to sample, input state to prepare
         """
-        assert self.target_type == "gate", "Target type should be a gate"
+        assert isinstance(self.target, GateTarget), "Target type should be a gate"
         d = 2**qc.num_qubits
         probabilities = self._chi_gate[self._trunc_index] ** 2 / (d**2)
         basis = pauli_basis(num_qubits=qc.num_qubits)
@@ -975,23 +1027,28 @@ class QuantumEnvironment(Env):
         """
         Generate circuit to be executed on quantum system
         """
-        custom_circuit = QuantumCircuit(self.tgt_register)
-        ref_circuit = QuantumCircuit(self.tgt_register)
+        custom_circuit = QuantumCircuit(self.target.tgt_register)
+        ref_circuit = QuantumCircuit(self.target.tgt_register)
+
         self.parametrized_circuit_func(
-            custom_circuit, self._parameters, self.tgt_register, **self._func_args
+            custom_circuit,
+            self.parameters[self._trunc_index],
+            self.target.tgt_register,
+            **self._func_args,
         )
-        if self.target_type == "gate":
-            ref_circuit.append(self.target["gate"], self.tgt_register)
-        else:
-            ref_circuit = self.target["dm"]
+        if isinstance(self.target, GateTarget):
+            ref_circuit.append(self.target.gate, self.target.tgt_register)
+        elif isinstance(self.target, StateTarget):
+            ref_circuit = self.target.dm
         return [custom_circuit], [ref_circuit]
 
     def clear_history(self):
         self._step_tracker = 0
+        self._episode_tracker = 0
         self.qc_history.clear()
         self.action_history.clear()
         self.reward_history.clear()
-        if self.target_type == "gate":
+        if isinstance(self.target, GateTarget):
             self.avg_fidelity_history.clear()
             self.process_fidelity_history.clear()
 
@@ -1011,15 +1068,16 @@ class QuantumEnvironment(Env):
 
         :return: Pulse calibration for the target gate
         """
-        if not self.target_type == "gate":
+        if not isinstance(self.target, GateTarget):
             raise ValueError("Target type should be a gate for gate calibration task.")
+
         if self.abstraction_level == "pulse":
             sched = schedule(
                 self.circuit_truncations[0], self.backend
             ).assign_parameters(
                 {
                     param: action
-                    for param, action in zip(self._parameters, self._optimal_action)
+                    for param, action in zip(self.parameters[0], self._optimal_action)
                 }
             )
             duration = sched.duration
@@ -1028,7 +1086,7 @@ class QuantumEnvironment(Env):
                 error -= simulate_pulse_schedule(
                     self.backend,
                     sched,
-                    target_unitary=Operator(self.target["gate"]),
+                    target_unitary=Operator(self.target.gate),
                     target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
                 )["gate_fidelity"]["optimal"]
 
@@ -1036,17 +1094,17 @@ class QuantumEnvironment(Env):
                 error = 1.0 - np.max(self.avg_fidelity_history)
             instruction_prop = InstructionProperties(duration, error, sched)
             self.backend.target.update_instruction_properties(
-                self.target["gate"].name,
+                self.target.gate.name,
                 tuple(self.physical_target_qubits),
                 instruction_prop,
             )
 
             return self.backend.target.get_calibration(
-                self.target["gate"].name, tuple(self.physical_target_qubits)
+                self.target.gate.name, tuple(self.physical_target_qubits)
             )
         else:
             return self.circuit_truncations[0].assign_parameters(
-                {self.parameters: self._optimal_action}
+                {self.parameters[0]: self._optimal_action}
             )
 
     def episode_length(self, global_step: int):
@@ -1092,12 +1150,12 @@ class QuantumEnvironment(Env):
             pass
 
     def __repr__(self):
-        string = f"QuantumEnvironment composed of {self._n_qubits} qubits, \n"
+        string = f"QuantumEnvironment composed of {self.n_qubits} qubits, \n"
         string += (
-            f"Defined target: {self.target_type} "
-            f"({self.target.get('gate', None) if not None else self.target['dm']})\n"
+            f"Defined target: {self.target.target_type} "
+            f"({self.target.gate if isinstance(self.target, GateTarget) else self.target.dm})\n"
         )
-        string += f"Physical qubits: {self.target['register']}\n"
+        string += f"Physical qubits: {self.target.physical_qubits}\n"
         string += f"Backend: {self.backend},\n"
         string += f"Abstraction level: {self.abstraction_level},\n"
         string += f"Run options: N_shots ({self.n_shots}), Sampling_Pauli_space ({self.sampling_Pauli_space}), \n"
@@ -1128,30 +1186,36 @@ class QuantumEnvironment(Env):
 
     @property
     def n_qubits(self):
-        return self._n_qubits
+        return self.target.n_qubits
 
     @n_qubits.setter
     def n_qubits(self, n_qubits):
         assert (
             isinstance(n_qubits, int) and n_qubits > 0
         ), "n_qubits must be a positive integer"
-        self._n_qubits = n_qubits
+        self.target.n_qubits = n_qubits
 
     @property
     def layout(self):
-        return self._layout
+        return self.target.layout
 
     @layout.setter
-    def layout(self, layout: Layout):
-        self._layout = layout
+    def layout(self, layout: Layout | List[Layout]):
+        if isinstance(layout, Layout):
+            layout = [layout]
+        self.target.layout = layout
 
     @property
     def physical_target_qubits(self):
-        return self._physical_target_qubits
+        return self.target.physical_qubits
 
     @property
     def physical_neighbor_qubits(self):
         return self._physical_neighbor_qubits
+
+    @property
+    def physical_next_neighbor_qubits(self):
+        return self._physical_next_neighbor_qubits
 
     @property
     def parameters(self):
@@ -1187,11 +1251,7 @@ class QuantumEnvironment(Env):
 
     @property
     def sampler(self) -> BaseSamplerV1 | BaseSamplerV2:
-        return self._sampler
-
-    @sampler.setter
-    def sampler(self, sampler: BaseSamplerV1 | BaseSamplerV2):
-        self._sampler = sampler
+        return self.fidelity_checker._sampler
 
     @property
     def tgt_instruction_counts(self):
@@ -1201,7 +1261,7 @@ class QuantumEnvironment(Env):
     def fidelity_history(self):
         return (
             self.avg_fidelity_history
-            if self.target_type == "gate"
+            if self.target.target_type == "gate"
             else self.state_fidelity_history
         )
 
@@ -1222,14 +1282,14 @@ class QuantumEnvironment(Env):
                 "abstraction_level": self.abstraction_level,
                 "sampling_Pauli_space": self.sampling_Pauli_space,
                 "n_shots": self.n_shots,
-                "target_type": self.target_type,
+                "target_type": self.target.target_type,
                 "target": self.target,
                 "c_factor": self.c_factor,
                 "reward_history": self.reward_history,
                 "action_history": self.action_history,
                 "fidelity_history": (
                     self.avg_fidelity_history
-                    if self.target_type == "gate"
+                    if self.target.target_type == "gate"
                     else self.state_fidelity_history
                 ),
             }

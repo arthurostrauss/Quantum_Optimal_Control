@@ -134,7 +134,7 @@ def apply_parametrized_circuit(
     :return:
     """
     target, backend = kwargs["target"], kwargs["backend"]
-    gate, physical_qubits = target.get("gate", None), target["register"]
+    gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
 
     parametrized_gate = Gate(
         f"{gate.name if gate is not None else 'G'}_cal",
@@ -186,7 +186,11 @@ def get_backend(
 
     if backend is None:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        from dynamics_backends import custom_backend, single_qubit_backend
+        from dynamics_backends import (
+            custom_backend,
+            single_qubit_backend,
+            surface_code_plaquette,
+        )
 
         print("Custom backend used")
         # TODO: Add here your custom backend
@@ -203,7 +207,8 @@ def get_backend(
         couplings = None
 
         # backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
-        backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
+        # backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
+        backend = surface_code_plaquette()[0]
         _, _ = perform_standard_calibrations(backend, calibration_files)
 
     if backend is None:
@@ -235,6 +240,7 @@ def get_circuit_context(backend: Optional[BackendV1 | BackendV2] = None):
     estimator_options,
     check_on_exp,
     channel_estimator,
+    fidelity_access,
 ) = load_q_env_from_yaml_file(config_file_address)
 env_backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
@@ -254,5 +260,8 @@ QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = 
 QuantumEnvironment.channel_estimator = (
     ContextAwareQuantumEnvironment.channel_estimator
 ) = channel_estimator
+QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_access = (
+    fidelity_access
+)
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context = get_circuit_context(env_backend)

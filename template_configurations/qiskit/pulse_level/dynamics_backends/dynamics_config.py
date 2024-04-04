@@ -61,6 +61,7 @@ def custom_backend(
     channels = {f"d{i}": freqs[i] for i in range(n_qubits)}
     ecr_ops = []
     num_controls = 0
+    control_channel_map = None
     if couplings is not None:
         static_ham, channels, ecr_ops, num_controls, control_channel_map = (
             get_couplings(

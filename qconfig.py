@@ -117,6 +117,7 @@ class QEnvConfig:
     batch_size: int = 50
     sampling_Paulis: int = 100
     n_shots: int = 1
+    n_reps: int = 1
     c_factor: float = 0.5
     benchmark_cycle: int = 1
     seed: int = 1234

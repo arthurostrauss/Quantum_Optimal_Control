@@ -782,9 +782,9 @@ def fidelity_from_tomography(
         dim, _ = target.dim
         avg_gate_fids = [(dim * f_pro + 1) / (dim + 1) for f_pro in process_results]
 
-        return np.mean(avg_gate_fids)
+        return avg_gate_fids
     else:  # target is QuantumState
-        return np.mean(process_results)
+        return process_results
 
 
 def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
@@ -1431,12 +1431,13 @@ def load_q_env_from_yaml_file(file_path: str):
         "batch_size": config["ENV"]["BATCH_SIZE"],
         "sampling_Paulis": config["ENV"]["SAMPLING_PAULIS"],
         "n_shots": config["ENV"]["N_SHOTS"],
+        "n_reps": config["ENV"]["N_REPS"],
         "c_factor": config["ENV"]["C_FACTOR"],
         "seed": config["ENV"]["SEED"],
         "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
         "training_with_cal": config["ENV"]["TRAINING_WITH_CAL"],
         "target": {
-            "register": config["TARGET"]["PHYSICAL_QUBITS"],
+            "physical_qubits": config["TARGET"]["PHYSICAL_QUBITS"],
         },
     }
     if "GATE" in config["TARGET"]:
@@ -1459,12 +1460,14 @@ def load_q_env_from_yaml_file(file_path: str):
         print("Runtime Options:", runtime_options)
     check_on_exp = config["ENV"]["CHECK_ON_EXP"]
     channel_estimator = config["ENV"]["CHANNEL_ESTIMATOR"]
+    fidelity_access = config["ENV"]["FIDELITY_ACCESS"]
     return (
         params,
         backend_params,
         remove_none_values(runtime_options),
         check_on_exp,
         channel_estimator,
+        fidelity_access,
     )
 
 

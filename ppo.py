@@ -415,11 +415,11 @@ class CustomPPO:
                     )
                 else:
                     print(
-                        f"Average fidelity of last {self.env.unwrapped.target_type}:",
+                        f"Average fidelity of last {self.env.unwrapped.target.target_type}:",
                         self.env.unwrapped.fidelity_history[-1],
                     )
                     self.writer.add_scalar(
-                        f"losses/avg_{self.env.unwrapped.target_type}_fidelity",
+                        f"losses/avg_{self.env.unwrapped.target.target_type}_fidelity",
                         self.env.unwrapped.fidelity_history[-1],
                         global_step,
                     )

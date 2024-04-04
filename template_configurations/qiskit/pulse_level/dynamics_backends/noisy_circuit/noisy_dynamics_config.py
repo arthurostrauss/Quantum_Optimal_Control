@@ -1,6 +1,5 @@
 from typing import List, Tuple, Dict, Optional
 import copy
-from qiskit_dynamics.array import Array
 from qiskit.quantum_info import Operator
 import jax
 from qiskit_dynamics import DynamicsBackend, Solver
@@ -18,8 +17,6 @@ from ..utils import (
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
 jax.config.update("jax_platform_name", "cpu")
-# import Array and set default backend
-Array.set_default_backend("jax")
 
 
 def custom_backend(
@@ -68,17 +65,20 @@ def custom_backend(
     channels = {f"d{i}": freqs[i] for i in range(n_qubits)}
     ecr_ops = []
     num_controls = 0
+    control_channel_map = None
     if couplings is not None:
-        static_ham, channels, ecr_ops, num_controls = get_couplings(
-            couplings,
-            static_ham,
-            a_ops,
-            adag_ops,
-            channels,
-            freqs,
-            ecr_ops,
-            drive_ops,
-            num_controls,
+        static_ham, channels, ecr_ops, num_controls, control_channel_map = (
+            get_couplings(
+                couplings,
+                static_ham,
+                a_ops,
+                adag_ops,
+                channels,
+                freqs,
+                ecr_ops,
+                drive_ops,
+                num_controls,
+            )
         )
 
     # Pulse-spillover noise
@@ -103,7 +103,7 @@ def custom_backend(
         hamiltonian_channels=list(channels.keys()),
         channel_carrier_freqs=channels,
         dt=dt,
-        evaluation_mode="dense",
+        array_library="jax",
     )
 
     solver = Solver(
@@ -113,7 +113,7 @@ def custom_backend(
         hamiltonian_channels=list(channels.keys()),
         channel_carrier_freqs=channels,
         dt=dt,
-        evaluation_mode="dense",
+        array_library="jax",
     )
     if solver_options is None:
         solver_options = {
@@ -127,11 +127,13 @@ def custom_backend(
         solver=jax_solver,
         subsystem_dims=dims,  # for computing measurement data
         solver_options=solver_options,  # to be used every time run is called
+        control_channel_map=control_channel_map,
     )
 
     dynamics_backend = DynamicsBackend(
         solver=solver,
         subsystem_dims=dims,  # for computing measurement data
         solver_options=solver_options,  # to be used every time run is called
+        control_channel_map=control_channel_map,
     )
     return jax_backend, dynamics_backend
