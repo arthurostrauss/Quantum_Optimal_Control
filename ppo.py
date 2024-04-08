@@ -411,6 +411,10 @@ class CustomPPO:
                         global_step,
                     )
                 else:
+                    print(
+                        f"Average fidelity of last {self.env.unwrapped.target.target_type}:",
+                        self.env.unwrapped.fidelity_history[-1],
+                    )
                     self.writer.add_scalar(
                         f"losses/avg_{self.env.unwrapped.target.target_type}_fidelity",
                         self.env.unwrapped.fidelity_history[-1],
@@ -756,7 +760,7 @@ def make_train_ppo(
                 avg_action_history.append(mean_action[0].numpy())
                 std_actions.append(std_action[0].numpy())
 
-            env.unwrapped.close()
+            # env.unwrapped.close()
             writer.close()
 
             return {
@@ -765,9 +769,11 @@ def make_train_ppo(
                 "fidelity_history": fidelities,
                 "action_history": avg_action_history,
                 "best_action_vector": env.unwrapped.optimal_action,
+                "total_shots": env.unwrapped.total_shots,
             }
         except Exception as e:
             logging.error(f"An error occurred during training: {e}")
+            raise
             return {
                 "avg_reward": -1.0,
                 "fidelity_history": [0] * total_updates,

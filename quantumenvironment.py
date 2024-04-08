@@ -9,10 +9,12 @@ Last updated: 16/02/2024
 
 from __future__ import annotations
 from abc import ABC
+from abc import ABC
 
 # For compatibility for options formatting between Estimators.
 import json
 import signal
+from dataclasses import asdict, dataclass
 from dataclasses import asdict, dataclass
 from itertools import product, chain
 from typing import Optional, List, Callable, Any, SupportsFloat
@@ -74,6 +76,7 @@ from helper_functions import (
     rotate_unitary,
     get_optimal_z_rotation,
     fidelity_from_tomography,
+    remove_unused_wires,
 )
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
@@ -172,10 +175,6 @@ class BaseTarget(ABC):
     def n_qubits(self):
         return self._n_qubits
 
-    @n_qubits.setter
-    def n_qubits(self, n_qubits: int):
-        self._n_qubits = n_qubits
-
 
 class StateTarget(BaseTarget):
     """
@@ -183,17 +182,17 @@ class StateTarget(BaseTarget):
     """
 
     def __init__(
-            self,
-            dm: Optional[DensityMatrix] = None,
-            circuit: Optional[QuantumCircuit] = None,
-            physical_qubits: Optional[List[int]] = None,
+        self,
+        dm: Optional[DensityMatrix] = None,
+        circuit: Optional[QuantumCircuit] = None,
+        physical_qubits: Optional[List[int]] = None,
     ):
 
         if dm is None and circuit is None:
             raise ValueError("No target provided")
         if dm is not None and circuit is not None:
             assert (
-                    DensityMatrix(circuit) == dm
+                DensityMatrix(circuit) == dm
             ), "Provided circuit does not generate the provided density matrix"
         self.dm = DensityMatrix(circuit) if dm is None else dm
         self.circuit = circuit if isinstance(circuit, QuantumCircuit) else None
@@ -209,11 +208,11 @@ class InputState(StateTarget):
     """
 
     def __init__(
-            self,
-            input_circuit: QuantumCircuit,
-            target_op: Gate | QuantumCircuit,
-            tgt_register: QuantumRegister,
-            n_reps: int = 1,
+        self,
+        input_circuit: QuantumCircuit,
+        target_op: Gate | QuantumCircuit,
+        tgt_register: QuantumRegister,
+        n_reps: int = 1,
     ):
         """
         Initialize the input state for the quantum environment
@@ -258,11 +257,11 @@ class GateTarget(BaseTarget):
     """
 
     def __init__(
-            self,
-            gate: Gate,
-            physical_qubits: Optional[List[int]] = None,
-            n_reps: int = 1,
-            input_states: Optional[List[List[InputState]]] = None,
+        self,
+        gate: Gate,
+        physical_qubits: Optional[List[int]] = None,
+        n_reps: int = 1,
+        input_states: Optional[List[List[InputState]]] = None,
     ):
         """
         Initialize the gate target for the quantum environment
@@ -272,7 +271,6 @@ class GateTarget(BaseTarget):
         :param input_states: List of input states to be used for calibration
         """
         self.gate = gate
-        self.n_reps = n_reps
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits, "gate"
         )
@@ -330,6 +328,7 @@ class QiskitBackendInfo:
         )
 
 
+
 class QuantumEnvironment(Env):
     metadata = {"render_modes": ["human"]}
     check_on_exp = False  # Indicate if fidelity benchmarking should be estimated via experiment or via simulation
@@ -374,6 +373,7 @@ class QuantumEnvironment(Env):
         if isinstance(self.training_config.backend_config, QiskitConfig):
             # Qiskit backend
             self._config_type = "qiskit"
+
             if "gate" in training_config.target:
                 self.target: BaseTarget = GateTarget(
                     n_reps=self.n_reps, **training_config.target
@@ -385,6 +385,7 @@ class QuantumEnvironment(Env):
             if self.backend is not None:
                 if self.n_qubits > self.backend.num_qubits:
                     raise ValueError(
+                        f"Target contains more qubits ({self.n_qubits}) than backend ({self.backend.num_qubits})"
                         f"Target contains more qubits ({self.n_qubits}) than backend ({self.backend.num_qubits})"
                     )
 
@@ -427,12 +428,12 @@ class QuantumEnvironment(Env):
             self._physical_next_neighbor_qubits = list(
                 filter(
                     lambda x: x
-                              not in self.physical_target_qubits + self.physical_neighbor_qubits,
+                    not in self.physical_target_qubits + self.physical_neighbor_qubits,
                     chain(
                         *[
                             list(self.backend_info.coupling_map.neighbors(target_qubit))
                             for target_qubit in self.physical_target_qubits
-                                                + self.physical_neighbor_qubits
+                            + self.physical_neighbor_qubits
                         ]
                     ),
                 )
@@ -474,14 +475,21 @@ class QuantumEnvironment(Env):
         signal.signal(signal.SIGTERM, self.signal_handler)
 
         if isinstance(self.target, GateTarget):
+        if isinstance(self.target, GateTarget):
             if self.channel_estimator:
-                self._pubs = []
+                self._chi_gate = [_calculate_chi_target(Operator(self.target.gate))]
+                self._pubs = self.retrieve_observables_and_input_states(
+                    self.circuit_truncations[self._trunc_index]
+                )
             else:
                 self._index_input_state = np.random.randint(
                     len(self.target.input_states[0])
+                    len(self.target.input_states[0])
                 )
                 self._input_state = self.target.input_states[0][self._index_input_state]
+                self._input_state = self.target.input_states[0][self._index_input_state]
             self.target_instruction = CircuitInstruction(
+                self.target.gate, self.target.tgt_register
                 self.target.gate, self.target.tgt_register
             )
             self.process_fidelity_history = []
@@ -516,11 +524,18 @@ class QuantumEnvironment(Env):
             ]
         elif isinstance(self.estimator, RuntimeEstimatorV2):
             self.estimator.options.update(job_tags=[f"rl_qoc_step{self._step_tracker}"])
-        target_state = None
+
         if isinstance(self.target, GateTarget):
             if self.channel_estimator:
-                pass
+                self._pubs = self.retrieve_observables_and_input_states(
+                    self.circuit_truncations[self._trunc_index]
+                )
+                target_state = None
             else:
+                input_states = self.target.input_states[self._trunc_index]
+                self._index_input_state = np.random.randint(len(input_states))
+                self._input_state = input_states[self._index_input_state]
+                target_state = self._input_state.target_state  # (Gate |input>=|target>)
                 input_states = self.target.input_states[self._trunc_index]
                 self._index_input_state = np.random.randint(len(input_states))
                 self._input_state = input_states[self._index_input_state]
@@ -540,11 +555,11 @@ class QuantumEnvironment(Env):
         return {"episode": self._episode_tracker, "step": self._step_tracker}
 
     def _get_obs(self):
-        if isinstance(self.target, GateTarget) and not self.channel_estimator:
-
+        if isinstance(self.target, GateTarget):
             return np.array(
                 [
                     self._index_input_state
+                    / len(self.target.input_states[self._trunc_index]),
                     / len(self.target.input_states[self._trunc_index]),
                     self._target_instruction_timings[self._inside_trunc_tracker],
                 ]
@@ -616,16 +631,15 @@ class QuantumEnvironment(Env):
         qc = self.circuit_truncations[trunc_index].copy()
         input_state_circ = None
         params, batch_size = np.array(actions), actions.shape[0]
-        if batch_size != self.batch_size:
-            raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
+        input_state_circ = QuantumCircuit(self.tgt_register)
 
         if (
-                self.do_benchmark() or self.fidelity_access
+            self.do_benchmark() or self.fidelity_access
         ):  # Benchmarking or fidelity access
             fids = self.store_benchmarks(params)
 
         if not self.fidelity_access:
-            if isinstance(self.target, GateTarget) and not self.channel_estimator:
+            if isinstance(self.target, GateTarget):
                 # Pick random input state
                 input_state_circ = self._input_state.circuit
                 for _ in range(self.n_reps - 1):  # Repeat the gate n_reps times
@@ -643,12 +657,15 @@ class QuantumEnvironment(Env):
                 self.estimator, self.backend, counts, qc, input_state_circ
             )
             # Append input state prep circuit to the custom circuit with front composition
+            # Append input state prep circuit to the custom circuit with front composition
             full_circ = transpile(
+                qc,
                 qc,
                 self.backend,
                 initial_layout=self.layout[trunc_index],
                 optimization_level=1,
             )
+            print("Sending Estimator job...")
             print("Sending Estimator job...")
             if isinstance(self.estimator, BaseEstimatorV1):
                 if self.channel_estimator:
@@ -769,12 +786,51 @@ class QuantumEnvironment(Env):
                 raise e
             if isinstance(self.target, StateTarget):
                 self.state_fidelity_history.append(np.mean(fids))
+            if isinstance(self.target, StateTarget):
+                self.state_fidelity_history.append(np.mean(fids))
             else:
                 self.avg_fidelity_history.append(np.mean(fids))
 
-        else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
+        else: # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
             print("Starting simulation benchmark...")
             if self.abstraction_level == "circuit":
+                if isinstance(self.backend, AerSimulator):
+                    aer_backend = self.backend
+                else:
+                    noise_model = (
+                        NoiseModel.from_backend(self.backend)
+                        if self.backend is not None
+                        else None
+                    )
+                    aer_backend = AerSimulator(
+                        noise_model=noise_model, method=method_str
+                    )
+
+                method_qc()
+                circ = transpile(qc, backend=aer_backend, optimization_level=0)
+                job = aer_backend.run(
+                    circ,
+                    False,
+                    [
+                        {
+                            self.parameters[self._trunc_index][j]: params[:, j]
+                            for j in range(n_actions)
+                        }
+                    ],
+                )
+                result = job.result()
+                output_states = [
+                    result.data(i)[method_str] for i in range(self.batch_size)
+                ]
+
+                fids = [benchmark(state, target) for state in output_states]
+
+                if isinstance(self.target, StateTarget):
+                    self.state_fidelity_history.append(np.mean(fids))
+                else:
+                    self.avg_fidelity_history.append(np.mean(fids))
+
+            else:  # Pulse simulation
                 if isinstance(self.backend, AerSimulator):
                     aer_backend = self.backend
                 else:
@@ -913,46 +969,6 @@ class QuantumEnvironment(Env):
             print("Finished simulation benchmark")
             return fids
 
-    def retrieve_observables(self, target_state: StateTarget, qc: QuantumCircuit):
-        """
-        Retrieve observables to sample for the DFE protocol for the given target state
-
-        :param target_state: Target state to prepare
-        :param qc: Quantum circuit to be executed on quantum system
-        :return: Observables to sample, number of shots for each observable
-        """
-        # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
-        probabilities = target_state.Chi ** 2
-        full_basis = pauli_basis(qc.num_qubits)
-        if not np.isclose(np.sum(probabilities), 1, atol=1e-5):
-            print("probabilities sum um to", np.sum(probabilities))
-            print("probabilities renormalized")
-            probabilities = probabilities / np.sum(probabilities)
-        k_samples = np.random.choice(
-            len(probabilities), size=self.sampling_Pauli_space, p=probabilities
-        )
-
-        pauli_indices, pauli_shots = np.unique(k_samples, return_counts=True)
-        reward_factor = self.c_factor / (
-                np.sqrt(target_state.dm.dim) * target_state.Chi[pauli_indices]
-        )
-
-        # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
-        observables = SparsePauliOp(
-            full_basis[pauli_indices], reward_factor, copy=False
-        )
-        shots_per_basis = []
-        for i, commuting_group in enumerate(
-                observables.paulis.group_qubit_wise_commuting()
-        ):
-            max_pauli_shots = 0
-            for pauli in commuting_group:
-                pauli_index = list(full_basis).index(pauli)
-                ref_index = list(pauli_indices).index(pauli_index)
-                max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
-            shots_per_basis.append(max_pauli_shots)
-
-        return observables, shots_per_basis
 
     def retrieve_observables_and_input_states(
             self, qc: QuantumCircuit, params: np.array
@@ -1059,6 +1075,7 @@ class QuantumEnvironment(Env):
         elif isinstance(self.target, StateTarget):
             ref_circuit = self.target.dm
         return [custom_circuit], [ref_circuit]
+
 
     def clear_history(self):
         self._step_tracker = 0
@@ -1228,14 +1245,11 @@ class QuantumEnvironment(Env):
     @property
     def physical_target_qubits(self):
         return self.target.physical_qubits
+        return self.target.physical_qubits
 
     @property
     def physical_neighbor_qubits(self):
         return self._physical_neighbor_qubits
-
-    @property
-    def physical_next_neighbor_qubits(self):
-        return self._physical_next_neighbor_qubits
 
     @property
     def parameters(self):
@@ -1286,6 +1300,10 @@ class QuantumEnvironment(Env):
     def sampler(self) -> BaseSamplerV1 | BaseSamplerV2:
         return self.fidelity_checker._sampler
 
+    @sampler.setter
+    def sampler(self, sampler: BaseSamplerV1 | BaseSamplerV2):
+        self._sampler = sampler
+
     @property
     def tgt_instruction_counts(self):
         return self._tgt_instruction_counts
@@ -1297,7 +1315,7 @@ class QuantumEnvironment(Env):
             if self.target.target_type == "gate"
             else self.state_fidelity_history
         )
-
+    
     @property
     def step_tracker(self):
         return self._step_tracker

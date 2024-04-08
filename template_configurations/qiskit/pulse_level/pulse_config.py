@@ -135,6 +135,7 @@ def apply_parametrized_circuit(
     """
     target, backend = kwargs["target"], kwargs["backend"]
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
+    gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
 
     parametrized_gate = Gate(
         f"{gate.name if gate is not None else 'G'}_cal",
@@ -190,7 +191,7 @@ def get_backend(
             custom_backend,
             single_qubit_backend,
             surface_code_plaquette,
-        )
+         )
 
         print("Custom backend used")
         # TODO: Add here your custom backend
@@ -207,7 +208,6 @@ def get_backend(
         couplings = None
 
         # backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
-        # backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
         backend = surface_code_plaquette()[0]
         _, _ = perform_standard_calibrations(backend, calibration_files)
 
@@ -262,6 +262,6 @@ QuantumEnvironment.channel_estimator = (
 ) = channel_estimator
 QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_access = (
     fidelity_access
-)
+ )
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context = get_circuit_context(env_backend)

@@ -127,5 +127,6 @@ dmypy.json
 
 *.pickle
 venv_qiskit10/
+runs/
 
-events.out.tfevents.*
+*.pickle

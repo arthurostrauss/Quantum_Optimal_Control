@@ -1,23 +1,23 @@
 N_TRIALS: 1
 N_UPDATES:
   - 250 # Min value
-  - 1000 # Max value
+  - 1500 # Max value
 N_EPOCHS:
   - 8 
   - 25
 MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
 BATCHSIZE_MULTIPLIER:
   - 2
-  - 12
+  - 8
 LR:
   - 0.00005
   - 0.02
 N_SHOTS: 
   - 1
-  - 1000
+  - 50 # 
 SAMPLE_PAULIS:
-  - 100
-  - 1000
+  - 10
+  - 100 # 150
 GAMMA:
   - 0.95
   - 0.999

@@ -66,8 +66,9 @@ def custom_backend(
     ecr_ops = []
     num_controls = 0
     control_channel_map = None
+    control_channel_map = None
     if couplings is not None:
-        static_ham, channels, ecr_ops, num_controls, control_channel_map = (
+        static_ham, channels, ecr_ops, num_controls = (
             get_couplings(
                 couplings,
                 static_ham,
@@ -78,8 +79,8 @@ def custom_backend(
                 ecr_ops,
                 drive_ops,
                 num_controls,
-            )
         )
+    )
 
     # Pulse-spillover noise
     drive_ops_errorfree = copy.deepcopy(drive_ops)
