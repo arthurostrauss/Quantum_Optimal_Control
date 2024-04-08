@@ -682,16 +682,17 @@ class QuantumEnvironment(Env):
                     self._pubs = [
                         (
                             full_circ,
-                            self._observables.apply_layout(full_circ.layout),
+                            observable.apply_layout(full_circ.layout),
                             params,
-                            1 / np.sqrt(self.n_shots * int(np.max(self._pauli_shots))),
+                            1 / np.sqrt(self.n_shots * pauli_shots),
+                        )
+                        for observable, pauli_shots in zip(
+                            self._observables.group_commuting(qubit_wise=True),
+                            self._pauli_shots,
                         )
                     ]
                     self._total_shots.append(
-                        self.batch_size
-                        * len(self._observables.group_commuting(qubit_wise=True))
-                        * int(np.max(self._pauli_shots))
-                        * self.n_shots
+                        self.batch_size * np.sum(self._pauli_shots * self.n_shots)
                     )
                 job = self.estimator.run(
                     pubs=self._pubs,
@@ -917,22 +918,35 @@ class QuantumEnvironment(Env):
         """
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         probabilities = target_state.Chi**2
+        full_basis = pauli_basis(qc.num_qubits)
         if np.sum(probabilities) != 1:
+            print("probabilities renormalized")
             probabilities = probabilities / np.sum(probabilities)
         k_samples = np.random.choice(
             len(probabilities), size=self.sampling_Pauli_space, p=probabilities
         )
 
-        pauli_index, pauli_shots = np.unique(k_samples, return_counts=True)
+        pauli_indices, pauli_shots = np.unique(k_samples, return_counts=True)
         reward_factor = self.c_factor / (
-            np.sqrt(target_state.dm.dim) * target_state.Chi[pauli_index]
+            np.sqrt(target_state.dm.dim) * target_state.Chi[pauli_indices]
         )
 
         # Retrieve Pauli observables to sample, and build a weighted sum to feed the Estimator primitive
         observables = SparsePauliOp(
-            pauli_basis(qc.num_qubits)[pauli_index], reward_factor, copy=False
+            full_basis[pauli_indices], reward_factor, copy=False
         )
-        return observables, pauli_shots
+        shots_per_basis = []
+        for i, commuting_group in enumerate(
+            observables.group_commuting(qubit_wise=True)
+        ):
+            max_pauli_shots = 0
+            for pauli in commuting_group.paulis:
+                pauli_index = list(full_basis).index(pauli)
+                ref_index = list(pauli_indices).index(pauli_index)
+                max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
+            shots_per_basis.append(max_pauli_shots)
+
+        return observables, shots_per_basis
 
     def retrieve_observables_and_input_states(self, qc: QuantumCircuit):
         """
