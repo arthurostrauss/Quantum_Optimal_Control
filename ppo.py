@@ -165,9 +165,6 @@ class CustomPPO:
         """
         Plots the reward history and fidelity history of the environment
         """
-        reward_curve, epoch = self.env.unwrapped.reward_history, len(
-            self.env.unwrapped.reward_history
-        )
         fidelity_range = [
             i * self.env.unwrapped.benchmark_cycle
             for i in range(len(self.env.unwrapped.fidelity_history))
@@ -176,7 +173,7 @@ class CustomPPO:
         plt.plot(
             fidelity_range,
             self.fidelity_history,
-            label="Circuit Fidelity",
+            label="Fidelity",
         )
 
         plt.title("Reward History")
@@ -414,10 +411,6 @@ class CustomPPO:
                         global_step,
                     )
                 else:
-                    print(
-                        f"Average fidelity of last {self.env.unwrapped.target.target_type}:",
-                        self.env.unwrapped.fidelity_history[-1],
-                    )
                     self.writer.add_scalar(
                         f"losses/avg_{self.env.unwrapped.target.target_type}_fidelity",
                         self.env.unwrapped.fidelity_history[-1],

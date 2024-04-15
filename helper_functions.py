@@ -100,7 +100,7 @@ from scipy.optimize import minimize
 from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import Dense
 
-from qconfig import QiskitConfig
+from qconfig import QiskitConfig, BackendConfig
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator, PauliToQuditOperator
 
 Estimator_type = Union[
@@ -809,9 +809,7 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
 
 def retrieve_primitives(
     backend: Backend_type,
-    layout: Layout,
-    config: Union[Dict, QiskitConfig],
-    abstraction_level: str = "circuit",
+    config: Union[Dict, BackendConfig],
     estimator_options: Optional[
         Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
     ] = None,
@@ -832,9 +830,6 @@ def retrieve_primitives(
         if isinstance(backend, DynamicsBackend) and isinstance(
             backend.options.solver, JaxSolver
         ):
-            assert (
-                abstraction_level == "pulse"
-            ), "DynamicsBackend works only with pulse level abstraction"
             estimator: Estimator_type = DynamicsBackendEstimator(
                 backend, options=estimator_options, skip_transpilation=True
             )
@@ -876,9 +871,7 @@ def retrieve_primitives(
         )
 
     else:  # No backend specified, ideal state-vector simulation
-        if abstraction_level != "circuit":
-            raise ValueError("Statevector simulation only works at circuit level")
-        sampler = Sampler(options={"initial_layout": layout})
+        sampler = Sampler()
         estimator = StatevectorEstimator()
 
     return estimator, ComputeUncompute(sampler)
