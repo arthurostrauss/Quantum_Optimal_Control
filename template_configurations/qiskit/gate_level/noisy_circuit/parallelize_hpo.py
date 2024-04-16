@@ -1,0 +1,127 @@
+# %%
+import sys
+import os
+import numpy as np
+from itertools import product
+from concurrent.futures import ProcessPoolExecutor
+import matplotlib.pyplot as plt
+import multiprocessing
+
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+module_path = os.path.abspath(
+    os.path.join(
+        "/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control"
+    )
+)
+if module_path not in sys.path:
+    sys.path.append(module_path)
+
+from correlated_noise_q_env_config import (
+    q_env_config as gate_q_env_config,
+    circuit_context,
+    circuit_gate_times,
+)
+    
+from correlated_noise_q_env_config_function import setup_quantum_environment
+
+from quantumenvironment import QuantumEnvironment
+from context_aware_quantum_environment import ContextAwareQuantumEnvironment
+from hyperparameter_optimization_ressource_constraint import HyperparameterOptimizer
+from gymnasium.spaces import Box
+from gymnasium.wrappers import RescaleAction, ClipAction
+from helper_functions import get_baseline_fid_from_phi_gamma
+
+import logging
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s INFO %(message)s",  # hardcoded INFO level
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
+
+# %%
+def get_total_runtime_hpo(phis, gammas, max_runtime_per_trial, num_hpo_trials):
+    return len(phis) * len(gammas) * max_runtime_per_trial * num_hpo_trials
+
+# %%
+def scale_action_space(phi_gamma_tuple, initial_phi=np.pi, initial_gamma=0.05, initial_space=Box(-0.1, 0.1, (7,), np.float32)):
+    
+    phi, gamma = phi_gamma_tuple
+
+    if gamma <= initial_gamma:
+        logging.warning('Do not scale down the action space for smaller noise gamma<0.05 and return initial action space.')
+        return initial_space
+    
+    # Calculate the initial and new ratios
+    initial_ratio = initial_phi * initial_gamma
+    new_ratio = phi * gamma
+
+    # Scale the action space based on the ratio
+    scale_factor = new_ratio / initial_ratio
+    new_low = initial_space.low * scale_factor
+    new_high = initial_space.high * scale_factor
+
+    # Create a new action space with the scaled values
+    new_space = Box(new_low, new_high, initial_space.shape, initial_space.dtype)
+
+    return new_space
+
+
+def perform_hpo_noisy_single_arg(phi_gamma_tuple):
+
+    gate_q_env_config, circuit_context, _ = setup_quantum_environment(phi_gamma_tuple=phi_gamma_tuple)
+    gate_q_env_config.action_space = scale_action_space(phi_gamma_tuple=phi_gamma_tuple)
+
+    q_env = ContextAwareQuantumEnvironment(gate_q_env_config, circuit_context)
+    q_env = ClipAction(q_env)
+    q_env = RescaleAction(q_env, -1.0, 1.0)
+
+    path_agent_config = '/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control/template_configurations/agent_config.yaml' #os.path.join(os.path.dirname(grand_parent_dir), "agent_config.yaml")
+    path_hpo_config = '/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control/template_configurations/qiskit/gate_level/noisy_circuit/noise_hpo_config.yaml' # os.path.join(current_dir, "noise_hpo_config.yaml")
+    save_results_path = '/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control/template_configurations/qiskit/gate_level/noisy_circuit/hpo_results/resource_constraint' # os.path.join("hpo_results", "resource_constraint")
+
+    target_fidelities = [1.0-infid for infid in [1e-3, 1e-4, 1e-5]]
+
+    max_runtime_per_trial = 1_200
+    num_hpo_trials = 20
+    lookback_window = 10
+
+    experimental_penalty_weights = {
+        'penalty_n_shots': 0.01,
+        'penalty_per_missed_fidelity': 5*1e4,
+        'fidelity_reward': 1e4,
+    }
+
+    optimizer = HyperparameterOptimizer(
+        q_env=q_env,
+        path_agent_config=path_agent_config,
+        path_hpo_config=path_hpo_config,
+        save_results_path=save_results_path,
+        experimental_penalty_weights=experimental_penalty_weights,
+        log_progress=False,
+    )
+
+    _ = optimizer.optimize_hyperparameters(
+        num_hpo_trials = num_hpo_trials,
+        phi_gamma_tuple = phi_gamma_tuple,
+        target_fidelities = target_fidelities,
+        lookback_window = lookback_window,
+        max_runtime = max_runtime_per_trial
+    )
+
+# %%
+if __name__ == "__main__":
+
+    phis = np.pi * np.array([0.25, 0.5, 0.75, 1.0])
+    gammas = np.linspace(0.01, 0.06, 6)  # Example values; adjust as necessary
+
+    # Create all combinations of phis and gammas
+    combinations = list(product(phis, gammas))
+
+    # Use multiprocessing to parallelize across multiple CPU cores
+    pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+    pool.map(perform_hpo_noisy_single_arg, combinations)
+    pool.close()
+    pool.join()

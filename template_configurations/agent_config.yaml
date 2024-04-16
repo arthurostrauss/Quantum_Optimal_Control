@@ -1,17 +1,17 @@
 RUN_NAME: "test" # Name of the run
 OPTIMIZER: "adam" # Optimizer for the policy network
 NUM_UPDATES: 1 # Number of policy updates
-N_EPOCHS: 13 # Number of epochs for each policy update
-MINIBATCH_SIZE: 28 # Number of samples per mini-batch
-LR: 2.0e-05 # Learning rate
-GAMMA: 0.9671097620320633 # Discount factor
-GAE_LAMBDA: 0.9604035556603205 # Lambda coefficient for Generalized Advantage Estimation
-ENT_COEF: 6.192686739691045e-05 # Entropy coefficient
-V_COEF: 0.7242706333241449 # Value (critic) function coefficient
-GRADIENT_CLIP: 0.5912392897506022 # Gradient clipping
+N_EPOCHS: 8 # Number of epochs for each policy update
+MINIBATCH_SIZE: 32 # Number of samples per mini-batch
+LR: 0.0005 # Learning rate
+GAMMA: 0.99 # Discount factor
+GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
+ENT_COEF: 0.0 # Entropy coefficient
+V_COEF: 0.5 # Value (critic) function coefficient
+GRADIENT_CLIP: 0.5 # Gradient clipping
 CLIP_VALUE_LOSS: True # Whether to clip value loss
 CLIP_VALUE_COEF: 0.2 # Clipping coefficient for value loss
-CLIP_RATIO: 0.27500104489296884 # Clipping ratio for PPO
+CLIP_RATIO: 0.2 # Clipping ratio for PPO
 N_UNITS: [ 64, 64 ] # Number of units in hidden layers
 ACTIVATION: "tanh" # Activation functions
 INCLUDE_CRITIC: True # Whether to include critic network within ActorCritic model

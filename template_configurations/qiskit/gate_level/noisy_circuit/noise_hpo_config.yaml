@@ -1,42 +1,22 @@
 N_TRIALS: 1
-N_UPDATES:
-  - 250 # Min value
-  - 1500 # Max value
-N_EPOCHS:
-  - 8 
-  - 25
+N_UPDATES: 1
+N_EPOCHS: 8
 MINIBATCH_SIZE: [10, 16, 24, 32, 48, 64, 96, 128]
-BATCHSIZE_MULTIPLIER:
-  - 2
-  - 8
-LR:
-  - 0.00005
-  - 0.02
+BATCHSIZE_MULTIPLIER: [5, 8, 10, 12, 15, 20, 25, 30, 40, 50, 100]
+  # - 2
+  # - 25
+LR: 0.001
 N_SHOTS: 
   - 1
-  - 50 # 
+  - 100 # 
 SAMPLE_PAULIS:
   - 10
-  - 100 # 150
-GAMMA:
-  - 0.95
-  - 0.999
-GAE_LAMBDA:
-  - 0.90
-  - 0.999
-ENT_COEF:
-  - 0.00005
-  - 0.001
-V_COEF:
-  - 0.25
-  - 0.75
-GRADIENT_CLIP:
-  - 0.005
-  - 0.9
-CLIP_VALUE_LOSS: True
-CLIP_VALUE_COEF:
-  - 0.1
-  - 0.3
-CLIP_RATIO:
-  - 0.1
-  - 0.3
+  - 150 # 150
+GAMMA: 0.99 # Discount factor
+GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
+ENT_COEF: 0.0 # Entropy coefficient
+V_COEF: 0.5 # Value (critic) function coefficient
+GRADIENT_CLIP: 0.5 # Gradient clipping
+CLIP_VALUE_LOSS: True # Whether to clip value loss
+CLIP_VALUE_COEF: 0.2 # Clipping coefficient for value loss
+CLIP_RATIO: 0.2 # Clipping ratio for PPO

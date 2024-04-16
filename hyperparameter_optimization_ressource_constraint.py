@@ -2,7 +2,9 @@ import sys
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-from typing import Union, Optional, Dict
+from typing import Union, Optional, Dict, List
+import numpy as np
+import math
 import time
 from datetime import datetime
 import pickle
@@ -12,8 +14,11 @@ from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from helper_functions import (
     load_from_yaml_file,
     create_hpo_agent_config,
+    get_baseline_fid_from_phi_gamma,
 )
-from ppo import make_train_ppo
+from ppo_while_not_met_baseline import make_train_ppo
+
+from functools import partial
 
 # from qiskit import QuantumCircuit
 # from qconfig import QEnvConfig
@@ -85,17 +90,13 @@ class HyperparameterOptimizer:
         - log_progress: Flag indicating whether to log the optimization progress.
         """
         self.q_env = q_env
-        # self.gate_q_env_config = gate_q_env_config
-        # self.context_aware_calibration = context_aware_calibration
-        # self.circuit_context = circuit_context
-        # Start with an initial agent configuration and then update it with the hyperparameters later in the workflow
         self.path_agent_config = path_agent_config
         self.hpo_config = load_from_yaml_file(path_hpo_config)
         self.save_results_path = save_results_path
         self.experimental_penalty_weights = experimental_penalty_weights
         self.log_progress = log_progress
 
-    def _objective(self, trial: optuna.trial.Trial):
+    def _objective(self, trial: optuna.trial.Trial, target_fidelities: List[float] = [0.999], lookback_window: int = 30, max_runtime: int | float = 600):
         """
         Objective function for the hyperparameter optimization process. This function is called
         by Optuna for each trial and is responsible for training the agent with the trial's
@@ -109,12 +110,6 @@ class HyperparameterOptimizer:
         - The custom cost value for the trial, incorporating the infidelity and penalties for
         experimentally costly hyperparameters.
         """
-        # if self.context_aware_calibration:
-        #     self.q_env = ContextAwareQuantumEnvironment(self.gate_q_env_config, self.circuit_context)
-        # else:
-        #     self.q_env = QuantumEnvironment(self.gate_q_env_config)
-        # self.q_env = ClipAction(self.q_env)
-        # self.q_env = RescaleAction(self.q_env, -1.0, 1.0)
 
         # q_env.unwrapped.backend
         self.agent_config, self.hyperparams = create_hpo_agent_config(
@@ -129,57 +124,110 @@ class HyperparameterOptimizer:
         train_fn = make_train_ppo(self.agent_config, self.q_env)
         start_time = time.time()
         training_results = train_fn(
-            total_updates=self.agent_config["N_UPDATES"],
-            print_debug=True,
+            target_fidelities=target_fidelities,
+            lookback_window=lookback_window,
+            max_runtime=max_runtime,
+            print_debug=False,
             num_prints=50,
         )
+
         runtime = time.time() - start_time
         if training_results["avg_reward"] != -1.0:  # Check if training was successful
             trial.set_user_attr("training_results", training_results)
             trial.set_user_attr("runtime", runtime)
+        else:
+            return float('inf') # Catch errors in the trianing process
 
-        fidelity_last_ten_percent = training_results["fidelity_history"][
-            -int(0.1 * len(training_results["fidelity_history"]))
-        ]
-        infidelity = 1 - fidelity_last_ten_percent
-
-        experimental_penalty_terms = self._get_penalty(
-            self.experimental_penalty_weights, runtime
-        )
-        custom_cost_value = 100*infidelity + experimental_penalty_terms
+        custom_cost_value = self._calculate_custom_cost(training_results, self.experimental_penalty_weights)
 
         return custom_cost_value
-
-    def _get_penalty(
-        self, experimental_penalty_weights: Dict[str, float], runtime: float
-    ):
+    
+    def _calculate_custom_cost(self, training_results: dict, reward_and_penalty_params: dict) -> float:
         """
-        Calculates the penalty for experimentally costly hyperparameters and runtime.
+        Calculates a custom cost with considerations for:
+        - The number of shots used to achieve the highest target fidelity,
+        - Rewarding the achievement of target fidelities,
+        - Penalizing based on the closeness for unachieved target fidelities.
 
         Parameters:
-        - experimental_penalty_weights: Dictionary specifying penalty weights for each hyperparameter.
-        - runtime: The runtime of the trial in seconds.
-
+        - training_results (dict): Dictionary containing training outcomes.
+        - fidelity_reward (dict): Dictionary containing rewards and penalties for fidelities and shots used
+        
         Returns:
-        - Total penalty as a float, including both hyperparameter penalties and runtime penalty.
+        - float: The calculated custom cost.
         """
-        if experimental_penalty_weights is None:
-            return 0
-        total_penalty = sum(
-            self.agent_config[key.upper()] * experimental_penalty_weights[key]
-            for key in experimental_penalty_weights
-            if key != "runtime"
-        )
-        if "runtime" in experimental_penalty_weights:
-            total_penalty += runtime * experimental_penalty_weights["runtime"]
-        return total_penalty
+        
+        total_cost = 0
+        highest_fidelity_achieved_info = None
+        target_fidelities = list(training_results['fidelity_info'].keys())
+
+        fidelity_reward = reward_and_penalty_params['fidelity_reward']
+        base_shot_penalty = reward_and_penalty_params['penalty_n_shots']
+        penalty_per_missed_fidelity = reward_and_penalty_params['penalty_per_missed_fidelity']
+
+        # Identify the highest fidelity achieved and its info
+        for fidelity in sorted(target_fidelities, reverse=True):
+            info = training_results['fidelity_info'][fidelity]
+            if info['achieved']:
+                highest_fidelity_achieved_info = info
+                break
+        
+        if highest_fidelity_achieved_info:
+            # Use shots up to the highest fidelity achieved
+            shots_used = highest_fidelity_achieved_info['shots_used']
+        else:
+            # If no fidelities were achieved, consider all shots used
+            shots_used = sum(training_results['total_shots'])
+        
+        # Apply base penalty for the shots used
+        total_cost += shots_used * base_shot_penalty
+
+        # Calculate reward/penalty for each target fidelity
+        for fidelity in target_fidelities:
+            info = training_results['fidelity_info'][fidelity]
+            if info['achieved']:
+                # Reward for achieving the fidelity, inversely proportional to shots used
+                total_cost -= fidelity_reward
+            else:
+                # Apply penalty based on how close the training came to the fidelity
+                highest_fidelity_reached = max(training_results['fidelity_history'])
+                closeness = fidelity - highest_fidelity_reached
+                total_cost += closeness * penalty_per_missed_fidelity
+
+        return total_cost
+
+
+    # def _get_penalty(
+    #     self, experimental_penalty_weights: Dict[str, float], runtime: float
+    # ):
+    #     """
+    #     Calculates the penalty for experimentally costly hyperparameters and runtime.
+
+    #     Parameters:
+    #     - experimental_penalty_weights: Dictionary specifying penalty weights for each hyperparameter.
+    #     - runtime: The runtime of the trial in seconds.
+
+    #     Returns:
+    #     - Total penalty as a float, including both hyperparameter penalties and runtime penalty.
+    #     """
+    #     if experimental_penalty_weights is None:
+    #         return 0
+    #     total_penalty = sum(
+    #         self.agent_config[key.upper()] * experimental_penalty_weights[key]
+    #         for key in experimental_penalty_weights
+    #         if key != "runtime"
+    #     )
+    #     if "runtime" in experimental_penalty_weights:
+    #         total_penalty += runtime * experimental_penalty_weights["runtime"]
+    #     return total_penalty
 
     def _generate_filename(self):
         """Generate the file name where the best configuration will be saved."""
         return (
-            f"custom_cost_value_{round(self.best_trial.value, 6)}"
+            f"phi-{self.phi/np.pi}pi_gamma-{self.gamma}_maxruntime-{self.max_runtime}_"
+            + f"custom-cost-value-{round(self.best_trial.value, 6)}"
             + "_timestamp_"
-            + datetime.now().strftime("%d-%m-%Y-%H-%M-%S")
+            + datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
             + ".pickle"
         )
 
@@ -206,8 +254,12 @@ class HyperparameterOptimizer:
             pickle_file_name = os.path.join(
                 self.save_results_path, self._generate_filename()
             )
-            with open(pickle_file_name, "wb") as handle:
-                pickle.dump(best_config, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            # Only save if best_config not empty
+            if len(best_config) != 0:
+                with open(pickle_file_name, "wb") as handle:
+                    pickle.dump(best_config, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            else:
+                logging.warning("WARNING: No best trial data to save.")
             logging.warning(f"Best configuration saved to {pickle_file_name}")
         else:
             logging.warning("No best trial data to save.")
@@ -241,7 +293,7 @@ class HyperparameterOptimizer:
             )
         )
 
-    def optimize_hyperparameters(self, num_hpo_trials: int = 1):
+    def optimize_hyperparameters(self, num_hpo_trials: int, phi_gamma_tuple: tuple, target_fidelities: List[float], lookback_window: int, max_runtime: int | float):
         """
         Starts the hyperparameter optimization process for the specified number of trials.
 
@@ -262,15 +314,43 @@ class HyperparameterOptimizer:
         ), "n_hpo_trials must be an integer greater than 0"
 
         start_time_hpo = time.time()
-        logging.warning("n_HPO_trials: {}".format(self.n_hpo_trials))
+        self.max_runtime = max_runtime
+        logging.warning("Max Runtime: {} mins".format(self.max_runtime / 60))
         logging.warning("---------------- STARTING HPO ----------------")
 
         study = optuna.create_study(
             direction="minimize",
-            # study_name=f'cx_gate-calibration_{datetime.now().strftime("%d-%m-%Y-_%H:%M:%S")}'
-            study_name=f'{self.target_gate["target_gate"].name}-calibration_{datetime.now().strftime("%d-%m-%Y-_%H:%M:%S")}',
+            study_name=f'{self.target_gate["target_gate"].name}-calibration_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}',
         )
-        study.optimize(self._objective, n_trials=self.n_hpo_trials)
+
+        # Ensure that only the target fidelities that are greater than the baseline fidelity are considered
+        self.baseline_fidelity = get_baseline_fid_from_phi_gamma(param_tuple=phi_gamma_tuple)
+        # To which integer power do I need to raise self.baseline_fidelity to be below the lowest target fidelity?
+        self.smallest_N_reps = math.ceil(math.log(min(target_fidelities), self.baseline_fidelity))
+        self.q_env.unwrapped.n_reps = self.smallest_N_reps
+
+        logging.warning(f'N reps: {self.q_env.unwrapped.n_reps}')
+        
+        self.target_fidelities = target_fidelities
+        # self.filtered_target_fidelities = [f for f in target_fidelities if f > self.baseline_fidelity**self.smallest_N_reps]
+
+        self.lookback_window = lookback_window if lookback_window is not None else 30
+        logging.warning(f'Lookback window: {self.lookback_window}')
+
+        if len(self.target_fidelities) == 0:
+            logging.warning("ERROR: No target fidelities greater than the baseline fidelity for the parameter set: phi = {}pi, gamma = {}".format(phi_gamma_tuple[0]/np.pi, phi_gamma_tuple[1]))
+            return {
+                "result": "ERROR: No target fidelities greater than the baseline fidelity for the parameter set: phi = {}pi, gamma = {}".format(phi_gamma_tuple[0]/np.pi, phi_gamma_tuple[1])
+            }
+
+        self.phi, self.gamma = phi_gamma_tuple[0], phi_gamma_tuple[1]
+        logging.warning("Parameters:")
+        logging.warning("    phi: {} pi; gamma: {}; Baseline Fidelity: {}; N_Reps: {}; Target Fidelities: {}".format(self.phi/np.pi, self.gamma, self.baseline_fidelity, self.smallest_N_reps, self.target_fidelities))
+        
+        time.sleep(4)
+        # Assuming target_fidelity and max_runtime are defined
+        objective_with_params = partial(self._objective, target_fidelities=self.target_fidelities, lookback_window=self.lookback_window, max_runtime=max_runtime)
+        study.optimize(objective_with_params, n_trials=self.n_hpo_trials)
 
         # If all trials led to errors in the training process, fidelities for all trials are 0.0
         # If this is the case, then the HPO failed
@@ -286,7 +366,7 @@ class HyperparameterOptimizer:
             self._logging_result(study, start_time_hpo)
 
         return self.best_config
-
+    
     @property
     def target_gate(self):
         """
