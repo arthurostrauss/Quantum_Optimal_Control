@@ -1,10 +1,13 @@
 import math
 
 from qiskit.circuit import ParameterExpression
-from qm.qua._type_hinting import QuaVariableType, QuaArrayType
 from qm.qua import *
-from videomode import ParameterValue, ParameterTable
+from qm.qua._expressions import QuaArrayType
+
+from qualang_tools.video_mode import ParameterTable
+from qualang_tools.video_mode.videomode import ParameterValue
 from qiskit import pulse
+import numpy as np
 
 
 def clip_qua(param: ParameterValue, min_value, max_value):
@@ -27,6 +30,36 @@ def clip_qua(param: ParameterValue, min_value, max_value):
                 assign(param.var[i], min_value)
             with elif_(param.var[i] > max_value):
                 assign(param.var[i], max_value)
+
+
+def clip_qua_var(param: QuaVariableType, min_value, max_value):
+    """
+    Clip the QUA variable between the min_value and the max_value
+    :param param: The QUA variable
+    :param min_value: The minimum value
+    :param max_value: The maximum value
+    :return: The clipped QUA variable
+    """
+    with if_(param < min_value):
+        assign(param, min_value)
+    with elif_(param > max_value):
+        assign(param, max_value)
+
+
+def clip_qua_array(param: QuaArrayType, min_value, max_value):
+    """
+    Clip the QUA array between the min_value and the max_value
+    :param param: The QUA array
+    :param min_value: The minimum value
+    :param max_value: The maximum value
+    :return: The clipped QUA array
+    """
+    i = declare(int)
+    with for_(i, 0, i < param.length(), i + 1):
+        with if_(param[i] < min_value):
+            assign(param[i], min_value)
+        with elif_(param[i] > max_value):
+            assign(param[i], max_value)
 
 
 def rand_gauss_moller_box(z1, z2, mean, std, rand):
@@ -127,26 +160,23 @@ def schedule_to_qua_instructions(sched: pulse.Schedule):
             raise ValueError(f"Unknown instruction {instruction}")
 
 
-def prepare_input_state(pauli_indices, qubit_elements):
-    q = declare(int)
-    with for_(q, 0, q < pauli_indices.length(), q + 1):
-        with switch_(q):
-            for i in range(len(qubit_elements)):
-                with case_(i):
-                    qubit_el = qubit_elements[i]
-                    with switch_(pauli_indices[q], unsafe=True):
-                        with case_(0):
-                            wait(4, qubit_el)
-                        with case_(1):
-                            X(qubit_el)
-                        with case_(2):
-                            H(qubit_el)
-                        with case_(3):
-                            H(qubit_el)
-                            Z(qubit_el)
-                        with case_(4):
-                            H(qubit_el)
-                            S(qubit_el)
-                        with case_(5):
-                            H(qubit_el)
-                            Sdg(qubit_el)
+def prepare_input_state(pauli_prep_index, q_iterator, qubits):
+    for i in range(len(qubits)):
+        qubit_el = qubits[i]
+        with switch_(pauli_prep_index[i], unsafe=True):
+            # TODO: Map this to PauliPrepBasis in Qiskit (for one qubit)
+            with case_(0):
+                wait(4, qubit_el)
+            with case_(1):
+                X(qubit_el)
+            with case_(2):
+                H(qubit_el)
+            with case_(3):
+                H(qubit_el)
+                Z(qubit_el)
+            with case_(4):
+                H(qubit_el)
+                S(qubit_el)
+            with case_(5):
+                H(qubit_el)
+                Sdg(qubit_el)

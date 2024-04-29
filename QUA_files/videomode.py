@@ -1,6 +1,7 @@
 # VideoMode script enabling the update of parameters in a QUA program through user input while the program is running.
 # Authors: Arthur Strauss, Théo Laudat
 # Date: 19/12/2023
+from __future__ import annotations
 
 import threading
 from qm.qua import *
@@ -81,7 +82,7 @@ class ParameterValue:
         self.length = 0 if not isinstance(value, (List, np.ndarray)) else len(value)
 
     def __repr__(self):
-        print(self.name, f"({self.value}, {self.type}) \n")
+        return f"{self.name}: ({self.value}, {self.type}) \n"
 
     def declare_variable(self):
         """
@@ -90,6 +91,10 @@ class ParameterValue:
         self.var = declare(t=self.type, value=self.value)
         self._var_declared = True
         return self.var
+
+    @property
+    def var_declared(self):
+        return self._var_declared
 
 
 class ParameterTable:
@@ -145,7 +150,13 @@ class ParameterTable:
                 )
             else:
                 self.table[parameter_name] = ParameterValue(
-                    parameter_name, parameter_value, index
+                    (
+                        parameter_name
+                        if isinstance(parameter_name, str)
+                        else parameter_name.name
+                    ),
+                    parameter_value,
+                    index,
                 )
 
     def declare_variables(self):
@@ -211,16 +222,16 @@ class ParameterTable:
 
     def get_parameter(self, param_name: str):
         """
-        Get the value of a specific arameter with latest updated value
+        Get the value of a specific parameter with latest updated value
         Args: parameter_name: Name of the parameter to be returned. If None, all parameters are printed.
         Returns: if parameter_name is None, Dictionary of the form { "parameter_name": parameter_value },
                 else parameter_value associated to parameter_name.
         """
         if param_name not in self.table.keys():
             raise KeyError(f"No parameter named {param_name} in the parameter table.")
-        return self.table[param_name].value
+        return self.table[param_name]
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str | Parameter | ParameterVector):
         """
         Returns the QUA variable corresponding to the parameter name.
         """
@@ -245,8 +256,10 @@ class ParameterTable:
             )
 
     def __repr__(self):
+        text = ""
         for parameter in self.table.values():
-            print(parameter)
+            text += parameter.__repr__()
+        return text
 
 
 class VideoMode:

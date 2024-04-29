@@ -9,6 +9,7 @@ from qiskit.primitives.backend_estimator import _run_circuits
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qua_backend import QuaBackend
 from qiskit.transpiler import PassManager
+from qiskit.pulse.library import SymbolicPulse
 
 
 class QuaEstimator(BackendEstimatorV2):
@@ -36,6 +37,7 @@ class QuaEstimator(BackendEstimatorV2):
                 the operator grouping (``abelian_grouping``), and
                 the random seed for the simulator (``seed_simulator``).
         """
+        SymbolicPulse.disable_validation = True
         if not isinstance(backend, QuaBackend):
             raise TypeError("QuaEstimator can only be used with a QuaBackend.")
         super().__init__(backend=backend, options=options)
