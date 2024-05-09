@@ -1,18 +1,51 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from itertools import accumulate
 from typing import Sequence
 
 from qiskit import QuantumCircuit, transpile
-from qiskit_ibm_runtime.qiskit.primitives import BackendEstimatorV2
+from qiskit.primitives import BackendEstimatorV2, PrimitiveResult, PubResult
 from qiskit.primitives.backend_estimator import _run_circuits
+from qiskit.primitives.containers.bindings_array import BindingsArray
+from qiskit.primitives.containers.estimator_pub import EstimatorPub
+from qiskit.primitives.containers.observables_array import ObservablesArray
 from qiskit.quantum_info.operators.base_operator import BaseOperator
-from qua_backend import QuaBackend
+from qua_backend import QMBackend
+from qualang_tools.video_mode import ParameterTable
 from qiskit.transpiler import PassManager
 from qiskit.pulse.library import SymbolicPulse
+from typing import List
+from qm.qua import *
+from qm import QuantumMachinesManager, QuantumMachine, QmJob, Program
+
+pauli_mapping = {"I": 0, "X": 1, "Y": 2, "Z": 3}
 
 
-class QuaEstimator(BackendEstimatorV2):
+def pauli_string_to_numbers(pauli_string: str):
+    """
+    This function converts a Pauli string to a list of numbers that represent the Pauli operators
+    """
+    return [pauli_mapping[pauli] for pauli in reversed(pauli_string)]
+
+
+def numbers_to_pauli_string(pauli_numbers: List[int]):
+    """
+    This function converts a list of numbers that represent the Pauli operators to a Pauli string
+    """
+    return "".join(
+        [key for key, value in pauli_mapping.items() if value in pauli_numbers]
+    )
+
+
+def pad_pauli_numbers(pauli_numbers: List[int], n_qubits: int):
+    """
+    This function pads a list of numbers that represent the Pauli operators to the desired number of qubits
+    """
+    return pauli_numbers + [0] * (n_qubits - len(pauli_numbers))
+
+
+class QMEstimator(BackendEstimatorV2):
     """Evaluates expectation value using Pauli rotation gates.
 
     This :class:`~.QuaEstimator` class is a specific implementation of the
@@ -27,7 +60,7 @@ class QuaEstimator(BackendEstimatorV2):
     def __init__(
         self,
         *,
-        backend: QuaBackend,
+        backend: QMBackend,
         options: dict | None = None,
     ):
         """
@@ -38,32 +71,46 @@ class QuaEstimator(BackendEstimatorV2):
                 the random seed for the simulator (``seed_simulator``).
         """
         SymbolicPulse.disable_validation = True
-        if not isinstance(backend, QuaBackend):
-            raise TypeError("QuaEstimator can only be used with a QuaBackend.")
+        if not isinstance(backend, QMBackend):
+            raise TypeError("QMEstimator can only be used with a QMBackend.")
         super().__init__(backend=backend, options=options)
-        for g in ["h", "sdg"]:
-            self.backend.options.solver.run_options[g + "_cal"] = [
-                lambda: self.backend.target.get_calibration(g, (qubit,))
-                for qubit in range(self.backend.num_qubits)
-            ]
-        self.backend.options.solver.run_options["subsystem_dims"] = (
-            self.backend.options.subsystem_dims
+
+    def _run(self, pubs: list[EstimatorPub]) -> PrimitiveResult[PubResult]:
+        """
+        Run the primitive on the backend.
+        Args:
+            pubs: The list of PUBs to run.
+
+        Returns:
+            The result of the run.
+        """
+        pub_dict = defaultdict(list)
+        self.backend.run(self.estimator_qua_program())
+
+    def estimator_qua_program(
+        self,
+        qc: QuantumCircuit,
+        observables: ObservablesArray,
+        parameter_values: BindingsArray,
+    ):
+        """
+        Generate the QUA program for the estimator primitive
+        """
+        n_qubits = qc.num_qubits
+        param_table = ParameterTable(
+            {parameter_name: 0.0 for parameter_name in parameter_values.data.keys()}
         )
-        self._mean_action = None
-        self._std_action = None
 
-    @property
-    def mean_action(self):
-        return self._mean_action
+        with program() as estimator:
+            n_shots = declare(int)
+            observables_indices = declare_input_stream(
+                int, name="observables_indices", size=n_qubits
+            )
+            param_vars = param_table.declare_variables()
 
-    @property
-    def std_action(self):
-        return self._std_action
+            self.backend.schedule_to_qua_program(qc, param_vars)
 
-    @mean_action.setter
-    def mean_action(self, value):
-        self._mean_action = value
-
-    @std_action.setter
-    def std_action(self, value):
-        self._std_action = value
+            for q in range(n_qubits):
+                with switch_(observables_indices[q]):
+                    with case_(1):
+                        self.backend.schedule_to_qua_program()
