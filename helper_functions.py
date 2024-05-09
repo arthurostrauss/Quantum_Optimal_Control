@@ -854,18 +854,8 @@ def retrieve_primitives(
                 ),
                 options=estimator_options,
             )
-            # estimator: Estimator_type = RuntimeEstimatorV1(
-            #     session=Session(
-            #         (
-            #             backend.service
-            #             if hasattr(backend, "service")
-            #             else QiskitRuntimeLocalService()
-            #         ),
-            #         backend,
-            #     ), options=estimator_options
-            # )
 
-        sampler: Sampler_type = RuntimeSamplerV1(
+        sampler: Sampler_type = RuntimeSamplerV2(
             session=estimator.session if hasattr(estimator, "session") else None,
             backend=backend,
         )
@@ -874,7 +864,7 @@ def retrieve_primitives(
         sampler = Sampler()
         estimator = StatevectorEstimator()
 
-    return estimator, ComputeUncompute(sampler)
+    return estimator, sampler
 
 
 def set_primitives_transpile_options(
@@ -1432,6 +1422,9 @@ def load_q_env_from_yaml_file(file_path: str):
         "target": {
             "physical_qubits": config["TARGET"]["PHYSICAL_QUBITS"],
         },
+        "check_on_exp": config["ENV"]["CHECK_ON_EXP"],
+        "channel_estimator": config["ENV"]["CHANNEL_ESTIMATOR"],
+        "fidelity_access": config["ENV"]["FIDELITY_ACCESS"],
     }
     if "GATE" in config["TARGET"]:
         params["target"]["gate"] = gate_map()[config["TARGET"]["GATE"].lower()]
@@ -1451,16 +1444,11 @@ def load_q_env_from_yaml_file(file_path: str):
     runtime_options = config["RUNTIME_OPTIONS"]
     if backend_params["real_backend"]:
         print("Runtime Options:", runtime_options)
-    check_on_exp = config["ENV"]["CHECK_ON_EXP"]
-    channel_estimator = config["ENV"]["CHANNEL_ESTIMATOR"]
-    fidelity_access = config["ENV"]["FIDELITY_ACCESS"]
+
     return (
         params,
         backend_params,
         remove_none_values(runtime_options),
-        check_on_exp,
-        channel_estimator,
-        fidelity_access,
     )
 
 

@@ -125,4 +125,7 @@ class QEnvConfig:
     benchmark_cycle: int = 1
     seed: int = 1234
     training_with_cal: bool = True
+    check_on_exp: bool = False
+    channel_estimator: bool = False
+    fidelity_access: bool = False
     device: Optional[torch.device] = None

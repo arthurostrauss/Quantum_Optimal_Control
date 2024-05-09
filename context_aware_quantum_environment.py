@@ -596,7 +596,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             }
         return info
 
-    def retrieve_observables_and_input_states(self, qc: QuantumCircuit):
+    def retrieve_observables_and_input_states(
+        self, qc: QuantumCircuit, params: np.array
+    ):
         raise NotImplementedError(
             "This method is not implemented for this class"
             " (Reason: channel characteristic function for whole context is too large"

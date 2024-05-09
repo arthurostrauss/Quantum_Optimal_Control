@@ -1,4 +1,4 @@
-from helper_functions import load_agent_from_yaml_file
+from helper_functions import load_from_yaml_file
 from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from gymnasium.wrappers import RescaleAction, ClipAction
@@ -33,7 +33,7 @@ if use_context:
 else:
     q_env = QuantumEnvironment(config)
 rescaled_env = RescaleAction(ClipAction(q_env), -1.0, 1.0)
-agent_config = load_agent_from_yaml_file("agent_config.yaml")
+agent_config = load_from_yaml_file("agent_config.yaml")
 ppo_agent = CustomPPO(agent_config, rescaled_env)
 ppo_agent.train(
     total_updates=arguments.get("num_updates"),

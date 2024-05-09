@@ -388,8 +388,8 @@ class CustomPPO:
 
             if global_step % num_prints == 0:
                 clear_output(wait=True)
-                if plot_real_time:
-                    self.plot_curves()
+            if plot_real_time:
+                self.plot_curves()
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             self.writer.add_scalar(
