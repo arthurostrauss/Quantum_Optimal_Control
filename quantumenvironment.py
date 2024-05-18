@@ -15,14 +15,13 @@ import json
 import signal
 from dataclasses import asdict, dataclass
 from itertools import product, chain
-from typing import Dict, Optional, List, Callable, Any, SupportsFloat
+from typing import Optional, List, Callable, Any, SupportsFloat
 
 from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
 from qiskit import schedule, transpile
-from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -32,6 +31,7 @@ from qiskit.circuit import (
     CircuitInstruction,
     ParameterVector,
 )
+from qiskit.circuit.library import ECRGate, CXGate
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import (
@@ -61,7 +61,6 @@ from qiskit_experiments.library.tomography.basis import (
 from qiskit_ibm_runtime import (
     EstimatorV1 as RuntimeEstimatorV1,
     EstimatorV2 as RuntimeEstimatorV2,
-    IBMBackend as RuntimeBackend,
     QiskitRuntimeService,
 )
 
@@ -76,7 +75,7 @@ from helper_functions import (
     rotate_unitary,
     get_optimal_z_rotation,
     fidelity_from_tomography,
-    remove_unused_wires,
+    get_hardware_runtime_single_circuit,
 )
 from qconfig import QiskitConfig, QEnvConfig, QuaConfig
 
@@ -175,6 +174,10 @@ class BaseTarget(ABC):
     def n_qubits(self):
         return self._n_qubits
 
+    @n_qubits.setter
+    def n_qubits(self, n_qubits: int):
+        self._n_qubits = n_qubits
+
 
 class StateTarget(BaseTarget):
     """
@@ -187,7 +190,6 @@ class StateTarget(BaseTarget):
         circuit: Optional[QuantumCircuit] = None,
         physical_qubits: Optional[List[int]] = None,
     ):
-
         if dm is None and circuit is None:
             raise ValueError("No target provided")
         if dm is not None and circuit is not None:
@@ -271,6 +273,8 @@ class GateTarget(BaseTarget):
         :param input_states: List of input states to be used for calibration
         """
         self.gate = gate
+        self.n_reps = n_reps
+        print("n_reps:", n_reps)
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits, "gate"
         )
@@ -343,9 +347,9 @@ class QuantumEnvironment(Env):
 
         super().__init__()
 
-        self._trunc_index = self._inside_trunc_tracker = (
-            0  # Index for circuit truncation (always 0 in this env)
-        )
+        self._trunc_index = (
+            self._inside_trunc_tracker
+        ) = 0  # Index for circuit truncation (always 0 in this env)
         self.training_config = training_config
         self.action_space = training_config.action_space
         self.n_shots = training_config.n_shots
@@ -368,6 +372,10 @@ class QuantumEnvironment(Env):
             0
         ]  # Timings for each instruction (here, only one gate starting at t=0)
         self._reward_check_max = 1.1
+        # Total Harware runtime for the whole calibrtion process
+        if training_config.backend_config.circuit_gate_times is not None:
+            self.circuit_gate_times = training_config.backend_config.circuit_gate_times
+            self._hardware_runtime = []
 
         if isinstance(self.training_config.backend_config, QiskitConfig):
             # Qiskit backend
@@ -403,9 +411,7 @@ class QuantumEnvironment(Env):
 
             self._estimator, self.fidelity_checker = retrieve_primitives(
                 self.backend,
-                self.layout,
                 self.config.backend_config,
-                self.abstraction_level,
                 estimator_options,
                 self.circuit_truncations[0],
             )
@@ -442,6 +448,7 @@ class QuantumEnvironment(Env):
 
             self._config_type = "qua"
             self._channel_mapping = training_config.backend_config.channel_mapping
+            # self._param_table = ParameterTable({param.name: 0. for param in self.parameters})
             raise AttributeError("QUA compatibility not yet implemented")
 
             # TODO: Add a QUA program
@@ -463,7 +470,7 @@ class QuantumEnvironment(Env):
         self._max_return = 0
         self._episode_ended = False
         self._episode_tracker = 0
-        self._benchmark_cycle = self.training_config.benchmark_cycle
+        self._benchmark_cycle = training_config.benchmark_cycle
         self.action_history = []
         self.density_matrix_history = []
         self.reward_history = []
@@ -474,10 +481,7 @@ class QuantumEnvironment(Env):
 
         if isinstance(self.target, GateTarget):
             if self.channel_estimator:
-                self._chi_gate = [_calculate_chi_target(Operator(self.target.gate))]
-                self._pubs = self.retrieve_observables_and_input_states(
-                    self.circuit_truncations[self._trunc_index]
-                )
+                self._pubs = []
             else:
                 self._index_input_state = np.random.randint(
                     len(self.target.input_states[0])
@@ -518,13 +522,10 @@ class QuantumEnvironment(Env):
             ]
         elif isinstance(self.estimator, RuntimeEstimatorV2):
             self.estimator.options.update(job_tags=[f"rl_qoc_step{self._step_tracker}"])
-
+        target_state = None
         if isinstance(self.target, GateTarget):
             if self.channel_estimator:
-                self._pubs = self.retrieve_observables_and_input_states(
-                    self.circuit_truncations[self._trunc_index]
-                )
-                target_state = None
+                pass
             else:
                 input_states = self.target.input_states[self._trunc_index]
                 self._index_input_state = np.random.randint(len(input_states))
@@ -545,7 +546,7 @@ class QuantumEnvironment(Env):
         return {"episode": self._episode_tracker, "step": self._step_tracker}
 
     def _get_obs(self):
-        if isinstance(self.target, GateTarget):
+        if isinstance(self.target, GateTarget) and not self.channel_estimator:
             return np.array(
                 [
                     self._index_input_state
@@ -555,7 +556,9 @@ class QuantumEnvironment(Env):
                 + list(self._observable_to_observation())
             )
         else:
-            return np.array([0, 0])
+            return np.array(
+                [0, self._target_instruction_timings[self._inside_trunc_tracker]]
+            )
 
     def step(
         self, action: ActType
@@ -585,6 +588,7 @@ class QuantumEnvironment(Env):
 
     def check_reward(self):
         if self.training_with_cal:
+            print("Checking reward to adjust C Factor...")
             example_obs, _ = self.reset()
             if example_obs.shape != self.observation_space.shape:
                 raise ValueError(
@@ -598,7 +602,6 @@ class QuantumEnvironment(Env):
             )
 
             batch_rewards = self.perform_action(sample_action)
-            self.store_benchmarks(sample_action)
             mean_reward = np.mean(batch_rewards)
             if not np.isclose(mean_reward, self.fidelity_history[-1], atol=1e-2):
                 self.c_factor *= self.fidelity_history[-1] / mean_reward
@@ -607,6 +610,29 @@ class QuantumEnvironment(Env):
             self.clear_history()
         else:
             pass
+
+    def _calculate_hardware_runtime(self, full_circ):
+        """
+        Calculates the total hardware runtime for executing a given quantum circuit.
+
+        Parameters:
+        - full_circ (QuantumCircuit): The quantum circuit to be executed.
+
+        Returns:
+        - total_runtime (float): The total hardware runtime in seconds.
+        """
+        return (
+            sum(
+                [
+                    get_hardware_runtime_single_circuit(
+                        full_circ, self.circuit_gate_times
+                    ),
+                    self.circuit_gate_times["measure"],
+                    self.circuit_gate_times["reset"],
+                ]
+            )
+            * self._total_shots[-1]
+        )
 
     def perform_action(self, actions: np.array):
         """
@@ -621,13 +647,17 @@ class QuantumEnvironment(Env):
         if batch_size != self.batch_size:
             raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
 
+        print("fidelity access", self.fidelity_access)
         if (
             self.do_benchmark() or self.fidelity_access
         ):  # Benchmarking or fidelity access
-            fids = self.store_benchmarks(params)
+            fids = self.store_benchmarks(
+                params
+            )  # Does not return anything but appends fidelity to self.circuit_fidelity_history
+            # fids = self.circuit_fidelity_history[-1]
 
         if not self.fidelity_access:
-            if isinstance(self.target, GateTarget):
+            if isinstance(self.target, GateTarget) and not self.channel_estimator:
                 # Pick random input state
                 input_state_circ = self._input_state.circuit
                 for _ in range(self.n_reps - 1):  # Repeat the gate n_reps times
@@ -635,7 +665,6 @@ class QuantumEnvironment(Env):
                 qc.compose(
                     input_state_circ, inplace=True, front=True
                 )  # Prepend input state preparation circuit
-
             counts = (
                 self._session_counts
                 if isinstance(self.estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2))
@@ -653,6 +682,10 @@ class QuantumEnvironment(Env):
             )
             print("Sending Estimator job...")
             if isinstance(self.estimator, BaseEstimatorV1):
+                if self.channel_estimator:
+                    raise NotImplementedError(
+                        "Channel estimator not implemented for EstimatorV1"
+                    )
                 print(self._observables)
                 job = self.estimator.run(
                     circuits=[full_circ] * self.batch_size,
@@ -666,16 +699,24 @@ class QuantumEnvironment(Env):
                     * self.batch_size
                     * len(self._observables.group_commuting(qubit_wise=True))
                 )
+
+                if self.has_valid_circuit_gate_times:
+                    self._hardware_runtime.append(
+                        self._calculate_hardware_runtime(full_circ)
+                    )
                 reward_table = job.result().values / self._observables.size
             else:  # EstimatorV2
                 if self.channel_estimator:
-                    for i in range(len(self._pubs)):
-                        self._pubs[i][2] = params
-                        self._pubs[i] = tuple(self._pubs[i])
-                        self._total_shots.append(
-                            self.batch_size
-                            * np.sum([pub[3] ** (-2) for pub in self._pubs])
-                            * len(self._pubs)
+                    (
+                        self._pubs,
+                        total_shots,
+                    ) = self.retrieve_observables_and_input_states(
+                        self.circuit_truncations[self._trunc_index], params
+                    )
+                    self._total_shots.append(total_shots)
+                    if self.has_valid_circuit_gate_times:
+                        self._hardware_runtime.append(
+                            self._calculate_hardware_runtime(full_circ)
                         )
                 else:
                     print(self._observables)
@@ -694,24 +735,31 @@ class QuantumEnvironment(Env):
                     self._total_shots.append(
                         self.batch_size * np.sum(self._pauli_shots * self.n_shots)
                     )
+                    if self.has_valid_circuit_gate_times:
+                        self._hardware_runtime.append(
+                            self._calculate_hardware_runtime(full_circ)
+                        )
                 job = self.estimator.run(
                     pubs=self._pubs,
                 )
-                reward_table = (
-                    np.sum([pub_result.data.evs for pub_result in job.result()], axis=0)
-                    / self._observables.size
-                )
+                reward_table = np.sum(
+                    [pub_result.data.evs for pub_result in job.result()], axis=0
+                ) / len(self._observables)
             print("Finished Estimator job")
         else:
-            reward_table = fids
+            reward_table = [fids]
 
+        if reward_table is None:
+            print("Error: reward_table is None")
+            raise
         if np.mean(reward_table) > self._max_return:
             self._max_return = np.mean(reward_table)
             self._optimal_action = np.mean(params, axis=0)
         self.reward_history.append(reward_table)
-        assert (
-            len(reward_table) == self.batch_size
-        ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
+        if not self.fidelity_access:
+            assert (
+                len(reward_table) == self.batch_size
+            ), f"Reward table size mismatch {len(reward_table)} != {self.batch_size} "
         assert not np.any(np.isinf(reward_table)) and not np.any(
             np.isnan(reward_table)
         ), "Reward table contains NaN or Inf values"
@@ -778,9 +826,7 @@ class QuantumEnvironment(Env):
                         if self.backend is not None
                         else None
                     )
-                    aer_backend = AerSimulator(
-                        noise_model=noise_model, method=method_str
-                    )
+                    aer_backend = AerSimulator(noise_model=noise_model)
 
                 method_qc()
                 circ = transpile(qc, backend=aer_backend, optimization_level=0)
@@ -822,10 +868,10 @@ class QuantumEnvironment(Env):
                         ]
                         scheds = schedule(qc_list, backend=self.backend)
                         dt = self.backend.dt
-                        max_duration = max([sched.duration for sched in scheds])
+                        durations = [sched.duration for sched in scheds]
                         results = self.backend.solve(
                             scheds,
-                            [0, max_duration * dt],
+                            durations,
                             y0=np.eye(np.prod(subsystem_dims)),
                             convert_results=False,
                         )
@@ -919,7 +965,8 @@ class QuantumEnvironment(Env):
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         probabilities = target_state.Chi**2
         full_basis = pauli_basis(qc.num_qubits)
-        if np.sum(probabilities) != 1:
+        if not np.isclose(np.sum(probabilities), 1, atol=1e-5):
+            print("probabilities sum um to", np.sum(probabilities))
             print("probabilities renormalized")
             probabilities = probabilities / np.sum(probabilities)
         k_samples = np.random.choice(
@@ -937,10 +984,10 @@ class QuantumEnvironment(Env):
         )
         shots_per_basis = []
         for i, commuting_group in enumerate(
-            observables.group_commuting(qubit_wise=True)
+            observables.paulis.group_qubit_wise_commuting()
         ):
             max_pauli_shots = 0
-            for pauli in commuting_group.paulis:
+            for pauli in commuting_group:
                 pauli_index = list(full_basis).index(pauli)
                 ref_index = list(pauli_indices).index(pauli_index)
                 max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
@@ -948,16 +995,19 @@ class QuantumEnvironment(Env):
 
         return observables, shots_per_basis
 
-    def retrieve_observables_and_input_states(self, qc: QuantumCircuit):
+    def retrieve_observables_and_input_states(
+        self, qc: QuantumCircuit, params: np.array
+    ):
         """
         Retrieve observables and input state to sample for the DFE protocol for a target gate
 
         :param qc: Quantum circuit to be executed on quantum system
+        :param params: Action vectors to execute on quantum system
         :return: Observables to sample, input state to prepare
         """
         assert isinstance(self.target, GateTarget), "Target type should be a gate"
         d = 2**qc.num_qubits
-        probabilities = self._chi_gate[self._trunc_index] ** 2 / (d**2)
+        probabilities = self.target.Chi**2 / (d**2)
         basis = pauli_basis(num_qubits=qc.num_qubits)
         samples, pauli_shots = np.unique(
             np.random.choice(
@@ -966,42 +1016,30 @@ class QuantumEnvironment(Env):
             return_counts=True,
         )
 
-        pauli_indices = [np.unravel_index(sample, (d**2, d**2)) for sample in samples]
+        pauli_indices = [
+            np.unravel_index(sample, (d**2, d**2)) for sample in samples
+        ]
         pauli_prep, pauli_meas = zip(
             *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )
-        prep_circuits, parity = [], 1
-        # for prep in pauli_prep:
-        #     prep_indices = []
-        #     for pauli_op in reversed(prep.to_label()):
-        #         input = np.random.randint(2)
-        #         parity *= (-1) ** input
-        #         if pauli_op == "I" or pauli_op == "Z":
-        #             prep_indices.append(input)
-        #         elif pauli_op == "X":
-        #             prep_indices.append(2 + input)
-        #         else:
-        #             prep_indices.append(4 + input)
-        #     prep_circuits.append(
-        #         qc.compose(Pauli6PreparationBasis().circuit(prep_indices), front=True)
-        #     )
-
-        reward_factor = [
-            self.c_factor / (d * self._chi_gate[self._trunc_index][p]) for p in samples
-        ]
-        observables = [
+        reward_factor = [self.c_factor / (d * self.target.Chi[p]) for p in samples]
+        self._observables = [
             SparsePauliOp(pauli_meas[i], reward_factor[i]) for i in range(len(samples))
         ]
-        # pubs = [
-        #     [prep_circ, observable, None, 1 / np.sqrt(pauli_shot)]
-        #     for prep_circ, observable, pauli_shot in zip(
-        #         prep_circuits, observables, pauli_shots
-        #     )
-        # ]
+        self._pauli_shots = pauli_shots
+
         pubs = []
-        for prep, obs, shot in zip(pauli_prep, observables, pauli_shots):
-            for input_state in range(2**qc.num_qubits):
+        total_shots = 0
+        for prep, obs, shot in zip(pauli_prep, self._observables, pauli_shots):
+            max_input_states = 2**qc.num_qubits // 2
+            selected_input_states = np.random.choice(
+                2**qc.num_qubits, size=max_input_states, replace=False
+            )
+            for input_state in selected_input_states:
                 prep_indices = []
+                dedicated_shots = shot // (2**qc.num_qubits)
+                if dedicated_shots == 0:
+                    continue
                 input = np.unravel_index(input_state, (2,) * qc.num_qubits)
                 parity = (-1) ** np.sum(input)
                 for i, pauli_op in enumerate(reversed(prep.to_label())):
@@ -1016,9 +1054,17 @@ class QuantumEnvironment(Env):
                     Pauli6PreparationBasis().circuit(prep_indices), front=True
                 )
 
-                pubs.append([prep_circuit, parity * obs, None, 1 / np.sqrt(shot)])
+                pubs.append(
+                    (
+                        prep_circuit,
+                        parity * obs,
+                        params,
+                        1 / np.sqrt(dedicated_shots * self.n_shots),
+                    )
+                )
+                total_shots += dedicated_shots * self.n_shots * self.batch_size
 
-        return pubs
+        return pubs, total_shots
 
     def _observable_to_observation(self):
         """
@@ -1059,6 +1105,9 @@ class QuantumEnvironment(Env):
     def clear_history(self):
         self._step_tracker = 0
         self._episode_tracker = 0
+        if hasattr(self, "hardware_runtime"):
+            self._hardware_runtime.clear()
+        self.total_shots.clear()
         self.qc_history.clear()
         self.action_history.clear()
         self.reward_history.clear()
@@ -1152,6 +1201,8 @@ class QuantumEnvironment(Env):
         """
         if self.fidelity_access:
             return True
+        elif self.benchmark_cycle == 0:
+            return False
         else:
             return self._episode_tracker % self.benchmark_cycle == 0
 
@@ -1233,7 +1284,20 @@ class QuantumEnvironment(Env):
 
     @property
     def parameters(self):
+        """
+        Return the Qiskit ParameterVector defining the actions applied on the environment
+        """
         return self._parameters
+
+    @property
+    def parameter_table(self):
+        """
+        Return the ParameterTable defining the actions applied on the environment (QUA only)
+        """
+        if self._config_type == "qua":
+            return self._param_table
+        else:
+            raise AttributeError("ParameterTable not available for Qiskit backend")
 
     @property
     def observables(self) -> SparsePauliOp:
@@ -1242,6 +1306,20 @@ class QuantumEnvironment(Env):
     @property
     def total_shots(self):
         return self._total_shots
+
+    @property
+    def hardware_runtime(self):
+        if self.circuit_gate_times is not None:
+            return self._hardware_runtime
+        else:
+            print("There was no circuit_gate_times dict passed. Returning None.")
+            return None
+
+    @property
+    def has_valid_circuit_gate_times(self):
+        return (
+            hasattr(self, "circuit_gate_times") and self.circuit_gate_times is not None
+        )
 
     @property
     def optimal_action(self):

@@ -68,6 +68,7 @@ class QiskitConfig(BackendConfig):
     channel_freq: Optional[Dict] = field(default_factory=dict)
     calibration_files: Optional[str] = None
     do_calibrations: bool = True
+    circuit_gate_times: Optional[Dict] = None
 
     def __post_init__(self):
         super().__init__(config_type="Qiskit")

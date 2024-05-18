@@ -127,7 +127,7 @@ def get_backend(
     global phi, gamma, custom_rx_gate_label
 
     identity_op = Operator(IGate())
-    rx_phi_gamma_op = Operator(RXGate(gamma*phi))
+    rx_phi_gamma_op = Operator(RXGate(gamma * phi))
     ident_rx_op = Operator(rx_phi_gamma_op.tensor(identity_op))
 
     noise_model = noise.NoiseModel()
@@ -141,7 +141,9 @@ def get_backend(
     #     dtm=2.2222 * 1e-10,
     #     basis_gates=["cx", "id", "rz", "sx", "x"],
     # )
-    backend = AerSimulator(noise_model=noise_model) # .from_backend(generic_backend, noise_model=noise_model)
+    backend = AerSimulator(
+        noise_model=noise_model
+    )  # .from_backend(generic_backend, noise_model=noise_model)
 
     if backend is None:
         # TODO: Add here your custom backend
@@ -156,8 +158,8 @@ def get_backend(
 
 
 ### Custom spillover noise model
-phi = np.pi / 4 # rotation angle
-gamma = 0.02  # spillover rate for the CRX gate
+phi = np.pi / 4  # rotation angle
+gamma = 0.1  # 0.02  # spillover rate for the CRX gate
 custom_rx_gate_label = "custom_kron(rx,ident)_gate"
 
 
@@ -170,7 +172,7 @@ def get_circuit_context(backend: Optional[BackendV2]):
     global phi, gamma, custom_rx_gate_label
 
     circuit = QuantumCircuit(2)
-    
+
     rx_op = Operator(RXGate(phi))
     identity_op = Operator(IGate())
     rx_op_2q = Operator(identity_op.tensor(rx_op))
@@ -182,21 +184,21 @@ def get_circuit_context(backend: Optional[BackendV2]):
     readout_time = 1.2e-6
     reset_time = 1.0e-6
 
-    gates_done_by_software = ['rz', 's', 't']
+    gates_done_by_software = ["rz", "s", "t"]
 
     circuit_gate_times = {
         custom_rx_gate_label: single_qubit_gate_time,
-        'x': single_qubit_gate_time,
-        'sx': single_qubit_gate_time,
-        'h': single_qubit_gate_time,
-        'u': single_qubit_gate_time,
-        'rzx': two_qubit_gate_time,
-        'reset': reset_time,
-        'measure': readout_time,
+        "x": single_qubit_gate_time,
+        "sx": single_qubit_gate_time,
+        "h": single_qubit_gate_time,
+        "u": single_qubit_gate_time,
+        "cx": two_qubit_gate_time,
+        "rzx": two_qubit_gate_time,
+        "reset": reset_time,
+        "measure": readout_time,
     }
     circuit_gate_times.update({gate: 0.0 for gate in gates_done_by_software})
 
-        
     circuit.cx(0, 1)
 
     if backend is not None and backend.target.has_calibration("x", (0,)):
@@ -223,14 +225,17 @@ backend_config = QiskitConfig(
         estimator_options if isinstance(backend, RuntimeBackend) else None
     ),
     parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
+    circuit_gate_times=get_circuit_context(backend)[
+        1
+    ],  # unpack the circuit gate_times from the tuple returned by get_circuit_context
 )
 
-QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
-    check_on_exp
-)
-QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_access = (
-    fidelity_access
-)
+QuantumEnvironment.check_on_exp = (
+    ContextAwareQuantumEnvironment.check_on_exp
+) = check_on_exp
+QuantumEnvironment.fidelity_access = (
+    ContextAwareQuantumEnvironment.fidelity_access
+) = fidelity_access
 QuantumEnvironment.channel_estimator = channel_estimator
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context, circuit_gate_times = get_circuit_context(backend)
