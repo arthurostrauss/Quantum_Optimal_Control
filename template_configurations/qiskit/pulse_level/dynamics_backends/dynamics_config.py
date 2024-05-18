@@ -63,18 +63,22 @@ def custom_backend(
     num_controls = 0
     control_channel_map = []
     if couplings is not None:
-        static_ham, channels, ecr_ops, num_controls, control_channel_map = (
-            get_couplings(
-                couplings,
-                static_ham,
-                a_ops,
-                adag_ops,
-                channels,
-                freqs,
-                ecr_ops,
-                drive_ops,
-                num_controls,
-            )
+        (
+            static_ham,
+            channels,
+            ecr_ops,
+            num_controls,
+            control_channel_map,
+        ) = get_couplings(
+            couplings,
+            static_ham,
+            a_ops,
+            adag_ops,
+            channels,
+            freqs,
+            ecr_ops,
+            drive_ops,
+            num_controls,
         )
 
     dt = 2.2222e-10

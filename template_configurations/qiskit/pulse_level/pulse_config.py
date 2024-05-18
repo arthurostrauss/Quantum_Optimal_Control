@@ -191,7 +191,7 @@ def get_backend(
             custom_backend,
             single_qubit_backend,
             surface_code_plaquette,
-         )
+        )
 
         print("Custom backend used")
         # TODO: Add here your custom backend
@@ -254,14 +254,14 @@ backend_config = QiskitConfig(
         "backend": env_backend,
     },
 )
-QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
-    check_on_exp
-)
+QuantumEnvironment.check_on_exp = (
+    ContextAwareQuantumEnvironment.check_on_exp
+) = check_on_exp
 QuantumEnvironment.channel_estimator = (
     ContextAwareQuantumEnvironment.channel_estimator
 ) = channel_estimator
-QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_access = (
-    fidelity_access
- )
+QuantumEnvironment.fidelity_access = (
+    ContextAwareQuantumEnvironment.fidelity_access
+) = fidelity_access
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context = get_circuit_context(env_backend)
