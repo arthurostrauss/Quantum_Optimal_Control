@@ -12,6 +12,11 @@ from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Uni
 import numpy as np
 from gymnasium.spaces import Box
 
+import sympy as sp
+from sympy.physics.quantum import TensorProduct
+from sympy import Matrix, eye, simplify
+from qiskit.quantum_info import DensityMatrix
+
 # Qiskit imports
 from qiskit import transpile
 from qiskit.circuit import (
@@ -19,7 +24,6 @@ from qiskit.circuit import (
     QuantumRegister,
     ParameterVector,
     CircuitInstruction,
-    Delay,
     Delay,
 )
 from qiskit.circuit.library import ECRGate
@@ -73,11 +77,11 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
     channel_estimator = False
 
     def __init__(
-            self,
-            training_config: QEnvConfig,
-            circuit_context: QuantumCircuit,
-            training_steps_per_gate: Union[List[int], int] = 1500,
-            intermediate_rewards: bool = False,
+        self,
+        training_config: QEnvConfig,
+        circuit_context: QuantumCircuit,
+        training_steps_per_gate: Union[List[int], int] = 1500,
+        intermediate_rewards: bool = False,
     ):
         """
         Class for wrapping a quantum environment in a Gym environment able to tackle
@@ -197,17 +201,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         #     False,
         #     self.physical_target_qubits + self.physical_neighbor_qubits,
         # )
-        # set_primitives_transpile_options(
-        #     self.estimator,
-        #     self.fidelity_checker,
-        #     self.layout[self._trunc_index],
-        #     False,
-        #     self.physical_target_qubits + self.physical_neighbor_qubits,
-        # )
         self._reshape_target()
 
     def _generate_circuit_truncations(
-            self,
+        self,
     ) -> Tuple[List[QuantumCircuit], List[QuantumCircuit]]:
         """
         Generate truncated circuits for contextual gate calibration.
@@ -267,12 +264,8 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 )
             )
             for start_time, instruction in zip(
-                    self._op_start_times, self.circuit_context.data
+                self._op_start_times, self.circuit_context.data
             ):  # Loop over instructions in circuit context
-                if isinstance(instruction.operation, Delay):
-                    continue
-
-                # Check if instruction involves target or nearest neighbor qubits
                 if isinstance(instruction.operation, Delay):
                     continue
 
@@ -296,17 +289,16 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                 # If instruction involves target or nn qubits and happens before target gate, add it to custom circuit
 
                 if (
-                        counts <= i or start_time <= self._target_instruction_timings[i]
+                    counts <= i or start_time <= self._target_instruction_timings[i]
                 ) and involves_target_qubits:
-
                     for qubit in involved_qubits:
                         if (
-                                mapping[qubit] not in custom_circuits[i].qregs
+                            mapping[qubit] not in custom_circuits[i].qregs
                         ):  # Add register if not already added
                             baseline_circuits[i].add_register(mapping[qubit])
                             custom_circuits[i].add_register(mapping[qubit])
                             if (
-                                    self.circuit_context.layout is not None
+                                self.circuit_context.layout is not None
                             ):  # Update physical layout
                                 self.layout[i].add(
                                     mapping[qubit][0],
@@ -368,13 +360,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         n_actions = self.action_space.shape[-1]
 
         n_custom_instructions = (
-                self._trunc_index + 1
+            self._trunc_index + 1
         )  # Count custom instructions present in the current truncation
         benchmark_circ = self.circuit_truncations[self._trunc_index]
         baseline_circ = self.baseline_truncations[self._trunc_index]
 
         if (
-                self.check_on_exp
+            self.check_on_exp
         ):  # Perform real experiments to retrieve from measurement data fidelities
             # Assess circuit fidelity with ComputeUncompute algo
             try:
@@ -422,13 +414,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             else:  # Pulse simulation
                 # Calculate circuit fidelity with pulse simulation
                 if isinstance(self.backend, DynamicsBackend) and isinstance(
-                        self.backend.options.solver, JaxSolver
+                    self.backend.options.solver, JaxSolver
                 ):
                     # Jax compatible pulse simulation
 
                     output_states = np.array(self.backend.options.solver.batched_sims)[
-                                    :, 1, :
-                                    ]
+                        :, 1, :
+                    ]
 
                     output_states = [
                         projected_statevector(s, self.backend.options.subsystem_dims)
@@ -443,10 +435,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         print("Fidelity stored", self.circuit_fidelity_history[-1])
 
     def reset(
-            self,
-            *,
-            seed: Optional[int] = None,
-            options: Optional[Dict[str, Any]] = None,
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> tuple[ObsType, dict[str, Any]]:
         """Reset the Environment, chooses a new input state"""
         super().reset(seed=seed)
@@ -464,18 +456,10 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         #         skip_transpilation,
         #         self.physical_target_qubits + self.physical_neighbor_qubits,
         #     )
-        # if self._trunc_index != self._select_trunc_index():
-        #     set_primitives_transpile_options(
-        #         self.estimator,
-        #         self.fidelity_checker,
-        #         self.layout[self._trunc_index],
-        #         skip_transpilation,
-        #         self.physical_target_qubits + self.physical_neighbor_qubits,
-        #     )
         return self._get_obs(), self._get_info()
 
     def step(
-            self, action: ActType
+        self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         # trunc_index tells us which circuit truncation should be trained
         # Dependent on global_step and method select_trunc_index
@@ -566,7 +550,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         Method to retrieve the length of the current episode, i.e. the gate instance that should be calibrated
         """
         assert (
-                global_step == self.step_tracker
+            global_step == self.step_tracker
         ), "Given step not synchronized with internal environment step counter"
         return 1  # + self._select_trunc_index()
 
@@ -715,9 +699,6 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         assert isinstance(self.target, GateTarget), "Target should be a gate target"
         # Generate input states for all circuit truncations (for their entire register)
         input_circuits = [
-        assert isinstance(self.target, GateTarget), "Target should be a gate target"
-        # Generate input states for all circuit truncations (for their entire register)
-        input_circuits = [
             [
                 PauliPreparationBasis().circuit(s)
                 for s in product(range(4), repeat=circ.num_qubits)
@@ -733,7 +714,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             flattened_circuits = [remove_unused_wires(qc) for qc in flattened_circuits]
             idx = 0
             for c, circ in enumerate(
-                    self.baseline_truncations
+                self.baseline_truncations
             ):  # Load input_circuits array with transpiled circuits
                 for s in range(len(list(product(range(4), repeat=circ.num_qubits)))):
                     input_circuits[c][s] = flattened_circuits[idx]
@@ -748,3 +729,145 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             for input, baseline_circ in zip(input_circuits, self.baseline_truncations)
         ]
         self.target.input_states = input_states
+
+        # for ind, input_state in enumerate(self.target.input_states[0]):
+        #     target_state = input_state.target_state.dm
+        #     phi_val = np.pi/4
+        #     validate_target_state = self._validate_target_state(input_state_index=ind, phi_val=phi_val, n_reps=self.n_reps)
+
+        #     assert np.allclose(target_state, validate_target_state), f"Target state {ind+1} not correctly validated"
+        #     print(f"Target state {ind+1} validated correctly")
+
+    def _validate_target_state(
+        self, input_state_index: int, phi_val: float, n_reps: int = 1
+    ):
+        # TODO: Extend function to ECR (currently only CX supported)
+
+        # Define the symbols for the angles
+        phi, gamma = sp.symbols("phi gamma")
+        a = sp.symbols("a:7")  # a[0] to a[6]
+
+        I = eye(2)
+        H = 1 / np.sqrt(2) * Matrix([[1, 1], [1, -1]])
+        S = Matrix([[1, 0], [0, 1j]])
+        X = Matrix([[0, 1], [1, 0]])
+
+        def get_input_rotation_gates(index: int):
+            """
+            Will return the input rotation gates for the given index (0-15) for the input states that form a tomographically complete set
+            """
+            input_rotation_circuits = {
+                0: TensorProduct(I, I),
+                1: TensorProduct(X, I),
+                2: TensorProduct(H, I),
+                3: TensorProduct(S * H, I),
+                4: TensorProduct(I, X),
+                5: TensorProduct(X, X),
+                6: TensorProduct(H, X),
+                7: TensorProduct(S * H, X),
+                8: TensorProduct(I, H),
+                9: TensorProduct(X, H),
+                10: TensorProduct(H, H),
+                11: TensorProduct(S * H, H),
+                12: TensorProduct(I, S * H),
+                13: TensorProduct(X, S * H),
+                14: TensorProduct(H, S * H),
+                15: TensorProduct(S * H, S * H),
+            }
+            return input_rotation_circuits[index]
+
+        # Define RX gate in symbolic form
+        def RX(theta):
+            return sp.Matrix(
+                [
+                    [sp.cos(theta / 2), -1j * sp.sin(theta / 2)],
+                    [-1j * sp.sin(theta / 2), sp.cos(theta / 2)],
+                ]
+            )
+
+        # Define U gate in symbolic form
+        def U_gate(theta, phi, lambd):
+            return sp.Matrix(
+                [
+                    [sp.cos(theta / 2), -sp.exp(1j * lambd) * sp.sin(theta / 2)],
+                    [
+                        sp.exp(1j * phi) * sp.sin(theta / 2),
+                        sp.exp(1j * lambd + 1j * phi) * sp.cos(theta / 2),
+                    ],
+                ]
+            )
+
+        # Define RZX gate in symbolic form
+        def RZX(theta):
+            cos = sp.cos(theta / 2)
+            sin = sp.sin(theta / 2)
+            i = 1j
+            return sp.Matrix(
+                [
+                    [cos, 0, -i * sin, 0],
+                    [0, cos, 0, i * sin],
+                    [-i * sin, 0, cos, 0],
+                    [0, i * sin, 0, cos],
+                ]
+            )
+
+        # Create the circuit matrix step by step
+        # RX gates
+        RX_q0 = TensorProduct(
+            sp.eye(2), RX(phi)
+        )  # RX(phi) with phi=0 applied to qubit 0
+        RX_q1 = TensorProduct(
+            RX(phi * gamma), sp.eye(2)
+        )  # RX(gamma*phi) with gamma*phi=0 applied to qubit 1
+
+        # U gates
+        U_q0 = TensorProduct(
+            sp.eye(2), U_gate(a[0], a[1], a[2])
+        )  # U gate applied to qubit 0
+        U_q1 = TensorProduct(
+            U_gate(a[3], a[4], a[5]), sp.eye(2)
+        )  # U gate applied to qubit 1
+
+        # RZX gate
+        RZX_q12 = RZX(a[6])  # RZX gate applied between qubits 0 and 1
+
+        def get_complete_circuit(
+            parametrized_cnot_circuit, input_state_index: int, n_reps: int = 1
+        ):
+            """Returns the full parametrized CNOT-gate circuit for the given input state index"""
+            input_rotation_gates = get_input_rotation_gates(input_state_index)
+            full_circuit = parametrized_cnot_circuit**n_reps * input_rotation_gates
+
+            return simplify(full_circuit)
+
+        gate_parameters = {
+            phi: phi_val,
+            gamma: 0.0,
+            a[0]: 0,
+            a[1]: 0,
+            a[2]: sp.pi / 2,
+            a[3]: sp.pi / 2,
+            a[4]: -sp.pi / 2,
+            a[5]: sp.pi / 2,
+            a[6]: -sp.pi / 2,
+        }
+
+        parametrized_cnot_circuit = RZX_q12 * U_q1 * U_q0 * RX_q1 * RX_q0
+        circuit_evaluated = parametrized_cnot_circuit.subs(gate_parameters).evalf(
+            chop=True
+        )
+        CompleteCircuit_evaluated = get_complete_circuit(
+            circuit_evaluated, input_state_index=input_state_index, n_reps=n_reps
+        )
+
+        CompleteCircuit_evaluated = sp.nsimplify(
+            CompleteCircuit_evaluated, tolerance=1e-10
+        )
+        CompleteCircuit_evaluated_float = CompleteCircuit_evaluated.evalf(chop=True)
+        circuit_operator = Operator(
+            np.array(CompleteCircuit_evaluated_float).astype(np.complex128)
+        )
+
+        output_state = Statevector.from_label("00").evolve(circuit_operator)
+
+        return DensityMatrix(output_state)
