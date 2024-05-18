@@ -269,9 +269,9 @@ class QuantumEnvironment(Env):
 
         super().__init__()
 
-        self._trunc_index = self._inside_trunc_tracker = (
-            0  # Index for circuit truncation (always 0 in this env)
-        )
+        self._trunc_index = (
+            self._inside_trunc_tracker
+        ) = 0  # Index for circuit truncation (always 0 in this env)
         self.training_config = training_config
         self.action_space = training_config.action_space
         self.n_shots = training_config.n_shots
@@ -893,7 +893,9 @@ class QuantumEnvironment(Env):
             return_counts=True,
         )
 
-        pauli_indices = [np.unravel_index(sample, (d**2, d**2)) for sample in samples]
+        pauli_indices = [
+            np.unravel_index(sample, (d**2, d**2)) for sample in samples
+        ]
         pauli_prep, pauli_meas = zip(
             *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )

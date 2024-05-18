@@ -210,9 +210,9 @@ def perform_standard_calibrations(
         backend.set_options(control_channel_map=control_channel_map)
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
         two_qubit_properties = {qubits: None for qubits in control_channel_map}
-    standard_gates: Dict[str, Gate] = (
-        get_standard_gate_name_mapping()
-    )  # standard gate library
+    standard_gates: Dict[
+        str, Gate
+    ] = get_standard_gate_name_mapping()  # standard gate library
     fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array(
         [1, 0.5, -0.5, 0.25, -0.25]
     )
