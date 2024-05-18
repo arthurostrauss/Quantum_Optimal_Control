@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 import warnings
 from qiskit import pulse, schedule, transpile
 from qiskit.circuit import (
@@ -89,6 +91,7 @@ from qiskit_algorithms.state_fidelities import ComputeUncompute
 from itertools import permutations
 from typing import Optional, Tuple, List, Union, Dict, Sequence
 import yaml
+import pickle
 
 import numpy as np
 
@@ -121,6 +124,22 @@ Sampler_type = Union[
     StatevectorSampler,
 ]
 Backend_type = Union[BackendV1, BackendV2]
+
+
+def load_from_pickle(file_path: str):
+    """
+    Load object from pickle file
+    """
+    with open(file_path, "rb") as file:
+        return pickle.load(file)
+
+
+def save_to_pickle(obj, file_path: str):
+    """
+    Save object to pickle file
+    """
+    with open(file_path, "wb") as file:
+        pickle.dump(obj, file)
 
 
 def count_gates(qc: QuantumCircuit):
@@ -839,7 +858,6 @@ def retrieve_primitives(
                 calibration_files = config.calibration_files
                 _, _ = perform_standard_calibrations(backend, calibration_files)
         else:
-
             if isinstance(backend, (FakeBackend, FakeBackendV2)):
                 print("Aer Backend created out of backend", backend)
                 backend = AerSimulator.from_backend(backend)
@@ -1357,42 +1375,59 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     )  # Qubitized unitary as a Qiskit Operator object (Note that is actually not unitary at this point, it's a Channel)
     return qubitized_unitary
 
-def get_hardware_runtime_single_circuit(qc: QuantumCircuit, circuit_gate_times: Dict) -> float:
-        """
-        Return a worst-case estimate of the runtime for a single execution of the circuit on the hardware
 
-        :param qc: QuantumCircuit to be executed
-        """
-        if len(circuit_gate_times) == 0:
-            raise ValueError('Empty circuit_gate_time dictionary received. Please add durations for your gates.')
+def get_hardware_runtime_single_circuit(
+    qc: QuantumCircuit, circuit_gate_times: Dict
+) -> float:
+    """
+    Return a worst-case estimate of the runtime for a single execution of the circuit on the hardware
 
-        total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
-        for instruction in qc.data:
-            for qubit in instruction.qubits:
-                # Custom gates only appear in the circuit context for the CAQEnv case
-                if instruction.operation.label in circuit_gate_times:
-                    total_time_per_qubit[qubit] += circuit_gate_times[instruction.operation.label]
-                else:
-                    total_time_per_qubit[qubit] += circuit_gate_times[instruction.operation.name]
+    :param qc: QuantumCircuit to be executed
+    """
+    if len(circuit_gate_times) == 0:
+        raise ValueError(
+            "Empty circuit_gate_time dictionary received. Please add durations for your gates."
+        )
 
-        # Find the maximum execution time among all qubits
-        total_execution_time = max(total_time_per_qubit.values()) + circuit_gate_times['reset'] + circuit_gate_times['measure']
-        
-        return total_execution_time
+    total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
+    for instruction in qc.data:
+        for qubit in instruction.qubits:
+            # Custom gates only appear in the circuit context for the CAQEnv case
+            if instruction.operation.label in circuit_gate_times:
+                total_time_per_qubit[qubit] += circuit_gate_times[
+                    instruction.operation.label
+                ]
+            else:
+                total_time_per_qubit[qubit] += circuit_gate_times[
+                    instruction.operation.name
+                ]
 
-def get_hardware_runtime_cumsum(qc: QuantumCircuit, circuit_gate_times: Dict, total_shots: List[int]) -> List[float]:
-    return np.cumsum(
-        get_hardware_runtime_single_circuit(qc, circuit_gate_times) * np.array(total_shots)
+    # Find the maximum execution time among all qubits
+    total_execution_time = (
+        max(total_time_per_qubit.values())
+        + circuit_gate_times["reset"]
+        + circuit_gate_times["measure"]
     )
 
+    return total_execution_time
+
+
+def get_hardware_runtime_cumsum(
+    qc: QuantumCircuit, circuit_gate_times: Dict, total_shots: List[int]
+) -> List[float]:
+    return np.cumsum(
+        get_hardware_runtime_single_circuit(qc, circuit_gate_times)
+        * np.array(total_shots)
+    )
+
+
 def get_baseline_fid_from_phi_gamma(param_tuple):
-    
     # prevent key errors with rounding
     param_tuple = (param_tuple[0], round(param_tuple[1], 2))
-    
+
     if any([param_tuple[0] == 0, param_tuple[1] == 0]):
         return 1.0
-    
+
     baseline_gate_fidelities = {
         (0.7853981633974483, 0.01): 0.9999845788223948,
         (0.7853981633974483, 0.02): 0.9999383162408302,
@@ -1453,9 +1488,10 @@ def get_baseline_fid_from_phi_gamma(param_tuple):
         (3.141592653589793, 0.12): 0.9648882429441258,
         (3.141592653589793, 0.13): 0.9588773128419905,
         (3.141592653589793, 0.14): 0.9524135262330098,
-        (3.141592653589793, 0.15): 0.9455032620941839
+        (3.141592653589793, 0.15): 0.9455032620941839,
     }
     return baseline_gate_fidelities[param_tuple]
+
 
 def rotate_unitary(x, unitary: Operator):
     """
@@ -1582,90 +1618,37 @@ def load_from_yaml_file(file_path: str):
 def create_hpo_agent_config(
     trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
 ):
-    hyper_params = {
-        # "N_UPDATES": trial.suggest_int(
-        #     "N_UPDATES", hpo_config["N_UPDATES"][0], hpo_config["N_UPDATES"][1]
-        # ),
-        # "N_EPOCHS": trial.suggest_int(
-        #     "N_EPOCHS", hpo_config["N_EPOCHS"][0], hpo_config["N_EPOCHS"][1]
-        # ),
-        "MINIBATCH_SIZE": trial.suggest_categorical(
-            "MINIBATCH_SIZE", hpo_config["MINIBATCH_SIZE"]
-        ),
-        "BATCHSIZE_MULTIPLIER": trial.suggest_int(
-            "BATCHSIZE_MULTIPLIER",
-            hpo_config["BATCHSIZE_MULTIPLIER"][0],
-            hpo_config["BATCHSIZE_MULTIPLIER"][1],
-        ),
-        # "LR": trial.suggest_float(
-        #     "LR",
-        #     hpo_config["LR"][0],
-        #     hpo_config["LR"][1],
-        #     log=True,
-        # ),
-        "N_SHOTS": trial.suggest_int(
-            "N_SHOTS",
-            hpo_config["N_SHOTS"][0],
-            hpo_config["N_SHOTS"][1],
-        ),
-        "SAMPLE_PAULIS": trial.suggest_int(
-            "SAMPLE_PAULIS",
-            hpo_config["SAMPLE_PAULIS"][0],
-            hpo_config["SAMPLE_PAULIS"][1],
-        ),
-        # "GAMMA": trial.suggest_float(
-        #     "GAMMA", hpo_config["GAMMA"][0], hpo_config["GAMMA"][1]
-        # ),
-        # "GAE_LAMBDA": trial.suggest_float(
-        #     "GAE_LAMBDA", hpo_config["GAE_LAMBDA"][0], hpo_config["GAE_LAMBDA"][1]
-        # ),
-        # "ENT_COEF": trial.suggest_float(
-        #     "ENT_COEF", hpo_config["ENT_COEF"][0], hpo_config["ENT_COEF"][1]
-        # ),
-        # "V_COEF": trial.suggest_float(
-        #     "V_COEF", hpo_config["V_COEF"][0], hpo_config["V_COEF"][1]
-        # ),
-        # "GRADIENT_CLIP": trial.suggest_float(
-        #     "GRADIENT_CLIP",
-        #     hpo_config["GRADIENT_CLIP"][0],
-        #     hpo_config["GRADIENT_CLIP"][1],
-        # ),
-        # "CLIP_VALUE_COEF": trial.suggest_float(
-        #     "CLIP_VALUE_COEF",
-        #     hpo_config["CLIP_VALUE_COEF"][0],
-        #     hpo_config["CLIP_VALUE_COEF"][1],
-        # ),
-        # "CLIP_RATIO": trial.suggest_float(
-        #     "CLIP_RATIO", hpo_config["CLIP_RATIO"][0], hpo_config["CLIP_RATIO"][1]
-        # ),
-    }
+    hyper_params = {}
+    hyperparams_in_scope = []
+
+    # Loop through hpo_config and decide whether to optimize or use the provided value
+    for param, values in hpo_config.items():
+        if (
+            isinstance(values, list) and len(values) == 2
+        ):  # If values is a list of length 2, optimize
+            if isinstance(values[0], int):
+                hyper_params[param] = trial.suggest_int(param, values[0], values[1])
+            elif isinstance(values[0], float):
+                hyper_params[param] = trial.suggest_float(param, values[0], values[1])
+            hyperparams_in_scope.append(param)
+        else:
+            hyper_params[param] = values
 
     # Dynamically calculate batchsize from minibatch_size and batchsize_multiplier
+    print("MINIBATCH_SIZE", hyper_params["MINIBATCH_SIZE"])
+    print("BATCHSIZE_MULTIPLIER", hyper_params["BATCHSIZE_MULTIPLIER"])
     hyper_params["BATCHSIZE"] = (
         hyper_params["MINIBATCH_SIZE"] * hyper_params["BATCHSIZE_MULTIPLIER"]
     )
-    # The upper hyperparameters are part of HPO scope
-    hyperparams = list(hyper_params.keys())
-    print('Hyperparameters considered:', hyperparams)
 
-    # The following hyperparameters are NOT part of HPO scope
-    hyper_params.update({
-        "N_UPDATES": hpo_config["N_UPDATES"],
-        "N_EPOCHS": hpo_config["N_EPOCHS"],
-        "LR": hpo_config["LR"],
-        "GAMMA": hpo_config["GAMMA"],
-        "GAE_LAMBDA": hpo_config["GAE_LAMBDA"],
-        "ENT_COEF": hpo_config["ENT_COEF"],
-        "V_COEF": hpo_config["V_COEF"],
-        "GRADIENT_CLIP": hpo_config["GRADIENT_CLIP"],
-        "CLIP_VALUE_COEF": hpo_config["CLIP_VALUE_COEF"],
-        "CLIP_RATIO": hpo_config["CLIP_RATIO"],
-        "CLIP_VALUE_LOSS": hpo_config["CLIP_VALUE_LOSS"],
-    })
-    print('Hyperparameter NOT in scope of HPO:', [el for el in list(hyper_params.keys()) if el not in hyperparams])
+    # Print hyperparameters considered for HPO
+    print("Hyperparameters considered for HPO:", hyperparams_in_scope)
 
-    # print('Clip Value Loss?:', hyper_params["CLIP_VALUE_LOSS"])
-    # hyper_params["CLIP_VALUE_LOSS"] = hpo_config["CLIP_VALUE_LOSS"]
+    # Print hyperparameters NOT considered for HPO
+    hyperparams_not_in_scope = [
+        param for param in hpo_config if param not in hyperparams_in_scope
+    ]
+    print("Hyperparameters NOT in scope of HPO:", hyperparams_not_in_scope)
 
     # Take over attributes from agent_config and populate hyper_params
     agent_config = load_from_yaml_file(path_to_agent_config)
@@ -1673,7 +1656,7 @@ def create_hpo_agent_config(
     final_config.update(agent_config)
     final_config.update(hyper_params)
 
-    return final_config, hyperparams
+    return final_config, hyperparams_in_scope
 
 
 def retrieve_backend_info(

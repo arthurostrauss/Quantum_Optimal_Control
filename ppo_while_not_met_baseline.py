@@ -453,6 +453,7 @@ class CustomPPO:
 def make_train_ppo(
     agent_config: Dict,
     env: QuantumEnvironment,
+    hpo_mode: bool = False,
     chkpt_dir: Optional[str] = "tmp/ppo",
     chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
 ):
@@ -485,6 +486,13 @@ def make_train_ppo(
     ]
     include_critic = agent_config["INCLUDE_CRITIC"]
     minibatch_size = agent_config["MINIBATCH_SIZE"]
+
+    if (
+        not hpo_mode
+    ):  # Temporary fix to run HPO and non-HPO in parallel for multiple batchsizes
+        minibatch_size = np.ceil(batchsize / 5).astype(int)
+        print("Minibatch size:", minibatch_size)
+
     if batchsize % minibatch_size != 0:
         raise ValueError(
             f"The current minibatch size of {minibatch_size} does not evenly divide the batchsize of {batchsize}"
@@ -534,11 +542,11 @@ def make_train_ppo(
 
     def train(
         target_fidelities: List[float],
-        lookback_window: int = 30,
-        max_runtime: int | float = 600,
-        std_actions_eps: float = 1e-3,
+        lookback_window: int = 10,
+        max_hardware_runtime: int | float = 600,
+        std_actions_eps: float = 1e-2,
         plot_real_time: bool = False,
-        print_debug: Optional[bool] = True,
+        print_debug: Optional[bool] = False,
         num_prints: Optional[int] = 40,
     ):
         """
@@ -559,7 +567,9 @@ def make_train_ppo(
                 i * env.unwrapped.benchmark_cycle
                 for i in range(len(env.unwrapped.fidelity_history))
             ]
-            plt.plot(np.mean(env.reward_history, axis=1), label="Reward")
+            plt.plot(
+                np.mean(env.reward_history, axis=1) ** (1 / env.n_reps), label="Reward"
+            )
             plt.plot(
                 fidelity_range,
                 env.fidelity_history,
@@ -572,14 +582,16 @@ def make_train_ppo(
             plt.ylabel("Reward")
             plt.show()
 
-
         try:
-
             fidelity_info = {
-                fidelity: {"achieved": False, "update_at": None, "train_time": None, "shots_used": None}
+                fidelity: {
+                    "achieved": False,
+                    "update_at": None,
+                    "train_time": None,
+                    "shots_used": None,
+                }
                 for fidelity in target_fidelities
             }
-
 
             env.unwrapped.clear_history()
             start = time.time()
@@ -597,19 +609,14 @@ def make_train_ppo(
             std_actions = []
             avg_action_history = []
 
-            ### Starting Learning ###
-            # for _ in tqdm.tqdm(range(1, total_updates + 1)):
-            
             start_time = time.time()
             total_updates = 0
 
-            while time.time() - start_time < max_runtime:
+            while np.sum(env.unwrapped.hardware_runtime) < max_hardware_runtime:
                 next_obs, _ = env.reset(seed=seed)
                 num_steps = env.unwrapped.episode_length(global_step)  # num_time_steps
                 batch_obs = torch.tile(torch.Tensor(next_obs), (batchsize, 1))
                 batch_done = torch.zeros_like(dones[0])
-
-                # print("episode length:", num_steps)
 
                 for step in range(num_steps):
                     global_step += 1
@@ -632,6 +639,9 @@ def make_train_ppo(
 
                     next_obs, reward, terminated, truncated, infos = env.step(
                         action.cpu().numpy()
+                    )
+                    print(
+                        f"Total Harware time taken: {sum(env.unwrapped.hardware_runtime)} s."
                     )
                     next_obs = torch.Tensor(next_obs)
                     done = int(np.logical_or(terminated, truncated))
@@ -805,48 +815,72 @@ def make_train_ppo(
                 avg_action_history.append(mean_action[0].numpy())
                 std_actions.append(std_action[0].numpy())
 
-
                 total_updates += 1
-                print('Total Updates applied:', total_updates)
-                print(f'Total Shots applied: {np.sum(env.unwrapped.total_shots):,}')
+                print("Total Updates applied:", total_updates)
+                print(f"Total Shots applied: {np.sum(env.unwrapped.total_shots):,}")
 
                 if global_step % num_prints == 0:
                     clear_output(wait=True)
                     if plot_real_time:
                         plot_curves(env)
 
-
                 # Check each target fidelity to see if it's been surpassed
                 if len(fidelities) > lookback_window:
                     for fidelity in target_fidelities:
                         info = fidelity_info[fidelity]
                         # Sliding window lookback to check if target fidelity has been surpassed
-                        if not info["achieved"] and np.mean(fidelities[-lookback_window:]) > fidelity:
-                            info.update({
-                                "achieved": True,
-                                "update_at": total_updates,
-                                "mean_action": mean_action[0].numpy(),
-                                "std_action": std_action.numpy()[0],
-                                "train_time": time.time() - start_time,
-                                "shots_used": np.cumsum(env.unwrapped.total_shots)[total_updates-1],
-                                "shots_per_updates": int(np.ceil(np.cumsum(env.unwrapped.total_shots)[total_updates-1] / total_updates)),
-                            })
-                            logging.warning(f"Target fidelity {fidelity} surpassed at update {total_updates}")
-
+                        if (
+                            not info["achieved"]
+                            and np.mean(fidelities[-lookback_window:]) > fidelity
+                        ):
+                            info.update(
+                                {
+                                    "achieved": True,
+                                    "update_at": total_updates,
+                                    "mean_action": mean_action[0].numpy(),
+                                    "std_action": std_action.numpy()[0],
+                                    "hardware_runtime": np.sum(
+                                        env.unwrapped.hardware_runtime
+                                    ),
+                                    "simulation_train_time": time.time() - start_time,
+                                    "shots_used": np.cumsum(env.unwrapped.total_shots)[
+                                        total_updates - 1
+                                    ],
+                                    "shots_per_updates": int(
+                                        np.ceil(
+                                            np.cumsum(env.unwrapped.total_shots)[
+                                                total_updates - 1
+                                            ]
+                                            / total_updates
+                                        )
+                                    ),
+                                }
+                            )
+                            logging.warning(
+                                f"Target fidelity {fidelity} surpassed at update {total_updates}"
+                            )
 
                 # Consider training to be succesfull if the standard deviations of the actions are below a given threshold
                 if np.allclose(std_action.numpy()[0], std_actions_eps):
-                    logging.warning("Standard deviation of actions converged to {}".format(std_actions_eps))
+                    logging.warning(
+                        "Standard deviation of actions converged to {}".format(
+                            std_actions_eps
+                        )
+                    )
                     break
-            
+
             env.unwrapped.close()
             writer.close()
 
             for fidelity, info in fidelity_info.items():
                 if info["achieved"]:
-                    logging.warning(f"Target fidelity {fidelity} achieved: Update {info['update_at']}, Train Time {round(info['train_time']/60, 4)} mins, Shots Used {info['shots_used']:,}")
+                    logging.warning(
+                        f"Target fidelity {fidelity} achieved: Update {info['update_at']}, Hardware Runtime: {round(info['hardware_runtime'], 2)} sec, Simulation Train Time: {round(info['simulation_train_time']/60, 4)} mins, Shots Used {info['shots_used']:,}"
+                    )
                 else:
-                    logging.warning(f"Target fidelity {fidelity} not achieved within max runtime.")
+                    logging.warning(
+                        f"Target fidelity {fidelity} not achieved within max hardware runtime of {max_hardware_runtime}s."
+                    )
 
             return {
                 "avg_reward": avg_reward,
@@ -855,11 +889,12 @@ def make_train_ppo(
                 "action_history": avg_action_history,
                 "best_action_vector": env.unwrapped.optimal_action,
                 "total_shots": env.unwrapped.total_shots,
+                "hardware_runtime": env.unwrapped.hardware_runtime,
                 "total_updates": total_updates,
                 "n_reps": env.unwrapped.n_reps,
                 "fidelity_info": fidelity_info,
             }
-        
+
         except Exception as e:
             logging.error(f"An error occurred during training: {e}")
             # raise

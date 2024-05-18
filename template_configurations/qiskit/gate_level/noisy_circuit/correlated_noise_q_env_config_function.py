@@ -28,19 +28,19 @@ from utils import create_circuit_from_own_unitaries
 
 from qiskit.providers.fake_provider import GenericBackendV2
 
-def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEnvConfig, QuantumCircuit, dict]:
 
-
+def setup_quantum_environment(
+    phi_gamma_tuple: Tuple[float, float]
+) -> Tuple[QEnvConfig, QuantumCircuit, dict]:
     current_dir = os.path.dirname(os.path.realpath(__file__))
     config_file_name = "noise_q_env_gate_config.yml"
     config_file_address = os.path.join(current_dir, config_file_name)
-    print('Config file address:', config_file_address)
+    print("Config file address:", config_file_address)
 
     global phi, gamma, custom_rx_gate_label
     phi, gamma = phi_gamma_tuple
-    print('Phi:', phi, '- Gamma:', gamma)
+    print("Phi:", phi, "- Gamma:", gamma)
     custom_rx_gate_label = "custom_kron(rx,ident)_gate"
-
 
     def apply_parametrized_circuit(
         qc: QuantumCircuit, params: ParameterVector, q_reg: QuantumRegister, **kwargs
@@ -56,18 +56,7 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
         target = kwargs["target"]
         my_qc = QuantumCircuit(q_reg, name=f"custom_{target['gate'].name}")
         optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-        # optimal_params += np.array(
-        #     [
-        #         -0.00020222,
-        #         -0.00018466,
-        #         0.00075005,
-        #         0.00248492,
-        #         -0.00792428,
-        #         -0.00582522,
-        #         -0.00161892,
-        #     ]
-        # )
-        # optimal_params = np.pi * np.zeros(len(params))
+        # optimal_params = np.zeros(len(params))
 
         qc.u(
             optimal_params[0] + params[0],
@@ -85,7 +74,6 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
         qc.rzx(optimal_params[6] + params[6], q_reg[0], q_reg[1])
 
         # qc.append(my_qc.to_instruction(label=my_qc.name), q_reg) # qc.append(my_qc.to_instruction(label=my_qc.name), q_reg)
-
 
     def get_backend(
         real_backend: Optional[bool] = None,
@@ -136,12 +124,14 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
         global phi, gamma, custom_rx_gate_label
 
         identity_op = Operator(IGate())
-        rx_phi_gamma_op = Operator(RXGate(gamma*phi))
+        rx_phi_gamma_op = Operator(RXGate(gamma * phi))
         ident_rx_op = Operator(rx_phi_gamma_op.tensor(identity_op))
 
         noise_model = noise.NoiseModel()
         coherent_crx_noise = noise.coherent_unitary_error(ident_rx_op)
-        noise_model.add_quantum_error(coherent_crx_noise, [custom_rx_gate_label], [0, 1])
+        noise_model.add_quantum_error(
+            coherent_crx_noise, [custom_rx_gate_label], [0, 1]
+        )
         noise_model.add_basis_gates(["unitary"])
         print("\n", noise_model, "\n")
 
@@ -150,7 +140,9 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
         #     dtm=2.2222 * 1e-10,
         #     basis_gates=["cx", "id", "rz", "sx", "x"],
         # )
-        backend = AerSimulator(noise_model=noise_model) # .from_backend(generic_backend, noise_model=noise_model)
+        backend = AerSimulator(
+            noise_model=noise_model
+        )  # .from_backend(generic_backend, noise_model=noise_model)
 
         if backend is None:
             # TODO: Add here your custom backend
@@ -160,15 +152,15 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
 
             # backend = FakeTorontoV2()
         if backend is None:
-            warnings.warn("No backend was provided, State vector simulation will be used")
+            warnings.warn(
+                "No backend was provided, State vector simulation will be used"
+            )
         return backend
-
 
     ### Custom spillover noise model
     # phi = np.pi / 4 # rotation angle
     # gamma = 0.01  # spillover rate for the CRX gate
     # custom_rx_gate_label = "custom_kron(rx,ident)_gate"
-
 
     def get_circuit_context(backend: Optional[BackendV2]):
         """
@@ -184,6 +176,7 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
         identity_op = Operator(IGate())
         rx_op_2q = Operator(identity_op.tensor(rx_op))
         circuit.unitary(rx_op_2q, [0, 1], label=custom_rx_gate_label)
+        circuit.cx(0, 1)
 
         # Define the gate time for our custom gate (essentially it's a single-qubit gate RX(phi))
         single_qubit_gate_time = 1.6e-7
@@ -191,29 +184,28 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
         readout_time = 1.2e-6
         reset_time = 1.0e-6
 
-        gates_done_by_software = ['rz', 's', 't']
+        gates_done_by_software = ["rz", "s", "t"]
 
         circuit_gate_times = {
             custom_rx_gate_label: single_qubit_gate_time,
-            'x': single_qubit_gate_time,
-            'sx': single_qubit_gate_time,
-            'h': single_qubit_gate_time,
-            'u': single_qubit_gate_time,
-            'rzx': two_qubit_gate_time,
-            'reset': reset_time,
-            'measure': readout_time,
+            "x": single_qubit_gate_time,
+            "sx": single_qubit_gate_time,
+            "h": single_qubit_gate_time,
+            "u": single_qubit_gate_time,
+            "cx": two_qubit_gate_time,
+            "rzx": two_qubit_gate_time,
+            "measure": readout_time,
+            "reset": reset_time,
         }
         circuit_gate_times.update({gate: 0.0 for gate in gates_done_by_software})
 
-            
-        circuit.cx(0, 1)
-
         if backend is not None and backend.target.has_calibration("x", (0,)):
-            circuit = transpile(circuit, backend, optimization_level=1, seed_transpiler=42)
+            circuit = transpile(
+                circuit, backend, optimization_level=1, seed_transpiler=42
+            )
         print("Circuit context")
         print(circuit)
         return circuit, circuit_gate_times
-
 
     # Do not touch part below, just retrieve in your notebook training_config and circuit_context
     (
@@ -231,17 +223,23 @@ def setup_quantum_environment(phi_gamma_tuple: Tuple[float, float]) -> Tuple[QEn
         estimator_options=(
             estimator_options if isinstance(backend, RuntimeBackend) else None
         ),
-        parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
+        parametrized_circuit_kwargs={
+            "target": env_params["target"],
+            "backend": backend,
+        },
+        circuit_gate_times=get_circuit_context(backend)[
+            1
+        ],  # unpack the circuit gate_times from the tuple returned by get_circuit_context
     )
 
-    QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
-        check_on_exp
-    )
-    QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_access = (
-        fidelity_access
-    )
+    QuantumEnvironment.check_on_exp = (
+        ContextAwareQuantumEnvironment.check_on_exp
+    ) = check_on_exp
+    QuantumEnvironment.fidelity_access = (
+        ContextAwareQuantumEnvironment.fidelity_access
+    ) = fidelity_access
     QuantumEnvironment.channel_estimator = channel_estimator
     q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
     circuit_context, circuit_gate_times = get_circuit_context(backend)
-    
+
     return (q_env_config, circuit_context, circuit_gate_times)
