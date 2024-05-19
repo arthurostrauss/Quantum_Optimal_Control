@@ -19,7 +19,7 @@ from correlated_noise_q_env_config_function import setup_quantum_environment
 
 # from quantumenvironment import QuantumEnvironment
 from context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from hyperparameter_optimization_ressource_constraint import HyperparameterOptimizer
+from hyperparameter_optimization_resource_constraint import HyperparameterOptimizer
 from gymnasium.spaces import Box
 from gymnasium.wrappers import RescaleAction, ClipAction
 
@@ -70,19 +70,19 @@ def perform_hpo_noisy_single_arg(phi_gamma_tuple):
     )
     # gate_q_env_config.action_space = scale_action_space(phi_gamma_tuple=phi_gamma_tuple)
 
-    # Retrieve the values to tailor the new action space
-    # largest_param_space_val_with_20percent_margin = load_from_pickle('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control/template_configurations/qiskit/gate_level/noisy_circuit/largest_action_space_bounds_linearscale.pickle')
-
     optimal_noise_free_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
     backend = gate_q_env_config.backend_config.backend
     print(backend)
 
-    action_optimization_result = get_optimized_params(
-        optimal_noise_free_params=optimal_noise_free_params,
-        phi_val=phi_gamma_tuple[0],
-        gamma_val=phi_gamma_tuple[1],
-        backend=backend,
-    )
+    # action_optimization_result = get_optimized_params(
+    #     optimal_noise_free_params=optimal_noise_free_params,
+    #     phi_val=phi_gamma_tuple[0],
+    #     gamma_val=phi_gamma_tuple[1],
+    #     backend=backend,
+    # )
+
+    # Retrieve the values to tailor the new action space
+    action_optimization_result = load_from_pickle('/Users/lukasvoss/Documents/Master Wirtschaftsphysik/Masterarbeit Yale-NUS CQT/Quantum_Optimal_Control/template_configurations/qiskit/gate_level/noisy_circuit/optimization_results_NM_CMAES.pickle')
     action_deviations = action_optimization_result["nelder_mead"]["optimal_deviations"]
     action_space_borders = round(
         1.2 * max(np.abs(action_deviations)), 3
@@ -95,7 +95,6 @@ def perform_hpo_noisy_single_arg(phi_gamma_tuple):
     print(
         f"Action space for phi={phi_gamma_tuple[0]} and gamma={phi_gamma_tuple[1]}: {gate_q_env_config.action_space.low} to {gate_q_env_config.action_space.high}"
     )
-    print(h)
 
     q_env = ContextAwareQuantumEnvironment(gate_q_env_config, circuit_context)
     q_env = ClipAction(q_env)
@@ -144,13 +143,6 @@ if __name__ == "__main__":
 
     # Create all combinations of phis and gammas
     combinations = list(product(phis, gammas))
-
-    # for phi_gamma_tuple in combinations:
-    #     try:
-    #         perform_hpo_noisy_single_arg(phi_gamma_tuple)
-    #     except Exception as e:
-    #         # raise e
-    #         continue
 
     # Use multiprocessing to parallelize across multiple CPU cores
     pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())

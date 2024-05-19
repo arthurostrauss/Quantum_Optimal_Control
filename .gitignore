@@ -129,4 +129,8 @@ dmypy.json
 venv_qiskit10/
 runs/
 
-*.pickle
+outcmaes/
+*.gif
+
+template_configurations/qiskit/gate_level/q_env_config_edu_example.py
+template_configurations/qiskit/gate_level/noise_hpo_config_edu_example.yaml

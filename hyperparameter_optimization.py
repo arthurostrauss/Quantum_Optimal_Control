@@ -146,7 +146,7 @@ class HyperparameterOptimizer:
         experimental_penalty_terms = self._get_penalty(
             self.experimental_penalty_weights, runtime
         )
-        custom_cost_value = 100*infidelity + experimental_penalty_terms
+        custom_cost_value = 100 * infidelity + experimental_penalty_terms
 
         return custom_cost_value
 

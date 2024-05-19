@@ -39,59 +39,6 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-
-def get_circ(phi_val, gamma_val, params, model):
-    """
-    Generate a quantum circuit with given parameters and model type.
-
-    Parameters:
-        phi_val (float): The phi value for the RX gate.
-        gamma_val (float): The gamma value for the RX gate when model is 'noisy'.
-        params (list): List of parameters for the U gates and RZX gate.
-        model (str): The model type, either 'ideal' or 'noisy'.
-
-    Returns:
-        QuantumCircuit: The constructed quantum circuit.
-    """
-    qc = QuantumCircuit(2)
-    qc.rx(phi_val, 0)
-    if model == "noisy":
-        qc.rx(gamma_val * phi_val, 1)
-
-    # Fully-Parametrize the CX gate
-    qc.u(params[0], params[1], params[2], 0)
-    qc.u(params[3], params[4], params[5], 1)
-    qc.rzx(params[6], 0, 1)
-
-    return qc
-
-
-def get_ideal_circ(phi: float):
-    ideal_circ = QuantumCircuit(2, name=f"ideal_circ_{phi}pi")
-    ideal_circ.rx(phi, 0)
-    ideal_circ.cx(0, 1)
-    return ideal_circ
-
-
-def get_noisy_circ(phi, params):
-    custom_rx_gate_label = "custom_kron(rx,ident)_gate"
-    noisy_circ = QuantumCircuit(2)
-
-    identity_op = Operator(IGate())
-    rx_op = Operator(RXGate(phi))
-    rx_2q_gate = Operator(identity_op.tensor(rx_op))
-    noisy_circ.unitary(rx_2q_gate, [0, 1], label=custom_rx_gate_label)
-
-    # Model custom CX gate
-    noisy_circ.u(params[0], params[1], params[2], 0)
-    noisy_circ.u(params[3], params[4], params[5], 1)
-    noisy_circ.rzx(params[6], 0, 1)
-
-    noisy_circ.save_superop()
-    # circuit.save_density_matrix()
-    return noisy_circ
-
-
 def get_summary(
     optimized_fidelity,
     optimal_noise_free_params,
@@ -104,7 +51,6 @@ def get_summary(
         "optimal_noise_free_params": optimal_noise_free_params,
         "optimized_params": optimized_params,
         "optimal_deviations": optimal_deviations,
-        # 'largest_action_space_bound': round(1.2 * max(np.abs(optimal_deviations)), 3),
         "time_taken": end_time,
     }
 
@@ -208,6 +154,19 @@ def get_cma_es_result(optimal_noise_free_params, phi_val, gamma_val, backend):
 
 
 def get_nelder_mead_result(optimal_noise_free_params, phi_val, backend):
+    """
+    Runs the Nelder-Mead optimization method to find the optimal parameters for a given fidelity function.
+
+    Args:
+        optimal_noise_free_params (array-like): The initial guess for the optimal noise-free parameters.
+        phi_val (float): The phi value.
+        backend: The backend used for the optimization.
+
+    Returns:
+        dict: A dictionary containing the summary of the optimization results, including the optimized fidelity,
+              the optimal noise-free parameters, the optimized parameters, the optimal deviations, and the
+              time taken for the optimization.
+    """
     start_time = time.time()
     result = minimize(
         fidelity_function,
@@ -303,6 +262,31 @@ def main(
         save_to_pickle(result, save_file_path)
 
     return result
+
+
+def get_ideal_circ(phi: float):
+    ideal_circ = QuantumCircuit(2, name=f"ideal_circ_{phi}pi")
+    ideal_circ.rx(phi, 0)
+    ideal_circ.cx(0, 1)
+    return ideal_circ
+
+def get_noisy_circ(phi, params):
+    custom_rx_gate_label = "custom_kron(rx,ident)_gate"
+    noisy_circ = QuantumCircuit(2)
+
+    identity_op = Operator(IGate())
+    rx_op = Operator(RXGate(phi))
+    rx_2q_gate = Operator(identity_op.tensor(rx_op))
+    noisy_circ.unitary(rx_2q_gate, [0, 1], label=custom_rx_gate_label)
+
+    # Model custom CX gate
+    noisy_circ.u(params[0], params[1], params[2], 0)
+    noisy_circ.u(params[3], params[4], params[5], 1)
+    noisy_circ.rzx(params[6], 0, 1)
+
+    noisy_circ.save_superop()
+    # circuit.save_density_matrix()
+    return noisy_circ
 
 
 if __name__ == "__main__":

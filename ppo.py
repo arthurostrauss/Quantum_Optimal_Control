@@ -169,7 +169,10 @@ class CustomPPO:
             i * self.env.unwrapped.benchmark_cycle
             for i in range(len(self.env.unwrapped.fidelity_history))
         ]
-        plt.plot(np.mean(self.reward_history, axis=1), label="Reward")
+        plt.plot(
+            np.mean(self.reward_history, axis=1) ** (1 / self.env.n_reps),
+            label="Reward",
+        )
         plt.plot(
             fidelity_range,
             self.fidelity_history,
