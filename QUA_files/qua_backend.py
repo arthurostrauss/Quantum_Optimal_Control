@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, List
 
+from qiskit.circuit import ParameterExpression
 from qiskit.providers import BackendV2 as Backend
 from qiskit.providers import Provider
 from qiskit.providers.models import PulseBackendConfiguration
@@ -9,6 +10,7 @@ from qiskit.transpiler import Target, InstructionProperties, InstructionDuration
 
 from qiskit import schedule as build_schedule, QuantumCircuit
 from qiskit import pulse
+from qm.jobs.running_qm_job import RunningQmJob
 from qm.qua import *
 from qm import QuantumMachinesManager, QuantumMachine, QmJob, Program
 from qualang_tools.addons.variables import assign_variables_to_element
@@ -19,8 +21,9 @@ from quam.examples.superconducting_qubits import QuAM, Transmon
 from QUA_files.qua_utils import (
     prepare_input_state,
     rand_gauss_moller_box,
-    schedule_to_qua_instructions,
+    measure_observable,
 )
+from qualang_tools.video_mode import ParameterTable
 
 
 class QMProvider(Provider):
@@ -33,6 +36,7 @@ class QMProvider(Provider):
             cluster_name: The name of the cluster
             octave_config: The octave configuration
         """
+        super().__init__(self)
         self.qmm = QuantumMachinesManager(
             host=host, port=port, cluster_name=cluster_name, octave=octave_config
         )
@@ -109,74 +113,14 @@ class QMBackend(Backend):
     def readout_elements(self):
         return [f"qubit{i}$rr" for i in range(self.num_qubits)]
 
-    def run(self, run_input: Program, **options):
+    def run(self, run_input: Program, **options) -> RunningQmJob:
         """
         Run a program on the backend
         Args:
             run_input: The QUA program to run
             **options: The options for the run
         """
-        self.qm.execute(run_input)
-
-
-def rl_qoc_qua_prog(q_env, qc: QuantumCircuit):
-    """
-    Generate a QUA program tailormade for the RL based calibration project
-    """
-    if not isinstance(q_env.backend, QMBackend) or q_env.config_type != "qua":
-        raise ValueError("The backend should be a QMBackend object")
-    trunc_index = q_env.trunc_index
-    n_actions = q_env.action_space.shape[-1]
-    real_time_parameters = q_env.parameter_table[trunc_index]
-    sched_qc = build_schedule(q_env.circuit_truncations[trunc_index], q_env.backend)
-    with program() as rl_qoc:
-        # Declare necessary variables
-        batchsize = declare(int)
-        n_shots = declare(int)
-        I, I_st, Q, Q_st = qua_declaration(q_env.n_qubits)
-        input_state_indices = declare_input_stream(
-            int, name="input_state_indices", size=q_env.n_qubits
-        )
-        input_state_index = declare(int)
-        observables_indices = declare_input_stream(
-            int, name="observables_indices", size=q_env.n_qubits
-        )
-        mean_action = declare_input_stream(fixed, name="mean_action", size=n_actions)
-        std_action = declare_input_stream(fixed, name="std_action", size=n_actions)
-        # param_vars is a Python list of QUA fixed variables
-        param_vars = (
-            real_time_parameters.declare_variables()
-        )  # TODO: Pause is currently happening here
-        z1, z2 = declare(fixed, size=n_actions), declare(fixed, size=n_actions)
-        batch_r = Random()
-        batch_r.set_seed(12321)
-        qua_i = declare(int, value=0)
-        # Infinite loop to run the training
-
-        with infinite_loop_():
-            advance_input_stream(mean_action)
-            advance_input_stream(
-                std_action
-            )  # Load the mean and std of the action (from agent)
-            advance_input_stream(
-                observables_indices
-            )  # Load info about the observables (estimator like)
-            advance_input_stream(
-                input_state_indices
-            )  # Load info about the input states to prepare
-            with for_(batchsize, 0, batchsize < q_env.batch_size, batchsize + 1):
-                for i in range(n_actions):
-                    z1[i], z2[i] = rand_gauss_moller_box(
-                        z1[i], z2[i], mean_action[i], std_action[i], batch_r
-                    )
-                    assign(param_vars[i], z1[i])
-                # Sample the input state and the observable
-            with for_each_(input_state_index, input_state_indices):
-                prepare_input_state(input_state_index, qua_i, q_env.qubit_elements)
-                assign(qua_i, qua_i + 1)
-            assign(qua_i, 0)
-
-    return rl_qoc
+        return self.qm.execute(run_input)
 
 
 def qua_declaration(n_qubits, readout_elements):
@@ -192,3 +136,73 @@ def qua_declaration(n_qubits, readout_elements):
     for i in range(n_qubits):
         assign_variables_to_element(readout_elements[i], I[i], Q[i])
     return I, I_st, Q, Q_st
+
+
+def get_el_from_channel(channel: pulse.channels.Channel):
+    return ""
+
+
+def get_pulse_from_instruction(
+    pulse_instance: pulse.library.Pulse,
+    channel: pulse.channels.Channel,
+    channel_mapping: dict = None,
+    parameter_table: ParameterTable = None,
+    pulse_lib: dict = None,
+):
+    param_statement = {"pulse": pulse_lib[pulse_instance.name]}
+
+    for param_name, param_value in pulse_instance.parameters.items():
+        if param_name == "amp" and isinstance(param_value, ParameterExpression):
+            amp_ = parameter_table[param_value]
+            angle = pulse_instance.parameters.get("angle", None)
+            if isinstance(angle, ParameterExpression):
+                angle = parameter_table[angle]
+            elif angle == 0:
+                angle = None
+
+            matrix_elements = (
+                [
+                    amp_ * Math.cos(angle),
+                    -amp_ * Math.sin(angle),
+                    amp_ * Math.sin(angle),
+                    amp_ * Math.cos(angle),
+                ]
+                if angle is not None
+                else [amp_]
+            )
+            param_statement["pulse"] *= amp(*matrix_elements)
+
+        elif param_name == "duration" and isinstance(param_value, ParameterExpression):
+            param_statement["duration"] = parameter_table[param_value]
+
+    return param_statement
+
+
+def schedule_to_qua_instructions(
+    sched: pulse.Schedule, backend: QMBackend, parameter_table: ParameterTable
+):
+    """
+    Convert a Qiskit pulse schedule to a QUA program
+    :param sched: The Qiskit pulse schedule
+    :param backend: The QMBackend object
+    """
+
+    time_tracker = {channel: 0 for channel in sched.channels}
+    for time, instruction in sched.instructions:
+        channel = instruction.channels[0]
+        if time_tracker[channel] < time:
+            wait((time - time_tracker[channel]) // 4, get_el_from_channel(channel))
+        time_tracker[channel] = time
+        if isinstance(instruction, pulse.Play):
+            play(
+                **get_pulse_from_instruction(instruction.pulse, channel),
+                element=get_el_from_channel(channel),
+            )
+        elif isinstance(instruction, pulse.ShiftPhase):
+            frame_rotation(instruction.phase, get_el_from_channel(channel))
+        elif isinstance(instruction, pulse.ShiftFrequency):
+            update_frequency(get_el_from_channel(channel), instruction.frequency)
+        elif isinstance(instruction, pulse.Delay):
+            wait(instruction.duration // 4, get_el_from_channel(channel))
+        else:
+            raise ValueError(f"Unknown instruction {instruction}")

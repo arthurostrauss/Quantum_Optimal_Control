@@ -6,11 +6,11 @@ from typing import Callable, Dict, Optional, List, Any
 
 from quam.components.channels import Channel as QuamChannel
 import torch
-from gymnasium import Space
+from gymnasium.spaces import Box
 from qiskit import pulse
 
 from qiskit_ibm_runtime import Options
-from qiskit.providers import Backend
+from qiskit.providers import BackendV2
 from qiskit.circuit import (
     QuantumCircuit,
     ParameterVector,
@@ -36,7 +36,7 @@ class BackendConfig(ABC):
     """
 
     parametrized_circuit: Callable
-    backend: Optional[Backend]
+    backend: Optional[BackendV2]
     parametrized_circuit_kwargs: Optional[Dict]
 
 
@@ -85,9 +85,6 @@ class QuaConfig(BackendConfig):
         channel_mapping: Dictionary mapping channels to quantum elements
     """
 
-    parametrized_circuit: Callable
-    backend: QMBackend
-    hardware_config: QMConfiguration
     channel_mapping: Dict[
         pulse.channels.Channel, QuamChannel
     ]  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
@@ -116,7 +113,7 @@ class QEnvConfig:
 
     target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit]
     backend_config: BackendConfig
-    action_space: Space
+    action_space: Box
     batch_size: int = 50
     sampling_Paulis: int = 100
     n_shots: int = 1

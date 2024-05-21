@@ -341,7 +341,7 @@ class QuantumEnvironment(Env):
             0  # Index for circuit truncation (always 0 in this env)
         )
         self.training_config = training_config
-        self.action_space = training_config.action_space
+        self.action_space: Box = training_config.action_space
         self.n_shots = training_config.n_shots
         self.n_reps = training_config.n_reps
         self.sampling_Pauli_space = (
@@ -376,7 +376,7 @@ class QuantumEnvironment(Env):
             self.target: BaseTarget = StateTarget(**training_config.target)
 
         # Qiskit backend
-        self.backend: Backend_type = training_config.backend_config.backend
+        self.backend = training_config.backend_config.backend
         if self.backend is not None:
             if self.n_qubits > self.backend.num_qubits:
                 raise ValueError(
@@ -395,8 +395,10 @@ class QuantumEnvironment(Env):
         self.abstraction_level = (
             "pulse" if self.circuit_truncations[0].calibrations else "circuit"
         )
-
-        estimator_options = training_config.backend_config.estimator_options
+        if isinstance(self.training_config.backend_config, QiskitConfig):
+            estimator_options = training_config.backend_config.estimator_options
+        else:
+            estimator_options = None
 
         self._estimator, self._sampler = retrieve_primitives(
             self.backend,
@@ -459,6 +461,7 @@ class QuantumEnvironment(Env):
         self.reward_history = []
         self.qc_history = []
         self._observables, self._pauli_shots = None, None
+        self._index_input_state = 0
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
@@ -466,9 +469,7 @@ class QuantumEnvironment(Env):
             if self.channel_estimator:
                 self._pubs = []
             else:
-                self._index_input_state = np.random.randint(
-                    len(self.target.input_states[0])
-                )
+
                 self._input_state = self.target.input_states[0][self._index_input_state]
             self.target_instruction = CircuitInstruction(
                 self.target.gate, self.target.tgt_register

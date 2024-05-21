@@ -17,20 +17,23 @@ from qiskit.circuit import (
     Gate,
 )
 from qiskit_dynamics import Solver
-from qualang_tools.config.configuration import QMConfiguration
 
 
+@dataclass
 class BackendConfig(ABC):
     """
     Abstract base class for backend configurations.
+
+    Args:
+        parametrized_circuit: Function applying parametrized transformation to a quantum circuit (Qiskit or QUA)
+        backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
+        parametrized_circuit_kwargs: Additional arguments to feed the parametrized_circuit function
+
     """
 
-    def __init__(self, config_type: str = ""):
-        self._config_type = config_type
-
-    @property
-    def config_type(self) -> str:
-        return self._config_type
+    parametrized_circuit: Callable
+    backend: Optional[Backend]
+    parametrized_circuit_kwargs: Optional[Dict]
 
 
 @dataclass
@@ -40,8 +43,6 @@ class QiskitConfig(BackendConfig):
 
     Args:
         parametrized_circuit: Function applying parametrized transformation to a QuantumCircuit instance
-        backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
-        additional_args: Additional arguments to feed the parametrized_circuit function
         estimator_options: Options to feed the Estimator primitive
         solver: Relevant only if dealing with pulse simulation (typically with DynamicsBackend), gives away solver used
         to run simulations for computing exact fidelity benchmark
@@ -61,32 +62,11 @@ class QiskitConfig(BackendConfig):
         ],
         None,
     ]
-    backend: Optional[Backend] = None
-    parametrized_circuit_kwargs: Optional[Dict] = field(default_factory=dict)
     estimator_options: Optional[Options] = None
     solver: Optional[Solver] = None
     channel_freq: Optional[Dict] = field(default_factory=dict)
-    calibration_files: Optional[List[str]] = None
+    calibration_files: Optional[str] = None
     do_calibrations: bool = True
-
-    def __post_init__(self):
-        super().__init__(config_type="Qiskit")
-
-
-@dataclass
-class QuaConfig(BackendConfig):
-    """
-    QUA Configuration
-    """
-
-    parametrized_macro: Callable
-    hardware_config: QMConfiguration
-    channel_mapping: Dict[
-        str | pulse.channels.Channel, str
-    ]  # channel to quantum element mapping
-
-    def __post_init__(self):
-        super().__init__(config_type="Qua")
 
 
 @dataclass
@@ -101,7 +81,6 @@ class QEnvConfig:
         target (Dict): Target state or target gate to prepare
         backend_config (BackendConfig): Backend configuration
         action_space (Space): Action space
-        observation_space (Space): Observation space
         batch_size (int, optional): Batch size (iterate over a bunch of actions per policy to estimate expected return). Defaults to 50.
         sampling_Paulis (int, optional): Number of Paulis to sample for the fidelity estimation scheme. Defaults to 100.
         n_shots (int, optional): Number of shots per Pauli for the fidelity estimation. Defaults to 1.
@@ -117,8 +96,12 @@ class QEnvConfig:
     batch_size: int = 50
     sampling_Paulis: int = 100
     n_shots: int = 1
+    n_reps: int = 1
     c_factor: float = 0.5
     benchmark_cycle: int = 1
     seed: int = 1234
     training_with_cal: bool = True
+    check_on_exp: bool = False
+    channel_estimator: bool = False
+    fidelity_access: bool = False
     device: Optional[torch.device] = None
