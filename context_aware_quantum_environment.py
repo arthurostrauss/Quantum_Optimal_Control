@@ -427,14 +427,15 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
                     raise NotImplementedError(
                         "Pulse simulation not yet implemented for this backend"
                     )
-        self.update_circuit_fidelity_history(output_states, baseline_circ)
+            circuit_fidelities = self.update_circuit_fidelity_history(output_states, baseline_circ)
         print("Fidelity stored", self.circuit_fidelity_history[-1])
+        return circuit_fidelities
 
     def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
+            self,
+            *,
+            seed: Optional[int] = None,
+            options: Optional[Dict[str, Any]] = None,
     ) -> tuple[ObsType, dict[str, Any]]:
         """Reset the Environment, chooses a new input state"""
         super().reset(seed=seed)
@@ -635,16 +636,11 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         return string
 
     def update_circuit_fidelity_history(self, output_states, baseline_circ):
-        batched_dm = DensityMatrix(
-            np.mean(
-                [state.to_operator().to_matrix() for state in output_states],
-                axis=0,
-            )
-        )
-        batched_circuit_fidelity = state_fidelity(
-            batched_dm, Statevector(baseline_circ)
-        )
-        self.circuit_fidelity_history.append(batched_circuit_fidelity)
+        circuit_fidelities = [state_fidelity(
+            state, Statevector(baseline_circ)
+        ) for state in output_states]
+        self.circuit_fidelity_history.append(circuit_fidelities)
+        return circuit_fidelities
 
     def _add_ecr_gate(self, basis_gates: Optional[List[str]] = None, coupling_map=None):
         """
