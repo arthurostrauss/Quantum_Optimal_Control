@@ -747,7 +747,7 @@ class QuantumEnvironment(Env):
                 ) / len(self._observables)
             print("Finished Estimator job")
         else:
-            reward_table = [fids]
+            reward_table = fids
 
         if reward_table is None:
             print("Error: reward_table is None")
