@@ -34,8 +34,9 @@ def apply_parametrized_circuit(
     :param q_reg: Quantum Register formed of target qubits
     :return:
     """
-    target = kwargs["target"]
-    my_qc = QuantumCircuit(q_reg, name=f"custom_{target['gate'].name}")
+    target, backend = kwargs["target"], kwargs["backend"]
+    gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
+    my_qc = QuantumCircuit(q_reg, name=f"{gate.name if gate is not None else 'G'}_cal")
     # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
     optimal_params = np.pi * np.zeros(len(params))
 
@@ -129,10 +130,9 @@ def get_circuit_context(backend: Optional[BackendV2]):
     env_params,
     backend_params,
     estimator_options,
-    check_on_exp,
-    channel_estimator,
 ) = load_q_env_from_yaml_file(config_file_address)
 backend = get_backend(**backend_params)
+
 backend_config = QiskitConfig(
     apply_parametrized_circuit,
     backend,
@@ -142,9 +142,5 @@ backend_config = QiskitConfig(
     parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
 )
 
-QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
-    check_on_exp
-)
-QuantumEnvironment.channel_estimator = channel_estimator
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context = get_circuit_context(backend)

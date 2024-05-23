@@ -70,7 +70,7 @@ def get_optimizer_from_str(optim_str):
     return optim_dict[optim_str]
 
 
-class CustomPPO:
+class Custom_QUA_PPO:
     def __init__(
         self,
         agent_config: Dict,
@@ -233,6 +233,11 @@ class CustomPPO:
                 with torch.no_grad():
                     mean_action, std_action, critic_value = self.agent(batch_obs)
                     probs = Normal(mean_action, std_action)
+                    if isinstance(self.env.unwrapped.estimator, QuaEstimator):
+                        self.env.unwrapped.estimator.mean_action = mean_action
+                        self.env.unwrapped.estimator.std_action = std_action
+
+                    # TODO: The action and log_prob must be retrieved from the QUA program (sampled on the fly)
                     action = torch.clip(
                         probs.sample(),
                         torch.Tensor(self.min_action),
@@ -388,8 +393,8 @@ class CustomPPO:
 
             if global_step % num_prints == 0:
                 clear_output(wait=True)
-            if plot_real_time:
-                self.plot_curves()
+                if plot_real_time:
+                    self.plot_curves()
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             self.writer.add_scalar(

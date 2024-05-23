@@ -62,7 +62,7 @@ from qiskit.pulse.exceptions import PulseError
 from qiskit.pulse.library import SymbolicPulse, Waveform
 from qiskit.pulse.schedule import Schedule, ScheduleBlock
 from qiskit.pulse.transforms.alignments import AlignmentKind
-from qiskit.pulse.utils import format_parameter_value
+from qiskit.pulse.utils import format_parameter_value, _validate_parameter_vector
 
 
 class NodeVisitor:
@@ -148,7 +148,9 @@ class ParameterSetter(NodeVisitor):
         """Visit ``Schedule``. Recursively visit schedule children and overwrite."""
         # accessing to private member
         # TODO: consider updating Schedule to handle this more gracefully
-        node._Schedule__children = [(t0, self.visit(sched)) for t0, sched in node.instructions]
+        node._Schedule__children = [
+            (t0, self.visit(sched)) for t0, sched in node.instructions
+        ]
         node._renew_timeslots()
 
         self._update_parameter_manager(node)
@@ -234,7 +236,9 @@ class ParameterSetter(NodeVisitor):
     def _update_parameter_manager(self, node: Schedule | ScheduleBlock):
         """A helper function to update parameter manager of pulse program."""
         if not hasattr(node, "_parameter_manager"):
-            raise PulseError(f"Node type {node.__class__.__name__} has no parameter manager.")
+            raise PulseError(
+                f"Node type {node.__class__.__name__} has no parameter manager."
+            )
 
         param_manager = node._parameter_manager
         updated = param_manager.parameters & self._param_map.keys()
@@ -359,12 +363,12 @@ class ParameterManager:
         return [param for param in self.parameters if param.name == parameter_name]
 
     def assign_parameters(
-            self,
-            pulse_program: Any,
-            value_dict: dict[
-                ParameterExpression | ParameterVector | str,
-                ParameterValueType | Sequence[ParameterValueType],
-            ],
+        self,
+        pulse_program: Any,
+        value_dict: dict[
+            ParameterExpression | ParameterVector | str,
+            ParameterValueType | Sequence[ParameterValueType],
+        ],
     ) -> Any:
         """Modify and return program data with parameters assigned according to the input.
 
@@ -378,7 +382,8 @@ class ParameterManager:
         """
         unrolled_value_dict = self._unroll_param_dict(value_dict)
         valid_map = {
-            k: unrolled_value_dict[k] for k in unrolled_value_dict.keys() & self._parameters
+            k: unrolled_value_dict[k]
+            for k in unrolled_value_dict.keys() & self._parameters
         }
         if valid_map:
             visitor = ParameterSetter(param_map=valid_map)
@@ -396,10 +401,11 @@ class ParameterManager:
         self._parameters |= visitor.parameters
 
     def _unroll_param_dict(
-            self,
-            parameter_binds: Mapping[
-                Parameter | ParameterVector | str, ParameterValueType | Sequence[ParameterValueType]
-            ],
+        self,
+        parameter_binds: Mapping[
+            Parameter | ParameterVector | str,
+            ParameterValueType | Sequence[ParameterValueType],
+        ],
     ) -> Mapping[Parameter, ParameterValueType]:
         """
         Unroll parameter dictionary to a map from parameter to value.
@@ -411,38 +417,23 @@ class ParameterManager:
             A dictionary from parameter to value.
         """
         out = {}
+        param_name_dict = {param.name: param for param in self.parameters}
+        param_vec_dict = {
+            param.vector.name: param.vector
+            for param in self.parameters
+            if isinstance(param, ParameterVectorElement)
+        }
         for parameter, value in parameter_binds.items():
             if isinstance(parameter, ParameterVector):
-                if not isinstance(value, Sequence):
-                    raise PulseError(
-                        f"Parameter vector '{parameter.name}' has length {len(parameter)},"
-                        f" but was assigned to {value}."
-                    )
-                if len(parameter) != len(value):
-                    raise PulseError(
-                        f"Parameter vector '{parameter.name}' has length {len(parameter)},"
-                        f" but was assigned to {len(value)} values."
-                    )
+                _validate_parameter_vector(parameter, value)
                 out.update(zip(parameter, value))
             elif isinstance(parameter, str):
-                for param in self.parameters:
-                    if param.name == parameter:
-                        out[param] = value
-                    elif (
-                            isinstance(param, ParameterVectorElement) and param.vector.name == parameter
-                    ):
-                        if not isinstance(value, Sequence):
-                            raise PulseError(
-                                f"ParameterVector '{param.vector.name}' has length {len(param.vector)},"
-                                f" but was assigned to a single value."
-                            )
-                        if len(param.vector) != len(value):
-                            raise PulseError(
-                                f"ParameterVector '{param.vector.name}' has length {len(param.vector)},"
-                                f" but was assigned to {len(value)} values."
-                            )
-                        out[param] = value[param.index]
-
+                if parameter in param_vec_dict:
+                    param = param_vec_dict[parameter]
+                    _validate_parameter_vector(param, value)
+                    out.update(zip(param, value))
+                elif parameter in param_name_dict:
+                    out[param_name_dict[parameter]] = value
             else:
                 out[parameter] = value
         return out

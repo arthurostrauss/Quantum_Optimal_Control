@@ -289,12 +289,12 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
 
                     for qubit in involved_qubits:
                         if (
-                                mapping[qubit] not in custom_circuits[i].qregs
+                            mapping[qubit] not in custom_circuits[i].qregs
                         ):  # Add register if not already added
                             baseline_circuits[i].add_register(mapping[qubit])
                             custom_circuits[i].add_register(mapping[qubit])
                             if (
-                                    self.circuit_context.layout is not None
+                                self.circuit_context.layout is not None
                             ):  # Update physical layout
                                 self.layout[i].add(
                                     mapping[qubit][0],
@@ -410,13 +410,13 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             else:  # Pulse simulation
                 # Calculate circuit fidelity with pulse simulation
                 if isinstance(self.backend, DynamicsBackend) and isinstance(
-                        self.backend.options.solver, JaxSolver
+                    self.backend.options.solver, JaxSolver
                 ):
                     # Jax compatible pulse simulation
 
                     output_states = np.array(self.backend.options.solver.batched_sims)[
-                                    :, 1, :
-                                    ]
+                        :, 1, :
+                    ]
 
                     output_states = [
                         projected_statevector(s, self.backend.options.subsystem_dims)
@@ -596,7 +596,9 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             }
         return info
 
-    def retrieve_observables_and_input_states(self, qc: QuantumCircuit):
+    def retrieve_observables_and_input_states(
+        self, qc: QuantumCircuit, params: np.array
+    ):
         raise NotImplementedError(
             "This method is not implemented for this class"
             " (Reason: channel characteristic function for whole context is too large"
@@ -710,7 +712,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             flattened_circuits = [remove_unused_wires(qc) for qc in flattened_circuits]
             idx = 0
             for c, circ in enumerate(
-                    self.baseline_truncations
+                self.baseline_truncations
             ):  # Load input_circuits array with transpiled circuits
                 for s in range(len(list(product(range(4), repeat=circ.num_qubits)))):
                     input_circuits[c][s] = flattened_circuits[idx]

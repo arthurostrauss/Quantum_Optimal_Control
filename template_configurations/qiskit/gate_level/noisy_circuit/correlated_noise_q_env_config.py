@@ -185,9 +185,6 @@ def get_circuit_context(backend: Optional[BackendV2]):
     env_params,
     backend_params,
     estimator_options,
-    check_on_exp,
-    channel_estimator,
-    fidelity_access,
 ) = load_q_env_from_yaml_file(config_file_address)
 backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
@@ -199,12 +196,5 @@ backend_config = QiskitConfig(
     parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
 )
 
-QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
-    check_on_exp
-)
-QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_access = (
-    fidelity_access
-)
-QuantumEnvironment.channel_estimator = channel_estimator
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
 circuit_context = get_circuit_context(backend)
