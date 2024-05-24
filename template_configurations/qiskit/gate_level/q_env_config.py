@@ -118,11 +118,31 @@ def get_circuit_context(backend: Optional[BackendV2]):
     for i in range(1, 5):
         circuit.cx(0, i)
 
+    # Define the gate time for our custom gate (essentially it's a single-qubit gate RX(phi))
+    single_qubit_gate_time = 1.6e-7
+    two_qubit_gate_time = 5.3e-7
+    readout_time = 1.2e-6
+    reset_time = 1.0e-6
+
+    gates_done_by_software = ["rz", "s", "t"]
+
+    circuit_gate_times = {
+        "x": single_qubit_gate_time,
+        "sx": single_qubit_gate_time,
+        "h": single_qubit_gate_time,
+        "u": single_qubit_gate_time,
+        "cx": two_qubit_gate_time,
+        "rzx": two_qubit_gate_time,
+        "reset": reset_time,
+        "measure": readout_time,
+    }
+    circuit_gate_times.update({gate: 0.0 for gate in gates_done_by_software})
+
     if backend is not None and backend.target.has_calibration("x", (0,)):
         circuit = transpile(circuit, backend, optimization_level=1, seed_transpiler=42)
     print("Circuit context")
     circuit.draw("mpl")
-    return circuit
+    return circuit, circuit_gate_times
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
@@ -142,6 +162,9 @@ backend_config = QiskitConfig(
         estimator_options if isinstance(backend, RuntimeBackend) else None
     ),
     parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
+    circuit_gate_times=get_circuit_context(backend)[
+        1
+    ],
 )
 
 QuantumEnvironment.check_on_exp = ContextAwareQuantumEnvironment.check_on_exp = (
@@ -152,4 +175,4 @@ QuantumEnvironment.fidelity_access = ContextAwareQuantumEnvironment.fidelity_acc
 )
 QuantumEnvironment.channel_estimator = channel_estimator
 q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
-circuit_context = get_circuit_context(backend)
+circuit_context, circuit_gate_times = get_circuit_context(backend)

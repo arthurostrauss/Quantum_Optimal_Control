@@ -1377,20 +1377,26 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
 
 
 def get_hardware_runtime_single_circuit(
-    qc: QuantumCircuit, circuit_gate_times: Dict
+    qc: QuantumCircuit, circuit_gate_times: Optional[Dict]=None, backend: Optional[BackendV2]=None
 ) -> float:
     """
     Return a worst-case estimate of the runtime for a single execution of the circuit on the hardware
 
     :param qc: QuantumCircuit to be executed
     """
-    if len(circuit_gate_times) == 0:
+
+    if backend is not None and backend.target.InstructionDurations is not None:
+        instruction_durations = backend.target.InstructionDurations
+        total_execution_time = sum(instruction_durations.get(instr[0].name, instr[1]) for instr in qc.data)
+        return total_execution_time
+
+    if not circuit_gate_times:
         raise ValueError(
             "Empty circuit_gate_time dictionary received. Please add durations for your gates."
         )
 
     total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
-    for instruction in qc.data:
+    for instruction in qc.decompose().data:
         for qubit in instruction.qubits:
             # Custom gates only appear in the circuit context for the CAQEnv case
             if instruction.operation.label in circuit_gate_times:
@@ -1623,22 +1629,28 @@ def create_hpo_agent_config(
 
     # Loop through hpo_config and decide whether to optimize or use the provided value
     for param, values in hpo_config.items():
-        if (
-            isinstance(values, list) and len(values) == 2
-        ):  # If values is a list of length 2, optimize
-            if isinstance(values[0], int):
-                hyper_params[param] = trial.suggest_int(param, values[0], values[1])
-            elif isinstance(values[0], float):
-                hyper_params[param] = trial.suggest_float(param, values[0], values[1])
-            hyperparams_in_scope.append(param)
+        if isinstance(values, list):
+            if len(values) == 2:  # If values is a list of length 2, optimize
+                if isinstance(values[0], int):
+                    hyper_params[param] = trial.suggest_int(param, values[0], values[1])
+                elif isinstance(values[0], float):
+                    if param == "LR": # If learning rate, suggest in log scale
+                        hyper_params[param] = trial.suggest_float(param, values[0], values[1], log=True)
+                    else:
+                        hyper_params[param] = trial.suggest_float(param, values[0], values[1])
+                hyperparams_in_scope.append(param)
+            elif len(values) > 2:  # If values is a list of more than 2, choose from list
+                hyper_params[param] = trial.suggest_categorical(param, values)
+                hyperparams_in_scope.append(param)
         else:
             hyper_params[param] = values
 
-    # Dynamically calculate batchsize from minibatch_size and batchsize_multiplier
+
+    # Dynamically calculate batchsize from minibatch_size and num_minibatches
     print("MINIBATCH_SIZE", hyper_params["MINIBATCH_SIZE"])
-    print("BATCHSIZE_MULTIPLIER", hyper_params["BATCHSIZE_MULTIPLIER"])
+    print("NUM_MINIBATCHES", hyper_params["NUM_MINIBATCHES"])
     hyper_params["BATCHSIZE"] = (
-        hyper_params["MINIBATCH_SIZE"] * hyper_params["BATCHSIZE_MULTIPLIER"]
+        hyper_params["MINIBATCH_SIZE"] * hyper_params["NUM_MINIBATCHES"]
     )
 
     # Print hyperparameters considered for HPO
