@@ -135,3 +135,15 @@ outcmaes/
 template_configurations/qiskit/gate_level/q_env_config_edu_example.py
 template_configurations/qiskit/gate_level/noise_hpo_config_edu_example.yaml
 template_configurations/qiskit/gate_level/time_circuit_n-reps.ipynb
+
+events.out.tfevents.*
+*.pickle
+venv_qiskit10/
+runs/
+
+outcmaes/
+*.gif
+
+template_configurations/qiskit/gate_level/q_env_config_edu_example.py
+template_configurations/qiskit/gate_level/noise_hpo_config_edu_example.yaml
+template_configurations/qiskit/gate_level/time_circuit_n-reps.ipynb
