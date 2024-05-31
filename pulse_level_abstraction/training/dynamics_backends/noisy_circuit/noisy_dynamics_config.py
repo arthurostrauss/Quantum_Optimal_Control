@@ -1,15 +1,17 @@
 from typing import List, Tuple, Dict, Optional
+import copy
 from qiskit.quantum_info import Operator
 import jax
 from qiskit_dynamics import DynamicsBackend, Solver
 from custom_jax_sim import JaxSolver
 import numpy as np
-from .utils import (
+from ..utils import (
     create_quantum_operators,
     expand_operators,
     get_full_identity,
     construct_static_hamiltonian,
     get_couplings,
+    get_pulse_spillover_noise,
 )
 
 jax.config.update("jax_enable_x64", True)
@@ -23,18 +25,20 @@ def custom_backend(
     anharmonicities: List[float],
     rabi_freqs: List[float],
     couplings: Optional[Dict[Tuple[int, int], float]] = None,
+    pulse_spillover_rates: Optional[Dict[Tuple[int, int], float]] = None,
     solver_options: Optional[Dict] = None,
 ):
     """
-    Custom backend for the dynamics simulation.
+    Custom noisy backend for the dynamics simulation.
+    We allow for pulse-spillover noise arising from signal-leakage between pairs of qubits.
 
     Args:
         dims: The dimensions of the subsystems.
         freqs: The frequencies of the subsystems.
         anharmonicities: The anharmonicities of the subsystems.
         couplings: The coupling constants between the subsystems.
+        noise_couplings: The pulse-spillover rate constants between (neighbouring) qubits.
         rabi_freqs: The Rabi frequencies of the subsystems.
-
     """
     assert (
         len(dims) == len(freqs) == len(anharmonicities) == len(rabi_freqs)
@@ -61,24 +65,33 @@ def custom_backend(
     channels = {f"d{i}": freqs[i] for i in range(n_qubits)}
     ecr_ops = []
     num_controls = 0
-    control_channel_map = []
+    control_channel_map = None
     if couplings is not None:
-        (
-            static_ham,
-            channels,
-            ecr_ops,
-            num_controls,
-            control_channel_map,
-        ) = get_couplings(
-            couplings,
-            static_ham,
+        static_ham, channels, ecr_ops, num_controls, control_channel_map = (
+            get_couplings(
+                couplings,
+                static_ham,
+                a_ops,
+                adag_ops,
+                channels,
+                freqs,
+                ecr_ops,
+                drive_ops,
+                num_controls,
+            )
+        )
+
+    # Pulse-spillover noise
+    drive_ops_errorfree = copy.deepcopy(drive_ops)
+    if pulse_spillover_rates is not None:
+        drive_ops = get_pulse_spillover_noise(
+            pulse_spillover_rates,
+            drive_ops_errorfree,
+            n_qubits,
+            rabi_freqs,
             a_ops,
             adag_ops,
-            channels,
-            freqs,
-            ecr_ops,
             drive_ops,
-            num_controls,
         )
 
     dt = 2.2222e-10
@@ -124,72 +137,3 @@ def custom_backend(
         control_channel_map=control_channel_map,
     )
     return jax_backend, dynamics_backend
-
-
-def single_qubit_backend(w, r, dt, solver_options=None):
-    """
-    Custom single qubit backend for the dynamics simulation.
-    """
-    X = Operator.from_label("X")
-    Z = Operator.from_label("Z")
-
-    drift = 2 * np.pi * w * Z / 2
-    operators = [2 * np.pi * r * X / 2]
-
-    # construct the solver
-    solver = Solver(
-        static_hamiltonian=drift,
-        hamiltonian_operators=operators,
-        rotating_frame=drift,
-        rwa_cutoff_freq=2 * 5.0,
-        hamiltonian_channels=["d0"],
-        channel_carrier_freqs={"d0": w},
-        dt=dt,
-        array_library="jax",
-    )
-
-    jax_solver = JaxSolver(
-        static_hamiltonian=drift,
-        hamiltonian_operators=operators,
-        rotating_frame=drift,
-        rwa_cutoff_freq=2 * 5.0,
-        hamiltonian_channels=["d0"],
-        channel_carrier_freqs={"d0": w},
-        dt=dt,
-        array_library="jax",
-    )
-
-    if solver_options is None:
-        solver_options = {
-            "method": "jax_odeint",
-            "atol": 1e-5,
-            "rtol": 1e-7,
-            "hmax": dt,
-        }
-    jax_backend = DynamicsBackend(
-        solver=jax_solver,
-        subsystem_dims=[2],
-        solver_options=solver_options,
-    )
-
-    dynamics_backend = DynamicsBackend(
-        solver=solver,
-        subsystem_dims=[2],
-        solver_options=solver_options,
-    )
-
-    return jax_backend, dynamics_backend
-
-
-def surface_code_plaquette():
-    """
-    Custom backend for the dynamics simulation of a surface code plaquette.
-    """
-    # Define the parameters
-    return custom_backend(
-        [2] * 5,
-        freqs=[4.8e9, 4.9e9, 5.0e9, 5.1e9, 5.2e9],
-        anharmonicities=[-0.33e9] * 5,
-        rabi_freqs=[0.1e6] * 5,
-        couplings={(0, 1): 0.1e6, (0, 2): 0.1e6, (0, 3): 0.1e6, (0, 4): 0.1e6},
-    )
