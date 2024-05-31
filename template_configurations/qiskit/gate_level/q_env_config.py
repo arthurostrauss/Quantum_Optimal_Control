@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import warnings
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import os
 import numpy as np
+from qiskit.transpiler import Layout
+
 from helper_functions import (
     load_q_env_from_yaml_file,
     select_backend,
+    get_q_env_config,
 )
 from qiskit import QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector
@@ -107,10 +110,13 @@ def get_backend(
     return backend
 
 
-def get_circuit_context(backend: Optional[BackendV2]):
+def get_circuit_context(
+    backend: Optional[BackendV2], initial_layout: Optional[List[int]] = None
+):
     """
     Define the context of the circuit to be used in the training
     :param backend: Backend instance
+    :param initial_layout: Initial layout of the qubits
     :return: QuantumCircuit instance
     """
     circuit = QuantumCircuit(5)
@@ -119,28 +125,27 @@ def get_circuit_context(backend: Optional[BackendV2]):
         circuit.cx(0, i)
 
     if backend is not None and backend.target.has_calibration("x", (0,)):
-        circuit = transpile(circuit, backend, optimization_level=1, seed_transpiler=42)
+        circuit = transpile(
+            circuit,
+            backend,
+            optimization_level=1,
+            seed_transpiler=42,
+        )
     print("Circuit context")
     circuit.draw("mpl")
     return circuit
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
-(
-    env_params,
-    backend_params,
-    estimator_options,
-) = load_q_env_from_yaml_file(config_file_address)
-backend = get_backend(**backend_params)
-
-backend_config = QiskitConfig(
+q_env_config = get_q_env_config(
+    config_file_address,
+    get_backend,
     apply_parametrized_circuit,
-    backend,
-    estimator_options=(
-        estimator_options if isinstance(backend, RuntimeBackend) else None
-    ),
-    parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
 )
-
-q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
-circuit_context = get_circuit_context(backend)
+q_env_config.backend_config.parametrized_circuit_kwargs = {
+    "target": q_env_config.target,
+    "backend": q_env_config.backend,
+}
+circuit_context = get_circuit_context(
+    q_env_config.backend, q_env_config.physical_qubits
+)

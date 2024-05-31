@@ -3,7 +3,7 @@ from qiskit_experiments.library.randomized_benchmarking import StandardRB, Inter
 from qiskit.circuit import Gate, ParameterVector
 from qiskit.primitives import BaseSamplerV2, BaseSampler
 from qiskit.quantum_info import Clifford, random_clifford, Operator
-from quantumenvironment import QuantumEnvironment, GateTarget
+from quantumenvironment import QuantumEnvironmentV2, GateTarget
 from gymnasium.spaces import Box
 import numpy as np
 from typing import Callable
@@ -42,7 +42,7 @@ class ORBIT:
         self,
         rb_length: int,
         num_sequences: int,
-        q_env: QuantumEnvironment,
+        q_env: QuantumEnvironmentV2,
         use_interleaved: bool = False,
     ):
         self.rb_length = rb_length
@@ -86,8 +86,8 @@ class ORBIT:
     def orbit_circuits(self):
 
         circuits, ref_circuits = [], []
-        circuit = self.q_env.circuit_truncations[0]
-        circuit_ref = self.q_env.baseline_truncations[0]
+        circuit = self.q_env.circuits[self.q_env.trunc_index]
+        circuit_ref = self.q_env.baseline_circuits[self.q_env.trunc_index]
 
         for seq in range(self.num_sequences):
             run_qc = QuantumCircuit(*circuit.qregs)
@@ -166,3 +166,35 @@ class ORBIT:
         )
 
         return result
+
+    def optimize_CMA(self, initial_params):
+        """
+        Optimize the parameter values for the circuit to maximize the fidelity using CMA-ES optimizer.
+
+        Parameters:
+        initial_params (list or np.array): Initial guess for the parameters.
+        """
+
+        # Define the objective function
+        import cma
+
+        def objective_function(params):
+            return 1 - self.run_orbit_circuits(params)
+
+        # Run the optimizer
+        es = cma.CMAEvolutionStrategy(
+            initial_params,
+            0.5,
+            {
+                "maxiter": 1000,
+                "tolx": 1e-6,
+                "bounds": bounds_from_action_space(self.q_env.action_space),
+            },
+        )
+        es.optimize(objective_function)
+
+        # Get the best parameters
+        optimal_params = es.result.xbest
+        minimized_value = es.result.fbest
+
+        return optimal_params, minimized_value

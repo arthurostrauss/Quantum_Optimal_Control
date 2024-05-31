@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, List, Any
+from typing import Callable, Dict, Optional, List, Any, Literal, Tuple
 
 from quam.components.channels import Channel as QuamChannel
 import torch
@@ -91,38 +91,172 @@ class QuaConfig(BackendConfig):
 
 
 @dataclass
+class BenchmarkConfig:
+    """
+    Configuration for benchmarking the policy through fidelity estimation
+
+    Args:
+        benchmark_cycle: benchmark_cycle (int, optional): Number of epochs between two fidelity benchmarking.
+    """
+
+    benchmark_cycle: int = 1
+    benchmark_batch_size: int = 1
+    check_on_exp: bool = False
+    tomography_analysis: str = "default"
+    dfe_precision: Tuple[float, float] = field(default=(1e-2, 1e-2))
+
+
+@dataclass
+class ExecutionConfig:
+    """
+    Configuration for the execution of the policy
+
+    Args:
+        batch_size: Batch size (iterate over a bunch of actions per policy to estimate expected return). Defaults to 50.
+        sampling_Paulis: Number of Paulis to sample for the fidelity estimation scheme. Defaults to 100.
+        n_shots: Number of shots per Pauli for the fidelity estimation. Defaults to 1.
+        c_factor: Renormalization factor. Defaults to 0.5.
+        seed: Seed for Observable sampling. Defaults to 1234.
+    """
+
+    batch_size: int = 100
+    sampling_Paulis: int = 100
+    n_shots: int = 1
+    n_reps: int = 1
+    c_factor: float = 0.5
+    seed: int = 1234
+
+
+@dataclass
+class RewardConfig:
+    """
+    Configuration for how to compute the reward in the RL workflow
+    """
+
+    reward_method: Literal["fidelity", "channel", "state", "xeb", "cafe"] = "state"
+
+    def __post_init__(self):
+        if self.reward_method == "fidelity":
+            self.dfe = False
+
+        elif self.reward_method == "channel":
+            self.dfe = True
+        else:
+            self.dfe = True
+
+
+def default_reward_config():
+    return RewardConfig()
+
+
+def default_benchmark_config():
+    return BenchmarkConfig()
+
+
+@dataclass
 class QEnvConfig:
     """
-    Quantum Environment configuration. This is used to define all hyperparameters characterizing the Quantum Environment.
-    Those include a description of the backend, the action and observation spaces, the batch size (number of actions per
-    policy evaluation), the number of Pauli observables to sample for the fidelity estimation scheme,
-    the number of shots per Pauli for the fidelity estimation, the renormalization factor, and the device on which the simulation is run.
+    Quantum Environment configuration.
+    This is used to define all hyperparameters characterizing the QuantumEnvironment.
 
     Args:
         target (Dict): Target state or target gate to prepare
         backend_config (BackendConfig): Backend configuration
         action_space (Space): Action space
-        batch_size (int, optional): Batch size (iterate over a bunch of actions per policy to estimate expected return). Defaults to 50.
-        sampling_Paulis (int, optional): Number of Paulis to sample for the fidelity estimation scheme. Defaults to 100.
-        n_shots (int, optional): Number of shots per Pauli for the fidelity estimation. Defaults to 1.
-        c_factor (float, optional): Renormalization factor. Defaults to 0.5.
-        benchmark_cycle (int, optional): Number of epochs between two fidelity benchmarking. Defaults to 5.
-        seed (int, optional): Seed for Observable sampling. Defaults to 1234.
-        device (Optional[torch.device], optional): Device on which the simulation is run. Defaults to None.
+        execution_config (ExecutionConfig): Execution configuration
+        reward_config (RewardConfig): Reward configuration
+        benchmark_config (BenchmarkConfig): Benchmark configuration
+        training_with_cal (bool): Training with calibration or not
+        device (torch.device): Device on which the simulation is run
     """
 
     target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit]
     backend_config: BackendConfig
     action_space: Box
-    batch_size: int = 50
-    sampling_Paulis: int = 100
-    n_shots: int = 1
-    n_reps: int = 1
-    c_factor: float = 0.5
-    benchmark_cycle: int = 1
-    seed: int = 1234
+    execution_config: ExecutionConfig
+    reward_config: RewardConfig = field(default_factory=default_reward_config)
+    benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     training_with_cal: bool = True
-    check_on_exp: bool = False
-    channel_estimator: bool = False
-    fidelity_access: bool = False
     device: Optional[torch.device] = None
+
+    @property
+    def backend(self):
+        return self.backend_config.backend
+
+    @property
+    def parametrized_circuit(self):
+        return self.backend_config.parametrized_circuit
+
+    @property
+    def parametrized_circuit_kwargs(self):
+        """
+        Additional keyword arguments to feed the parametrized_circuit function
+        Returns: Dictionary of additional keyword arguments with their values
+        """
+        return self.backend_config.parametrized_circuit_kwargs
+
+    @parametrized_circuit_kwargs.setter
+    def parametrized_circuit_kwargs(self, value: Dict):
+        self.backend_config.parametrized_circuit_kwargs = value
+
+    @property
+    def physical_qubits(self):
+        return self.target["physical_qubits"]
+
+    @property
+    def batch_size(self):
+        return self.execution_config.batch_size
+
+    @property
+    def sampling_Paulis(self):
+        return self.execution_config.sampling_Paulis
+
+    @property
+    def n_shots(self):
+        return self.execution_config.n_shots
+
+    @property
+    def n_reps(self):
+        return self.execution_config.n_reps
+
+    @property
+    def c_factor(self):
+        return self.execution_config.c_factor
+
+    @property
+    def seed(self):
+        return self.execution_config.seed
+
+    @property
+    def benchmark_cycle(self):
+        return self.benchmark_config.benchmark_cycle
+
+    @property
+    def benchmark_batch_size(self):
+        return self.benchmark_config.benchmark_batch_size
+
+    @property
+    def tomography_analysis(self):
+        return self.benchmark_config.tomography_analysis
+
+    @property
+    def check_on_exp(self):
+        return self.benchmark_config.check_on_exp
+
+    @property
+    def reward_method(self):
+        return self.reward_config.reward_method
+
+    @property
+    def dfe(self):
+        """
+        Indicates if Direct Fidelity Estimation is used for the reward computation (true if reward_method is "channel"
+        or "state" and false if reward_method is "fidelity" or "xeb")
+        Returns:
+
+        """
+        return self.reward_config.dfe
+
+    @property
+    def n_actions(self):
+        return self.action_space.shape[-1]

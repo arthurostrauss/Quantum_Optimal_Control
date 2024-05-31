@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from qiskit import pulse, schedule, transpile
+from qiskit import pulse, schedule, transpile, QuantumRegister
 from qiskit.circuit import (
     QuantumCircuit,
     Gate,
@@ -86,8 +86,8 @@ from qiskit_experiments.calibration_management.basis_gate_library import (
 
 from qiskit_algorithms.state_fidelities import ComputeUncompute
 
-from itertools import permutations
-from typing import Optional, Tuple, List, Union, Dict, Sequence
+from itertools import permutations, chain
+from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any
 import yaml
 
 import numpy as np
@@ -100,7 +100,14 @@ from scipy.optimize import minimize
 from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import Dense
 
-from qconfig import QiskitConfig, BackendConfig
+from qconfig import (
+    BackendConfig,
+    ExecutionConfig,
+    BenchmarkConfig,
+    RewardConfig,
+    QiskitConfig,
+    QEnvConfig,
+)
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator, PauliToQuditOperator
 
 Estimator_type = Union[
@@ -349,6 +356,52 @@ def perform_standard_calibrations(
     print("Updated Instruction Schedule Map", target.instruction_schedule_map())
 
     return cals, exp_results
+
+
+def add_ecr_gate(
+    backend: BackendV2, basis_gates: Optional[List[str]] = None, coupling_map=None
+):
+    """
+    Add ECR gate to basis gates if not present
+    :param backend: Backend instance
+    :param basis_gates: Basis gates of the backend
+    :param coupling_map: Coupling map of the backend
+    """
+    if "ecr" not in basis_gates and backend.num_qubits > 1:
+        target = backend.target
+        target.add_instruction(
+            gate_map()["ecr"],
+            properties={qubits: None for qubits in coupling_map.get_edges()},
+        )
+        cals = Calibrations.from_backend(
+            backend,
+            [
+                FixedFrequencyTransmon(["x", "sx"]),
+                EchoedCrossResonance(["cr45p", "cr45m", "ecr"]),
+            ],
+            add_parameter_defaults=True,
+        )
+
+        for qubit_pair in coupling_map.get_edges():
+            if target.has_calibration("cx", qubit_pair):
+                default_params, _, _ = get_ecr_params(backend, qubit_pair)
+                error = backend.target["cx"][qubit_pair].error
+                target.update_instruction_properties(
+                    "ecr",
+                    qubit_pair,
+                    InstructionProperties(
+                        error=error,
+                        calibration=cals.get_schedule(
+                            "ecr", qubit_pair, default_params
+                        ),
+                    ),
+                )
+        basis_gates.append("ecr")
+        for i, gate in enumerate(basis_gates):
+            if gate == "cx":
+                basis_gates.pop(i)
+        # raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the
+        # future")
 
 
 def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
@@ -706,7 +759,7 @@ def simulate_pulse_schedule(
     return final_results
 
 
-def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options=None):
+def run_jobs(session: Session, circuits: List[QuantumCircuit], **run_options):
     """
     Run batch of Quantum Circuits on provided backend
 
@@ -724,11 +777,11 @@ def run_jobs(session: Session, circuits: List[QuantumCircuit], run_options=None)
 
 def fidelity_from_tomography(
     qc_list: List[QuantumCircuit],
-    backend: Backend,
+    backend: Optional[Backend],
     target: Operator | QuantumState,
     physical_qubits: Optional[Sequence[int]],
     analysis: Union[BaseAnalysis, None, str] = "default",
-    session: Optional[Session] = None,
+    sampler: RuntimeSamplerV2 = None,
 ):
     """
     Extract average state or gate fidelity from batch of Quantum Circuit for target state or gate
@@ -739,7 +792,7 @@ def fidelity_from_tomography(
         physical_qubits: Physical qubits on which state or process tomography is to be performed
         analysis: Analysis instance
         target: Target state or gate for fidelity calculation
-        session: Runtime session
+        sampler: Runtime Sampler
     Returns:
         avg_fidelity: Average state or gate fidelity (over the batch of Quantum Circuits)
     """
@@ -768,9 +821,9 @@ def fidelity_from_tomography(
 
     if isinstance(backend, RuntimeBackend):
         circuits = process_tomo._transpiled_circuits()
-        jobs = run_jobs(session, circuits)
+        jobs = sampler.run([(circ,) for circ in circuits])
         exp_data = process_tomo._initialize_experiment_data()
-        exp_data.add_jobs(jobs)
+        exp_data.add_data()
         results = process_tomo.analysis.run(exp_data).block_for_results()
     else:
         results = process_tomo.run().block_for_results()
@@ -839,7 +892,6 @@ def retrieve_primitives(
                 calibration_files = config.calibration_files
                 _, _ = perform_standard_calibrations(backend, calibration_files)
         else:
-
             if isinstance(backend, (FakeBackend, FakeBackendV2)):
                 print("Aer Backend created out of backend", backend)
                 backend = AerSimulator.from_backend(backend)
@@ -1411,20 +1463,35 @@ def load_q_env_from_yaml_file(file_path: str):
     action_shape = low.shape
     params = {
         "action_space": Box(low=low, high=high, shape=action_shape, dtype=np.float32),
-        "batch_size": config["ENV"]["BATCH_SIZE"],
-        "sampling_Paulis": config["ENV"]["SAMPLING_PAULIS"],
-        "n_shots": config["ENV"]["N_SHOTS"],
-        "n_reps": config["ENV"]["N_REPS"],
-        "c_factor": config["ENV"]["C_FACTOR"],
-        "seed": config["ENV"]["SEED"],
-        "benchmark_cycle": config["ENV"]["BENCHMARK_CYCLE"],
+        "execution_config": ExecutionConfig(
+            **{
+                "batch_size": config["ENV"]["EXECUTION"]["BATCH_SIZE"],
+                "sampling_Paulis": config["ENV"]["EXECUTION"]["SAMPLING_PAULIS"],
+                "n_shots": config["ENV"]["EXECUTION"]["N_SHOTS"],
+                "n_reps": config["ENV"]["EXECUTION"]["N_REPS"],
+                "c_factor": config["ENV"]["EXECUTION"]["C_FACTOR"],
+                "seed": config["ENV"]["EXECUTION"]["SEED"],
+            }
+        ),
+        "benchmark_config": BenchmarkConfig(
+            **{
+                "benchmark_cycle": config["ENV"]["BENCHMARKING"]["BENCHMARK_CYCLE"],
+                "benchmark_batch_size": config["ENV"]["BENCHMARKING"][
+                    "BENCHMARK_BATCH_SIZE"
+                ],
+                "check_on_exp": config["ENV"]["BENCHMARKING"]["CHECK_ON_EXP"],
+                "tomography_analysis": config["ENV"]["BENCHMARKING"][
+                    "TOMOGRAPHY_ANALYSIS"
+                ],
+            }
+        ),
+        "reward_config": RewardConfig(
+            **{"reward_method": config["ENV"]["REWARD"]["REWARD_METHOD"]}
+        ),
         "training_with_cal": config["ENV"]["TRAINING_WITH_CAL"],
         "target": {
             "physical_qubits": config["TARGET"]["PHYSICAL_QUBITS"],
         },
-        "check_on_exp": config["ENV"]["CHECK_ON_EXP"],
-        "channel_estimator": config["ENV"]["CHANNEL_ESTIMATOR"],
-        "fidelity_access": config["ENV"]["FIDELITY_ACCESS"],
     }
     if "GATE" in config["TARGET"]:
         params["target"]["gate"] = gate_map()[config["TARGET"]["GATE"].lower()]
@@ -1450,6 +1517,39 @@ def load_q_env_from_yaml_file(file_path: str):
         backend_params,
         remove_none_values(runtime_options),
     )
+
+
+def get_q_env_config(
+    config_file_address: str,
+    get_backend_func: Callable,
+    parametrized_circ_func: Callable[
+        [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
+    ],
+    **parametrized_circ_args,
+):
+    """
+    Get Qiskit Quantum Environment configuration
+
+    Args:
+        config_file_address: Configuration file address
+        get_backend_func: Function to get backend (should be defined in your Python config)
+        parametrized_circ_func: Function to get parametrized circuit (should be defined in your Python config)
+        parametrized_circ_args: Additional arguments for parametrized circuit function
+    """
+    params, backend_params, runtime_options = load_q_env_from_yaml_file(
+        config_file_address
+    )
+    backend = get_backend_func(**backend_params)
+    backend_config = QiskitConfig(
+        parametrized_circ_func,
+        backend,
+        estimator_options=(
+            runtime_options if isinstance(backend, RuntimeBackend) else None
+        ),
+        parametrized_circuit_kwargs=parametrized_circ_args,
+    )
+    q_env_config = QEnvConfig(backend_config=backend_config, **params)
+    return q_env_config
 
 
 def remove_none_values(dictionary):
@@ -1550,7 +1650,6 @@ def create_hpo_agent_config(
 
 def retrieve_backend_info(
     backend: Optional[Backend_type] = None,
-    estimator: Optional[RuntimeEstimatorV1] = None,
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration
@@ -1571,18 +1670,6 @@ def retrieve_backend_info(
         backend_data = BackendData(backend)
         dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
         coupling_map = CouplingMap(backend_data.coupling_map)
-        if (
-            coupling_map.size() == 0
-            and backend_data.num_qubits > 1
-            and estimator is not None
-        ):
-            if isinstance(estimator, RuntimeEstimatorV1):
-                coupling_map = CouplingMap(estimator.options.simulator["coupling_map"])
-                if coupling_map is None:
-                    raise ValueError(
-                        "To build a local circuit context, backend needs a coupling map"
-                    )
-
         # Check basis_gates and their respective durations of backend (for identifying timing context)
         if isinstance(backend, BackendV1):
             instruction_durations = InstructionDurations.from_backend(backend)
@@ -1598,9 +1685,36 @@ def retrieve_backend_info(
             "No Backend was provided, using default values for dt, coupling_map, basis_gates and instruction_durations"
         )
 
-        return 2.222e-10, CouplingMap(), ["x, sx, cx, rz"], None
+        return 2.222e-10, CouplingMap.from_full(5), ["x", "sx", "cx", "rz"], None
 
     return dt, coupling_map, basis_gates, instruction_durations
+
+
+def retrieve_neighbor_qubits(coupling_map: CouplingMap, target_qubits: List):
+    """
+    Retrieve neighbor qubits of target qubits
+
+    Args:
+        coupling_map: Coupling map
+        target_qubits: Target qubits
+
+    Returns:
+        neighbor_qubits: List of neighbor qubits indices for specified target qubits
+    """
+
+    return list(
+        set(
+            filter(
+                lambda x: x not in target_qubits,
+                chain(
+                    *[
+                        list(coupling_map.neighbors(target_qubit))
+                        for target_qubit in target_qubits
+                    ]
+                ),
+            )
+        )
+    )
 
 
 def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):

@@ -72,11 +72,11 @@ def get_optimizer_from_str(optim_str):
 
 class CustomPPO:
     def __init__(
-        self,
-        agent_config: Dict,
-        env: QuantumEnvironment | Wrapper,
-        chkpt_dir: Optional[str] = "tmp/ppo",
-        chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+            self,
+            agent_config: Dict,
+            env: QuantumEnvironment | Wrapper,
+            chkpt_dir: Optional[str] = "tmp/ppo",
+            chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
     ):
         """
         Initializes the PPO algorithm with the given hyperparameters
@@ -180,15 +180,14 @@ class CustomPPO:
         plt.legend()
         plt.xlabel("Iteration")
         plt.ylabel("Reward")
-        plt.show()
 
     def train(
-        self,
-        total_updates: int,
-        print_debug=True,
-        num_prints=40,
-        clear_history=False,
-        plot_real_time=True,
+            self,
+            total_updates: int,
+            print_debug=True,
+            num_prints=40,
+            clear_history=False,
+            plot_real_time=True,
     ):
         """
         Training function for PPO algorithm
@@ -204,6 +203,9 @@ class CustomPPO:
             global_step = 0
         else:
             global_step = self.env.unwrapped.step_tracker
+
+        if plot_real_time:
+            plt.ion()
 
         obs = torch.zeros(
             (self.num_time_steps, self.batchsize) + self.env.observation_space.shape
@@ -232,6 +234,8 @@ class CustomPPO:
 
                 with torch.no_grad():
                     mean_action, std_action, critic_value = self.agent(batch_obs)
+                    self.env.unwrapped.mean_action = mean_action[0]
+                    self.env.unwrapped.std_action = std_action[0]
                     probs = Normal(mean_action, std_action)
                     action = torch.clip(
                         probs.sample(),
@@ -277,13 +281,13 @@ class CustomPPO:
                         nextnonterminal = 1.0 - dones[t + 1]
                         nextvalues = values[t + 1]
                     delta = (
-                        rewards[t]
-                        + self.gamma * nextvalues * nextnonterminal
-                        - values[t]
+                            rewards[t]
+                            + self.gamma * nextvalues * nextnonterminal
+                            - values[t]
                     )
                     advantages[t] = lastgaelam = (
-                        delta
-                        + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
+                            delta
+                            + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
                     )
                 returns = advantages + values
 
@@ -325,7 +329,7 @@ class CustomPPO:
                     mb_advantages = b_advantages[mb_inds]
                     if self.normalize_advantage:
                         mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                            mb_advantages.std() + 1e-8
+                                mb_advantages.std() + 1e-8
                         )
 
                     # Policy loss
@@ -353,9 +357,9 @@ class CustomPPO:
 
                     entropy_loss = entropy.mean()
                     loss = (
-                        pg_loss
-                        - self.ent_coef * entropy_loss
-                        + v_loss * self.critic_loss_coef
+                            pg_loss
+                            - self.ent_coef * entropy_loss
+                            + v_loss * self.critic_loss_coef
                     )
 
                     self.optimizer.zero_grad()
@@ -444,10 +448,10 @@ class CustomPPO:
 
 
 def make_train_ppo(
-    agent_config: Dict,
-    env: QuantumEnvironment,
-    chkpt_dir: Optional[str] = "tmp/ppo",
-    chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+        agent_config: Dict,
+        env: QuantumEnvironment,
+        chkpt_dir: Optional[str] = "tmp/ppo",
+        chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
 ):
     """
     Creates a training function for PPO algorithm.
@@ -526,9 +530,9 @@ def make_train_ppo(
     )
 
     def train(
-        total_updates: int,
-        print_debug: Optional[bool] = True,
-        num_prints: Optional[int] = 40,
+            total_updates: int,
+            print_debug: Optional[bool] = True,
+            num_prints: Optional[int] = 40,
     ):
         """
         Training function for PPO algorithm
@@ -569,6 +573,8 @@ def make_train_ppo(
 
                     with torch.no_grad():
                         mean_action, std_action, critic_value = agent(batch_obs)
+                        env.unwrapped.mean_action = mean_action[0]
+                        env.unwrapped.std_action = std_action[0]
                         probs = Normal(mean_action, std_action)
                         action = torch.clip(
                             probs.sample(),
@@ -613,12 +619,12 @@ def make_train_ppo(
                             nextnonterminal = 1.0 - dones[t + 1]
                             nextvalues = values[t + 1]
                         delta = (
-                            rewards[t]
-                            + gamma * nextvalues * nextnonterminal
-                            - values[t]
+                                rewards[t]
+                                + gamma * nextvalues * nextnonterminal
+                                - values[t]
                         )
                         advantages[t] = lastgaelam = (
-                            delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+                                delta + gamma * gae_lambda * nextnonterminal * lastgaelam
                         )
                     returns = advantages + values
 
@@ -660,7 +666,7 @@ def make_train_ppo(
                         mb_advantages = b_advantages[mb_inds]
                         if normalize_advantage:  # Normalize advantage
                             mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                                mb_advantages.std() + 1e-8
+                                    mb_advantages.std() + 1e-8
                             )
 
                         # Policy loss
@@ -687,9 +693,9 @@ def make_train_ppo(
 
                         entropy_loss = entropy.mean()
                         loss = (
-                            pg_loss
-                            - ent_coef * entropy_loss
-                            + v_loss * critic_loss_coef
+                                pg_loss
+                                - ent_coef * entropy_loss
+                                + v_loss * critic_loss_coef
                         )
 
                         optimizer.zero_grad()

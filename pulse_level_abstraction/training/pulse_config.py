@@ -3,6 +3,8 @@ from __future__ import annotations
 import warnings
 from typing import Optional, Dict, List
 import os
+
+from qiskit.transpiler import Layout
 from qiskit_experiments.calibration_management import (
     FixedFrequencyTransmon,
     EchoedCrossResonance,
@@ -13,6 +15,7 @@ from helper_functions import (
     select_backend,
     new_params_ecr,
     new_params_sq_gate,
+    get_q_env_config,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate
@@ -20,8 +23,6 @@ from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
 from qiskit.providers import BackendV1, BackendV2, BackendV2Converter
 from qiskit_experiments.calibration_management import Calibrations
 from qconfig import QiskitConfig, QEnvConfig
-from quantumenvironment import QuantumEnvironment
-from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -55,11 +56,9 @@ def custom_schedule(
     sq_pulse_features = ["amp", "angle"]  # For single qubit gates
     sq_name = "x"  # Name of the single qubit gate baseline to pick
     keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
-    include_baseline = (
-        False  # Choose if the baseline shall be included in the parametrization
-    )
+    include_baseline = False  # Choose if original calibration shall be included as baseline in parametrization
     include_duration = (
-        False  # Choose if the pulse duration shall be included in the parametrization
+        False  # Choose if pulse duration shall be included in parametrization
     )
     duration_window = 1  # Duration window for the pulse duration
     if include_duration:
@@ -124,7 +123,7 @@ def custom_schedule(
 
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: ParameterVector, tgt_register: QuantumRegister, **kwargs
-):
+) -> None:
     """
     Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
     This function is used to run the QuantumCircuit instance on a Runtime backend
@@ -136,13 +135,20 @@ def apply_parametrized_circuit(
     target, backend = kwargs["target"], kwargs["backend"]
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
 
-    parametrized_gate = Gate(
-        f"{gate.name if gate is not None else 'G'}_cal",
-        len(tgt_register),
-        params=params.params,
+    # parametrized_gate = Gate(
+    #     f"{gate.name if gate is not None else 'G'}_cal",
+    #     len(tgt_register),
+    #     params=params.params,
+    # )
+
+    parametrized_gate_name = (
+        f"{gate.name if gate is not None else 'G'}_cal" + params.name[-1]
     )
+    parametrized_gate: Gate = backend.target.operation_from_name(parametrized_gate_name)
     parametrized_schedule = custom_schedule(
-        backend=backend, physical_qubits=physical_qubits, params=params
+        backend=backend,
+        physical_qubits=physical_qubits,
+        params=parametrized_gate.params,
     )
     qc.add_calibration(parametrized_gate, physical_qubits, parametrized_schedule)
     qc.append(parametrized_gate, tgt_register)
@@ -157,7 +163,7 @@ def get_backend(
     instance: Optional[str] = None,
     solver_options: Optional[Dict] = None,
     calibration_files: str = None,
-):
+) -> Optional[BackendV1 | BackendV2]:
     """
     Define backend on which the calibration is performed.
     This function uses data from the yaml file to define the backend.
@@ -216,16 +222,24 @@ def get_backend(
     return backend
 
 
-def get_circuit_context(backend: Optional[BackendV1 | BackendV2] = None):
+def get_circuit_context(
+    backend: Optional[BackendV1 | BackendV2] = None,
+    initial_layout: Optional[List[int]] = None,
+):
     """
     Define here the circuit context to be used for the calibration
+    :param backend: Backend instance
+    :param initial_layout: Initial layout of the qubits
+    :return: QuantumCircuit instance
     """
-    circuit = QuantumCircuit(1)
+    circuit = QuantumCircuit(2)
     circuit.h(0)
-    # circuit.cx(0, 1)
+    circuit.cx(0, 1)
+    circuit.h(0)
+    circuit.cx(0, 1)
 
     if backend is not None and backend.target.has_calibration("x", (0,)):
-        circuit = transpile(circuit, backend)
+        circuit = transpile(circuit, backend, initial_layout=initial_layout)
 
     print("Circuit context: ")
     print(circuit)
@@ -234,23 +248,16 @@ def get_circuit_context(backend: Optional[BackendV1 | BackendV2] = None):
 
 
 # Do not touch part below, just import in your notebook q_env_config and circuit_context
-(
-    env_params,
-    backend_params,
-    estimator_options,
-) = load_q_env_from_yaml_file(config_file_address)
-env_backend = get_backend(**backend_params)
-backend_config = QiskitConfig(
-    apply_parametrized_circuit,
-    env_backend,
-    estimator_options=(
-        estimator_options if isinstance(env_backend, RuntimeBackend) else None
-    ),
-    parametrized_circuit_kwargs={
-        "target": env_params["target"],
-        "backend": env_backend,
-    },
-)
 
-q_env_config = QEnvConfig(backend_config=backend_config, **env_params)
-circuit_context = get_circuit_context(env_backend)
+q_env_config = get_q_env_config(
+    config_file_address,
+    get_backend,
+    apply_parametrized_circuit,
+)
+q_env_config.backend_config.parametrized_circuit_kwargs = {
+    "target": q_env_config.target,
+    "backend": q_env_config.backend,
+}
+circuit_context = get_circuit_context(
+    q_env_config.backend, q_env_config.physical_qubits
+)
