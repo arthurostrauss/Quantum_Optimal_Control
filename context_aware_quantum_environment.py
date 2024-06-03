@@ -42,8 +42,6 @@ from qiskit_experiments.calibration_management import (
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 
 from helper_functions import (
-    get_ecr_params,
-    set_primitives_transpile_options,
     projected_statevector,
     remove_unused_wires,
     get_instruction_timings,
@@ -53,7 +51,6 @@ from qconfig import QEnvConfig
 from base_q_env import (
     GateTarget,
     InputState,
-    _calculate_chi_target,
     BaseQuantumEnvironment,
 )
 from quantumenvironment import (

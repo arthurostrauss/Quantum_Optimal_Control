@@ -102,7 +102,7 @@ class QuantumEnvironment(Env):
         self.n_shots = training_config.n_shots
         self.n_reps = training_config.n_reps
         self.sampling_Pauli_space = (
-            training_config.sampling_Paulis
+            training_config.sampling_paulis
         )  # Number of Pauli observables to sample
         self.c_factor = training_config.c_factor  # Reward scaling factor
         self.training_with_cal = training_config.training_with_cal
@@ -163,11 +163,7 @@ class QuantumEnvironment(Env):
             estimator_options,
             self.circuit_truncations[0],
         )
-        if (
-            isinstance(self._sampler, BaseSamplerV2)
-            and self.check_on_exp
-            and isinstance(self.backend, IBMBackend)
-        ):
+        if not isinstance(self.sampler, BaseSamplerV1):
             self.fidelity_checker = ComputeUncompute(
                 RuntimeSamplerV1(session=self.estimator.session)
             )
@@ -1174,7 +1170,7 @@ class QuantumEnvironmentV2(BaseQuantumEnvironment):
         return target, [custom_circuit], [ref_circuit]
 
     def _get_obs(self):
-        if isinstance(self.target, GateTarget) and not self.config.channel_estimator:
+        if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
                     self._index_input_state

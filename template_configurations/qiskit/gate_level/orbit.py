@@ -146,7 +146,9 @@ class ORBIT:
             # fidelity = np.mean([count[0] for count in counts])
 
             zero_state_key = int(0)
-            values_for_key_0 = [count[zero_state_key] for count in counts if zero_state_key in count]
+            values_for_key_0 = [
+                count[zero_state_key] for count in counts if zero_state_key in count
+            ]
             # Calculate the mean value for key 0
             fidelity = sum(values_for_key_0) / len(counts) if values_for_key_0 else 0.0
 
@@ -173,23 +175,24 @@ class ORBIT:
         )
 
         return result
-    
+
     def optimize_CMA(self, initial_params):
         """
         Optimize the parameter values for the circuit to maximize the fidelity using CMA-ES optimizer.
-        
+
         Parameters:
         initial_params (list or np.array): Initial guess for the parameters.
         """
+
         # Define the objective function
         def objective_function(params):
             fidelity = self.run_orbit_circuits(params)
             self.fidelities.append(fidelity)
             return 1.0 - fidelity
-        
+
         # Run the optimizer
         es = cma.CMAEvolutionStrategy(
-            initial_params, 
+            initial_params,
             0.5,
             {
                 "maxiter": 1000,
@@ -198,9 +201,9 @@ class ORBIT:
             },
         )
         es.optimize(objective_function)
-        
+
         # Get the best parameters
         optimal_params = es.result.xbest
         minimized_value = es.result.fbest
-        
+
         return optimal_params, minimized_value, es.result

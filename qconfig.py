@@ -38,6 +38,7 @@ class BackendConfig(ABC):
     parametrized_circuit: Callable
     backend: Optional[BackendV2]
     parametrized_circuit_kwargs: Optional[Dict]
+    instruction_durations_dict: Optional[Dict[str, float]] = None
 
 
 @dataclass
@@ -85,9 +86,9 @@ class QuaConfig(BackendConfig):
         channel_mapping: Dictionary mapping channels to quantum elements
     """
 
-    channel_mapping: Dict[
-        pulse.channels.Channel, QuamChannel
-    ]  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
+    channel_mapping: Dict[pulse.channels.Channel, QuamChannel] = (
+        None  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
+    )
 
 
 @dataclass
@@ -120,7 +121,7 @@ class ExecutionConfig:
     """
 
     batch_size: int = 100
-    sampling_Paulis: int = 100
+    sampling_paulis: int = 100
     n_shots: int = 1
     n_reps: int = 1
     c_factor: float = 0.5
@@ -133,20 +134,81 @@ class RewardConfig:
     Configuration for how to compute the reward in the RL workflow
     """
 
-    reward_method: Literal["fidelity", "channel", "state", "xeb", "cafe"] = "state"
+    reward_method: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
 
     def __post_init__(self):
         if self.reward_method == "fidelity":
             self.dfe = False
 
-        elif self.reward_method == "channel":
+        elif self.reward_method == "channel" or self.reward_method == "state":
             self.dfe = True
         else:
-            self.dfe = True
+            self.dfe = False
+
+
+@dataclass
+class FidelityConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on fidelity estimation
+    """
+
+    reward_method: Literal["fidelity"] = field(default="fidelity", init=False)
+
+
+@dataclass
+class StateConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on state fidelity estimation
+    """
+
+    reward_method: Literal["state"] = field(default="state", init=False)
+
+
+@dataclass
+class ChannelConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on channel fidelity estimation
+    """
+
+    reward_method: Literal["channel"] = field(default="channel", init=False)
+    num_eigenstates_per_pauli: int
+
+
+@dataclass
+class XEBConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on cross-entropy benchmarking
+    """
+
+    reward_method: Literal["xeb"] = field(default="xeb", init=False)
+    num_sequences: int = 10
+    depth: int = 1
+
+
+@dataclass
+class CAFEConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on Context-Aware Fidelity Estimation (CAFE)
+    """
+
+    reward_method: Literal["cafe"] = field(default="cafe", init=False)
+    input_states_choice: str = "all"
+
+
+@dataclass
+class ORBITConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on ORBIT
+    """
+
+    reward_method: Literal["orbit"] = field(default="orbit", init=False)
+    num_sequences: int = 3
+    depth: int = 1
+    use_interleaved: bool = False
 
 
 def default_reward_config():
-    return RewardConfig()
+    return StateConfig()
 
 
 def default_benchmark_config():
@@ -208,8 +270,8 @@ class QEnvConfig:
         return self.execution_config.batch_size
 
     @property
-    def sampling_Paulis(self):
-        return self.execution_config.sampling_Paulis
+    def sampling_paulis(self):
+        return self.execution_config.sampling_paulis
 
     @property
     def n_shots(self):
@@ -247,6 +309,12 @@ class QEnvConfig:
     def reward_method(self):
         return self.reward_config.reward_method
 
+    @reward_method.setter
+    def reward_method(
+        self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
+    ):
+        self.reward_config.reward_method = value
+
     @property
     def dfe(self):
         """
@@ -260,3 +328,11 @@ class QEnvConfig:
     @property
     def n_actions(self):
         return self.action_space.shape[-1]
+
+    @property
+    def channel_estimator(self):
+        return self.reward_method == "channel"
+
+    @property
+    def fidelity_access(self):
+        return self.reward_method == "fidelity"

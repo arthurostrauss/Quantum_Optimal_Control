@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import warnings
+from dataclasses import asdict
+
 from qiskit import pulse, schedule, transpile, QuantumRegister
 from qiskit.circuit import (
     QuantumCircuit,
@@ -105,8 +107,14 @@ from qconfig import (
     ExecutionConfig,
     BenchmarkConfig,
     RewardConfig,
+    StateConfig,
     QiskitConfig,
     QEnvConfig,
+    CAFEConfig,
+    ChannelConfig,
+    XEBConfig,
+    ORBITConfig,
+    FidelityConfig,
 )
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator, PauliToQuditOperator
 
@@ -128,6 +136,15 @@ Sampler_type = Union[
     StatevectorSampler,
 ]
 Backend_type = Union[BackendV1, BackendV2]
+
+reward_configs = {
+    "channel": ChannelConfig,
+    "xeb": XEBConfig,
+    "orbit": ORBITConfig,
+    "state": StateConfig,
+    "cafe": CAFEConfig,
+    "fidelity": FidelityConfig,
+}
 
 
 def count_gates(qc: QuantumCircuit):
@@ -919,55 +936,32 @@ def retrieve_primitives(
     return estimator, sampler
 
 
-def set_primitives_transpile_options(
-    estimator: BaseEstimatorV1 | BaseEstimatorV2,
-    fidelity_checker: ComputeUncompute,
-    layout: Layout,
-    skip_transpilation: bool,
-    physical_qubits: list,
+def substitute_target_gate(
+    circuit: QuantumCircuit,
+    target_gate: Gate,
+    parametrized_circuit_func: Callable,
+    params: ParameterVector,
+    **kwargs,
 ):
     """
-    Set transpile options for Qiskit primitives
+    Substitute target gate in Quantum Circuit with a parametrized version of the gate.
+    The parametrized_circuit function signature should match the expected one for a QiskitConfig instance.
+
     Args:
-        estimator: Estimator instance
-        fidelity_checker: ComputeUncompute instance
-        layout: Layout instance
-        skip_transpilation: Skip transpilation flag
-        physical_qubits: Physical qubits on which the transpilation is to be performed
+        circuit: Quantum Circuit instance
+        target_gate: Target gate to be substituted
+        parametrized_circuit_func: Parametrized circuit function
+        params: Parameter vector
+        kwargs: Optional keyword arguments
     """
-    if isinstance(estimator, RuntimeEstimatorV1):
-        # TODO: Could change resilience level
-        estimator.set_options(
-            optimization_level=0,
-            resilience_level=0,
-            skip_transpilation=skip_transpilation,
-        )
-        estimator.options.transpilation["initial_layout"] = physical_qubits
-        fidelity_checker.update_default_options(**estimator.options)
 
-    elif isinstance(estimator, AerEstimator):
-        estimator._transpile_options = AerOptions(
-            initial_layout=layout, optimization_level=0
-        )
-        estimator._skip_transpilation = skip_transpilation
-        fidelity_checker._sampler._transpile_options = AerOptions(
-            initial_layout=layout, optimization_level=0
-        )
-        fidelity_checker._sampler._skip_transpilation = skip_transpilation
-
-    elif isinstance(estimator, BackendEstimator):
-        estimator.set_transpile_options(initial_layout=layout, optimization_level=0)
-        estimator._skip_transpilation = skip_transpilation
-        fidelity_checker._sampler.set_transpile_options(
-            initial_layout=layout, optimization_level=0
-        )
-        fidelity_checker._sampler._skip_transpilation = skip_transpilation
-
-    else:
-        # raise TypeError(
-        #     "Estimator primitive not recognized (must be either BackendEstimator, Aer or Runtime"
-        # )
-        pass
+    qc = circuit.copy_empty_like()
+    for instruction in circuit.data:
+        if instruction.operation == target_gate:
+            qc.append(instruction)
+        else:
+            parametrized_circuit_func(qc, params, qc.qregs[0], **kwargs)
+    return qc
 
 
 def handle_session(
@@ -1000,7 +994,8 @@ def handle_session(
             Session(old_session.service, backend),
             estimator.options,
         )
-        estimator = type(estimator)(session=session, options=dict(options))
+        estimator = type(estimator)(session=session, options=asdict(options))
+
     elif isinstance(estimator, DynamicsBackendEstimator):
         if not isinstance(backend, DynamicsBackend) or not isinstance(
             backend.options.solver, JaxSolver
@@ -1461,34 +1456,21 @@ def load_q_env_from_yaml_file(file_path: str):
             "Low and high arrays in action space should have the same shape"
         )
     action_shape = low.shape
+    env_config = config["ENV"]
     params = {
         "action_space": Box(low=low, high=high, shape=action_shape, dtype=np.float32),
         "execution_config": ExecutionConfig(
-            **{
-                "batch_size": config["ENV"]["EXECUTION"]["BATCH_SIZE"],
-                "sampling_Paulis": config["ENV"]["EXECUTION"]["SAMPLING_PAULIS"],
-                "n_shots": config["ENV"]["EXECUTION"]["N_SHOTS"],
-                "n_reps": config["ENV"]["EXECUTION"]["N_REPS"],
-                "c_factor": config["ENV"]["EXECUTION"]["C_FACTOR"],
-                "seed": config["ENV"]["EXECUTION"]["SEED"],
-            }
+            **get_lower_keys_dict(env_config["EXECUTION"])
         ),
         "benchmark_config": BenchmarkConfig(
-            **{
-                "benchmark_cycle": config["ENV"]["BENCHMARKING"]["BENCHMARK_CYCLE"],
-                "benchmark_batch_size": config["ENV"]["BENCHMARKING"][
-                    "BENCHMARK_BATCH_SIZE"
-                ],
-                "check_on_exp": config["ENV"]["BENCHMARKING"]["CHECK_ON_EXP"],
-                "tomography_analysis": config["ENV"]["BENCHMARKING"][
-                    "TOMOGRAPHY_ANALYSIS"
-                ],
-            }
+            **get_lower_keys_dict(env_config["BENCHMARKING"])
         ),
-        "reward_config": RewardConfig(
-            **{"reward_method": config["ENV"]["REWARD"]["REWARD_METHOD"]}
+        "reward_config": reward_configs[env_config["REWARD"]["REWARD_METHOD"]](
+            **remove_none_values(
+                get_lower_keys_dict(env_config.get("REWARD_PARAMS", {}))
+            )
         ),
-        "training_with_cal": config["ENV"]["TRAINING_WITH_CAL"],
+        "training_with_cal": env_config["TRAINING_WITH_CAL"],
         "target": {
             "physical_qubits": config["TARGET"]["PHYSICAL_QUBITS"],
         },
@@ -1517,6 +1499,16 @@ def load_q_env_from_yaml_file(file_path: str):
         backend_params,
         remove_none_values(runtime_options),
     )
+
+
+def get_lower_keys_dict(dictionary: Dict[str, Any]):
+    """
+    Get dictionary with lower keys
+
+    Args:
+        dictionary: Dictionary
+    """
+    return {key.lower(): value for key, value in dictionary.items()}
 
 
 def get_q_env_config(
@@ -1650,13 +1642,15 @@ def create_hpo_agent_config(
 
 def retrieve_backend_info(
     backend: Optional[Backend_type] = None,
+    instruction_durations_dict: Optional[Dict[str, float]] = None,
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration
 
     Args:
         backend: Backend instance
-        estimator: Estimator instance
+        instruction_durations_dict: Instruction duration dictionary
+
 
     Returns:
     dt: Time step
@@ -1678,7 +1672,7 @@ def retrieve_backend_info(
             instruction_durations = backend.instruction_durations
             basis_gates = backend.operation_names.copy()
         else:
-            instruction_durations = None
+            instruction_durations = instruction_durations_dict
             basis_gates = None
     else:
         warnings.warn(
