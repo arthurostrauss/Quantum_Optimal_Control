@@ -38,6 +38,7 @@ class BackendConfig(ABC):
     parametrized_circuit: Callable
     backend: Optional[BackendV2]
     parametrized_circuit_kwargs: Optional[Dict]
+    instruction_durations_dict: Optional[Dict[str, float]] = None
 
 
 @dataclass
@@ -87,7 +88,7 @@ class QuaConfig(BackendConfig):
 
     channel_mapping: Dict[
         pulse.channels.Channel, QuamChannel
-    ]  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
+    ] = None  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
 
 
 @dataclass

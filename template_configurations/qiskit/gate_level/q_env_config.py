@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import warnings
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union
 import os
 import numpy as np
 from qiskit.transpiler import Layout
 
 from helper_functions import (
-    load_q_env_from_yaml_file,
+    generate_default_instruction_durations_dict,
     select_backend,
     get_q_env_config,
 )
@@ -15,6 +15,7 @@ from qiskit import QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
 from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
+from qiskit.transpiler import InstructionDurations
 from qiskit.providers import BackendV1, BackendV2
 
 from qconfig import QiskitConfig, QEnvConfig
@@ -135,6 +136,45 @@ def get_circuit_context(
     circuit.draw("mpl")
     return circuit
 
+def get_instruction_durations(backend: BackendV2):
+    if backend is None or not backend.instruction_durations.duration_by_name_qubits:
+        # User input for default gate durations
+        single_qubit_gate_time = 1.6e-7
+        two_qubit_gate_time = 5.3e-7
+        readout_time = 1.2e-6
+        reset_time = 1.0e-6
+        gates_done_by_software = ["rz", "s", "t"]
+
+        circuit_gate_times = {
+            "x": single_qubit_gate_time,
+            "sx": single_qubit_gate_time,
+            "h": single_qubit_gate_time,
+            "u": single_qubit_gate_time,
+            "cx": two_qubit_gate_time,
+            "rzx": two_qubit_gate_time,
+            "measure": readout_time,
+            "reset": reset_time,
+        }
+        circuit_gate_times.update({gate: 0.0 for gate in gates_done_by_software})
+
+        n_qubits = backend.num_qubits if backend else 10
+        instruction_durations_dict = generate_default_instruction_durations_dict(
+            n_qubits, 
+            single_qubit_gate_time, 
+            two_qubit_gate_time, 
+            gates_done_by_software, 
+            circuit_gate_times
+        )
+
+        instruction_durations = InstructionDurations()
+        instruction_durations.dt = 2.2222222222222221e-10
+        instruction_durations.duration_by_name_qubits = instruction_durations_dict
+        
+        return instruction_durations
+
+    elif backend.instruction_durations.duration_by_name_qubits:
+        return backend.instruction_durations
+
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
 q_env_config = get_q_env_config(
@@ -146,6 +186,7 @@ q_env_config.backend_config.parametrized_circuit_kwargs = {
     "target": q_env_config.target,
     "backend": q_env_config.backend,
 }
+q_env_config.backend_config.instruction_durations_dict = get_instruction_durations(q_env_config.backend)
 circuit_context = get_circuit_context(
     q_env_config.backend, q_env_config.physical_qubits
 )

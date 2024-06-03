@@ -1174,7 +1174,7 @@ class QuantumEnvironmentV2(BaseQuantumEnvironment):
         return target, [custom_circuit], [ref_circuit]
 
     def _get_obs(self):
-        if isinstance(self.target, GateTarget) and not self.config.channel_estimator:
+        if isinstance(self.target, GateTarget) and not self.config.reward_method == 'state':
             return np.array(
                 [
                     self._index_input_state

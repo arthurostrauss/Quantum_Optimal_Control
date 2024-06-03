@@ -15,7 +15,7 @@ import json
 import signal
 from dataclasses import asdict, dataclass
 from itertools import product, chain
-from typing import Optional, List, Callable, Any, SupportsFloat, Tuple
+from typing import Dict, Optional, List, Callable, Any, SupportsFloat, Tuple
 
 from gymnasium import Env
 import numpy as np
@@ -65,6 +65,7 @@ from qiskit_ibm_runtime import (
 from qiskit_ibm_runtime.fake_provider.local_service import QiskitRuntimeLocalService
 
 from helper_functions import (
+    get_hardware_runtime_single_circuit,
     retrieve_primitives,
     Backend_type,
     handle_session,
@@ -315,13 +316,13 @@ class QiskitBackendInfo:
     Class to store information on Qiskit backend
     """
 
-    def __init__(self, backend: Backend_type):
+    def __init__(self, backend: Backend_type, instruction_durations_dict: Dict[str, float]):
         (
             self.dt,
             self.coupling_map,
             self.basis_gates,
             self.instruction_durations,
-        ) = retrieve_backend_info(backend)
+        ) = retrieve_backend_info(backend, instruction_durations_dict)
         self.backend = backend
 
     def custom_transpile(
@@ -377,7 +378,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
         self.backend = training_config.backend
-        self.backend_info = QiskitBackendInfo(self.backend)
+        self.backend_info = QiskitBackendInfo(self.backend, training_config.backend_config.instruction_durations_dict)
         self._physical_target_qubits = training_config.target.get(
             "physical_qubits", None
         )
@@ -451,6 +452,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._step_tracker = 0
         self._inside_trunc_tracker = 0
         self._total_shots = []
+        self._total_hardware_runtime = []
         self._max_return = 0
         self._episode_ended = False
         self._episode_tracker = 0
@@ -530,6 +532,11 @@ class BaseQuantumEnvironment(ABC, Env):
                 qc, params
             )
             self._total_shots.append(total_shots)
+            self._total_hardware_runtime.append(
+                get_hardware_runtime_single_circuit(qc, self.config.backend_config.instruction_durations_dict.duration_by_name_qubits) 
+                * self.total_shots[-1]
+            )
+            print("Hardware runtime taken:", sum(self.hardware_runtime))
         elif self.config.reward_method == "state":
             if isinstance(self.target, GateTarget):
                 for _ in range(
@@ -558,6 +565,11 @@ class BaseQuantumEnvironment(ABC, Env):
             self._total_shots.append(
                 self.batch_size * np.sum(self._pauli_shots * self.n_shots)
             )
+            self._total_hardware_runtime.append(
+                get_hardware_runtime_single_circuit(qc, self.config.backend_config.instruction_durations_dict.duration_by_name_qubits) 
+                * self.total_shots[-1]
+            )
+            print("Hardware runtime taken:", sum(self.hardware_runtime))
 
         counts = (
             self._session_counts
@@ -1051,6 +1063,10 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def total_shots(self):
         return self._total_shots
+    
+    @property
+    def hardware_runtime(self):
+        return self._total_hardware_runtime
 
     @property
     def n_actions(self):

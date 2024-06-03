@@ -1571,73 +1571,43 @@ def load_from_yaml_file(file_path: str):
 def create_hpo_agent_config(
     trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
 ):
-    hyper_params = {
-        "N_UPDATES": trial.suggest_int(
-            "N_UPDATES", hpo_config["N_UPDATES"][0], hpo_config["N_UPDATES"][1]
-        ),
-        "N_EPOCHS": trial.suggest_int(
-            "N_EPOCHS", hpo_config["N_EPOCHS"][0], hpo_config["N_EPOCHS"][1]
-        ),
-        "MINIBATCH_SIZE": trial.suggest_categorical(
-            "MINIBATCH_SIZE", hpo_config["MINIBATCH_SIZE"]
-        ),
-        "BATCHSIZE_MULTIPLIER": trial.suggest_int(
-            "BATCHSIZE_MULTIPLIER",
-            hpo_config["BATCHSIZE_MULTIPLIER"][0],
-            hpo_config["BATCHSIZE_MULTIPLIER"][1],
-        ),
-        "LR": trial.suggest_float(
-            "LR",
-            hpo_config["LR"][0],
-            hpo_config["LR"][1],
-            log=True,
-        ),
-        "N_SHOTS": trial.suggest_int(
-            "N_SHOTS",
-            hpo_config["N_SHOTS"][0],
-            hpo_config["N_SHOTS"][1],
-        ),
-        "SAMPLE_PAULIS": trial.suggest_int(
-            "SAMPLE_PAULIS",
-            hpo_config["SAMPLE_PAULIS"][0],
-            hpo_config["SAMPLE_PAULIS"][1],
-        ),
-        "GAMMA": trial.suggest_float(
-            "GAMMA", hpo_config["GAMMA"][0], hpo_config["GAMMA"][1]
-        ),
-        "GAE_LAMBDA": trial.suggest_float(
-            "GAE_LAMBDA", hpo_config["GAE_LAMBDA"][0], hpo_config["GAE_LAMBDA"][1]
-        ),
-        "ENT_COEF": trial.suggest_float(
-            "ENT_COEF", hpo_config["ENT_COEF"][0], hpo_config["ENT_COEF"][1]
-        ),
-        "V_COEF": trial.suggest_float(
-            "V_COEF", hpo_config["V_COEF"][0], hpo_config["V_COEF"][1]
-        ),
-        "GRADIENT_CLIP": trial.suggest_float(
-            "GRADIENT_CLIP",
-            hpo_config["GRADIENT_CLIP"][0],
-            hpo_config["GRADIENT_CLIP"][1],
-        ),
-        "CLIP_VALUE_COEF": trial.suggest_float(
-            "CLIP_VALUE_COEF",
-            hpo_config["CLIP_VALUE_COEF"][0],
-            hpo_config["CLIP_VALUE_COEF"][1],
-        ),
-        "CLIP_RATIO": trial.suggest_float(
-            "CLIP_RATIO", hpo_config["CLIP_RATIO"][0], hpo_config["CLIP_RATIO"][1]
-        ),
-    }
+    hyper_params = {}
+    hyperparams_in_scope = []
 
-    # Dynamically calculate batchsize from minibatch_size and batchsize_multiplier
+    # Loop through hpo_config and decide whether to optimize or use the provided value
+    for param, values in hpo_config.items():
+        if isinstance(values, list):
+            if len(values) == 2:  # If values is a list of length 2, optimize
+                if isinstance(values[0], int):
+                    hyper_params[param] = trial.suggest_int(param, values[0], values[1])
+                elif isinstance(values[0], float):
+                    if param == "LR": # If learning rate, suggest in log scale
+                        hyper_params[param] = trial.suggest_float(param, values[0], values[1], log=True)
+                    else:
+                        hyper_params[param] = trial.suggest_float(param, values[0], values[1])
+                hyperparams_in_scope.append(param)
+            elif len(values) > 2:  # If values is a list of more than 2, choose from list and optimize
+                hyper_params[param] = trial.suggest_categorical(param, values)
+                hyperparams_in_scope.append(param)
+        else:
+            hyper_params[param] = values
+
+
+    # Dynamically calculate batchsize from minibatch_size and num_minibatches
+    print("MINIBATCH_SIZE", hyper_params["MINIBATCH_SIZE"])
+    print("NUM_MINIBATCHES", hyper_params["NUM_MINIBATCHES"])
     hyper_params["BATCHSIZE"] = (
-        hyper_params["MINIBATCH_SIZE"] * hyper_params["BATCHSIZE_MULTIPLIER"]
+        hyper_params["MINIBATCH_SIZE"] * hyper_params["NUM_MINIBATCHES"]
     )
-    # The upper hyperparameters are part of HPO scope
-    hyperparams = list(hyper_params.keys())
 
-    # The following hyperparameters are NOT part of HPO scope
-    hyper_params["CLIP_VALUE_LOSS"] = hpo_config["CLIP_VALUE_LOSS"]
+    # Print hyperparameters considered for HPO
+    print("Hyperparameters considered for HPO:", hyperparams_in_scope)
+
+    # Print hyperparameters NOT considered for HPO
+    hyperparams_not_in_scope = [
+        param for param in hpo_config if param not in hyperparams_in_scope
+    ]
+    print("Hyperparameters NOT in scope of HPO:", hyperparams_not_in_scope)
 
     # Take over attributes from agent_config and populate hyper_params
     agent_config = load_from_yaml_file(path_to_agent_config)
@@ -1645,11 +1615,174 @@ def create_hpo_agent_config(
     final_config.update(agent_config)
     final_config.update(hyper_params)
 
-    return final_config, hyperparams
+    return final_config, hyperparams_in_scope
+
+def get_hardware_runtime_single_circuit(
+        qc: QuantumCircuit, instruction_durations_dict: Dict[str, float]
+):
+    
+    total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
+
+    for instruction in qc.data:
+        qubits_involved = instruction.qubits
+        gate_name = instruction.operation.name if not instruction.operation.label else instruction.operation.label
+
+        if len(qubits_involved) == 1:
+            qbit1 = qubits_involved[0]
+            qbit1_index = qc.find_bit(qbit1).index
+            key = (gate_name, (qbit1_index,))
+            if key in instruction_durations_dict:
+                gate_time = instruction_durations_dict[key][0]
+                total_time_per_qubit[qbit1] += gate_time
+            
+        elif len(qubits_involved) == 2:
+            qbit1, qbit2 = qubits_involved
+            qbit1_index = qc.find_bit(qbit1).index
+            qbit2_index = qc.find_bit(qbit2).index
+            key = (gate_name, (qbit1_index, qbit2_index))
+            if key in instruction_durations_dict:
+                gate_time = instruction_durations_dict[key][0]
+                for qbit in qubits_involved:
+                    total_time_per_qubit[qbit] += gate_time
+
+        else:
+            raise NotImplementedError('Hardware runtimes of 3-qubit gates are not implemented currently.')
+ 
+    # Find the maximum execution time among all qubits
+    total_execution_time = (
+        max(total_time_per_qubit.values())
+        + instruction_durations_dict[('reset', (0,))][0] # Reset time is the same for all qubits
+        + instruction_durations_dict[('measure', (0,))][0] # Reset time is the same for all qubits
+    )
+
+    return total_execution_time
+
+
+
+# def get_hardware_runtime_single_circuit(
+#     qc: QuantumCircuit, circuit_gate_times: Optional[Dict]=None, backend: Optional[BackendV2]=None
+# ) -> float:
+#     """
+#     Return a worst-case estimate of the runtime for a single execution of the circuit on the hardware
+
+#     :param qc: QuantumCircuit to be executed
+#     """
+
+#     if backend is not None and backend.target.InstructionDurations is not None:
+#         instruction_durations = backend.target.InstructionDurations
+#         total_execution_time = sum(instruction_durations.get(instr[0].name, instr[1]) for instr in qc.data)
+#         return total_execution_time
+
+#     if not circuit_gate_times:
+#         raise ValueError(
+#             "Empty circuit_gate_time dictionary received. Please add durations for your gates."
+#         )
+
+#     total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
+#     for instruction in qc.decompose().data:
+#         for qubit in instruction.qubits:
+#             # Custom gates only appear in the circuit context for the CAQEnv case
+#             if instruction.operation.label in circuit_gate_times:
+#                 total_time_per_qubit[qubit] += circuit_gate_times[
+#                     instruction.operation.label
+#                 ]
+#             else:
+#                 total_time_per_qubit[qubit] += circuit_gate_times[
+#                     instruction.operation.name
+#                 ]
+
+#     # Find the maximum execution time among all qubits
+#     total_execution_time = (
+#         max(total_time_per_qubit.values())
+#         + circuit_gate_times["reset"]
+#         + circuit_gate_times["measure"]
+#     )
+
+#     return total_execution_time
+
+
+def get_hardware_runtime_cumsum(
+    qc: QuantumCircuit, circuit_gate_times: Dict, total_shots: List[int]
+) -> List[float]:
+    return np.cumsum(
+        get_hardware_runtime_single_circuit(qc, circuit_gate_times)
+        * np.array(total_shots)
+    )
+
+def get_baseline_fid_from_phi_gamma(param_tuple):
+    # prevent key errors with rounding
+    param_tuple = (param_tuple[0], round(param_tuple[1], 2))
+
+    if any([param_tuple[0] == 0, param_tuple[1] == 0]):
+        return 1.0
+
+    baseline_gate_fidelities = {
+        (0.7853981633974483, 0.01): 0.9999845788223948,
+        (0.7853981633974483, 0.02): 0.9999383162408302,
+        (0.7853981633974483, 0.03): 0.9998612151090003,
+        (0.7853981633974483, 0.04): 0.9997532801828659,
+        (0.7853981633974483, 0.05): 0.9996145181203613,
+        (0.7853981633974483, 0.06): 0.999444937480985,
+        (0.7853981633974483, 0.07): 0.9992445487252688,
+        (0.7853981633974483, 0.08): 0.9990133642141359,
+        (0.7853981633974483, 0.09): 0.9987513982081349,
+        (0.7853981633974483, 0.1): 0.9984586668665639,
+        (0.7853981633974483, 0.11): 0.9981351882464706,
+        (0.7853981633974483, 0.12): 0.9977809823015402,
+        (0.7853981633974483, 0.13): 0.9973960708808629,
+        (0.7853981633974483, 0.14): 0.9969804777275899,
+        (0.7853981633974483, 0.15): 0.9965342284774632,
+        (1.5707963267948966, 0.01): 0.9999383162408302,
+        (1.5707963267948966, 0.02): 0.9997532801828658,
+        (1.5707963267948966, 0.03): 0.9994449374809848,
+        (1.5707963267948966, 0.04): 0.9990133642141359,
+        (1.5707963267948966, 0.05): 0.9984586668665638,
+        (1.5707963267948966, 0.06): 0.9977809823015402,
+        (1.5707963267948966, 0.07): 0.9969804777275897,
+        (1.5707963267948966, 0.08): 0.9960573506572388,
+        (1.5707963267948966, 0.09): 0.9950118288582785,
+        (1.5707963267948966, 0.1): 0.9938441702975689,
+        (1.5707963267948966, 0.11): 0.9925546630773869,
+        (1.5707963267948966, 0.12): 0.9911436253643442,
+        (1.5707963267948966, 0.13): 0.9896114053108829,
+        (1.5707963267948966, 0.14): 0.9879583809693737,
+        (1.5707963267948966, 0.15): 0.9861849601988382,
+        (2.356194490192345, 0.01): 0.9998612151090003,
+        (2.356194490192345, 0.02): 0.9994449374809851,
+        (2.356194490192345, 0.03): 0.998751398208135,
+        (2.356194490192345, 0.04): 0.9977809823015402,
+        (2.356194490192345, 0.05): 0.9965342284774632,
+        (2.356194490192345, 0.06): 0.9950118288582788,
+        (2.356194490192345, 0.07): 0.9932146285882479,
+        (2.356194490192345, 0.08): 0.9911436253643444,
+        (2.356194490192345, 0.09): 0.9887999688823954,
+        (2.356194490192345, 0.1): 0.9861849601988384,
+        (2.356194490192345, 0.11): 0.9833000510084537,
+        (2.356194490192345, 0.12): 0.9801468428384714,
+        (2.356194490192345, 0.13): 0.9767270861595005,
+        (2.356194490192345, 0.14): 0.9730426794137726,
+        (2.356194490192345, 0.15): 0.9690956679612422,
+        (3.141592653589793, 0.01): 0.9997532801828659,
+        (3.141592653589793, 0.02): 0.9990133642141359,
+        (3.141592653589793, 0.03): 0.99778098230154,
+        (3.141592653589793, 0.04): 0.9960573506572388,
+        (3.141592653589793, 0.05): 0.9938441702975689,
+        (3.141592653589793, 0.06): 0.9911436253643443,
+        (3.141592653589793, 0.07): 0.9879583809693738,
+        (3.141592653589793, 0.08): 0.9842915805643158,
+        (3.141592653589793, 0.09): 0.9801468428384714,
+        (3.141592653589793, 0.1): 0.9755282581475768,
+        (3.141592653589793, 0.11): 0.970440384477113,
+        (3.141592653589793, 0.12): 0.9648882429441258,
+        (3.141592653589793, 0.13): 0.9588773128419905,
+        (3.141592653589793, 0.14): 0.9524135262330098,
+        (3.141592653589793, 0.15): 0.9455032620941839,
+    }
+    return baseline_gate_fidelities[param_tuple]
 
 
 def retrieve_backend_info(
-    backend: Optional[Backend_type] = None,
+    backend: Optional[Backend_type] = None, instruction_durations_dict: Dict[str, float] = None
 ):
     """
     Retrieve useful Backend data to run context aware gate calibration
@@ -1678,7 +1811,7 @@ def retrieve_backend_info(
             instruction_durations = backend.instruction_durations
             basis_gates = backend.operation_names.copy()
         else:
-            instruction_durations = None
+            instruction_durations = instruction_durations_dict
             basis_gates = None
     else:
         warnings.warn(
@@ -1730,6 +1863,49 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     )
     return qc.data.count(tgt_instruction)
 
+def generate_default_instruction_durations_dict(n_qubits, single_qubit_gate_time, two_qubit_gate_time, gates_done_by_software, circuit_gate_times):
+    default_instruction_durations_dict = {}
+    
+    # Identify single-qubit and two-qubit gates
+    single_qubit_gates = []
+    two_qubit_gates = []
+    
+    for gate in circuit_gate_times:
+        if gate in gates_done_by_software:
+            continue
+        if gate == 'measure' or gate == 'reset':
+            continue
+        if circuit_gate_times[gate] == single_qubit_gate_time:
+            single_qubit_gates.append(gate)
+        elif circuit_gate_times[gate] == two_qubit_gate_time:
+            two_qubit_gates.append(gate)
+    
+    # Single qubit gates
+    for gate in single_qubit_gates:
+        for qubit in range(n_qubits):
+            default_instruction_durations_dict[(gate, (qubit,))] = (circuit_gate_times[gate], 's')
+    
+    # Two qubit gates (assuming all-to-all connectivity)
+    for gate in two_qubit_gates:
+        for qubit1 in range(n_qubits):
+            for qubit2 in range(n_qubits):
+                if qubit1 != qubit2:
+                    default_instruction_durations_dict[(gate, (qubit1, qubit2))] = (two_qubit_gate_time, 's')
+    
+    # Measure gates
+    for qubit in range(n_qubits):
+        default_instruction_durations_dict[('measure', (qubit,))] = (circuit_gate_times['measure'], 's')
+    
+    # Reset gates
+    for qubit in range(n_qubits):
+        default_instruction_durations_dict[('reset', (qubit,))] = (circuit_gate_times['reset'], 's')
+    
+    # Gates done by software
+    for gate in gates_done_by_software:
+        for qubit in range(n_qubits):
+            default_instruction_durations_dict[(gate, (qubit,))] = (0.0, 's')
+    
+    return default_instruction_durations_dict
 
 def select_optimizer(
     lr: float,
