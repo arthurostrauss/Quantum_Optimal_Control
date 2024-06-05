@@ -17,6 +17,7 @@ from qiskit.circuit import (
     QuantumRegister,
     Gate,
 )
+from qiskit.transpiler import InstructionDurations
 from qiskit_dynamics import Solver
 from qualang_tools.config.configuration import QMConfiguration
 
@@ -38,7 +39,7 @@ class BackendConfig(ABC):
     parametrized_circuit: Callable
     backend: Optional[BackendV2]
     parametrized_circuit_kwargs: Optional[Dict]
-    instruction_durations_dict: Optional[Dict[str, float]] = None
+    instruction_durations_dict: Optional[InstructionDurations] = None
 
 
 @dataclass
