@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 import warnings
 from qiskit import pulse, schedule, transpile, QuantumRegister
 from qiskit.circuit import (
@@ -1567,6 +1568,19 @@ def load_from_yaml_file(file_path: str):
         config = yaml.safe_load(f)
     return config
 
+def load_from_pickle(file_path: str):
+     """
+     Load object from pickle file
+     """
+     with open(file_path, "rb") as file:
+         return pickle.load(file)
+
+def save_to_pickle(obj, file_path: str):
+    """
+    Save object to pickle file
+    """
+    with open(file_path, "wb") as file:
+        pickle.dump(obj, file)
 
 def create_hpo_agent_config(
     trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
