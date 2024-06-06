@@ -15,13 +15,13 @@ import json
 import signal
 from dataclasses import asdict, dataclass
 from itertools import product, chain
-from typing import Dict, Optional, List, Callable, Any, SupportsFloat, Tuple
+from typing import Optional, List, Callable, Any, SupportsFloat, Tuple, Dict
 
 from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule, transpile
+from qiskit import schedule, transpile, QiskitError
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -39,8 +39,9 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
     Sampler,
+    BackendSampler,
 )
-from qiskit.quantum_info import partial_trace
+from qiskit.quantum_info import partial_trace, Clifford, random_clifford
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
@@ -50,6 +51,7 @@ from qiskit_algorithms.state_fidelities import ComputeUncompute
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
+from qiskit_experiments.library import InterleavedRB
 
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_experiments.library.tomography.basis import (
@@ -65,15 +67,23 @@ from qiskit_ibm_runtime import (
 from qiskit_ibm_runtime.fake_provider.local_service import QiskitRuntimeLocalService
 
 from helper_functions import (
-    get_hardware_runtime_single_circuit,
     retrieve_primitives,
     Backend_type,
     handle_session,
     retrieve_backend_info,
     simulate_pulse_schedule,
     retrieve_neighbor_qubits,
+    substitute_target_gate,
+    get_hardware_runtime_single_circuit,
 )
-from qconfig import QiskitConfig, QEnvConfig, QuaConfig
+from qconfig import (
+    QiskitConfig,
+    QEnvConfig,
+    QuaConfig,
+    CAFEConfig,
+    ChannelConfig,
+    ORBITConfig,
+)
 
 
 def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Gate):
@@ -316,7 +326,11 @@ class QiskitBackendInfo:
     Class to store information on Qiskit backend
     """
 
-    def __init__(self, backend: Backend_type, instruction_durations_dict: Dict[str, float]):
+    def __init__(
+        self,
+        backend: Backend_type,
+        instruction_durations_dict: Optional[Dict[str, float]] = None,
+    ):
         (
             self.dt,
             self.coupling_map,
@@ -330,16 +344,21 @@ class QiskitBackendInfo:
         qc: QuantumCircuit | List[QuantumCircuit],
         initial_layout: Optional[Layout] = None,
         scheduling: bool = True,
+        optimization_level: int = 0,
+        remove_final_measurements: bool = True,
     ):
         """
         Custom transpile function to transpile the quantum circuit
         """
+        if remove_final_measurements:
+            if isinstance(qc, QuantumCircuit):
+                circuit = qc.remove_final_measurements(inplace=False)
+            else:
+                circuit = [circ.remove_final_measurements(inplace=False) for circ in qc]
+        else:
+            circuit = qc
         return transpile(
-            (
-                qc.remove_final_measurements(inplace=False)
-                if isinstance(qc, QuantumCircuit)
-                else [circ.remove_final_measurements(inplace=False) for circ in qc]
-            ),
+            circuit,
             backend=self.backend,
             scheduling_method=(
                 "asap"
@@ -349,7 +368,7 @@ class QiskitBackendInfo:
             basis_gates=self.basis_gates,
             coupling_map=(self.coupling_map if self.coupling_map.size() != 0 else None),
             instruction_durations=self.instruction_durations,
-            optimization_level=0,
+            optimization_level=optimization_level,
             initial_layout=initial_layout,
             dt=self.dt,
         )
@@ -367,7 +386,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._training_config = training_config
         self.n_shots = training_config.n_shots
         self.n_reps = training_config.n_reps
-        self.sampling_Pauli_space = training_config.sampling_Paulis
+        self.sampling_Pauli_space = training_config.sampling_paulis
         self.c_factor = training_config.c_factor
         self.batch_size = training_config.batch_size
 
@@ -378,7 +397,9 @@ class BaseQuantumEnvironment(ABC, Env):
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
         self.backend = training_config.backend
-        self.backend_info = QiskitBackendInfo(self.backend, training_config.backend_config.instruction_durations_dict)
+        self.backend_info = QiskitBackendInfo(
+            self.backend, training_config.backend_config.instruction_durations_dict
+        )
         self._physical_target_qubits = training_config.target.get(
             "physical_qubits", None
         )
@@ -405,14 +426,6 @@ class BaseQuantumEnvironment(ABC, Env):
                     )
                 )
 
-        if self.backend is not None:
-            for custom_gate in self.custom_gates:
-                self.backend.target.add_instruction(
-                    custom_gate,
-                    properties={
-                        tuple(self.physical_target_qubits): InstructionProperties()
-                    },
-                )
         self._physical_neighbor_qubits = retrieve_neighbor_qubits(
             self.backend_info.coupling_map, self.physical_target_qubits
         )
@@ -429,6 +442,15 @@ class BaseQuantumEnvironment(ABC, Env):
             self.define_target_and_circuits()
         )
         self.abstraction_level = "pulse" if self.circuits[0].calibrations else "circuit"
+        if self.backend is not None and self.abstraction_level == "pulse":
+            for custom_gate in self.custom_gates:
+                if custom_gate.name not in self.backend.operation_names:
+                    self.backend.target.add_instruction(
+                        custom_gate,
+                        properties={
+                            tuple(self.physical_target_qubits): InstructionProperties()
+                        },
+                    )
         self._estimator, self._sampler = retrieve_primitives(
             self.backend,
             self.config.backend_config,
@@ -436,9 +458,13 @@ class BaseQuantumEnvironment(ABC, Env):
             self.circuits[0],
         )
         if not isinstance(self.sampler, BaseSamplerV1):
-            self.fidelity_checker = ComputeUncompute(
-                RuntimeSamplerV1(session=self.estimator.session)
-            )
+            if hasattr(self.estimator, "session"):
+                self.fidelity_checker = ComputeUncompute(
+                    RuntimeSamplerV1(session=self.estimator.session)
+                )
+            else:
+                # TODO: Account for BackendSampler vs AerSampler
+                self.fidelity_checker = None
         else:
             self.fidelity_checker = ComputeUncompute(self._sampler)
 
@@ -452,7 +478,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._step_tracker = 0
         self._inside_trunc_tracker = 0
         self._total_shots = []
-        self._total_hardware_runtime = []
+        self._hardware_runtime = []
         self._max_return = 0
         self._episode_ended = False
         self._episode_tracker = 0
@@ -525,51 +551,31 @@ class BaseQuantumEnvironment(ABC, Env):
 
         if self.do_benchmark():  # Benchmarking or fidelity access
             fids = self.compute_benchmarks(params)
-        if self.config.reward_method == "fidelity":
-            return fids
-        elif self.config.reward_method == "channel":
-            self._pubs, total_shots = self.retrieve_observables_and_input_states(
-                qc, params
-            )
-            self._total_shots.append(total_shots)
-            self._total_hardware_runtime.append(
-                get_hardware_runtime_single_circuit(qc, self.config.backend_config.instruction_durations_dict.duration_by_name_qubits) 
-                * self.total_shots[-1]
-            )
-            print("Hardware runtime taken:", sum(self.hardware_runtime))
-        elif self.config.reward_method == "state":
-            if isinstance(self.target, GateTarget):
-                for _ in range(
-                    self.n_reps - 1
-                ):  # Repeat circuit for noise amplification
-                    qc.compose(self.circuits[trunc_index], inplace=True)
-                # Append input state prep circuit to the custom circuit with front composition
-                qc.compose(self._input_state.circuit, inplace=True, front=True)
+        
+        reward_methods = {
+            "channel": self.channel_reward_pubs,
+            "state": self.state_reward_pubs,
+            "cafe": self.cafe_reward_pubs,
+            "xeb": self.xeb_reward_pubs,
+            "orbit": self.orbit_reward_pubs
+        }
+        # Get the reward method from the configuration
+        reward_method = self.config.reward_method
+        # Check if the reward method exists in the dictionary
+        if reward_method in reward_methods:
+            if reward_method == "fidelity":
+                return fids
+            else:
+                self._pubs, total_shots = reward_methods[reward_method](qc, params)
+        else:
+            raise NotImplementedError(f"Reward method not implemented. Only ({list(reward_methods.keys())}) are supported.")
 
-            qc = self.backend_info.custom_transpile(
-                qc, initial_layout=self.layout[trunc_index], scheduling=False
-            )
-
-            self._pubs = [
-                (
-                    qc,
-                    obs.apply_layout(qc.layout),
-                    params,
-                    1 / np.sqrt(self.n_shots * pauli_shots),
-                )
-                for obs, pauli_shots in zip(
-                    self._observables.group_commuting(qubit_wise=True),
-                    self._pauli_shots,
-                )
-            ]
-            self._total_shots.append(
-                self.batch_size * np.sum(self._pauli_shots * self.n_shots)
-            )
-            self._total_hardware_runtime.append(
-                get_hardware_runtime_single_circuit(qc, self.config.backend_config.instruction_durations_dict.duration_by_name_qubits) 
-                * self.total_shots[-1]
-            )
-            print("Hardware runtime taken:", sum(self.hardware_runtime))
+        self._total_shots.append(total_shots)
+        self._hardware_runtime.append(
+            get_hardware_runtime_single_circuit(qc, self.config.backend_config.instruction_durations_dict.duration_by_name_qubits) 
+            * self.total_shots[-1]
+        )
+        print("Hardware runtime taken:", sum(self.hardware_runtime))
 
         counts = (
             self._session_counts
@@ -579,7 +585,9 @@ class BaseQuantumEnvironment(ABC, Env):
         self.estimator = handle_session(
             self.estimator, self.backend, counts, qc, input_state_circ
         )
-        print("Sending Estimator job...")
+        print(
+            f"Sending {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job..."
+        )
         if isinstance(self.estimator, BaseEstimatorV1):
             # TODO: Remove V1 support (once pulse support for V2 is added)
             reward_table = self.run_v1_primitive(qc, params)
@@ -592,8 +600,25 @@ class BaseQuantumEnvironment(ABC, Env):
                     [pub_result.data.evs for pub_result in pub_results], axis=0
                 ) / len(self._observables)
             else:
-                # TODO: Implement XEB and CAFE reward computation using Sampler
-                reward_table = np.zeros(self.batch_size)
+                # TODO: Implement XEB and CAFE/ORBIT reward computation using Sampler
+                pub_counts = [
+                    [pub_result.data.meas.get_counts(i) for i in range(self.batch_size)]
+                    for pub_result in pub_results
+                ]
+                if self.config.reward_method == "xeb":
+                    reward_table = np.zeros(self.batch_size)
+                else:
+                    reward_table = np.mean(
+                        [
+                            [
+                                count.get("0" * qc.num_qubits, 0) / self.n_shots
+                                for count in counts
+                            ]
+                            for counts in pub_counts
+                        ],
+                        axis=0,
+                    )
+
         print("Finished Estimator job")
 
         return reward_table  # Shape [batchsize]
@@ -698,24 +723,70 @@ class BaseQuantumEnvironment(ABC, Env):
 
         return observables, shots_per_basis
 
-    def retrieve_observables_and_input_states(
-        self, qc: QuantumCircuit, params: np.array
+    def state_reward_pubs(self, qc, params):
+        """
+        Retrieve observables and input state to sample for the DFE protocol for a target state
+        """
+        if isinstance(self.target, GateTarget):
+            for _ in range(self.n_reps - 1):  # Repeat circuit for noise amplification
+                qc.compose(self.circuits[self._inside_trunc_tracker], inplace=True)
+            # Append input state prep circuit to the custom circuit with front composition
+            qc.compose(self._input_state.circuit, inplace=True, front=True)
+
+        qc = self.backend_info.custom_transpile(
+            qc, initial_layout=self.layout[self._inside_trunc_tracker], scheduling=False
+        )
+
+        pubs = [
+            (
+                qc,
+                obs.apply_layout(qc.layout),
+                params,
+                1 / np.sqrt(self.n_shots * pauli_shots),
+            )
+            for obs, pauli_shots in zip(
+                self._observables.group_commuting(qubit_wise=True),
+                self._pauli_shots,
+            )
+        ]
+        total_shots = self.batch_size * np.sum(self._pauli_shots * self.n_shots)
+
+        return pubs, total_shots
+
+    def channel_reward_pubs(
+        self,
+        qc: QuantumCircuit,
+        params: np.array,
+        dfe_precision: Optional[Tuple[float, float]] = None,
     ):
         """
         Retrieve observables and input state to sample for the DFE protocol for a target gate
 
         :param qc: Quantum circuit to be executed on quantum system
         :param params: Action vectors to execute on quantum system
+        :param dfe_precision: Optional Tuple (Ɛ, δ) from DFE paper
         :return: Observables to sample, input state to prepare
         """
         assert isinstance(self.target, GateTarget), "Target type should be a gate"
+        assert isinstance(
+            self.config.reward_config, ChannelConfig
+        ), "ChannelConfig object required for channel reward method"
+        nb_states = self.config.reward_config.num_eigenstates_per_pauli
+        assert (
+            nb_states <= 2**qc.num_qubits
+        ), f"Number of eigenstates per Pauli should be less than {2 ** qc.num_qubits}"
         d = 2**qc.num_qubits
         probabilities = self.target.Chi**2 / (d**2)
         basis = pauli_basis(num_qubits=qc.num_qubits)
+
+        if dfe_precision is not None:
+            eps, delta = dfe_precision
+            l = int(np.ceil(1 / (eps**2 * delta)))
+        else:
+            l = self.sampling_Pauli_space
+
         samples, self._pauli_shots = np.unique(
-            np.random.choice(
-                len(probabilities), size=self.sampling_Pauli_space, p=probabilities
-            ),
+            np.random.choice(len(probabilities), size=l, p=probabilities),
             return_counts=True,
         )
 
@@ -727,11 +798,17 @@ class BaseQuantumEnvironment(ABC, Env):
         self._observables = [
             SparsePauliOp(pauli_meas[i], reward_factor[i]) for i in range(len(samples))
         ]
+        if dfe_precision is not None:
+            self._pauli_shots = np.ceil(
+                2
+                * np.log(2 / delta)
+                / (d * l * eps**2 * self.target.Chi[pauli_indices] ** 2)
+            )
 
         pubs = []
         total_shots = 0
         for prep, obs, shot in zip(pauli_prep, self._observables, self._pauli_shots):
-            max_input_states = 2**qc.num_qubits // 4
+            max_input_states = 2**qc.num_qubits // nb_states
             selected_input_states = np.random.choice(
                 2**qc.num_qubits, size=max_input_states, replace=False
             )
@@ -752,14 +829,15 @@ class BaseQuantumEnvironment(ABC, Env):
                     else:
                         prep_indices.append(4 + input[i])
 
-                input_circ = self.backend_info.custom_transpile(
-                    PauliPreparationBasis().circuit(prep_indices),
-                    initial_layout=self.layout[self.trunc_index],
-                )
                 prep_circuit = qc.compose(
-                    input_circ,
+                    Pauli6PreparationBasis().circuit(prep_indices),
                     front=True,
                     inplace=False,
+                )
+                prep_circuit = self.backend_info.custom_transpile(
+                    prep_circuit,
+                    initial_layout=self.layout[self._inside_trunc_tracker],
+                    scheduling=False,
                 )
 
                 pubs.append(
@@ -771,6 +849,174 @@ class BaseQuantumEnvironment(ABC, Env):
                     )
                 )
                 total_shots += dedicated_shots * self.n_shots * self.batch_size
+
+        return pubs, total_shots
+
+    def cafe_reward_pubs(self, circuit: QuantumCircuit, params):
+        """
+        Retrieve PUBs for Context-Aware Fidelity Estimation (CAFE) protocol
+
+        :param qc: Quantum circuit to be executed on quantum system
+        :param params: Action vectors to execute on quantum system
+        """
+
+        assert isinstance(self.target, GateTarget), "Target type should be a gate"
+        assert isinstance(
+            self.config.reward_config, CAFEConfig
+        ), "CAFEConfig object required for CAFE reward method"
+
+        pubs = []
+        total_shots = 0
+        circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
+
+        input_circuits = [
+            Pauli6PreparationBasis().circuit(s)
+            for s in product(range(4), repeat=circuit.num_qubits)
+        ]
+
+        for input_circ in input_circuits:
+            run_qc = QuantumCircuit.copy_empty_like(
+                circuit, name="cafe_circ"
+            )  # Circuit with the custom target gate
+            ref_qc = QuantumCircuit.copy_empty_like(
+                circuit_ref, name="cafe_ref_circ"
+            )  # Circuit with the reference gate
+
+            # Bind input states to the circuits
+            for qc in [run_qc, ref_qc]:
+                qc.compose(input_circ, inplace=True)
+                qc.barrier()
+
+            # Add the custom target gate to the run circuit n_reps times
+            for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
+                for _ in range(self.n_reps):
+                    qc.compose(context, inplace=True)
+                    qc.barrier()
+
+            reverse_unitary = Operator(ref_qc).adjoint()
+            reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
+            reverse_unitary_qc.unitary(
+                reverse_unitary,
+                reverse_unitary_qc.qubits,
+                label="U_inv",
+            )
+            reverse_unitary_qc.measure_all()
+            layout = self.layout[self._inside_trunc_tracker]
+            reverse_unitary_qc = self.backend_info.custom_transpile(
+                reverse_unitary_qc,
+                initial_layout=layout,
+                scheduling=False,
+                optimization_level=3,
+                remove_final_measurements=False,
+            )  # Try to get the smallest possible circuit for the reverse unitary
+
+            qc = self.backend_info.custom_transpile(
+                run_qc, initial_layout=layout, scheduling=False
+            )
+            qc.barrier()
+            # Add the inverse unitary + measurement to the circuit
+            qc.compose(reverse_unitary_qc, inplace=True)
+
+            pubs.append((qc, params, self.n_shots))
+            total_shots += self.batch_size * self.n_shots
+
+        return pubs, total_shots
+
+    def xeb_reward_pubs(self, circuit: QuantumCircuit, params):
+        pass
+
+    def orbit_reward_pubs(self, circuit: QuantumCircuit, params):
+        """
+        Retrieve PUBs for ORBIT protocol
+
+        :param circuit: Quantum circuit to be executed on quantum system
+        :param params: Action vectors to execute on quantum system
+        """
+        assert isinstance(self.target, GateTarget), "Target type should be a gate"
+        assert isinstance(
+            self.config.reward_config, ORBITConfig
+        ), "ORBITConfig object required for ORBIT reward method"
+        layout = self.layout[self._inside_trunc_tracker]
+        circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
+        pubs = []
+        total_shots = 0
+        if self.config.reward_config.use_interleaved:
+            try:
+                clifford = Clifford(circuit_ref)
+            except QiskitError as e:
+                raise ValueError(
+                    "Circuit should be a Clifford circuit for using interleaved RB directly"
+                ) from e
+            physical_qubits = list(
+                self.layout[self._inside_trunc_tracker].get_physical_bits().keys()
+            )
+            ref_element = self.baseline_circuits[self._inside_trunc_tracker].to_gate(
+                label="ref_circ"
+            )
+            custom_element = circuit.to_gate(label="custom_circ")
+            exp = InterleavedRB(
+                ref_element,
+                physical_qubits,
+                [self.n_reps],
+                self.backend,
+                self.sampling_Pauli_space,
+                self.seed,
+                circuit_order="RRRIII",
+            )
+            ref_circuits = exp.circuits()[0 : self.n_reps]
+            interleaved_circuits = exp.circuits()[self.n_reps :]
+            run_circuits = [
+                substitute_target_gate(circ, ref_element, custom_element)
+                for circ in interleaved_circuits
+            ]
+            run_circuits = self.backend_info.custom_transpile(
+                run_circuits,
+                initial_layout=layout,
+                scheduling=False,
+                remove_final_measurements=False,
+            )
+            pubs = [(qc, params, self.n_shots) for qc in run_circuits]
+            total_shots += self.batch_size * self.n_shots * len(pubs)
+        else:
+            for seq in range(self.sampling_Pauli_space):
+
+                ref_qc = QuantumCircuit.copy_empty_like(
+                    self.baseline_circuits[self._inside_trunc_tracker],
+                    name="orbit_ref_circ",
+                )
+                run_qc = QuantumCircuit.copy_empty_like(circuit, name="orbit_run_circ")
+                for l in range(self.n_reps):
+                    r_cliff = random_clifford(circuit.num_qubits, self.seed)
+                    for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
+                        qc.compose(r_cliff.to_circuit(), inplace=True)
+                        qc.barrier()
+                        qc.compose(context, inplace=True)
+                        qc.barrier()
+
+                reverse_unitary = Operator(ref_qc).adjoint()
+                reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
+                reverse_unitary_qc.unitary(
+                    reverse_unitary, reverse_unitary_qc.qubits, label="U_inv"
+                )
+                reverse_unitary_qc.measure_all()
+
+                reverse_unitary_qc = self.backend_info.custom_transpile(
+                    reverse_unitary_qc,
+                    initial_layout=layout,
+                    scheduling=False,
+                    optimization_level=3,
+                    remove_final_measurements=False,
+                )  # Try to get the smallest possible circuit for the reverse unitary
+
+                qc = self.backend_info.custom_transpile(
+                    run_qc, initial_layout=layout, scheduling=False
+                )
+                qc.barrier()
+                # Add the inverse unitary + measurement to the circuit
+                qc.compose(reverse_unitary_qc, inplace=True)
+
+                pubs.append((qc, params, self.n_shots))
+                total_shots += self.batch_size * self.n_shots
 
         return pubs, total_shots
 
@@ -1066,7 +1312,7 @@ class BaseQuantumEnvironment(ABC, Env):
     
     @property
     def hardware_runtime(self):
-        return self._total_hardware_runtime
+        return self._hardware_runtime
 
     @property
     def n_actions(self):
