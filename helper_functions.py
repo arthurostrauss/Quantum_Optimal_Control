@@ -22,9 +22,12 @@ from qiskit.primitives import (
     StatevectorSampler,
     BaseEstimatorV1,
     BaseEstimatorV2,
+    BackendSamplerV2,
+    BackendEstimatorV2, 
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer import AerSimulator
+from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit.quantum_info import (
     Operator,
@@ -117,6 +120,7 @@ Estimator_type = Union[
     RuntimeEstimatorV2,
     Estimator,
     BackendEstimator,
+    BackendEstimatorV2,
     DynamicsBackendEstimator,
     StatevectorEstimator,
 ]
@@ -126,6 +130,7 @@ Sampler_type = Union[
     RuntimeSamplerV2,
     Sampler,
     BackendSampler,
+    BackendSamplerV2,
     StatevectorSampler,
 ]
 Backend_type = Union[BackendV1, BackendV2]
@@ -880,45 +885,62 @@ def retrieve_primitives(
         estimator_options: Estimator options
         circuit: QuantumCircuit instance implementing the custom gate (for DynamicsBackend)
     """
-    if backend is not None:
-        if isinstance(backend, DynamicsBackend) and isinstance(
-            backend.options.solver, JaxSolver
-        ):
-            estimator: Estimator_type = DynamicsBackendEstimator(
-                backend, options=estimator_options, skip_transpilation=True
-            )
-            backend.options.solver.circuit_macro = lambda: schedule(circuit, backend)
-
-            if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
-                calibration_files = config.calibration_files
-                _, _ = perform_standard_calibrations(backend, calibration_files)
-        else:
-            if isinstance(backend, (FakeBackend, FakeBackendV2)):
-                print("Aer Backend created out of backend", backend)
-                backend = AerSimulator.from_backend(backend)
-            estimator: Estimator_type = RuntimeEstimatorV2(
-                session=Session(
-                    (
-                        backend.service
-                        if hasattr(backend, "service")
-                        else QiskitRuntimeLocalService()
-                    ),
-                    backend,
-                ),
-                options=estimator_options,
-            )
-
-        sampler: Sampler_type = RuntimeSamplerV2(
-            session=estimator.session if hasattr(estimator, "session") else None,
-            backend=backend,
+    if isinstance(backend, DynamicsBackend) and isinstance(
+        backend.options.solver, JaxSolver
+    ):
+        estimator = DynamicsBackendEstimator(
+            backend, options=estimator_options, skip_transpilation=True
         )
+        sampler = BackendSamplerV2(backend=backend)
+        backend.options.solver.circuit_macro = lambda: schedule(circuit, backend)
 
-    else:  # No backend specified, ideal state-vector simulation
+        if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
+            calibration_files = config.calibration_files
+            _, _ = perform_standard_calibrations(backend, calibration_files)
+    # elif isinstance(backend, (FakeBackend, FakeBackendV2, AerBackend)):
+    #     from qiskit_aer.primitives import EstimatorV2 as AerEstimatorV2, SamplerV2 as AerSamplerV2
+    #     print("Aer Backend created out of backend", backend)
+    #     estimator = AerEstimatorV2.from_backend(backend=backend)
+    #     sampler = AerSamplerV2.from_backend(backend=backend)
+    elif backend is None:  # No backend specified, ideal state-vector simulation
         sampler = Sampler()
         estimator = StatevectorEstimator()
 
+    elif isinstance(backend, RuntimeBackend):
+        # TODO: Next update: will switch to keyword mode instead of session
+        estimator = RuntimeEstimatorV2(
+            session=Session(backend=backend),
+            options=estimator_options,
+        )
+        sampler = RuntimeSamplerV2(session=estimator.session)
+    else:
+        estimator = BackendEstimatorV2(backend=backend, options=estimator_options)
+        sampler = BackendSamplerV2(backend=backend)
+
     return estimator, sampler
 
+def substitute_target_gate(
+    circuit: QuantumCircuit,
+    target_gate: Gate,
+    custom_gate: Gate,
+):
+    """
+    Substitute target gate in Quantum Circuit with a parametrized version of the gate.
+    The parametrized_circuit function signature should match the expected one for a QiskitConfig instance.
+
+    Args:
+        circuit: Quantum Circuit instance
+        target_gate: Target gate to be substituted
+        custom_gate: Custom gate to be substituted with
+    """
+    ref_label = target_gate.label
+    qc = circuit.copy_empty_like()
+    for instruction in circuit.data:
+        if instruction.operation.label != ref_label:
+            qc.append(instruction)
+        else:
+            qc.append(custom_gate, instruction.qubits)
+    return qc
 
 def set_primitives_transpile_options(
     estimator: BaseEstimatorV1 | BaseEstimatorV2,

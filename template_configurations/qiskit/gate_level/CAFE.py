@@ -99,7 +99,7 @@ class CAFE:
         circuit_ref = self.q_env.baseline_truncations[0]
         n_qubits = self.q_env.n_qubits
 
-        input_circuits = input_circuits = [
+        input_circuits = [
             PauliPreparationBasis().circuit(s)
             for s in product(range(4), repeat=n_qubits)
         ]

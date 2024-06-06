@@ -32,8 +32,8 @@ RUNTIME_OPTIONS: # Relevant only when using the Qiskit runtime service
     job_tags: null
 
 BACKEND: # Backend configuration (If all set to null, the user needs to specify its own backend in q_env_config.py's get_backend() function)
-  REAL_BACKEND: False # True: real or False: fake Aer backend
-  NAME: "fake_jakarta" # Name of the backend
+  REAL_BACKEND: null # False # True: real or False: fake Aer backend
+  NAME: null # "fake_jakarta" # Name of the backend
   DYNAMICS: # Use a DynamicsBackend (if fields above are not null, build a DynamicsBackend.from_backend() with the specified backend)
     USE_DYNAMICS: null # Whether to use a DynamicsBackend
     PHYSICAL_QUBITS: null # Number of qubits characterizing the environment (i.e. the full quantum circuit dimension)
@@ -47,7 +47,7 @@ BACKEND: # Backend configuration (If all set to null, the user needs to specify 
 TARGET: # Target Gate configuration
   GATE: "CX"
   # STATE: "0" # Target state (if GATE is null)
-  PHYSICAL_QUBITS: [ 1, 0 ]
+  PHYSICAL_QUBITS: [ 0, 1 ]
 
 ENV: # Environment configuration
   EXECUTION:
@@ -62,11 +62,18 @@ ENV: # Environment configuration
     HIGH: [ 3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14 ]
   REWARD:
     REWARD_METHOD: "state" # Choose between "fidelity", "state", "channel", "xeb", "cafe"
+  REWARD_PARAMS: # All unused parameters should be set to null (only assign values to parameters used by chosen reward method)
+    NUM_SEQUENCES: null # Number of random sequences to generate for ORBIT or XEB reward
+    DEPTH: null # Circuit depth for the random sequences in ORBIT or XEB reward
+    USE_INTERLEAVED: null # Whether to use interleaved RB (target must be Clifford) for ORBIT reward
+    NUM_EIGENSTATES_PER_PAULI: null # Number of eigenstates per Pauli to consider for channel fidelity reward
+    INPUT_STATES_CHOICE: null # Choice of input states for CAFE reward
   BENCHMARKING:
     BENCHMARK_CYCLE: 1 # Number of steps between two fidelity benchmarks
-    BENCHMARK_BATCH_SIZE: 20 # Number of actions to evaluate per fidelity benchmark
+    BENCHMARK_BATCH_SIZE: 1 # Number of actions to evaluate per fidelity benchmark
     CHECK_ON_EXP: False # Whether to perform fidelity benchmarking with tomographic experiments or just using simulation
     TOMOGRAPHY_ANALYSIS: "default" # Analysis method for tomography experiment
+    DFE_PRECISION: (1e-3, 1e-3) # Precision tuple (eps, delta) for the DFE analysis
   TRAINING_WITH_CAL: True
 
 
