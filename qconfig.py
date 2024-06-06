@@ -87,9 +87,9 @@ class QuaConfig(BackendConfig):
         channel_mapping: Dictionary mapping channels to quantum elements
     """
 
-    channel_mapping: Dict[
-        pulse.channels.Channel, QuamChannel
-    ] = None  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
+    channel_mapping: Dict[pulse.channels.Channel, QuamChannel] = (
+        None  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
+    )
 
 
 @dataclass
@@ -145,6 +145,8 @@ class RewardConfig:
             self.dfe = True
         else:
             self.dfe = False
+
+            
 @dataclass
 class FidelityConfig(RewardConfig):
     """
@@ -209,7 +211,7 @@ class ORBITConfig(RewardConfig):
 
 
 def default_reward_config():
-    return RewardConfig()
+    return StateConfig()
 
 
 def default_benchmark_config():
@@ -310,6 +312,12 @@ class QEnvConfig:
     def reward_method(self):
         return self.reward_config.reward_method
 
+    @reward_method.setter
+    def reward_method(
+        self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
+    ):
+        self.reward_config.reward_method = value
+
     @property
     def dfe(self):
         """
@@ -323,3 +331,11 @@ class QEnvConfig:
     @property
     def n_actions(self):
         return self.action_space.shape[-1]
+
+    @property
+    def channel_estimator(self):
+        return self.reward_method == "channel"
+
+    @property
+    def fidelity_access(self):
+        return self.reward_method == "fidelity"

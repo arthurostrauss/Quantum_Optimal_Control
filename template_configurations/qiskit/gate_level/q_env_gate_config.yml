@@ -51,12 +51,12 @@ TARGET: # Target Gate configuration
 
 ENV: # Environment configuration
   EXECUTION:
-    SAMPLING_PAULIS: 100 # Number of Pauli strings to sample
-    N_SHOTS: 1024 # Number of shots for each Pauli
-    N_REPS: 1 # Number of repetitions for the fidelity benchmarking
+    SAMPLING_PAULIS: 20 # Number of Pauli strings to sample (for ORBIT/XEB: number of random sequences)
+    N_SHOTS: 1000 # Number of shots for each Pauli (for ORBIT/XEB/CAFE: number of shots for each random sequence)
+    N_REPS: 30 # Number of repetitions of layer circuit (Corresponds to fixed circuit depth for ORBIT/XEB)
     C_FACTOR: 1. # Cost factor for the reward function
     BATCH_SIZE: 256 # Number of actions to evaluate per policy iteration
-    SEED: 100
+    SEED: 102
   ACTION_SPACE:
     LOW: [ -3.14, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14 ]
     HIGH: [ 3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14 ]
