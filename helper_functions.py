@@ -1489,7 +1489,7 @@ def load_q_env_from_yaml_file(file_path: str):
         "execution_config": ExecutionConfig(
             **{
                 "batch_size": config["ENV"]["EXECUTION"]["BATCH_SIZE"],
-                "sampling_Paulis": config["ENV"]["EXECUTION"]["SAMPLING_PAULIS"],
+                "sampling_paulis": config["ENV"]["EXECUTION"]["SAMPLING_PAULIS"],
                 "n_shots": config["ENV"]["EXECUTION"]["N_SHOTS"],
                 "n_reps": config["ENV"]["EXECUTION"]["N_REPS"],
                 "c_factor": config["ENV"]["EXECUTION"]["C_FACTOR"],

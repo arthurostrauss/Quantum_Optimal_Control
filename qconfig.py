@@ -122,7 +122,7 @@ class ExecutionConfig:
     """
 
     batch_size: int = 100
-    sampling_Paulis: int = 100
+    sampling_paulis: int = 100
     n_shots: int = 1
     n_reps: int = 1
     c_factor: float = 0.5
@@ -135,16 +135,77 @@ class RewardConfig:
     Configuration for how to compute the reward in the RL workflow
     """
 
-    reward_method: Literal["fidelity", "channel", "state", "xeb", "cafe"] = "state"
+    reward_method: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
 
     def __post_init__(self):
         if self.reward_method == "fidelity":
             self.dfe = False
 
-        elif self.reward_method == "channel":
+        elif self.reward_method == "channel" or self.reward_method == "state":
             self.dfe = True
         else:
-            self.dfe = True
+            self.dfe = False
+@dataclass
+class FidelityConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on fidelity estimation
+    """
+
+    reward_method: Literal["fidelity"] = field(default="fidelity", init=False)
+
+
+@dataclass
+class StateConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on state fidelity estimation
+    """
+
+    reward_method: Literal["state"] = field(default="state", init=False)
+
+
+@dataclass
+class ChannelConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on channel fidelity estimation
+    """
+
+    reward_method: Literal["channel"] = field(default="channel", init=False)
+    num_eigenstates_per_pauli: int
+
+
+@dataclass
+class XEBConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on cross-entropy benchmarking
+    """
+
+    reward_method: Literal["xeb"] = field(default="xeb", init=False)
+    num_sequences: int = 10
+    depth: int = 1
+
+
+@dataclass
+class CAFEConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on Context-Aware Fidelity Estimation (CAFE)
+    """
+
+    reward_method: Literal["cafe"] = field(default="cafe", init=False)
+    input_states_choice: str = "all"
+
+
+@dataclass
+class ORBITConfig(RewardConfig):
+    """
+    Configuration for computing the reward based on ORBIT
+    """
+
+    reward_method: Literal["orbit"] = field(default="orbit", init=False)
+    num_sequences: int = 3
+    depth: int = 1
+    use_interleaved: bool = False
+
+
 
 
 def default_reward_config():
@@ -210,8 +271,8 @@ class QEnvConfig:
         return self.execution_config.batch_size
 
     @property
-    def sampling_Paulis(self):
-        return self.execution_config.sampling_Paulis
+    def sampling_paulis(self):
+        return self.execution_config.sampling_paulis
 
     @property
     def n_shots(self):
