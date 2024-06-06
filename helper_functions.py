@@ -106,6 +106,8 @@ from scipy.optimize import minimize
 from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import Dense
 
+import keyword
+import re
 from qconfig import (
     BackendConfig,
     ExecutionConfig,
@@ -151,6 +153,21 @@ reward_configs = {
     "cafe": CAFEConfig,
     "fidelity": FidelityConfig,
 }
+
+
+def to_python_identifier(s):
+    # Prepend underscore if the string starts with a digit
+    if s[0].isdigit():
+        s = "_" + s
+
+    # Replace non-alphanumeric characters with underscore
+    s = re.sub("\W|^(?=\d)", "_", s)
+
+    # Append underscore if the string is a Python keyword
+    if keyword.iskeyword(s):
+        s += "_"
+
+    return s
 
 
 def count_gates(qc: QuantumCircuit):

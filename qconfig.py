@@ -38,7 +38,7 @@ class BackendConfig(ABC):
 
     parametrized_circuit: Callable
     backend: Optional[BackendV2]
-    parametrized_circuit_kwargs: Optional[Dict]
+    parametrized_circuit_kwargs: Optional[Dict] = field(default_factory=dict)
     instruction_durations_dict: Optional[InstructionDurations] = None
 
 

@@ -805,8 +805,8 @@ class QuantumEnvironment(Env):
         """
         Generate circuit to be executed on quantum system
         """
-        custom_circuit = QuantumCircuit(self.target.tgt_register)
-        ref_circuit = QuantumCircuit(self.target.tgt_register)
+        custom_circuit = QuantumCircuit(self.target.tgt_register, name="custom_circuit")
+        ref_circuit = QuantumCircuit(self.target.tgt_register, name="ref_circuit")
 
         self.parametrized_circuit_func(
             custom_circuit,
