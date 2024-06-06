@@ -38,16 +38,20 @@ from qiskit.primitives import (
     BaseEstimatorV2,
     BaseSamplerV2,
     BaseSamplerV1,
-    Sampler,
-    BackendSampler,
 )
-from qiskit.quantum_info import partial_trace, Clifford, random_clifford
+from qiskit.quantum_info import Clifford, random_clifford
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.states import DensityMatrix, Statevector
-from qiskit.transpiler import Layout, InstructionProperties
+from qiskit.transpiler import (
+    Layout,
+    InstructionProperties,
+    CouplingMap,
+    InstructionDurations,
+)
 from qiskit_algorithms.state_fidelities import ComputeUncompute
+from qiskit.providers import BackendV2
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
@@ -64,11 +68,9 @@ from qiskit_ibm_runtime import (
     SamplerV1 as RuntimeSamplerV1,
     IBMBackend,
 )
-from qiskit_ibm_runtime.fake_provider.local_service import QiskitRuntimeLocalService
 
 from helper_functions import (
     retrieve_primitives,
-    Backend_type,
     handle_session,
     retrieve_backend_info,
     simulate_pulse_schedule,
@@ -322,21 +324,16 @@ class GateTarget(BaseTarget):
 
 class QiskitBackendInfo:
     """
-    Class to store information on Qiskit backend
+    Class to store information on Qiskit backend (can also generate some dummy information for the case of no backend)
     """
 
     def __init__(
         self,
-        backend: Backend_type,
-        instruction_durations_dict: Optional[Dict[str, float]] = None,
+        backend: Optional[BackendV2] = None,
+        custom_instruction_durations: Optional[InstructionDurations] = None,
     ):
-        (
-            self.dt,
-            self.coupling_map,
-            self.basis_gates,
-            self.instruction_durations,
-        ) = retrieve_backend_info(backend, instruction_durations_dict)
         self.backend = backend
+        self._instruction_durations = custom_instruction_durations
 
     def custom_transpile(
         self,
@@ -349,6 +346,10 @@ class QiskitBackendInfo:
         """
         Custom transpile function to transpile the quantum circuit
         """
+        if self.backend is None and self.instruction_durations is None and scheduling:
+            raise QiskitError(
+                "Backend or instruction durations should be provided for scheduling"
+            )
         if remove_final_measurements:
             if isinstance(qc, QuantumCircuit):
                 circuit = qc.remove_final_measurements(inplace=False)
@@ -370,6 +371,46 @@ class QiskitBackendInfo:
             optimization_level=optimization_level,
             initial_layout=initial_layout,
             dt=self.dt,
+        )
+
+    @property
+    def coupling_map(self):
+        """
+        Retrieve the coupling map of the backend (default is fully connected if backend is None)
+        """
+        return (
+            self.backend.coupling_map
+            if self.backend is not None
+            else CouplingMap.from_full(5)
+        )
+
+    @property
+    def basis_gates(self):
+        """
+        Retrieve the basis gates of the backend (default is ['x', 'sx', 'cx', 'rz', 'measure', 'reset'])
+        """
+        return (
+            self.backend.operation_names
+            if self.backend is not None
+            else ["x", "sx", "cx", "rz", "measure", "reset"]
+        )
+
+    @property
+    def dt(self):
+        """
+        Retrieve the time unit of the backend (default is 1e-9)
+        """
+        return self.backend.dt if self.backend is not None else 1e-9
+
+    @property
+    def instruction_durations(self):
+        """
+        Retrieve the instruction durations of the backend (default is None)
+        """
+        return (
+            self.backend.instruction_durations
+            if self.backend is not None
+            else self._instruction_durations
         )
 
 
@@ -402,28 +443,38 @@ class BaseQuantumEnvironment(ABC, Env):
         self._physical_target_qubits = training_config.target.get(
             "physical_qubits", None
         )
-        gate = training_config.target.get("gate", None)
-        gate_name_base = gate.name if gate is not None else "G"
-        gate_name_base += "_cal"
-        self.custom_gates = []
-        for param_vec in self.parameters:
-            if not isinstance(param_vec, ParameterVector):
-                self.custom_gates.append(
-                    Gate(
-                        gate_name_base + str(0),
-                        len(self.physical_target_qubits),
-                        params=self.parameters.params,
-                    )
-                )
-                break
-            else:
-                self.custom_gates.append(
-                    Gate(
-                        gate_name_base + param_vec.name[-1],
-                        len(self.physical_target_qubits),
-                        params=param_vec.params,
-                    )
-                )
+
+        # gate = training_config.target.get("gate", None)
+        # gate_name_base = gate.name if gate is not None else "G"
+        # gate_name_base += "_cal"
+        # self.custom_gates = []
+        # for param_vec in self.parameters:
+        #     if not isinstance(param_vec, ParameterVector):
+        #         self.custom_gates.append(
+        #             Gate(
+        #                 gate_name_base + str(0),
+        #                 len(self.physical_target_qubits),
+        #                 params=self.parameters.params,
+        #             )
+        #         )
+        #         break
+        #     else:
+        #         self.custom_gates.append(
+        #             Gate(
+        #                 gate_name_base + param_vec.name[-1],
+        #                 len(self.physical_target_qubits),
+        #                 params=param_vec.params,
+        #             )
+        #         )
+        # if self.backend is not None:
+        #     for custom_gate in self.custom_gates:
+        #         if custom_gate.name not in self.backend.operation_names:
+        #             self.backend.target.add_instruction(
+        #                 custom_gate,
+        #                 properties={
+        #                     tuple(self.physical_target_qubits): InstructionProperties()
+        #                 },
+        #             )
 
         self._physical_neighbor_qubits = retrieve_neighbor_qubits(
             self.backend_info.coupling_map, self.physical_target_qubits
@@ -441,15 +492,6 @@ class BaseQuantumEnvironment(ABC, Env):
             self.define_target_and_circuits()
         )
         self.abstraction_level = "pulse" if self.circuits[0].calibrations else "circuit"
-        if self.backend is not None and self.abstraction_level == "pulse":
-            for custom_gate in self.custom_gates:
-                if custom_gate.name not in self.backend.operation_names:
-                    self.backend.target.add_instruction(
-                        custom_gate,
-                        properties={
-                            tuple(self.physical_target_qubits): InstructionProperties()
-                        },
-                    )
         self._estimator, self._sampler = retrieve_primitives(
             self.backend,
             self.config.backend_config,

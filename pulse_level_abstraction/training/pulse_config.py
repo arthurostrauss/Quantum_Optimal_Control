@@ -4,13 +4,13 @@ import warnings
 from typing import Optional, Dict, List
 import os
 
-from qiskit.transpiler import Layout
+from qiskit.transpiler import Layout, Target, InstructionProperties
 from qiskit_experiments.calibration_management import (
     FixedFrequencyTransmon,
     EchoedCrossResonance,
 )
 from helper_functions import (
-    load_q_env_from_yaml_file,
+    to_python_identifier,
     perform_standard_calibrations,
     select_backend,
     new_params_ecr,
@@ -18,7 +18,7 @@ from helper_functions import (
     get_q_env_config,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
-from qiskit.circuit import ParameterVector, Gate
+from qiskit.circuit import ParameterVector, Gate, Parameter
 from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
 from qiskit.providers import BackendV1, BackendV2, BackendV2Converter
 from qiskit_experiments.calibration_management import Calibrations
@@ -121,6 +121,35 @@ def custom_schedule(
     return custom_sched
 
 
+def validate_pulse_kwargs(
+    **kwargs,
+) -> tuple[Optional[Gate], list[int], BackendV1 | BackendV2]:
+    """
+    Validate the kwargs passed to the parametrized circuit function for pulse level calibration
+    """
+    if "target" not in kwargs or "backend" not in kwargs:
+        raise ValueError("Missing target and backend in kwargs.")
+    target, backend = kwargs["target"], kwargs["backend"]
+    assert isinstance(
+        backend, (BackendV1, BackendV2)
+    ), "Backend should be a valid Qiskit Backend instance"
+    assert isinstance(
+        target, dict
+    ), "Target should be a dictionary with 'physical_qubits' keys."
+
+    gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
+    if gate is not None:
+        assert isinstance(gate, Gate), "Gate should be a valid Qiskit Gate instance"
+    assert isinstance(
+        physical_qubits, list
+    ), "Physical qubits should be a list of integers"
+    assert all(
+        isinstance(qubit, int) for qubit in physical_qubits
+    ), "Physical qubits should be a list of integers"
+
+    return gate, physical_qubits, backend
+
+
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: ParameterVector, tgt_register: QuantumRegister, **kwargs
 ) -> None:
@@ -130,28 +159,43 @@ def apply_parametrized_circuit(
     :param qc: Quantum Circuit instance to add the gate on
     :param params: Parameters of the custom Gate
     :param tgt_register: Quantum Register formed of target qubits
+    :param kwargs: Additional arguments to be passed to the function (here target dict and backend object)
     :return:
     """
-    target, backend = kwargs["target"], kwargs["backend"]
-    gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
 
-    # parametrized_gate = Gate(
-    #     f"{gate.name if gate is not None else 'G'}_cal",
-    #     len(tgt_register),
-    #     params=params.params,
-    # )
+    gate, physical_qubits, backend = validate_pulse_kwargs(**kwargs)
+    parametrized_gate_name = f"{gate.name if gate is not None else 'G'}_cal"
 
-    parametrized_gate_name = (
-        f"{gate.name if gate is not None else 'G'}_cal" + params.name[-1]
+    param_vec_name = params.name
+    if param_vec_name[-1].isdigit():
+        parametrized_gate_name += param_vec_name[-1]
+
+    # Create a custom gate with the same name as the original gate
+    # Create new set of parameters that are valid Python identifiers (no brackets from the ParameterVector)
+    params2 = [Parameter(to_python_identifier(p.name)) for p in params]
+    parametrized_gate = Gate(
+        parametrized_gate_name,
+        len(physical_qubits),
+        params=params2,
     )
-    parametrized_gate: Gate = backend.target.operation_from_name(parametrized_gate_name)
+
+    # Create custom schedule with original parameters
     parametrized_schedule = custom_schedule(
         backend=backend,
         physical_qubits=physical_qubits,
-        params=parametrized_gate.params,
+        params=params,
     )
-    qc.add_calibration(parametrized_gate, physical_qubits, parametrized_schedule)
+
+    # Add the custom calibration to the circuit with current parameters
     qc.append(parametrized_gate, tgt_register)
+    qc.add_calibration(
+        parametrized_gate_name, physical_qubits, parametrized_schedule, params.params
+    )
+
+    # Add the custom calibration to the backend for enabling transpilation with the custom gate
+    if parametrized_gate_name not in backend.operation_names:
+        target: Target = backend.target
+        target.add_instruction(parametrized_gate, {tuple(physical_qubits): None})
 
 
 def get_backend(

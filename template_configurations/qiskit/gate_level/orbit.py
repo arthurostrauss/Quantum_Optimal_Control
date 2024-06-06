@@ -3,7 +3,7 @@ from qiskit_experiments.library.randomized_benchmarking import StandardRB, Inter
 from qiskit.circuit import Gate, ParameterVector
 from qiskit.primitives import BaseSamplerV2, BaseSampler
 from qiskit.quantum_info import Clifford, random_clifford, Operator
-from quantumenvironment import QuantumEnvironment, GateTarget
+from quantumenvironment import QuantumEnvironmentV2, GateTarget
 from gymnasium.spaces import Box
 import numpy as np
 from typing import Callable
@@ -43,7 +43,7 @@ class ORBIT:
         self,
         rb_length: int,
         num_sequences: int,
-        q_env: QuantumEnvironment,
+        q_env: QuantumEnvironmentV2,
         use_interleaved: bool = False,
     ):
         self.rb_length = rb_length
@@ -87,8 +87,8 @@ class ORBIT:
     def orbit_circuits(self):
 
         circuits, ref_circuits = [], []
-        circuit = self.q_env.circuit_truncations[0]
-        circuit_ref = self.q_env.baseline_truncations[0]
+        circuit = self.q_env.circuits[self.q_env.trunc_index]
+        circuit_ref = self.q_env.baseline_circuits[self.q_env.trunc_index]
 
         for seq in range(self.num_sequences):
             run_qc = QuantumCircuit(*circuit.qregs)

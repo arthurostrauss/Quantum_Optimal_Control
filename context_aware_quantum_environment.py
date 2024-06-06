@@ -811,16 +811,6 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
             )
             for i in range(circ_reg.size)
         }
-        # mapping = {
-        #     self.circ_nn_register[i]: nn_registers[i]
-        #     for i in range(self.circ_nn_register.size)
-        # } | {
-        #         self.circ_tgt_register[i]: tgt_register[i]
-        #         for i in range(self.circ_tgt_register.size)
-        #     } | {
-        #         self.circ_anc_register[i]: anc_registers[i]
-        #         for i in range(self.circ_anc_register.size)
-        #     }
 
         # Initialize custom and baseline circuits for each target gate (by default only contains target qubits)
         custom_circuits, baseline_circuits = [
@@ -866,7 +856,7 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
                             baseline_circuits[i].add_register(mapping[qubit])
                             custom_circuits[i].add_register(mapping[qubit])
                             if (
-                                self.circuit_context.layout is not None
+                                self.circuit_context.layout.final_layout is not None
                             ):  # Update physical layout
                                 layouts[i].add(
                                     mapping[qubit][0],
@@ -912,8 +902,8 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
                         except TypeError:
                             raise TypeError("Failed to call parametrized_circuit_func")
                         counts += 1
-            custom_circuits[i] = remove_unused_wires(custom_circuits[i])
-            baseline_circuits[i] = remove_unused_wires(baseline_circuits[i])
+            # custom_circuits[i] = remove_unused_wires(custom_circuits[i])
+            # baseline_circuits[i] = remove_unused_wires(baseline_circuits[i])
 
         target = GateTarget(
             self.config.target["gate"],
