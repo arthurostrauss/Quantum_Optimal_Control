@@ -163,8 +163,11 @@ def get_circuit_context(
     print(circuit)
     return circuit
 
-def get_instruction_durations(backend: BackendV2):
-    if backend is None or not backend.instruction_durations.duration_by_name_qubits:
+def get_instruction_durations(backend: Optional[BackendV2] = None):
+
+    if backend is not None and backend.instruction_durations.duration_by_name_qubits:
+        instruction_durations = backend.instruction_durations
+    else:
         # User input for default gate durations
         single_qubit_gate_time = 1.6e-7
         two_qubit_gate_time = 5.3e-7
@@ -197,10 +200,7 @@ def get_instruction_durations(backend: BackendV2):
         instruction_durations.dt = 2.2222222222222221e-10
         instruction_durations.duration_by_name_qubits = instruction_durations_dict
         
-        return instruction_durations
-
-    elif backend.instruction_durations.duration_by_name_qubits:
-        return backend.instruction_durations
+    return instruction_durations
 
 
 
