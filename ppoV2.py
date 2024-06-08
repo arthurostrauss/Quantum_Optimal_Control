@@ -17,11 +17,9 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 from torch.distributions import Normal
 from agent import ActorNetwork, CriticNetwork, Agent
-from quantumenvironment import QuantumEnvironment, QuantumEnvironmentV2
-from context_aware_quantum_environment import (
-    ContextAwareQuantumEnvironment,
-    ContextAwareQuantumEnvironmentV2,
-)
+from base_q_env import BaseQuantumEnvironment
+from quantumenvironment import QuantumEnvironment
+from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 
 import sys
 import logging
@@ -34,10 +32,9 @@ logging.basicConfig(
 )
 
 QUANTUM_ENVIRONMENT = Union[
+    BaseQuantumEnvironment,
     QuantumEnvironment,
-    QuantumEnvironmentV2,
     ContextAwareQuantumEnvironment,
-    ContextAwareQuantumEnvironmentV2,
 ]
 
 

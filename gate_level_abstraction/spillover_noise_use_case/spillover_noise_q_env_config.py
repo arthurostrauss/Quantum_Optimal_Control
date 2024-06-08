@@ -189,11 +189,11 @@ def get_instruction_durations(backend: Optional[BackendV2] = None):
 
         n_qubits = backend.num_qubits if backend else 10
         instruction_durations_dict = generate_default_instruction_durations_dict(
-            n_qubits, 
-            single_qubit_gate_time, 
-            two_qubit_gate_time, 
-            gates_done_by_software, 
-            circuit_gate_times
+            n_qubits=n_qubits, 
+            single_qubit_gate_time=single_qubit_gate_time, 
+            two_qubit_gate_time=two_qubit_gate_time, 
+            circuit_gate_times=circuit_gate_times,
+            gates_done_by_software=gates_done_by_software, 
         )
 
         instruction_durations = InstructionDurations()

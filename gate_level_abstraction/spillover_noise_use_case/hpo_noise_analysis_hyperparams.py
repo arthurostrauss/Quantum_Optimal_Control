@@ -14,10 +14,8 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 
 # Assuming helper_functions.py is correctly placed and contains the necessary functions
-from helper_functions import (
-    get_baseline_fid_from_phi_gamma,
-    load_from_pickle,
-)
+from helper_functions import load_from_pickle
+from noise_utils.utils import get_baseline_fid_from_phi_gamma
 
 import logging
 

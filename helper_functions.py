@@ -93,7 +93,7 @@ from qiskit_experiments.calibration_management.basis_gate_library import (
 from qiskit_algorithms.state_fidelities import ComputeUncompute
 
 from itertools import permutations, chain
-from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any
+from typing import Iterable, Optional, Tuple, List, Union, Dict, Sequence, Callable, Any
 import yaml
 
 import numpy as np
@@ -1750,77 +1750,6 @@ def get_hardware_runtime_cumsum(
         * np.array(total_shots)
     )
 
-def get_baseline_fid_from_phi_gamma(param_tuple):
-    # prevent key errors with rounding
-    param_tuple = (param_tuple[0], round(param_tuple[1], 2))
-
-    if any([param_tuple[0] == 0, param_tuple[1] == 0]):
-        return 1.0
-
-    baseline_gate_fidelities = {
-        (0.7853981633974483, 0.01): 0.9999845788223948,
-        (0.7853981633974483, 0.02): 0.9999383162408302,
-        (0.7853981633974483, 0.03): 0.9998612151090003,
-        (0.7853981633974483, 0.04): 0.9997532801828659,
-        (0.7853981633974483, 0.05): 0.9996145181203613,
-        (0.7853981633974483, 0.06): 0.999444937480985,
-        (0.7853981633974483, 0.07): 0.9992445487252688,
-        (0.7853981633974483, 0.08): 0.9990133642141359,
-        (0.7853981633974483, 0.09): 0.9987513982081349,
-        (0.7853981633974483, 0.1): 0.9984586668665639,
-        (0.7853981633974483, 0.11): 0.9981351882464706,
-        (0.7853981633974483, 0.12): 0.9977809823015402,
-        (0.7853981633974483, 0.13): 0.9973960708808629,
-        (0.7853981633974483, 0.14): 0.9969804777275899,
-        (0.7853981633974483, 0.15): 0.9965342284774632,
-        (1.5707963267948966, 0.01): 0.9999383162408302,
-        (1.5707963267948966, 0.02): 0.9997532801828658,
-        (1.5707963267948966, 0.03): 0.9994449374809848,
-        (1.5707963267948966, 0.04): 0.9990133642141359,
-        (1.5707963267948966, 0.05): 0.9984586668665638,
-        (1.5707963267948966, 0.06): 0.9977809823015402,
-        (1.5707963267948966, 0.07): 0.9969804777275897,
-        (1.5707963267948966, 0.08): 0.9960573506572388,
-        (1.5707963267948966, 0.09): 0.9950118288582785,
-        (1.5707963267948966, 0.1): 0.9938441702975689,
-        (1.5707963267948966, 0.11): 0.9925546630773869,
-        (1.5707963267948966, 0.12): 0.9911436253643442,
-        (1.5707963267948966, 0.13): 0.9896114053108829,
-        (1.5707963267948966, 0.14): 0.9879583809693737,
-        (1.5707963267948966, 0.15): 0.9861849601988382,
-        (2.356194490192345, 0.01): 0.9998612151090003,
-        (2.356194490192345, 0.02): 0.9994449374809851,
-        (2.356194490192345, 0.03): 0.998751398208135,
-        (2.356194490192345, 0.04): 0.9977809823015402,
-        (2.356194490192345, 0.05): 0.9965342284774632,
-        (2.356194490192345, 0.06): 0.9950118288582788,
-        (2.356194490192345, 0.07): 0.9932146285882479,
-        (2.356194490192345, 0.08): 0.9911436253643444,
-        (2.356194490192345, 0.09): 0.9887999688823954,
-        (2.356194490192345, 0.1): 0.9861849601988384,
-        (2.356194490192345, 0.11): 0.9833000510084537,
-        (2.356194490192345, 0.12): 0.9801468428384714,
-        (2.356194490192345, 0.13): 0.9767270861595005,
-        (2.356194490192345, 0.14): 0.9730426794137726,
-        (2.356194490192345, 0.15): 0.9690956679612422,
-        (3.141592653589793, 0.01): 0.9997532801828659,
-        (3.141592653589793, 0.02): 0.9990133642141359,
-        (3.141592653589793, 0.03): 0.99778098230154,
-        (3.141592653589793, 0.04): 0.9960573506572388,
-        (3.141592653589793, 0.05): 0.9938441702975689,
-        (3.141592653589793, 0.06): 0.9911436253643443,
-        (3.141592653589793, 0.07): 0.9879583809693738,
-        (3.141592653589793, 0.08): 0.9842915805643158,
-        (3.141592653589793, 0.09): 0.9801468428384714,
-        (3.141592653589793, 0.1): 0.9755282581475768,
-        (3.141592653589793, 0.11): 0.970440384477113,
-        (3.141592653589793, 0.12): 0.9648882429441258,
-        (3.141592653589793, 0.13): 0.9588773128419905,
-        (3.141592653589793, 0.14): 0.9524135262330098,
-        (3.141592653589793, 0.15): 0.9455032620941839,
-    }
-    return baseline_gate_fidelities[param_tuple]
-
 
 def retrieve_backend_info(
     backend: Optional[Backend_type] = None,
@@ -1906,7 +1835,29 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     )
     return qc.data.count(tgt_instruction)
 
-def generate_default_instruction_durations_dict(n_qubits, single_qubit_gate_time, two_qubit_gate_time, gates_done_by_software, circuit_gate_times):
+def generate_default_instruction_durations_dict(
+        n_qubits: int, 
+        single_qubit_gate_time: float, 
+        two_qubit_gate_time: float,  
+        circuit_gate_times: Dict,
+        gates_done_by_software: Optional[List] = None,
+    ):
+    """
+    Generates a dictionary of default instruction durations for each gate and qubit combination. This allows for calculating the total execution time of a quantum circuit.
+    In particular, the metric of hardware runtime becomes relevant to benchmark the performance of different methods for the same calibration task.
+
+    Args:
+        n_qubits (int): The number of qubits in the quantum circuit.
+        single_qubit_gate_time (float): The duration of a single-qubit gate.
+        two_qubit_gate_time (float): The duration of a two-qubit gate.
+        circuit_gate_times (dict): A dictionary mapping gate names to their respective durations.
+        gates_done_by_software (list): A list of gates that are performed by software and have zero duration.
+
+    Returns:
+        dict: A dictionary where the keys are tuples of the form (gate, qubits) and the values are tuples of the form (duration, unit).
+              The duration is the default duration for the gate and qubit combination, and the unit is the time unit (e.g., 's' for seconds).
+
+    """
     default_instruction_durations_dict = {}
     
     # Identify single-qubit and two-qubit gates
@@ -1914,7 +1865,7 @@ def generate_default_instruction_durations_dict(n_qubits, single_qubit_gate_time
     two_qubit_gates = []
     
     for gate in circuit_gate_times:
-        if gate in gates_done_by_software:
+        if gates_done_by_software is not None and gate in gates_done_by_software:
             continue
         if gate == 'measure' or gate == 'reset':
             continue
@@ -1935,18 +1886,16 @@ def generate_default_instruction_durations_dict(n_qubits, single_qubit_gate_time
                 if qubit1 != qubit2:
                     default_instruction_durations_dict[(gate, (qubit1, qubit2))] = (two_qubit_gate_time, 's')
     
-    # Measure gates
+    # Reset and Measure operations
     for qubit in range(n_qubits):
         default_instruction_durations_dict[('measure', (qubit,))] = (circuit_gate_times['measure'], 's')
-    
-    # Reset gates
-    for qubit in range(n_qubits):
         default_instruction_durations_dict[('reset', (qubit,))] = (circuit_gate_times['reset'], 's')
     
     # Gates done by software
-    for gate in gates_done_by_software:
-        for qubit in range(n_qubits):
-            default_instruction_durations_dict[(gate, (qubit,))] = (0.0, 's')
+    if gates_done_by_software is not None:
+        for gate in gates_done_by_software:
+            for qubit in range(n_qubits):
+                default_instruction_durations_dict[(gate, (qubit,))] = (0.0, 's')
     
     return default_instruction_durations_dict
 
