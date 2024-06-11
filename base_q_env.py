@@ -76,6 +76,7 @@ from helper_functions import (
     simulate_pulse_schedule,
     retrieve_neighbor_qubits,
     substitute_target_gate,
+    get_hardware_runtime_single_circuit,
 )
 from qconfig import (
     QiskitConfig,
@@ -519,6 +520,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._step_tracker = 0
         self._inside_trunc_tracker = 0
         self._total_shots = []
+        self._hardware_runtime = []
         self._max_return = 0
         self._episode_ended = False
         self._episode_tracker = 0
@@ -591,25 +593,31 @@ class BaseQuantumEnvironment(ABC, Env):
 
         if self.do_benchmark():  # Benchmarking or fidelity access
             fids = self.compute_benchmarks(params)
-        if self.config.reward_method == "fidelity":
-            return fids
-        elif self.config.reward_method == "channel":
-            self._pubs, total_shots = self.channel_reward_pubs(qc, params)
-        elif self.config.reward_method == "state":
-            self._pubs, total_shots = self.state_reward_pubs(qc, params)
-
-        elif self.config.reward_method == "cafe":
-            self._pubs, total_shots = self.cafe_reward_pubs(qc, params)
-
-        elif self.config.reward_method == "xeb":
-            self._pubs, total_shots = self.xeb_reward_pubs(qc, params)
-
-        elif self.config.reward_method == "orbit":
-            self._pubs, total_shots = self.orbit_reward_pubs(qc, params)
+        
+        reward_methods = {
+            "channel": self.channel_reward_pubs,
+            "state": self.state_reward_pubs,
+            "cafe": self.cafe_reward_pubs,
+            "xeb": self.xeb_reward_pubs,
+            "orbit": self.orbit_reward_pubs
+        }
+        # Get the reward method from the configuration
+        reward_method = self.config.reward_method
+        # Check if the reward method exists in the dictionary
+        if reward_method in reward_methods:
+            if reward_method == "fidelity":
+                return fids
+            else:
+                self._pubs, total_shots = reward_methods[reward_method](qc, params)
         else:
-            raise NotImplementedError("Reward method not implemented")
+            raise NotImplementedError(f"Reward method not implemented. Only ({list(reward_methods.keys())}) are supported.")
 
         self._total_shots.append(total_shots)
+        self._hardware_runtime.append(
+            get_hardware_runtime_single_circuit(qc, self.config.backend_config.instruction_durations_dict.duration_by_name_qubits) 
+            * self.total_shots[-1]
+        )
+        print("Hardware runtime taken:", sum(self.hardware_runtime))
 
         counts = (
             self._session_counts
@@ -1343,6 +1351,10 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def total_shots(self):
         return self._total_shots
+    
+    @property
+    def hardware_runtime(self):
+        return self._hardware_runtime
 
     @property
     def n_actions(self):

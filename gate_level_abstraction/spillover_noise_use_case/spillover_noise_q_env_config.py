@@ -1,29 +1,28 @@
 from __future__ import annotations
-
+from typing import Optional, Dict, List
 import warnings
-from typing import Optional, Dict, List, Union
 import os
 import numpy as np
-from qiskit.transpiler import Layout
-
 from helper_functions import (
     generate_default_instruction_durations_dict,
     select_backend,
     get_q_env_config,
 )
 from qiskit import QuantumCircuit, QuantumRegister, transpile
+from qiskit.quantum_info import Operator
 from qiskit.circuit import ParameterVector
-from qiskit_ibm_runtime import IBMBackend as RuntimeBackend
-from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
+from qiskit.providers import BackendV2
+import qiskit_aer.noise as noise
+from qiskit_aer import AerSimulator
+from qiskit.quantum_info import Operator
+from qiskit.circuit.library import RXGate, IGate, CRXGate
+from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.transpiler import InstructionDurations
-from qiskit.providers import BackendV1, BackendV2
+from qiskit.transpiler import CouplingMap    
 
-from qconfig import QiskitConfig, QEnvConfig
-from quantumenvironment import QuantumEnvironment
-from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-config_file_name = "q_env_gate_config.yml"
+config_file_name = "noise_q_env_gate_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
 
 
@@ -38,11 +37,10 @@ def apply_parametrized_circuit(
     :param q_reg: Quantum Register formed of target qubits
     :return:
     """
-    target, backend = kwargs["target"], kwargs["backend"]
-    gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
-    my_qc = QuantumCircuit(q_reg, name=f"{gate.name if gate is not None else 'G'}_cal")
-    # optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-    optimal_params = np.pi * np.zeros(len(params))
+    target = kwargs["target"]
+    my_qc = QuantumCircuit(q_reg, name=f"{target['gate'].name}_cal")
+    optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
+    # optimal_params = np.pi * np.zeros(len(params))
 
     my_qc.u(
         optimal_params[0] + params[0],
@@ -99,6 +97,34 @@ def get_backend(
         calibration_files,
     )
 
+    ### Random noise with Kraus operators ###
+    # dim = 4  # For a 4x4 system (e.g., 2 qubits)
+    # num_ops = 3  # Number of Kraus operators
+    # epsilon = 0.01  # Noise strength parameter
+    # kraus_ops_eps = generate_random_cptp_map(dim, num_ops, epsilon)
+    # noise_model = NoiseModel()
+    # noise_model.add_all_qubit_quantum_error(kraus_ops_eps, ['rzx'])
+
+    ### Custom spillover noise model ###
+    global phi, gamma, custom_rx_gate_label
+
+    noise_model = noise.NoiseModel()
+    coherent_crx_noise = noise.coherent_unitary_error(CRXGate(gamma * phi))
+    noise_model.add_quantum_error(coherent_crx_noise, [custom_rx_gate_label], [0, 1])
+    noise_model.add_basis_gates(["unitary"])
+    print("\n", noise_model, "\n")
+
+    generic_backend = GenericBackendV2(
+        num_qubits=2,
+        dtm=2.2222 * 1e-10,
+        basis_gates=["cx", "id", "rz", "sx", "x", "crx"],
+    )
+    # backend = AerSimulator.from_backend(generic_backend, noise_model=noise_model)
+    backend = AerSimulator(noise_model=noise_model) 
+    #     coupling_map=CouplingMap.from_full(5),
+    #     method="density_matrix"
+    # )
+
     if backend is None:
         # TODO: Add here your custom backend
         # For now use FakeJakartaV2 as a safe working custom backend
@@ -111,33 +137,41 @@ def get_backend(
     return backend
 
 
+# Custom spillover noise model
+phi = np.pi / 4  # rotation angle
+gamma = 0.01  # spillover rate for the CRX gate
+custom_rx_gate_label = "custom_kron(rx,ident)_gate"
+
+
 def get_circuit_context(
     backend: Optional[BackendV2], initial_layout: Optional[List[int]] = None
 ):
     """
     Define the context of the circuit to be used in the training
     :param backend: Backend instance
-    :param initial_layout: Initial layout of the qubits
     :return: QuantumCircuit instance
     """
-    circuit = QuantumCircuit(5)
-    circuit.h(0)
-    for i in range(1, 5):
-        circuit.cx(0, i)
+    global phi, gamma, custom_rx_gate_label
+
+    circuit = QuantumCircuit(2)
+    rx_op = Operator(RXGate(phi))
+    identity_op = Operator(IGate())
+    rx_op_2q = identity_op.tensor(rx_op)
+    circuit.unitary(rx_op_2q, [0, 1], label=custom_rx_gate_label)
+
+    circuit.cx(0, 1)
 
     if backend is not None and backend.target.has_calibration("x", (0,)):
-        circuit = transpile(
-            circuit,
-            backend,
-            optimization_level=1,
-            seed_transpiler=42,
-        )
+        circuit = transpile(circuit, backend, optimization_level=1, seed_transpiler=42)
     print("Circuit context")
-    circuit.draw("mpl")
+    print(circuit)
     return circuit
 
-def get_instruction_durations(backend: BackendV2):
-    if backend is None or not backend.instruction_durations.duration_by_name_qubits:
+def get_instruction_durations(backend: Optional[BackendV2] = None):
+
+    if backend is not None and backend.instruction_durations.duration_by_name_qubits:
+        instruction_durations = backend.instruction_durations
+    else:
         # User input for default gate durations
         single_qubit_gate_time = 1.6e-7
         two_qubit_gate_time = 5.3e-7
@@ -170,10 +204,8 @@ def get_instruction_durations(backend: BackendV2):
         instruction_durations.dt = 2.2222222222222221e-10
         instruction_durations.duration_by_name_qubits = instruction_durations_dict
         
-        return instruction_durations
+    return instruction_durations
 
-    elif backend.instruction_durations.duration_by_name_qubits:
-        return backend.instruction_durations
 
 
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
