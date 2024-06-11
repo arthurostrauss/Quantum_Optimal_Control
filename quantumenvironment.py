@@ -164,9 +164,13 @@ class QuantumEnvironment(Env):
             self.circuit_truncations[0],
         )
         if not isinstance(self.sampler, BaseSamplerV1):
-            self.fidelity_checker = ComputeUncompute(
-                RuntimeSamplerV1(session=self.estimator.session)
-            )
+            if hasattr(self.estimator, "session"):
+                self.fidelity_checker = ComputeUncompute(
+                    RuntimeSamplerV1(session=self.estimator.session)
+                )
+            else:
+                # TODO: Account for BackendSampler vs AerSampler
+                self.fidelity_checker = None
         else:
             self.fidelity_checker = ComputeUncompute(self._sampler)
         # Retrieve physical qubits forming the target register (and additional qubits for the circuit context)
@@ -1243,27 +1247,29 @@ class QuantumEnvironmentV2(BaseQuantumEnvironment):
         else:
             pass
 
-    def compute_benchmarks(self, params: np.array) -> np.array:
+    def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: List of Action vectors to execute on quantum system
         :return: None
         """
-
-        qc = self.circuits[self.trunc_index].copy()
-        n_actions = params.shape[-1]
+        new_qc = qc.copy()
         if isinstance(self.target, StateTarget):
             key, cls = "dm", DensityMatrix
             benchmark = state_fidelity
             method_str = "statevector" if self.backend is None else "density_matrix"
             method_qc = (
-                qc.save_statevector if self.backend is None else qc.save_density_matrix
+                new_qc.save_statevector
+                if self.backend is None
+                else new_qc.save_density_matrix
             )
         else:
             key, cls = "gate", Operator
             benchmark = average_gate_fidelity
             method_str = "unitary" if self.backend is None else "superop"
-            method_qc = qc.save_unitary if self.backend is None else qc.save_superop
+            method_qc = (
+                new_qc.save_unitary if self.backend is None else new_qc.save_superop
+            )
 
         target: DensityMatrix | Operator = cls(getattr(self.target, key))
 
@@ -1275,13 +1281,15 @@ class QuantumEnvironmentV2(BaseQuantumEnvironment):
                     np.random.normal(
                         self.mean_action,
                         self.std_action,
-                        size=(self.config.benchmark_batch_size, n_actions),
+                        size=(self.config.benchmark_batch_size, self.n_actions),
                     ),
                     self.action_space.low,
                     self.action_space.high,
                 )
 
-                qc_list = [qc.assign_parameters(angle_set) for angle_set in angle_sets]
+                qc_list = [
+                    new_qc.assign_parameters(angle_set) for angle_set in angle_sets
+                ]
                 print("Starting tomography...")
                 session = (
                     self.estimator.session
@@ -1322,11 +1330,11 @@ class QuantumEnvironmentV2(BaseQuantumEnvironment):
                     )
 
                 method_qc()
-                circ = transpile(qc, backend=aer_backend, optimization_level=0)
+                circ = transpile(new_qc, backend=aer_backend, optimization_level=0)
                 job = aer_backend.run(
                     circ,
                     False,
-                    [{self.parameters[j]: params[:, j] for j in range(n_actions)}],
+                    [{self.parameters[j]: params[:, j] for j in range(self.n_actions)}],
                 )
                 result = job.result()
                 output_states = [
@@ -1354,7 +1362,9 @@ class QuantumEnvironmentV2(BaseQuantumEnvironment):
                         :, 1, :, :
                     ]
                 else:
-                    qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
+                    qc_list = [
+                        new_qc.assign_parameters(angle_set) for angle_set in params
+                    ]
                     scheds = schedule(qc_list, backend=self.backend)
                     dt = self.backend.dt
                     durations = [sched.duration for sched in scheds]

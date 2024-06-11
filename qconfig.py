@@ -146,7 +146,7 @@ class RewardConfig:
         else:
             self.dfe = False
 
-            
+
 @dataclass
 class FidelityConfig(RewardConfig):
     """
@@ -206,8 +206,6 @@ class ORBITConfig(RewardConfig):
     num_sequences: int = 3
     depth: int = 1
     use_interleaved: bool = False
-
-
 
 
 def default_reward_config():

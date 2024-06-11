@@ -25,7 +25,7 @@ from qiskit.primitives import (
     BaseEstimatorV1,
     BaseEstimatorV2,
     BackendSamplerV2,
-    BackendEstimatorV2, 
+    BackendEstimatorV2,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit_aer import AerSimulator
@@ -615,6 +615,7 @@ def new_params_ecr(
     :param include_baseline: Include baseline calibration in the parameters
     :return: Dictionary of updated ECR parameters
     """
+    qubits = tuple(qubits)
     new_params, available_features, _, _ = get_ecr_params(backend, qubits)
 
     if keep_symmetry:  # Maintain symmetry between the two GaussianSquare pulses
@@ -941,17 +942,22 @@ def retrieve_primitives(
         estimator = StatevectorEstimator()
 
     elif isinstance(backend, RuntimeBackend):
-        # TODO: Next update: will switch to keyword mode instead of session
+        # TODO: Next update: will switch to keyword 'mode' instead of 'session'
         estimator = RuntimeEstimatorV2(
             session=Session(backend=backend),
             options=estimator_options,
         )
         sampler = RuntimeSamplerV2(session=estimator.session)
+
+    # elif isinstance(backend, QMBackend):
+    #     estimator = QMEstimator(backend=backend, options=estimator_options)
+    #     sampler = QMSampler(backend=backend)
     else:
         estimator = BackendEstimatorV2(backend=backend, options=estimator_options)
         sampler = BackendSamplerV2(backend=backend)
 
     return estimator, sampler
+
 
 def substitute_target_gate(
     circuit: QuantumCircuit,
@@ -975,6 +981,7 @@ def substitute_target_gate(
         else:
             qc.append(custom_gate, instruction.qubits)
     return qc
+
 
 def substitute_target_gate(
     circuit: QuantumCircuit,
@@ -1118,9 +1125,13 @@ def select_backend(
             # Fake backend initialization (Aer Simulator)
             try:
                 if not use_dynamics:
-                    backend = FakeProviderForBackendV2().backend(backend_name)
+                    backend = FakeProviderForBackendV2().backend(
+                        backend_name if backend_name is not None else "fake_jakarta"
+                    )
                 else:
-                    backend = FakeProvider().get_backend(backend_name)
+                    backend = FakeProvider().get_backend(
+                        backend_name if backend_name is not None else "fake_jakarta"
+                    )
             except QiskitBackendNotFoundError:
                 raise QiskitError(
                     "Backend not found. Please check the backend name and try again."
@@ -1595,12 +1606,14 @@ def load_from_yaml_file(file_path: str):
         config = yaml.safe_load(f)
     return config
 
+
 def load_from_pickle(file_path: str):
-     """
-     Load object from pickle file
-     """
-     with open(file_path, "rb") as file:
-         return pickle.load(file)
+    """
+    Load object from pickle file
+    """
+    with open(file_path, "rb") as file:
+        return pickle.load(file)
+
 
 def save_to_pickle(obj, file_path: str):
     """
@@ -1608,6 +1621,7 @@ def save_to_pickle(obj, file_path: str):
     """
     with open(file_path, "wb") as file:
         pickle.dump(obj, file)
+
 
 def create_hpo_agent_config(
     trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
@@ -1622,17 +1636,22 @@ def create_hpo_agent_config(
                 if isinstance(values[0], int):
                     hyper_params[param] = trial.suggest_int(param, values[0], values[1])
                 elif isinstance(values[0], float):
-                    if param == "LR": # If learning rate, suggest in log scale
-                        hyper_params[param] = trial.suggest_float(param, values[0], values[1], log=True)
+                    if param == "LR":  # If learning rate, suggest in log scale
+                        hyper_params[param] = trial.suggest_float(
+                            param, values[0], values[1], log=True
+                        )
                     else:
-                        hyper_params[param] = trial.suggest_float(param, values[0], values[1])
+                        hyper_params[param] = trial.suggest_float(
+                            param, values[0], values[1]
+                        )
                 hyperparams_in_scope.append(param)
-            elif len(values) > 2:  # If values is a list of more than 2, choose from list and optimize
+            elif (
+                len(values) > 2
+            ):  # If values is a list of more than 2, choose from list and optimize
                 hyper_params[param] = trial.suggest_categorical(param, values)
                 hyperparams_in_scope.append(param)
         else:
             hyper_params[param] = values
-
 
     # Dynamically calculate batchsize from minibatch_size and num_minibatches
     print("MINIBATCH_SIZE", hyper_params["MINIBATCH_SIZE"])
@@ -1658,15 +1677,19 @@ def create_hpo_agent_config(
 
     return final_config, hyperparams_in_scope
 
+
 def get_hardware_runtime_single_circuit(
-        qc: QuantumCircuit, instruction_durations_dict: Dict[str, float]
+    qc: QuantumCircuit, instruction_durations_dict: Dict[str, float]
 ):
-    
     total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
 
     for instruction in qc.data:
         qubits_involved = instruction.qubits
-        gate_name = instruction.operation.name if not instruction.operation.label else instruction.operation.label
+        gate_name = (
+            instruction.operation.name
+            if not instruction.operation.label
+            else instruction.operation.label
+        )
 
         if len(qubits_involved) == 1:
             qbit1 = qubits_involved[0]
@@ -1675,7 +1698,7 @@ def get_hardware_runtime_single_circuit(
             if key in instruction_durations_dict:
                 gate_time = instruction_durations_dict[key][0]
                 total_time_per_qubit[qbit1] += gate_time
-            
+
         elif len(qubits_involved) == 2:
             qbit1, qbit2 = qubits_involved
             qbit1_index = qc.find_bit(qbit1).index
@@ -1687,17 +1710,22 @@ def get_hardware_runtime_single_circuit(
                     total_time_per_qubit[qbit] += gate_time
 
         else:
-            raise NotImplementedError('Hardware runtimes of 3-qubit gates are not implemented currently.')
- 
+            raise NotImplementedError(
+                "Hardware runtimes of 3-qubit gates are not implemented currently."
+            )
+
     # Find the maximum execution time among all qubits
     total_execution_time = (
         max(total_time_per_qubit.values())
-        + instruction_durations_dict[('reset', (0,))][0] # Reset time is the same for all qubits
-        + instruction_durations_dict[('measure', (0,))][0] # Reset time is the same for all qubits
+        + instruction_durations_dict[("reset", (0,))][
+            0
+        ]  # Reset time is the same for all qubits
+        + instruction_durations_dict[("measure", (0,))][
+            0
+        ]  # Reset time is the same for all qubits
     )
 
     return total_execution_time
-
 
 
 # def get_hardware_runtime_single_circuit(
@@ -1835,13 +1863,14 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     )
     return qc.data.count(tgt_instruction)
 
+
 def generate_default_instruction_durations_dict(
-        n_qubits: int, 
-        single_qubit_gate_time: float, 
-        two_qubit_gate_time: float,  
-        circuit_gate_times: Dict,
-        virtual_gates: Optional[List] = None,
-    ):
+    n_qubits: int,
+    single_qubit_gate_time: float,
+    two_qubit_gate_time: float,
+    circuit_gate_times: Dict,
+    virtual_gates: Optional[List] = None,
+):
     """
     Generates a dictionary of default instruction durations for each gate and qubit combination. This allows for calculating the total execution time of a quantum circuit.
     In particular, the metric of hardware runtime becomes relevant to benchmark the performance of different methods for the same calibration task.
@@ -1859,45 +1888,58 @@ def generate_default_instruction_durations_dict(
 
     """
     default_instruction_durations_dict = {}
-    
+
     # Identify single-qubit and two-qubit gates
     single_qubit_gates = []
     two_qubit_gates = []
-    
+
     for gate in circuit_gate_times:
         if virtual_gates is not None and gate in virtual_gates:
             continue
-        if gate == 'measure' or gate == 'reset':
+        if gate == "measure" or gate == "reset":
             continue
         if circuit_gate_times[gate] == single_qubit_gate_time:
             single_qubit_gates.append(gate)
         elif circuit_gate_times[gate] == two_qubit_gate_time:
             two_qubit_gates.append(gate)
-    
+
     # Single qubit gates
     for gate in single_qubit_gates:
         for qubit in range(n_qubits):
-            default_instruction_durations_dict[(gate, (qubit,))] = (circuit_gate_times[gate], 's')
-    
+            default_instruction_durations_dict[(gate, (qubit,))] = (
+                circuit_gate_times[gate],
+                "s",
+            )
+
     # Two qubit gates (assuming all-to-all connectivity)
     for gate in two_qubit_gates:
         for qubit1 in range(n_qubits):
             for qubit2 in range(n_qubits):
                 if qubit1 != qubit2:
-                    default_instruction_durations_dict[(gate, (qubit1, qubit2))] = (two_qubit_gate_time, 's')
-    
+                    default_instruction_durations_dict[(gate, (qubit1, qubit2))] = (
+                        two_qubit_gate_time,
+                        "s",
+                    )
+
     # Reset and Measure operations
     for qubit in range(n_qubits):
-        default_instruction_durations_dict[('measure', (qubit,))] = (circuit_gate_times['measure'], 's')
-        default_instruction_durations_dict[('reset', (qubit,))] = (circuit_gate_times['reset'], 's')
-    
+        default_instruction_durations_dict[("measure", (qubit,))] = (
+            circuit_gate_times["measure"],
+            "s",
+        )
+        default_instruction_durations_dict[("reset", (qubit,))] = (
+            circuit_gate_times["reset"],
+            "s",
+        )
+
     # Gates done by software
     if virtual_gates is not None:
         for gate in virtual_gates:
             for qubit in range(n_qubits):
-                default_instruction_durations_dict[(gate, (qubit,))] = (0.0, 's')
-    
+                default_instruction_durations_dict[(gate, (qubit,))] = (0.0, "s")
+
     return default_instruction_durations_dict
+
 
 def select_optimizer(
     lr: float,

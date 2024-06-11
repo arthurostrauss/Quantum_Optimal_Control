@@ -40,6 +40,7 @@ from qiskit_experiments.calibration_management import (
     EchoedCrossResonance,
 )
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
+from qiskit_ibm_runtime import EstimatorV2
 
 from helper_functions import (
     projected_statevector,
@@ -1030,16 +1031,16 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
                 [0, self._target_instruction_timings[self._inside_trunc_tracker]]
             )
 
-    def compute_benchmarks(self, params: np.array) -> np.array:
+    def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: Batch of actions
         """
+        new_qc = qc.copy()
         n_actions = self.action_space.shape[-1]
         n_custom_instructions = (
             self.trunc_index + 1
         )  # Count custom instructions present in the current truncation
-        qc = self.circuits[self.trunc_index]
         baseline_circ = self.baseline_circuits[self.trunc_index]
         target = Statevector(baseline_circ)
 
@@ -1071,20 +1072,26 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
                     self.config.benchmark_config.dfe_precision,
                 )
                 if self.abstraction_level == "circuit":
-                    qc = self.backend_info.custom_transpile(
-                        qc,
+                    new_qc = self.backend_info.custom_transpile(
+                        new_qc,
                         initial_layout=self.layout[self.trunc_index],
                         scheduling=False,
                     )
                 pubs = [
-                    (qc, obs.apply_layout(qc.layout), angle_sets, 1 / np.sqrt(shot))
+                    (
+                        new_qc,
+                        obs.apply_layout(new_qc.layout),
+                        angle_sets,
+                        1 / np.sqrt(shot),
+                    )
                     for obs, shot in zip(
                         observables.group_commuting(qubit_wise=True), shots
                     )
                 ]
-                self.estimator.options.update(
-                    job_tags=[f"DFE_step{self._step_tracker}"]
-                )
+                if isinstance(self.estimator, EstimatorV2):
+                    self.estimator.options.update(
+                        job_tags=[f"DFE_step{self._step_tracker}"]
+                    )
                 job = self.estimator.run(pubs=pubs)
                 results = job.result()
                 circuit_fidelities = np.sum(
@@ -1110,8 +1117,9 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
                     backend = AerSimulator(
                         noise_model=noise_model, method="density_matrix"
                     )
-                circ = transpile(qc, backend=backend, optimization_level=0)
-                circ.save_density_matrix()
+                new_qc.save_density_matrix()
+                circ = transpile(new_qc, backend=backend, optimization_level=0)
+
                 states_result = backend.run(
                     circ,
                     parameter_binds=[

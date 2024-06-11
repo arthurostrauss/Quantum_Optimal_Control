@@ -368,8 +368,8 @@ def take_step(
     batch_done,
     min_action,
     max_action,
-    agent,
-    env,
+    agent: Agent,
+    env: BaseQuantumEnvironment,
     writer,
 ):
     """
@@ -407,6 +407,8 @@ def take_step(
     with torch.no_grad():
         mean_action, std_action, critic_value = agent(batch_obs)
         probs = Normal(mean_action, std_action)
+        env.mean_action = mean_action[0]
+        env.std_action = std_action[0]
         action = torch.clip(
             probs.sample(),
             torch.Tensor(min_action),
@@ -736,7 +738,7 @@ def log_fidelity_info_summary(fidelity_info, max_hardware_runtime):
     for fidelity, info in fidelity_info.items():
         if info["achieved"]:
             logging.warning(
-                f"Target fidelity {fidelity} achieved: Update {info['update_at']}, Hardware Runtime: {round(info['hardware_runtime'], 2)} sec, Simulation Train Time: {round(info['simulation_train_time']/60, 4)} mins, Shots Used {info['shots_used']:,}"
+                f"Target fidelity {fidelity} achieved: Update {info['update_at']}, Hardware Runtime: {round(info['hardware_runtime'], 2)} sec, Simulation Train Time: {round(info['simulation_train_time'] / 60, 4)} mins, Shots Used {info['shots_used']:,}"
             )
         else:
             logging.warning(
@@ -967,7 +969,14 @@ class CustomPPOV2:
                 logging.warning("Training in normal mode")
                 for iteration in tqdm.tqdm(range(1, self.total_updates + 1)):
                     if self.execute_training_cycle(
-                        iteration, num_prints, avg_reward, fidelities, avg_action_history, std_actions, fidelity_info, start_time
+                        iteration,
+                        num_prints,
+                        avg_reward,
+                        fidelities,
+                        avg_action_history,
+                        std_actions,
+                        fidelity_info,
+                        start_time,
                     ):
                         break
 
@@ -980,7 +989,14 @@ class CustomPPOV2:
                 ):
                     iteration += 1
                     if self.execute_training_cycle(
-                        iteration, num_prints, avg_reward, fidelities, avg_action_history, std_actions, fidelity_info, start_time
+                        iteration,
+                        num_prints,
+                        avg_reward,
+                        fidelities,
+                        avg_action_history,
+                        std_actions,
+                        fidelity_info,
+                        start_time,
                     ):
                         break
 
@@ -1149,9 +1165,17 @@ class CustomPPOV2:
         )
 
         return mean_action, std_action
-    
+
     def execute_training_cycle(
-        self, iteration, num_prints, avg_reward, fidelities, avg_action_history, std_actions, fidelity_info, start_time
+        self,
+        iteration,
+        num_prints,
+        avg_reward,
+        fidelities,
+        avg_action_history,
+        std_actions,
+        fidelity_info,
+        start_time,
     ):
         if self.anneal_lr:
             self.learning_rate_annealing(iteration=iteration)
