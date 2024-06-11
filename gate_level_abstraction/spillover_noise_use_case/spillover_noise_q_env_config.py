@@ -18,6 +18,7 @@ from qiskit.quantum_info import Operator
 from qiskit.circuit.library import RXGate, IGate, CRXGate
 from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.transpiler import InstructionDurations
+from qiskit.transpiler import CouplingMap    
 
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
@@ -119,7 +120,10 @@ def get_backend(
         basis_gates=["cx", "id", "rz", "sx", "x", "crx"],
     )
     # backend = AerSimulator.from_backend(generic_backend, noise_model=noise_model)
-    backend = AerSimulator(noise_model=noise_model)
+    backend = AerSimulator(noise_model=noise_model) 
+    #     coupling_map=CouplingMap.from_full(5),
+    #     method="density_matrix"
+    # )
 
     if backend is None:
         # TODO: Add here your custom backend
@@ -152,7 +156,7 @@ def get_circuit_context(
     circuit = QuantumCircuit(2)
     rx_op = Operator(RXGate(phi))
     identity_op = Operator(IGate())
-    rx_op_2q = Operator(identity_op.tensor(rx_op))
+    rx_op_2q = identity_op.tensor(rx_op)
     circuit.unitary(rx_op_2q, [0, 1], label=custom_rx_gate_label)
 
     circuit.cx(0, 1)
@@ -173,7 +177,7 @@ def get_instruction_durations(backend: Optional[BackendV2] = None):
         two_qubit_gate_time = 5.3e-7
         readout_time = 1.2e-6
         reset_time = 1.0e-6
-        gates_done_by_software = ["rz", "s", "t"]
+        virtual_gates = ["rz", "s", "t"]
 
         circuit_gate_times = {
             "x": single_qubit_gate_time,
@@ -185,7 +189,7 @@ def get_instruction_durations(backend: Optional[BackendV2] = None):
             "measure": readout_time,
             "reset": reset_time,
         }
-        circuit_gate_times.update({gate: 0.0 for gate in gates_done_by_software})
+        circuit_gate_times.update({gate: 0.0 for gate in virtual_gates})
 
         n_qubits = backend.num_qubits if backend else 10
         instruction_durations_dict = generate_default_instruction_durations_dict(
@@ -193,7 +197,7 @@ def get_instruction_durations(backend: Optional[BackendV2] = None):
             single_qubit_gate_time=single_qubit_gate_time, 
             two_qubit_gate_time=two_qubit_gate_time, 
             circuit_gate_times=circuit_gate_times,
-            gates_done_by_software=gates_done_by_software, 
+            virtual_gates=virtual_gates, 
         )
 
         instruction_durations = InstructionDurations()

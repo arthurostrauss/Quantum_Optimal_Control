@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Sequence
 from qiskit.circuit import (
     QuantumCircuit,
     Instruction,
@@ -127,7 +127,7 @@ def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs)
 
 
 def process_gate(
-    inst: Instruction, qargs: Qubit, gate_count: Dict, circuit_context: QuantumCircuit
+    inst: Instruction, qargs: Sequence[Qubit], gate_count: Dict, circuit_context: QuantumCircuit
 ):
     """
     Processes a gate to generate a unique label and determine qubit indices for the new unitary gate.

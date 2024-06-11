@@ -1840,7 +1840,7 @@ def generate_default_instruction_durations_dict(
         single_qubit_gate_time: float, 
         two_qubit_gate_time: float,  
         circuit_gate_times: Dict,
-        gates_done_by_software: Optional[List] = None,
+        virtual_gates: Optional[List] = None,
     ):
     """
     Generates a dictionary of default instruction durations for each gate and qubit combination. This allows for calculating the total execution time of a quantum circuit.
@@ -1851,7 +1851,7 @@ def generate_default_instruction_durations_dict(
         single_qubit_gate_time (float): The duration of a single-qubit gate.
         two_qubit_gate_time (float): The duration of a two-qubit gate.
         circuit_gate_times (dict): A dictionary mapping gate names to their respective durations.
-        gates_done_by_software (list): A list of gates that are performed by software and have zero duration.
+        virtual_gates (list): A list of gates that are performed by software and have zero duration.
 
     Returns:
         dict: A dictionary where the keys are tuples of the form (gate, qubits) and the values are tuples of the form (duration, unit).
@@ -1865,7 +1865,7 @@ def generate_default_instruction_durations_dict(
     two_qubit_gates = []
     
     for gate in circuit_gate_times:
-        if gates_done_by_software is not None and gate in gates_done_by_software:
+        if virtual_gates is not None and gate in virtual_gates:
             continue
         if gate == 'measure' or gate == 'reset':
             continue
@@ -1892,8 +1892,8 @@ def generate_default_instruction_durations_dict(
         default_instruction_durations_dict[('reset', (qubit,))] = (circuit_gate_times['reset'], 's')
     
     # Gates done by software
-    if gates_done_by_software is not None:
-        for gate in gates_done_by_software:
+    if virtual_gates is not None:
+        for gate in virtual_gates:
             for qubit in range(n_qubits):
                 default_instruction_durations_dict[(gate, (qubit,))] = (0.0, 's')
     
