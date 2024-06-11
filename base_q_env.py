@@ -334,6 +334,8 @@ class QiskitBackendInfo:
         backend: Optional[BackendV2] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
     ):
+        if backend is not None and backend.coupling_map is None:
+            raise QiskitError("Backend does not have a coupling map")
         self.backend = backend
         self._instruction_durations = custom_instruction_durations
 
