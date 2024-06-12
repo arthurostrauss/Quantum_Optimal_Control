@@ -938,16 +938,16 @@ def retrieve_primitives(
     #     estimator = AerEstimatorV2.from_backend(backend=backend)
     #     sampler = AerSamplerV2.from_backend(backend=backend)
     elif backend is None:  # No backend specified, ideal state-vector simulation
-        sampler = Sampler()
+        sampler = StatevectorSampler()
         estimator = StatevectorEstimator()
 
     elif isinstance(backend, RuntimeBackend):
         # TODO: Next update: will switch to keyword 'mode' instead of 'session'
         estimator = RuntimeEstimatorV2(
-            session=Session(backend=backend),
+            mode=Session(backend=backend),
             options=estimator_options,
         )
-        sampler = RuntimeSamplerV2(session=estimator.session)
+        sampler = RuntimeSamplerV2(mode=estimator.session)
 
     # elif isinstance(backend, QMBackend):
     #     estimator = QMEstimator(backend=backend, options=estimator_options)
@@ -1089,7 +1089,7 @@ def select_backend(
     physical_qubits: Optional[List[int]] = None,
     solver_options: Optional[Dict] = None,
     calibration_files: Optional[str] = None,
-):
+) -> Optional[BackendV2]:
     """
     Select backend to use for training among real backend or fake backend (Aer Simulator)
 

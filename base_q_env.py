@@ -918,6 +918,7 @@ class BaseQuantumEnvironment(ABC, Env):
         pubs = []
         total_shots = 0
         circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
+        layout = self.layout[self._inside_trunc_tracker]
 
         input_circuits = [
             Pauli6PreparationBasis().circuit(s)
@@ -928,25 +929,26 @@ class BaseQuantumEnvironment(ABC, Env):
             return_counts=True,
         )
 
-        for sample, shot in zip(samples, shots):
+        # for sample, shot in zip(samples, shots):
+        for sample in range(len(input_circuits)):
             run_qc = QuantumCircuit.copy_empty_like(
                 circuit, name="cafe_circ"
-            )  # Circuit with the custom target gate
+            )  # Circuit with custom target gate
             ref_qc = QuantumCircuit.copy_empty_like(
                 circuit_ref, name="cafe_ref_circ"
-            )  # Circuit with the reference gate
+            )  # Circuit with reference gate
 
-            # Bind input states to the circuits
-            for qc in [run_qc, ref_qc]:
+            for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
+                # Bind input states to the circuits
                 qc.compose(input_circuits[sample], inplace=True)
                 qc.barrier()
-
-            # Add the custom target gate to the run circuit n_reps times
-            for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
-                for _ in range(self.n_reps):
+                for _ in range(
+                    self.n_reps
+                ):  # Add custom target gate to run circuit n_reps times
                     qc.compose(context, inplace=True)
                     qc.barrier()
 
+            # Compute inverse unitary for reference circuit
             reverse_unitary = Operator(ref_qc).adjoint()
             reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
             reverse_unitary_qc.unitary(
@@ -955,15 +957,16 @@ class BaseQuantumEnvironment(ABC, Env):
                 label="U_inv",
             )
             reverse_unitary_qc.measure_all()
-            layout = self.layout[self._inside_trunc_tracker]
+
             reverse_unitary_qc = self.backend_info.custom_transpile(
                 reverse_unitary_qc,
                 initial_layout=layout,
                 scheduling=False,
-                optimization_level=3,
+                optimization_level=3,  # Find smallest circuit implementing inverse unitary
                 remove_final_measurements=False,
-            )  # Try to get the smallest possible circuit for the reverse unitary
+            )
 
+            # Bind inverse unitary + measurement to run circuit
             for circ, pubs_ in zip([run_qc, ref_qc], [pubs, self._ideal_pubs]):
                 transpiled_circuit = self.backend_info.custom_transpile(
                     circ, initial_layout=layout, scheduling=False
@@ -971,8 +974,10 @@ class BaseQuantumEnvironment(ABC, Env):
                 transpiled_circuit.barrier(self.involved_qubits)
                 # Add the inverse unitary + measurement to the circuit
                 transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-                pubs_.append((transpiled_circuit, params, self.n_shots * shot))
-            total_shots += self.batch_size * self.n_shots * shot
+                pubs_.append((transpiled_circuit, params, self.n_shots))
+                # pubs_.append((transpiled_circuit, params, self.n_shots * shot))
+            total_shots += self.batch_size * self.n_shots
+            # total_shots += self.batch_size * self.n_shots * shot
 
         return pubs, total_shots
 
@@ -1022,19 +1027,18 @@ class BaseQuantumEnvironment(ABC, Env):
         circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
         pubs = []
         total_shots = 0
-        if self.config.reward_config.use_interleaved:
+        if self.config.reward_config.use_interleaved:  # Interleaved RB
             try:
                 clifford = Clifford(circuit_ref)
             except QiskitError as e:
                 raise ValueError(
                     "Circuit should be a Clifford circuit for using interleaved RB directly"
                 ) from e
-            physical_qubits = list(layout.get_physical_bits().keys())
             ref_element = circuit_ref.to_gate(label="ref_circ")
             custom_element = circuit.to_gate(label="custom_circ")
             exp = InterleavedRB(
                 ref_element,
-                physical_qubits,
+                self.involved_qubits,
                 [self.n_reps],
                 self.backend,
                 self.sampling_Pauli_space,
