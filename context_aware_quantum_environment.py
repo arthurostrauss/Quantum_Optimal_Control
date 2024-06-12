@@ -41,6 +41,7 @@ from qiskit_experiments.calibration_management import (
 )
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 from qiskit_ibm_runtime import EstimatorV2
+from qiskit_ibm_runtime import EstimatorV2
 
 from helper_functions import (
     projected_statevector,
@@ -1212,3 +1213,10 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
         """Reset all counters related to training"""
         super().clear_history()
         self.circuit_fidelity_history.clear()
+
+    def update_circuit_fidelity_history(self, output_states, baseline_circ):
+        circuit_fidelities = [
+            state_fidelity(state, Statevector(baseline_circ)) for state in output_states
+        ]
+        self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
+        return circuit_fidelities

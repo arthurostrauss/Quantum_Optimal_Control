@@ -420,7 +420,7 @@ def take_step(
     actions[step] = action
     logprobs[step] = logprob
 
-    next_obs, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
+    next_obs, reward, terminated, truncated, infos = env.unwrapped.step(action.cpu().numpy())
     next_obs = torch.Tensor(next_obs)
     done = int(np.logical_or(terminated, truncated))
     reward = torch.Tensor(reward)
@@ -769,60 +769,6 @@ def update_training_results(
     }
 
 
-def unpack_training_config(config: Dict):
-    """
-    Unpacks the training configuration dictionary and returns the extracted values.
-
-    Args:
-        config (Dict): The training configuration dictionary.
-
-    Returns:
-        Tuple: A tuple containing the extracted values in the following order:
-            - training_mode (str): The training mode.
-            - total_updates (int or None): The total number of updates for normal training mode.
-            - target_fidelities (List[float]): The target fidelities.
-            - lookback_window (int): The lookback window.
-            - max_hardware_runtime (float or None): The maximum hardware runtime for hardware_constraint_use_case mode.
-            - anneal_learning_rate (bool): Flag indicating whether to anneal the learning rate.
-            - std_actions_eps (float): The epsilon value for standard actions.
-
-    Raises:
-        ValueError: If the required keys are not present in the configuration dictionary.
-    """
-    # Mandatory keys
-    training_mode = config.get("training_mode")
-    training_details = config.get("training_details", {})
-
-    if training_mode == "hardware_constraint_use_case":
-        max_hardware_runtime = training_details.get("max_hardware_runtime")
-        total_updates = None
-        if max_hardware_runtime is None:
-            raise ValueError(
-                "max_hardware_runtime must be set for hardware_constraint_use_case mode"
-            )
-    else:
-        total_updates = training_details.get("total_updates")
-        max_hardware_runtime = None
-        if total_updates is None:
-            raise ValueError("total_updates must be set for normal training mode")
-
-    # Optional keys with default values
-    target_fidelities = training_details.get("target_fidelities", [0.99, 0.999, 0.9999])
-    lookback_window = training_details.get("lookback_window", 10)
-    anneal_learning_rate = training_details.get("anneal_learning_rate", False)
-    std_actions_eps = training_details.get("std_actions_eps", 1e-2)
-
-    return (
-        training_mode,
-        total_updates,
-        target_fidelities,
-        lookback_window,
-        max_hardware_runtime,
-        anneal_learning_rate,
-        std_actions_eps,
-    )
-
-
 class CustomPPOV2:
     def __init__(
         self,
@@ -847,6 +793,7 @@ class CustomPPOV2:
         Returns:
             train (function): The training function for the PPO algorithm.
         """
+        env.unwrapped.clear_history()
         # Initialize environment parameters
         (
             self.seed,
@@ -894,6 +841,103 @@ class CustomPPOV2:
 
         # Initialize optimizer
         self.optimizer = initialize_optimizer(self.agent, self.agent_config)
+    def _set_sub_training_mode(self, training_details: Dict):
+        self.total_updates = None
+        self.max_hardware_runtime = None
+        if 'total_updates' in training_details:
+            self.total_updates = training_details["total_updates"]
+            constraint = 'total_updates'
+        elif 'max_hardware_runtime' in training_details:
+            self.max_hardware_runtime = training_details["max_hardware_runtime"]
+            constraint = 'max_hardware_runtime'
+        else:
+            raise ValueError(
+                "ERROR: Please provide either 'total_updates' or 'max_hardware_runtime' in the 'training_details' for 'spillover_noise_use_case' training mode."
+            )
+        if 'total_updates' in training_details and 'max_hardware_runtime' in training_details:
+            logging.warning(
+                "Both 'total_updates' or 'max_hardware_runtime' was provided in the 'training_details'! Using 'total_updates' as default."
+            )
+        return constraint
+
+    def _unpack_training_config(self, training_config: Dict):
+        """
+        Unpacks the training configuration dictionary and returns the extracted values.
+
+        Args:
+            config (Dict): The training configuration dictionary.
+
+        Returns:
+            Tuple: A tuple containing the extracted values in the following order:
+                - training_mode (str): The training mode.
+                - total_updates (int or None): The total number of updates for normal training mode.
+                - target_fidelities (List[float]): The target fidelities.
+                - lookback_window (int): The lookback window.
+                - max_hardware_runtime (float or None): The maximum hardware runtime for hardware_constraint_use_case mode.
+                - anneal_learning_rate (bool): Flag indicating whether to anneal the learning rate.
+                - std_actions_eps (float): The epsilon value for standard actions.
+
+        Raises:
+            ValueError: If the required keys are not present in the configuration dictionary.
+        """
+        # Mandatory keys
+        # training_mode = config.get("training_mode")
+        # training_details = config.get("training_details", {})
+
+        # if training_mode == "spillover_noise_use_case":
+        #     max_hardware_runtime = training_details.get("max_hardware_runtime")
+        #     total_updates = None
+        #     if max_hardware_runtime is None:
+        #         raise ValueError(
+        #             "max_hardware_runtime must be set for hardware_constraint_use_case mode"
+        #         )
+        # else:
+        #     total_updates = training_details.get("total_updates")
+        #     max_hardware_runtime = None
+        #     if total_updates is None:
+        #         raise ValueError("total_updates must be set for normal training mode")
+
+        training_details = training_config["training_details"]
+        training_mode = training_config["training_mode"]
+        self.phi_gamma_tuple = None
+        if training_mode == 'spillover_noise_use_case':
+            # Retrieve phi and gamma values
+            if not 'phi_gamma_tuple' in training_details:
+                raise ValueError(
+                    "ERROR: Please set 'phi_gamma_tuple' in the 'training_details' for the 'spillover_noise_use_case' training mode."
+                )
+            self.phi_gamma_tuple = training_details["phi_gamma_tuple"]
+            self.constraint = self._set_sub_training_mode(training_details)
+            logging.warning(
+                f"Constraint: {self.constraint}; Phi: {training_details['phi_gamma_tuple'][0]}; Gamma: {training_details['phi_gamma_tuple'][1]}"
+            )
+
+        elif training_config["training_mode"] == 'normal_calibration': 
+            self.constraint = self._set_sub_training_mode(training_details)
+            info_str = 'Total Updates' if self.constraint == 'total_updates' else 'Max Hardware Runtime'
+            logging.warning(
+                f"Constraint: {self.constraint}; {info_str}: {training_details[self.constraint]}"
+            )
+        else:
+            raise ValueError(
+                "ERROR: Training mode not recognized. Please choose between 'normal_calibration' and 'spillover_noise_use_case'."
+        )
+
+        # Optional keys with default values
+        target_fidelities = training_details.get("target_fidelities", [0.99, 0.999, 0.9999])
+        lookback_window = training_details.get("lookback_window", 10)
+        anneal_learning_rate = training_details.get("anneal_learning_rate", False)
+        std_actions_eps = training_details.get("std_actions_eps", 1e-2)
+
+        return (
+            training_mode,
+            self.total_updates,
+            target_fidelities,
+            lookback_window,
+            self.max_hardware_runtime,
+            anneal_learning_rate,
+            std_actions_eps,
+        )
 
     def train(
         self,
@@ -927,22 +971,18 @@ class CustomPPOV2:
             self.max_hardware_runtime,
             self.anneal_lr,
             self.std_actions_eps,
-        ) = unpack_training_config(training_config)
-        self.hardware_constraint_use_case = (
-            self.training_mode == "hardware_constraint_use_case"
-        )
+        ) = self._unpack_training_config(training_config)
 
         try:
-            if self.hardware_constraint_use_case or self.target_fidelities is not None:
-                fidelity_info = {
-                    fidelity: {
-                        "achieved": False,
-                        "update_at": None,
-                        "train_time": None,
-                        "shots_used": None,
-                    }
-                    for fidelity in self.target_fidelities
+            fidelity_info = {
+                fidelity: {
+                    "achieved": False,
+                    "update_at": None,
+                    "train_time": None,
+                    "shots_used": None,
                 }
+                for fidelity in self.target_fidelities
+            }
 
             self.env.unwrapped.clear_history()
             self.global_step = 0
@@ -965,7 +1005,8 @@ class CustomPPOV2:
             ### Training Loop ###
 
             # Normal Mode: No hardware constraints
-            if not self.hardware_constraint_use_case:
+            # if not self.hardware_constraint_use_case:
+            if self.constraint == 'total_updates':
                 logging.warning("Training in normal mode")
                 for iteration in tqdm.tqdm(range(1, self.total_updates + 1)):
                     if self.execute_training_cycle(
@@ -980,7 +1021,8 @@ class CustomPPOV2:
                     ):
                         break
 
-            else:  # Hardware Constraint Mode: Train until hardware runtime exceeds maximum
+            elif self.constraint == 'max_hardware_runtime':
+            # Hardware Constraint Mode: Train until hardware runtime exceeds maximum
                 logging.warning("Training in hardware constraint use case mode")
                 iteration = 0
                 while (
@@ -1003,14 +1045,13 @@ class CustomPPOV2:
             self.env.unwrapped.close()
             self.writer.close()
 
-            if self.hardware_constraint_use_case:
-                log_fidelity_info_summary(fidelity_info, self.max_hardware_runtime)
+            self.log_fidelity_info_summary(fidelity_info)
 
             return self.training_results
 
         except Exception as e:
             logging.error(f"An error occurred during training: {e}")
-            # raise
+            raise
             return {
                 "avg_reward": -1.0,
                 "fidelity_history": [0] * self.total_updates,
@@ -1216,6 +1257,25 @@ class CustomPPOV2:
         )
 
         return check_convergence_std_actions(std_action, self.std_actions_eps)
+    
+    def log_fidelity_info_summary(self, fidelity_info):
+        """
+        Logs a summary of fidelity information.
+        """
+        if self.constraint == 'total_updates':
+            resource_type = 'Total Updates'
+        elif self.constraint == 'max_hardware_runtime':
+            resource_type = 'Max Hardware Runtime'
+
+        for fidelity, info in fidelity_info.items():
+            if info["achieved"]:
+                logging.warning(
+                    f"Target fidelity {fidelity} achieved: Update {info['update_at']}, Hardware Runtime: {round(info['hardware_runtime'], 2)} sec, Simulation Train Time: {round(info['simulation_train_time'] / 60, 4)} mins, Shots Used {info['shots_used']:,}"
+                )
+            else:
+                logging.warning(
+                    f"Target fidelity {fidelity} not achieved within {resource_type} of {self.max_hardware_runtime if self.max_hardware_runtime else self.total_updates}{'s' if self.max_hardware_runtime else ''}."
+                )
 
     def learning_rate_annealing(
         self,
@@ -1233,9 +1293,9 @@ class CustomPPOV2:
             iteration: The current iteration number (optional).
             max_hardware_runtime: The maximum hardware runtime (optional).
         """
-        if not self.hardware_constraint_use_case:
+        if self.constraint == 'total_updates':
             frac = 1.0 - (iteration - 1.0) / self.total_updates
-        else:
+        elif self.constraint == 'max_hardware_runtime':
             frac = 1.0 - (
                 np.sum(self.env.unwrapped.hardware_runtime) / self.max_hardware_runtime
             )
