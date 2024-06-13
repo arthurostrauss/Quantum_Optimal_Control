@@ -18,8 +18,10 @@ from helper_functions import (
     save_to_pickle
 )
 from gate_level_abstraction.spillover_noise_use_case.noise_utils.utils import get_baseline_fid_from_phi_gamma
-from ppoV2 import CustomPPOV2
+from ppoV2_new import CustomPPOV2
 from functools import partial
+
+from hpo_training_config import HPOConfig, HardwareRuntime, TotalUpdates, TrainingConfig
 
 import logging
 
@@ -61,10 +63,7 @@ class HyperparameterOptimizer:
 
     def __init__(
         self,
-        q_env: QUANTUM_ENVIRONMENT,
-        config_paths: Dict[str, str],
-        saving_mode: str = "all",
-        log_results: bool = True,
+        hpo_config: HPOConfig,
     ):
         """
         Initializes the HyperparameterOptimizer with configurations for the quantum environment,
@@ -73,21 +72,21 @@ class HyperparameterOptimizer:
         Parameters:
         - q_env: QuantumEnvironment or ContextAwareQuantumEnvironment instance.
         - config_paths: Dictionary containing paths to the configuration files for the agent, HPO and where to save results to.
-        - experimental_penalty_weights: Optional dictionary specifying penalty weights for experimentally costly hyperparameters.
+        - hardware_penalty_weights: Optional dictionary specifying penalty weights for experimentally costly hyperparameters.
         - log_results: Flag indicating whether to log the optimization results at the end of the process.
         """
-        self.q_env = q_env
-        self.path_agent_config = config_paths["agent_config_path"]
-        self.hpo_config = load_from_yaml_file(config_paths["hpo_config_path"])
-        self.save_results_path = config_paths["save_results_path"]
-        self.log_progress = log_results
-        self.saving_mode = saving_mode
-        if self.saving_mode not in ["all", "best"]:
-            raise ValueError(
-                f"Saving mode must be 'all' or 'best', but got '{self.saving_mode}'"
-            )
+        self.hpo_config = hpo_config
         self.all_trials_data = []
-
+        # self.path_agent_config = config_paths["agent_config_path"]
+        # self.hpo_config = load_from_yaml_file(config_paths["hpo_config_path"])
+        # self.save_results_path = config_paths["save_results_path"]
+        # self.log_progress = log_results
+        # self.saving_mode = saving_mode
+        # if self.saving_mode not in ["all", "best"]:
+        #     raise ValueError(
+        #         f"Saving mode must be 'all' or 'best', but got '{self.saving_mode}'"
+        #     )
+        
     def _get_num_hpo_trials(self, num_hpo_trials: Optional[int] = None):
         if num_hpo_trials is not None:
             assert (
@@ -151,14 +150,14 @@ class HyperparameterOptimizer:
             studyname = "state-preparation"
         return studyname
 
-    def _get_n_reps_noisy_use_case(self, phi_gamma_tuple: Tuple[float, float]):
-        self.phi, self.gamma = phi_gamma_tuple
+    def _get_n_reps_noisy_use_case(self):
+        # self.phi, self.gamma = self.phi_gamma_tuple
         self.baseline_fidelity = get_baseline_fid_from_phi_gamma(
-            param_tuple=phi_gamma_tuple
+            param_tuple=self.phi_gamma_tuple
         )
         # To which integer power do I need to raise self.baseline_fidelity to be below the lowest target fidelity?
         self.smallest_N_reps = math.ceil(
-            math.log(min(self.target_fidelities), self.baseline_fidelity)
+            math.log(min(self.training_config.target_fidelities), self.baseline_fidelity)
         )
         self.q_env.unwrapped.n_reps = min([self.smallest_N_reps, 150])
         if self.q_env.unwrapped.n_reps == 150:
@@ -167,7 +166,7 @@ class HyperparameterOptimizer:
     def _log_training_parameters(self):
         param_str = ""
         logging.warning("Parameters:")
-        if self.phi_gamma_tuple:
+        if self.training_config.training_mode == 'spillover_noise_use_case':
             param_str = "phi: {}; gamma: {}; Baseline Fidelity: {}; ".format(
                 self.phi, self.gamma, self.baseline_fidelity
             )
@@ -179,21 +178,18 @@ class HyperparameterOptimizer:
         
         logging.warning(param_str)
 
-    def _initialize_optimization_process(self, training_config: Dict, num_hpo_trials: int, experimental_penalty_weights: Dict[str, float | int]):
+    def _initialize_optimization_process(self, training_config: TrainingConfig, num_hpo_trials: int, hardware_penalty_weights: Dict[str, float | int]):
         self.training_config = training_config
-        training_details = self.training_config["training_details"]
-        self._get_training_mode()
-        self.experimental_penalty_weights = experimental_penalty_weights
+        # training_details = self.training_config.training_details
+        # self._get_training_mode()
+        self.hardware_penalty_weights = hardware_penalty_weights
         self.n_hpo_trials = self._get_num_hpo_trials(num_hpo_trials)     
-        self.target_fidelities = training_details.get("target_fidelities", [0.99, 0.999, 0.9999])
-        self.lookback_window = training_details.get('lookback_window', 10)
-
+        # self.target_fidelities = self.training_details.targ
+        # self.lookback_window = self.training_details.get('lookback_window', 10)
 
     def optimize_hyperparameters(
         self,
-        num_hpo_trials: int,
-        training_config: Dict,
-        experimental_penalty_weights: Dict[str, float | int],
+        training_config: TrainingConfig,
     ):
         """
         Starts the hyperparameter optimization process for the specified number of trials.
@@ -204,25 +200,28 @@ class HyperparameterOptimizer:
         Returns:
         - A dictionary containing the best configuration and its performance metric.
         """
-        self._initialize_optimization_process(training_config, num_hpo_trials, experimental_penalty_weights)
+        # self._initialize_optimization_process(training_config, num_hpo_trials, hardware_penalty_weights)
+        self.training_config = training_config
+        # self.hardware_penalty_weights = hardware_penalty_weights
+        # self.n_hpo_trials = self._get_num_hpo_trials(num_hpo_trials) 
         study = optuna.create_study(
             direction="minimize",
             study_name=f'{self._get_study_name()}_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}',
         )
 
         # Ensure that only the target fidelities that are greater than the baseline fidelity are considered
-        if self.phi_gamma_tuple:
+        if self.training_mode == 'spillover_noise_use_case':
             self._get_n_reps_noisy_use_case(self.phi_gamma_tuple)
         
         self._log_training_parameters()
         time.sleep(4)
         # Start the hyperparameter optimization process
         start_time_hpo = time.time()        
-        study.optimize(self._objective, n_trials=self.n_hpo_trials)
+        study.optimize(self._objective, n_trials=self.num_hpo_trials)
         self.post_processing(study, start_time_hpo)
 
         return self.data
-    
+
     def post_processing(self, study: optuna.study.Study, start_time_hpo: float):
         self._catch_all_trials_failed(study)
         self.best_trial = study.best_trial
@@ -258,7 +257,7 @@ class HyperparameterOptimizer:
 
         # q_env.unwrapped.backend
         self.agent_config, self.hyperparams = create_hpo_agent_config(
-            trial, self.hpo_config, self.path_agent_config
+            trial, self.hpo_config_file_data, self.path_agent_config
         )
 
         # Include batchsize, n_shots, and sampling_Pauli_space in the hpo scope
@@ -279,7 +278,7 @@ class HyperparameterOptimizer:
             return float("inf")  # Catch errors in the trianing process
 
         custom_cost_value = self._calculate_custom_cost(
-            training_results, self.experimental_penalty_weights
+            training_results
         )
 
         # Keep traaack of all trials data
@@ -288,7 +287,7 @@ class HyperparameterOptimizer:
             "training_results": training_results,
             "hyper_params": trial.params,
             "custom_cost_value": custom_cost_value,
-            "penalty_weights": self.experimental_penalty_weights,
+            "penalty_weights": self.hardware_penalty_weights,
             "simulation runtime": simulation_training_time,
         }
         self.all_trials_data.append(trial_data)
@@ -296,7 +295,7 @@ class HyperparameterOptimizer:
         return custom_cost_value
 
     def _calculate_custom_cost(
-        self, training_results: dict, reward_and_penalty_params: dict
+        self, training_results: dict
     ) -> float:
         """
         Calculates a custom cost with considerations for:
@@ -316,11 +315,11 @@ class HyperparameterOptimizer:
         highest_fidelity_achieved_info = None
         target_fidelities = list(training_results["fidelity_info"].keys())
 
-        fidelity_reward = reward_and_penalty_params["fidelity_reward"]
-        base_shot_penalty = reward_and_penalty_params["penalty_n_shots"]
-        penalty_per_missed_fidelity = reward_and_penalty_params[
-            "penalty_per_missed_fidelity"
-        ]
+        # fidelity_reward = reward_and_penalty_params["fidelity_reward"]
+        # base_shot_penalty = reward_and_penalty_params["penalty_n_shots"]
+        # penalty_per_missed_fidelity = reward_and_penalty_params[
+        #     "penalty_per_missed_fidelity"
+        # ]
 
         # Identify the highest fidelity achieved and its info
         for fidelity in sorted(target_fidelities, reverse=True):
@@ -337,19 +336,19 @@ class HyperparameterOptimizer:
             shots_used = sum(training_results["total_shots"])
 
         # Apply base penalty for the shots used
-        total_cost += shots_used * base_shot_penalty
+        total_cost += shots_used * self.penalty_n_shots
 
         # Calculate reward/penalty for each target fidelity
         for fidelity in target_fidelities:
             info = training_results["fidelity_info"][fidelity]
             if info["achieved"]:
                 # Reward for achieving the fidelity, inversely proportional to shots used
-                total_cost -= fidelity_reward
+                total_cost -= self.fidelity_reward
             else:
                 # Apply penalty based on how close the training came to the fidelity
                 highest_fidelity_reached = max(training_results["fidelity_history"])
                 closeness = fidelity - highest_fidelity_reached
-                total_cost += closeness * penalty_per_missed_fidelity
+                total_cost += closeness * self.penalty_per_missed_fidelity
 
         return total_cost
 
@@ -358,11 +357,11 @@ class HyperparameterOptimizer:
         if self.training_mode == 'spillover_noise_use_case' and hasattr(self, "phi") and hasattr(self, "gamma"):
             start_file_name = f"phi-{self.phi/np.pi}pi_gamma-{round(self.gamma, 2)}"
         elif self.training_mode == 'normal_calibration':
-            start_file_name = f"gate_calibration"
+            start_file_name = "gate_calibration"
         else:
             start_file_name = "state_preparation"
 
-        start_file_name += f"_{self.training_constraint}-{self.max_hardware_runtime if self.max_hardware_runtime else self.total_updates}_"
+        start_file_name += f"_{self.training_constraint}_"
 
         return (
             start_file_name
@@ -390,7 +389,7 @@ class HyperparameterOptimizer:
                 "runtime": self.best_trial.user_attrs.get("runtime", 0),
                 "hyper_params": self.best_trial.params,
                 "custom_cost_value": self.best_trial.values[0],
-                "penalty_weights": self.experimental_penalty_weights,
+                "penalty_weights": self.hardware_penalty_weights,
             }
             pickle_file_name = os.path.join(
                 self.save_results_path, self._generate_filename()
@@ -438,6 +437,93 @@ class HyperparameterOptimizer:
             )
         )
 
+    @property
+    def fidelity_reward(self):
+        return self.hardware_penalty_weights.fidelity_reward
+    
+    @property
+    def penalty_n_shots(self):
+        return self.hardware_penalty_weights.shots_penalty
+    
+    @property
+    def penalty_per_missed_fidelity(self):
+        return self.hardware_penalty_weights.missed_fidelity_penalty
+
+    @property
+    def hpo_config_file_data(self):
+        return load_from_yaml_file(self.hpo_config_path)
+    
+    @property
+    def hpo_config_path(self):
+        return self.hpo_config.hpo_config_path
+
+    @property
+    def training_details(self):
+        return self.training_config.training_details
+    
+    @property
+    def num_hpo_trials(self):
+        return self.hpo_config.num_trials
+
+    @property
+    def hardware_penalty_weights(self):
+        return self.hpo_config.hardware_penalty_weights
+
+    @property
+    def target_fidelities(self):
+        return self.training_config.target_fidelities
+    
+    @property
+    def training_constraint(self):
+        return self.training_config.training_constraint
+    
+    @property
+    def lookback_window(self):
+        return self.training_config.lookback_window
+    
+    @property
+    def std_actions_eps(self):
+        return self.training_config.std_actions_eps
+    
+    @property
+    def anneal_learning_rate(self):
+        return self.training_config.anneal_learning_rate
+    
+    @property
+    def q_env(self):
+        return self.hpo_config.q_env
+
+    @property
+    def path_agent_config(self):
+        return self.hpo_config.agent_config_path
+    
+    @property
+    def save_results_path(self):
+        return self.hpo_config.save_results_path
+    
+    @property
+    def log_progress(self):
+        return self.hpo_config.log_results
+    
+    @property
+    def saving_mode(self):
+        return self.hpo_config.saving_mode
+    
+    @property
+    def training_mode(self):
+        return self.training_config.training_mode
+    
+    @property
+    def phi_gamma_tuple(self):
+        return self.phi_gamma_tuple if self.training_mode == 'spillover_noise_use_case' else None
+
+    @property
+    def phi(self):
+        return self.phi_gamma_tuple[0]
+    
+    @property
+    def gamma(self):
+        return self.phi_gamma_tuple[1]
     @property
     def target_operation(self):
         """
