@@ -289,7 +289,9 @@ class GateTarget(BaseTarget):
             if not isinstance(target_op, List):
                 target_op = [target_op]
             if not all([isinstance(op, (QuantumCircuit, Gate)) for op in target_op]):
-                raise ValueError("target_op should be either Gate or QuantumCircuit")
+                raise ValueError(
+                    "target_op should be either Gate or QuantumCircuit, or a list of them"
+                )
 
         else:
             target_op = [gate]
@@ -428,6 +430,19 @@ class BaseQuantumEnvironment(ABC, Env):
             training_config: QEnvConfig object containing the training configuration
         """
         self._training_config = training_config
+        self._reward_methods = {
+            "channel": self.channel_reward_pubs,
+            "state": self.state_reward_pubs,
+            "cafe": self.cafe_reward_pubs,
+            "xeb": self.xeb_reward_pubs,
+            "orbit": self.orbit_reward_pubs,
+            "fidelity": self.compute_benchmarks,
+        }
+        if self.config.reward_method not in self._reward_methods:
+            raise ValueError(
+                f"Reward method {self.config.reward_method} not implemented. Only "
+                f"{list(self._reward_methods.keys())} are supported."
+            )
         self.n_shots = training_config.n_shots
         self.n_reps = training_config.n_reps
         self.sampling_Pauli_space = training_config.sampling_paulis
@@ -515,7 +530,6 @@ class BaseQuantumEnvironment(ABC, Env):
 
         self._mean_action = np.zeros(self.action_space.shape[-1])
         self._std_action = np.ones(self.action_space.shape[-1])
-
         # Data storage
         self._optimal_action = np.zeros(self.action_space.shape[-1])
         self._seed = training_config.seed
@@ -594,29 +608,17 @@ class BaseQuantumEnvironment(ABC, Env):
         if batch_size != self.batch_size:
             raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
 
-        if self.do_benchmark():  # Benchmarking or fidelity access
-            fids = self.compute_benchmarks(qc, params)
-
-        reward_methods = {
-            "channel": self.channel_reward_pubs,
-            "state": self.state_reward_pubs,
-            "cafe": self.cafe_reward_pubs,
-            "xeb": self.xeb_reward_pubs,
-            "orbit": self.orbit_reward_pubs,
-        }
         # Get the reward method from the configuration
         reward_method = self.config.reward_method
-        # Check if the reward method exists in the dictionary
-        if reward_method in reward_methods:
+        if self.do_benchmark():  # Benchmarking or fidelity access
+            fids = self.compute_benchmarks(qc, params)
             if reward_method == "fidelity":
+                self._total_shots.append(0)
+                self._hardware_runtime.append(0.0)
                 return fids
-            else:
-                self._pubs, total_shots = reward_methods[reward_method](qc, params)
-        else:
-            raise NotImplementedError(
-                f"Reward method not implemented. Only ({list(reward_methods.keys())}) are supported."
-            )
 
+        # Check if the reward method exists in the dictionary
+        self._pubs, total_shots = self._reward_methods[reward_method](qc, params)
         self._total_shots.append(total_shots)
         self._hardware_runtime.append(
             get_hardware_runtime_single_circuit(
@@ -865,7 +867,7 @@ class BaseQuantumEnvironment(ABC, Env):
             for input_state in selected_input_states:
                 prep_indices = []
                 dedicated_shots = shot // (
-                    2**qc.num_qubits
+                    max_input_states
                 )  # Number of shots per Pauli eigenstate (divided equally)
                 if dedicated_shots == 0:
                     continue
@@ -899,6 +901,8 @@ class BaseQuantumEnvironment(ABC, Env):
                     )
                 )
                 total_shots += dedicated_shots * self.n_shots * self.batch_size
+        if len(pubs) == 0:
+            self.channel_reward_pubs(qc, params)
 
         return pubs, total_shots
 

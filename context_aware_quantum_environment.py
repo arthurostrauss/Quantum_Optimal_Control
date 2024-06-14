@@ -1102,8 +1102,6 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
                 self.close()
                 raise exc
 
-            self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
-
         else:  # Perform ideal simulation at circuit or pulse level
             if self.abstraction_level == "circuit":
                 # Calculate circuit fidelity with statevector simulation
@@ -1155,9 +1153,16 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
                     raise NotImplementedError(
                         "Pulse simulation not yet implemented for this backend"
                     )
-            circuit_fidelities = self.update_circuit_fidelity_history(
-                output_states, baseline_circ
-            )
+            circuit_fidelities = [
+                state_fidelity(state, Statevector(baseline_circ))
+                for state in output_states
+            ]
+            # circuit_fidelities = [state_fidelity(partial_trace(state,
+            #                                                    list(range(state.num_qubits))[target.num_qubits:]),
+            #                                      partial_trace(Statevector(baseline_circ),
+            #                                                    list(range(state.num_qubits))[target.num_qubits:]))
+            #                       for state in output_states]
+        self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
         print("Fidelity stored", self.circuit_fidelity_history[-1])
         return circuit_fidelities
 
@@ -1207,10 +1212,3 @@ class ContextAwareQuantumEnvironmentV2(BaseQuantumEnvironment):
         """Reset all counters related to training"""
         super().clear_history()
         self.circuit_fidelity_history.clear()
-
-    def update_circuit_fidelity_history(self, output_states, baseline_circ):
-        circuit_fidelities = [
-            state_fidelity(state, Statevector(baseline_circ)) for state in output_states
-        ]
-        self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
-        return circuit_fidelities
