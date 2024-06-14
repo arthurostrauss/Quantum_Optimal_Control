@@ -919,7 +919,7 @@ def retrieve_primitives(
         Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
     ] = None,
     circuit: Optional[QuantumCircuit] = None,
-) -> (Estimator_type, Sampler_type):
+) -> Tuple[Estimator_type, Sampler_type]:
     """
     Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
 

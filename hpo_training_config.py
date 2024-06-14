@@ -88,7 +88,17 @@ class HardwareRuntime:
             self.hardware_runtime > 0
         ), "hardware_runtime must be greater than 0"
     
-    
+@dataclass
+class TrainFunctionSettings:
+    plot_real_time: bool = False
+    print_debug: Optional[bool] = False
+    num_prints: Optional[int] = 40
+    hpo_mode: Optional[bool] = False
+    clear_history: Optional[bool] = False
+
+    def __post_init__(self):
+        assert isinstance(self.num_prints, int) and self.num_prints > 0, \
+            "num_prints must be an integer greater than 0"
 
 @dataclass
 class TrainingDetails:

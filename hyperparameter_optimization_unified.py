@@ -21,7 +21,7 @@ from gate_level_abstraction.spillover_noise_use_case.noise_utils.utils import ge
 from ppoV2_new import CustomPPOV2
 from functools import partial
 
-from hpo_training_config import HPOConfig, HardwareRuntime, TotalUpdates, TrainingConfig
+from hpo_training_config import HPOConfig, HardwareRuntime, TotalUpdates, TrainFunctionSettings, TrainingConfig
 
 import logging
 
@@ -77,72 +77,7 @@ class HyperparameterOptimizer:
         """
         self.hpo_config = hpo_config
         self.all_trials_data = []
-        # self.path_agent_config = config_paths["agent_config_path"]
-        # self.hpo_config = load_from_yaml_file(config_paths["hpo_config_path"])
-        # self.save_results_path = config_paths["save_results_path"]
-        # self.log_progress = log_results
-        # self.saving_mode = saving_mode
-        # if self.saving_mode not in ["all", "best"]:
-        #     raise ValueError(
-        #         f"Saving mode must be 'all' or 'best', but got '{self.saving_mode}'"
-        #     )
-        
-    def _get_num_hpo_trials(self, num_hpo_trials: Optional[int] = None):
-        if num_hpo_trials is not None:
-            assert (
-                isinstance(num_hpo_trials, int) and num_hpo_trials > 0
-            ), "n_hpo_trials must be an integer greater than 0"
-        return num_hpo_trials if num_hpo_trials is not None else self.hpo_config.get("n_trials", 10)
     
-    def _set_sub_training_mode(self, training_details: Dict):
-        self.total_updates = None
-        self.max_hardware_runtime = None
-        if 'total_updates' in training_details:
-            self.total_updates = training_details["total_updates"]
-            constraint = 'total_updates'
-        elif 'max_hardware_runtime' in training_details:
-            self.max_hardware_runtime = training_details["max_hardware_runtime"]
-            constraint = 'max_hardware_runtime'
-        else:
-            raise ValueError(
-                "ERROR: Please provide either 'total_updates' or 'max_hardware_runtime' in the 'training_details' for 'spillover_noise_use_case' training mode."
-            )
-        if 'total_updates' in training_details and 'max_hardware_runtime' in training_details:
-            logging.warning(
-                "Both 'total_updates' or 'max_hardware_runtime' was provided in the 'training_details'! Using 'total_updates' as default."
-            )
-        return constraint
-    
-    def _get_training_mode(self):
-        training_details = self.training_config["training_details"]
-        self.training_mode = self.training_config["training_mode"]
-        self.phi_gamma_tuple = None
-        if self.training_mode == 'spillover_noise_use_case':
-            # Retrieve phi and gamma values
-            if not 'phi_gamma_tuple' in training_details:
-                raise ValueError(
-                    "ERROR: Please set 'phi_gamma_tuple' in the 'training_details' for the 'spillover_noise_use_case' training mode."
-                )
-            self.phi_gamma_tuple = training_details["phi_gamma_tuple"]
-            self.training_constraint = self._set_sub_training_mode(training_details)
-            logging.warning(
-                f"Constraint: {self.training_constraint}; Phi: {training_details['phi_gamma_tuple'][0]}; Gamma: {training_details['phi_gamma_tuple'][1]}"
-            )
-
-        elif self.training_config["training_mode"] == 'normal_calibration': 
-            self.training_constraint = self._set_sub_training_mode(training_details)
-            info_str = 'Total Updates' if self.training_constraint == 'total_updates' else 'Max Hardware Runtime'
-            logging.warning(
-                f"Constraint: {self.training_constraint}; {info_str}: {training_details[self.training_constraint]}"
-            )
-        else:
-            raise ValueError(
-                "ERROR: Training mode not recognized. Please choose between 'normal_calibration' and 'spillover_noise_use_case'."
-        )
-        logging.warning(
-            f"------------------------- STARTING HPO IN MODE: {self.training_config['training_mode']} -------------------------"
-        )
-
     def _get_study_name(self):
         if hasattr(self.q_env.unwrapped.target, "gate"):
             studyname = f'{self.target_operation["target_gate"].name}-calibration'
@@ -151,7 +86,6 @@ class HyperparameterOptimizer:
         return studyname
 
     def _get_n_reps_noisy_use_case(self):
-        # self.phi, self.gamma = self.phi_gamma_tuple
         self.baseline_fidelity = get_baseline_fid_from_phi_gamma(
             param_tuple=self.phi_gamma_tuple
         )
@@ -178,18 +112,10 @@ class HyperparameterOptimizer:
         
         logging.warning(param_str)
 
-    def _initialize_optimization_process(self, training_config: TrainingConfig, num_hpo_trials: int, hardware_penalty_weights: Dict[str, float | int]):
-        self.training_config = training_config
-        # training_details = self.training_config.training_details
-        # self._get_training_mode()
-        self.hardware_penalty_weights = hardware_penalty_weights
-        self.n_hpo_trials = self._get_num_hpo_trials(num_hpo_trials)     
-        # self.target_fidelities = self.training_details.targ
-        # self.lookback_window = self.training_details.get('lookback_window', 10)
-
     def optimize_hyperparameters(
         self,
         training_config: TrainingConfig,
+        train_function_settings: TrainFunctionSettings,
     ):
         """
         Starts the hyperparameter optimization process for the specified number of trials.
@@ -200,10 +126,9 @@ class HyperparameterOptimizer:
         Returns:
         - A dictionary containing the best configuration and its performance metric.
         """
-        # self._initialize_optimization_process(training_config, num_hpo_trials, hardware_penalty_weights)
         self.training_config = training_config
-        # self.hardware_penalty_weights = hardware_penalty_weights
-        # self.n_hpo_trials = self._get_num_hpo_trials(num_hpo_trials) 
+        self.train_function_settings = train_function_settings
+
         study = optuna.create_study(
             direction="minimize",
             study_name=f'{self._get_study_name()}_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}',
@@ -268,7 +193,10 @@ class HyperparameterOptimizer:
         # train_fn = make_train_ppo(self.agent_config, self.q_env, hpo_mode=True)
         ppo_agent = CustomPPOV2(self.agent_config, self.q_env)
         start_time = time.time()
-        training_results = ppo_agent.train(self.training_config)
+        training_results = ppo_agent.train(
+            training_config=self.training_config, 
+            train_function_settings=self.train_function_settings
+        )
 
         simulation_training_time = time.time() - start_time
         if training_results["avg_reward"] != -1.0:  # Check if training was successful
@@ -315,12 +243,6 @@ class HyperparameterOptimizer:
         highest_fidelity_achieved_info = None
         target_fidelities = list(training_results["fidelity_info"].keys())
 
-        # fidelity_reward = reward_and_penalty_params["fidelity_reward"]
-        # base_shot_penalty = reward_and_penalty_params["penalty_n_shots"]
-        # penalty_per_missed_fidelity = reward_and_penalty_params[
-        #     "penalty_per_missed_fidelity"
-        # ]
-
         # Identify the highest fidelity achieved and its info
         for fidelity in sorted(target_fidelities, reverse=True):
             info = training_results["fidelity_info"][fidelity]
@@ -354,7 +276,7 @@ class HyperparameterOptimizer:
 
     def _generate_filename(self):
         """Generate the file name where the best configuration will be saved."""
-        if self.training_mode == 'spillover_noise_use_case' and hasattr(self, "phi") and hasattr(self, "gamma"):
+        if self.training_mode == 'spillover_noise_use_case': # and hasattr(self, "phi") and hasattr(self, "gamma"):
             start_file_name = f"phi-{self.phi/np.pi}pi_gamma-{round(self.gamma, 2)}"
         elif self.training_mode == 'normal_calibration':
             start_file_name = "gate_calibration"
@@ -435,7 +357,7 @@ class HyperparameterOptimizer:
             "The best action vector: {}".format(
                 self.data[0]['training_results']['best_action_vector']
             )
-        )
+        ) if len(self.data) > 0 else None
 
     @property
     def fidelity_reward(self):
@@ -519,11 +441,11 @@ class HyperparameterOptimizer:
 
     @property
     def phi(self):
-        return self.phi_gamma_tuple[0]
+        return self.phi_gamma_tuple[0] if self.phi_gamma_tuple is not None else None
     
     @property
     def gamma(self):
-        return self.phi_gamma_tuple[1]
+        return self.phi_gamma_tuple[1] if self.phi_gamma_tuple is not None else None
     @property
     def target_operation(self):
         """
