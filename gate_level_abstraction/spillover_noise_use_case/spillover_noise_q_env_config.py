@@ -108,9 +108,13 @@ def get_backend(
     ### Custom spillover noise model ###
     global phi, gamma, custom_rx_gate_label
 
+    identity_op = Operator(IGate())
+    rx_phi_gamma_op = Operator(RXGate(gamma * phi))
+    ident_rx_op = rx_phi_gamma_op.tensor(identity_op)
+
     noise_model = noise.NoiseModel()
-    coherent_crx_noise = noise.coherent_unitary_error(CRXGate(gamma * phi))
-    noise_model.add_quantum_error(coherent_crx_noise, [custom_rx_gate_label], [0, 1])
+    coherent_rx_noise = noise.coherent_unitary_error(ident_rx_op)
+    noise_model.add_quantum_error(coherent_rx_noise, [custom_rx_gate_label], [0, 1])
     noise_model.add_basis_gates(["unitary"])
     print("\n", noise_model, "\n")
 
@@ -120,7 +124,7 @@ def get_backend(
         basis_gates=["cx", "id", "rz", "sx", "x", "crx"],
     )
     # backend = AerSimulator.from_backend(generic_backend, noise_model=noise_model)
-    backend = AerSimulator(noise_model=noise_model) 
+    backend = AerSimulator(noise_model=noise_model, coupling_map=CouplingMap.from_full(5)) 
     #     coupling_map=CouplingMap.from_full(5),
     #     method="density_matrix"
     # )
@@ -161,7 +165,7 @@ def get_circuit_context(
 
     circuit.cx(0, 1)
 
-    if backend is not None and backend.target.has_calibration("x", (0,)):
+    if backend is not None:
         circuit = transpile(circuit, backend, optimization_level=1, seed_transpiler=42)
     print("Circuit context")
     print(circuit)

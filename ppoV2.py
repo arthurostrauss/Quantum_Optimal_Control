@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import time
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 from typing import Optional, Dict, List, Type, Union
 import tqdm
@@ -23,6 +25,8 @@ from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 
 import sys
 import logging
+
+from hpo_training_config import HardwareRuntime, TotalUpdates, TrainFunctionSettings, TrainingConfig, TrainingDetails
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -237,7 +241,7 @@ def initialize_networks(
 
     """
     actor_net = ActorNetwork(
-        env.observation_space,
+        env.unwrapped.observation_space,
         hidden_units,
         n_actions,
         activation_functions,
@@ -245,7 +249,7 @@ def initialize_networks(
         chkpt_dir,
     )
     critic_net = CriticNetwork(
-        env.observation_space, hidden_units, activation_functions, chkpt_dir_critic
+        env.unwrapped.observation_space, hidden_units, activation_functions, chkpt_dir_critic
     )
 
     if include_critic:
@@ -285,10 +289,10 @@ def plot_curves(env):
         i * env.unwrapped.benchmark_cycle
         for i in range(len(env.unwrapped.fidelity_history))
     ]
-    plt.plot(np.mean(env.reward_history, axis=1) ** (1 / env.n_reps), label="Reward")
+    plt.plot(np.mean(env.unwrapped.reward_history, axis=1), label="Reward")
     plt.plot(
         fidelity_range,
-        env.fidelity_history,
+        env.unwrapped.fidelity_history,
         label="Circuit Fidelity",
     )
 
@@ -296,6 +300,8 @@ def plot_curves(env):
     plt.legend()
     plt.xlabel("Iteration")
     plt.ylabel("Reward")
+    # Ensure integer ticks on the x-axis
+    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
     plt.show()
 
 
@@ -347,7 +353,7 @@ def reset_env(env, seed, global_step, batchsize, dones):
         batch_done (object): The batch done flags.
     """
     next_obs, _ = env.reset(seed=seed)
-    num_steps = env.unwrapped.episode_length(global_step)  # num_time_steps
+    num_steps = env.unwrapped.episode_length(global_step)
     batch_obs = torch.tile(torch.Tensor(next_obs), (batchsize, 1))
     batch_done = torch.zeros_like(dones[0])
     return next_obs, num_steps, batch_obs, batch_done
@@ -731,44 +737,6 @@ def update_fidelity_info(
                 )
 
 
-def log_fidelity_info_summary(fidelity_info, max_hardware_runtime):
-    """
-    Logs a summary of fidelity information.
-    """
-    for fidelity, info in fidelity_info.items():
-        if info["achieved"]:
-            logging.warning(
-                f"Target fidelity {fidelity} achieved: Update {info['update_at']}, Hardware Runtime: {round(info['hardware_runtime'], 2)} sec, Simulation Train Time: {round(info['simulation_train_time'] / 60, 4)} mins, Shots Used {info['shots_used']:,}"
-            )
-        else:
-            logging.warning(
-                f"Target fidelity {fidelity} not achieved within max hardware runtime of {max_hardware_runtime}s."
-            )
-
-
-def update_training_results(
-    env,
-    avg_reward,
-    std_actions,
-    fidelities,
-    avg_action_history,
-    total_updates,
-    fidelity_info,
-):
-    return {
-        "avg_reward": avg_reward,
-        "std_action": std_actions,
-        "fidelity_history": fidelities,
-        "hardware_runtime": env.unwrapped.hardware_runtime,
-        "action_history": avg_action_history,
-        "best_action_vector": env.unwrapped.optimal_action,
-        "total_shots": env.unwrapped.total_shots,
-        "total_updates": total_updates,
-        "n_reps": env.unwrapped.n_reps,
-        "fidelity_info": fidelity_info,
-    }
-
-
 class CustomPPOV2:
     def __init__(
         self,
@@ -793,7 +761,7 @@ class CustomPPOV2:
         Returns:
             train (function): The training function for the PPO algorithm.
         """
-        env.unwrapped.clear_history()
+        self.env.unwrapped.clear_history()
         # Initialize environment parameters
         (
             self.seed,
@@ -838,113 +806,38 @@ class CustomPPOV2:
             self.chkpt_dir,
             self.chkpt_dir_critic,
         )
-
         # Initialize optimizer
         self.optimizer = initialize_optimizer(self.agent, self.agent_config)
-    def _set_sub_training_mode(self, training_details: Dict):
-        self.total_updates = None
-        self.max_hardware_runtime = None
-        if 'total_updates' in training_details:
-            self.total_updates = training_details["total_updates"]
-            constraint = 'total_updates'
-        elif 'max_hardware_runtime' in training_details:
-            self.max_hardware_runtime = training_details["max_hardware_runtime"]
-            constraint = 'max_hardware_runtime'
-        else:
-            raise ValueError(
-                "ERROR: Please provide either 'total_updates' or 'max_hardware_runtime' in the 'training_details' for 'spillover_noise_use_case' training mode."
-            )
-        if 'total_updates' in training_details and 'max_hardware_runtime' in training_details:
-            logging.warning(
-                "Both 'total_updates' or 'max_hardware_runtime' was provided in the 'training_details'! Using 'total_updates' as default."
-            )
-        return constraint
 
-    def _unpack_training_config(self, training_config: Dict):
-        """
-        Unpacks the training configuration dictionary and returns the extracted values.
-
-        Args:
-            config (Dict): The training configuration dictionary.
-
-        Returns:
-            Tuple: A tuple containing the extracted values in the following order:
-                - training_mode (str): The training mode.
-                - total_updates (int or None): The total number of updates for normal training mode.
-                - target_fidelities (List[float]): The target fidelities.
-                - lookback_window (int): The lookback window.
-                - max_hardware_runtime (float or None): The maximum hardware runtime for hardware_constraint_use_case mode.
-                - anneal_learning_rate (bool): Flag indicating whether to anneal the learning rate.
-                - std_actions_eps (float): The epsilon value for standard actions.
-
-        Raises:
-            ValueError: If the required keys are not present in the configuration dictionary.
-        """
-        # Mandatory keys
-        # training_mode = config.get("training_mode")
-        # training_details = config.get("training_details", {})
-
-        # if training_mode == "spillover_noise_use_case":
-        #     max_hardware_runtime = training_details.get("max_hardware_runtime")
-        #     total_updates = None
-        #     if max_hardware_runtime is None:
-        #         raise ValueError(
-        #             "max_hardware_runtime must be set for hardware_constraint_use_case mode"
-        #         )
-        # else:
-        #     total_updates = training_details.get("total_updates")
-        #     max_hardware_runtime = None
-        #     if total_updates is None:
-        #         raise ValueError("total_updates must be set for normal training mode")
-
-        training_details = training_config["training_details"]
-        training_mode = training_config["training_mode"]
-        self.phi_gamma_tuple = None
-        if training_mode == 'spillover_noise_use_case':
-            # Retrieve phi and gamma values
-            if not 'phi_gamma_tuple' in training_details:
-                raise ValueError(
-                    "ERROR: Please set 'phi_gamma_tuple' in the 'training_details' for the 'spillover_noise_use_case' training mode."
-                )
-            self.phi_gamma_tuple = training_details["phi_gamma_tuple"]
-            self.constraint = self._set_sub_training_mode(training_details)
-            logging.warning(
-                f"Constraint: {self.constraint}; Phi: {training_details['phi_gamma_tuple'][0]}; Gamma: {training_details['phi_gamma_tuple'][1]}"
-            )
-
-        elif training_config["training_mode"] == 'normal_calibration': 
-            self.constraint = self._set_sub_training_mode(training_details)
-            info_str = 'Total Updates' if self.constraint == 'total_updates' else 'Max Hardware Runtime'
-            logging.warning(
-                f"Constraint: {self.constraint}; {info_str}: {training_details[self.constraint]}"
-            )
-        else:
-            raise ValueError(
-                "ERROR: Training mode not recognized. Please choose between 'normal_calibration' and 'spillover_noise_use_case'."
-        )
-
-        # Optional keys with default values
-        target_fidelities = training_details.get("target_fidelities", [0.99, 0.999, 0.9999])
-        lookback_window = training_details.get("lookback_window", 10)
-        anneal_learning_rate = training_details.get("anneal_learning_rate", False)
-        std_actions_eps = training_details.get("std_actions_eps", 1e-2)
-
-        return (
-            training_mode,
-            self.total_updates,
-            target_fidelities,
-            lookback_window,
-            self.max_hardware_runtime,
-            anneal_learning_rate,
-            std_actions_eps,
-        )
+    def _update_training_results(
+        self,
+        avg_reward,
+        std_actions,
+        fidelities,
+        avg_action_history,
+        iteration,
+        fidelity_info,
+    ):
+        return {
+            "training_mode": self.training_mode,
+            "reward_method": self.env.unwrapped.config.reward_config.reward_method,
+            "training_constraint": self.training_constraint,
+            "avg_reward": avg_reward,
+            "std_action": std_actions,
+            "fidelity_history": fidelities,
+            "hardware_runtime": self.env.unwrapped.hardware_runtime,
+            "action_history": avg_action_history,
+            "best_action_vector": self.env.unwrapped.optimal_action,
+            "total_shots": self.env.unwrapped.total_shots,
+            "total_updates": iteration,
+            "n_reps": self.env.unwrapped.n_reps,
+            "fidelity_info": fidelity_info,
+        }
 
     def train(
         self,
-        training_config: Dict,
-        plot_real_time: bool = False,
-        print_debug: Optional[bool] = False,
-        num_prints: Optional[int] = 40,
+        training_config: TrainingConfig,
+        train_function_settings: TrainFunctionSettings,
     ):
         """
         Trains the model using Proximal Policy Optimization (PPO) algorithm.
@@ -959,20 +852,8 @@ class CustomPPOV2:
             Dict: A dictionary containing the training results, including average reward and fidelity history.
         """
         self.training_config = training_config
-        self.plot_real_time = plot_real_time
-        self.print_debug = print_debug
-        self.num_prints = num_prints
-
-        (
-            self.training_mode,
-            self.total_updates,
-            self.target_fidelities,
-            self.lookback_window,
-            self.max_hardware_runtime,
-            self.anneal_lr,
-            self.std_actions_eps,
-        ) = self._unpack_training_config(training_config)
-
+        self.train_function_settings = train_function_settings
+        
         try:
             fidelity_info = {
                 fidelity: {
@@ -984,8 +865,12 @@ class CustomPPOV2:
                 for fidelity in self.target_fidelities
             }
 
-            self.env.unwrapped.clear_history()
-            self.global_step = 0
+            if self.clear_history or self.hpo_mode: 
+                self.env.unwrapped.clear_history()
+                self.global_step = 0
+            else:
+                self.global_step = self.env.unwrapped.step_tracker
+
 
             (
                 self.obs,
@@ -1003,15 +888,13 @@ class CustomPPOV2:
             start_time = time.time()
 
             ### Training Loop ###
-
-            # Normal Mode: No hardware constraints
-            # if not self.hardware_constraint_use_case:
-            if self.constraint == 'total_updates':
-                logging.warning("Training in normal mode")
+            if isinstance(self.training_constraint, TotalUpdates):
+                self.total_updates = self.training_constraint.total_updates
+                logging.warning("Training Constraint: Total Updates")
                 for iteration in tqdm.tqdm(range(1, self.total_updates + 1)):
                     if self.execute_training_cycle(
                         iteration,
-                        num_prints,
+                        self.num_prints,
                         avg_reward,
                         fidelities,
                         avg_action_history,
@@ -1021,9 +904,10 @@ class CustomPPOV2:
                     ):
                         break
 
-            elif self.constraint == 'max_hardware_runtime':
+            elif isinstance(self.training_constraint, HardwareRuntime):
             # Hardware Constraint Mode: Train until hardware runtime exceeds maximum
-                logging.warning("Training in hardware constraint use case mode")
+                self.max_hardware_runtime = self.training_constraint.hardware_runtime
+                logging.warning("Training Constraint: Hardware Runtime")
                 iteration = 0
                 while (
                     np.sum(self.env.unwrapped.hardware_runtime)
@@ -1032,7 +916,7 @@ class CustomPPOV2:
                     iteration += 1
                     if self.execute_training_cycle(
                         iteration,
-                        num_prints,
+                        self.num_prints,
                         avg_reward,
                         fidelities,
                         avg_action_history,
@@ -1050,12 +934,14 @@ class CustomPPOV2:
             return self.training_results
 
         except Exception as e:
-            logging.error(f"An error occurred during training: {e}")
-            raise
-            return {
-                "avg_reward": -1.0,
-                "fidelity_history": [0] * self.total_updates,
-            }
+            if self.hpo_mode: # Return a default value for HPO
+                logging.error(f"An error occurred during training: {e}")
+                return {
+                    "avg_reward": -1.0,
+                    "fidelity_history": [0] * self.total_updates,
+                }
+            else: # Raise the error for debugging in the normal mode
+                raise
 
     def perform_training_iteration(
         self,
@@ -1218,7 +1104,7 @@ class CustomPPOV2:
         fidelity_info,
         start_time,
     ):
-        if self.anneal_lr:
+        if self.anneal_learning_rate:
             self.learning_rate_annealing(iteration=iteration)
 
         mean_action, std_action = self.perform_training_iteration(num_prints)
@@ -1246,13 +1132,12 @@ class CustomPPOV2:
                 start_time,
             )
 
-        self._training_results = update_training_results(
-            self.env,
+        self._training_results = self._update_training_results(
             avg_reward,
             std_actions,
             fidelities,
             avg_action_history,
-            self.total_updates,
+            iteration,
             fidelity_info,
         )
 
@@ -1262,10 +1147,6 @@ class CustomPPOV2:
         """
         Logs a summary of fidelity information.
         """
-        if self.constraint == 'total_updates':
-            resource_type = 'Total Updates'
-        elif self.constraint == 'max_hardware_runtime':
-            resource_type = 'Max Hardware Runtime'
 
         for fidelity, info in fidelity_info.items():
             if info["achieved"]:
@@ -1274,7 +1155,7 @@ class CustomPPOV2:
                 )
             else:
                 logging.warning(
-                    f"Target fidelity {fidelity} not achieved within {resource_type} of {self.max_hardware_runtime if self.max_hardware_runtime else self.total_updates}{'s' if self.max_hardware_runtime else ''}."
+                    f"Target fidelity {fidelity} not achieved within {self.training_constraint}{'s' if isinstance(self.training_constraint, HardwareRuntime) else ''}."
                 )
 
     def learning_rate_annealing(
@@ -1293,11 +1174,11 @@ class CustomPPOV2:
             iteration: The current iteration number (optional).
             max_hardware_runtime: The maximum hardware runtime (optional).
         """
-        if self.constraint == 'total_updates':
-            frac = 1.0 - (iteration - 1.0) / self.total_updates
-        elif self.constraint == 'max_hardware_runtime':
+        if isinstance(self.training_constraint, TotalUpdates):
+            frac = 1.0 - (iteration - 1.0) / self.training_constraint.total_updates
+        elif isinstance(self.training_constraint, HardwareRuntime):
             frac = 1.0 - (
-                np.sum(self.env.unwrapped.hardware_runtime) / self.max_hardware_runtime
+                np.sum(self.env.unwrapped.hardware_runtime) / self.training_constraint.hardware_runtime
             )
         lrnow = frac * self.lr
         self.optimizer.param_groups[0]["lr"] = lrnow
@@ -1305,3 +1186,47 @@ class CustomPPOV2:
     @property
     def training_results(self):
         return self._training_results
+    
+    @property
+    def target_fidelities(self):
+        return self.training_config.target_fidelities
+    
+    @property
+    def training_constraint(self):
+        return self.training_config.training_constraint
+    
+    @property
+    def training_mode(self):
+        return self.training_config.training_mode
+    
+    @property
+    def lookback_window(self):
+        return self.training_config.lookback_window
+    
+    @property
+    def std_actions_eps(self):
+        return self.training_config.std_actions_eps
+    
+    @property
+    def anneal_learning_rate(self):
+        return self.training_config.anneal_learning_rate
+    
+    @property
+    def plot_real_time(self):
+        return self.train_function_settings.plot_real_time
+
+    @property
+    def print_debug(self):
+        return self.train_function_settings.print_debug
+    
+    @property
+    def num_prints(self):
+        return self.train_function_settings.num_prints
+    
+    @property
+    def hpo_mode(self):
+        return self.train_function_settings.hpo_mode
+    
+    @property
+    def clear_history(self):
+        return self.train_function_settings.clear_history

@@ -107,22 +107,11 @@ class TrainingDetails:
     lookback_window: Optional[int] = 10
     anneal_learning_rate: Optional[bool] = False
     std_actions_eps: Optional[float] = 1e-2
-    phi_gamma_tuple: Optional[tuple] = (None, None)
-
-    
 
 @dataclass
 class TrainingConfig:
     training_mode: Literal["normal_calibration", "spillover_noise_use_case"] = None # Forces the user to make an explicit choice
     training_details: TrainingDetails = None
-
-    def __post_init__(self):
-        self.validate()
-
-    def validate(self):
-        if self.training_mode == "spillover_noise_use_case" and \
-        self.training_details.phi_gamma_tuple == (None, None):
-            raise ValueError("phi_gamma_tuple must be set when training_mode is 'spillover_noise_use_case'.")
     
     @property
     def training_constraint(self):

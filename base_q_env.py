@@ -86,6 +86,7 @@ from qconfig import (
     ChannelConfig,
     ORBITConfig,
     XEBConfig,
+    XEBConfig,
 )
 
 
@@ -1125,6 +1126,12 @@ class BaseQuantumEnvironment(ABC, Env):
             return array_obs
         else:
             raise NotImplementedError("Channel estimator not yet implemented")
+        
+    def modify_environment_params(self, **kwargs):
+        """
+        Modify environment parameters
+        """
+        pass
 
     @property
     def config(self):
@@ -1207,6 +1214,8 @@ class BaseQuantumEnvironment(ABC, Env):
         self.qc_history.clear()
         self.action_history.clear()
         self.reward_history.clear()
+        self._total_shots.clear()
+        self._hardware_runtime.clear()
         if isinstance(self.target, GateTarget):
             self.avg_fidelity_history.clear()
             self.process_fidelity_history.clear()
