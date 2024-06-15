@@ -86,8 +86,6 @@ from qconfig import (
     ChannelConfig,
     ORBITConfig,
     XEBConfig,
-    XEBConfig,
-    XEBConfig,
 )
 
 
@@ -623,10 +621,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self._pubs, total_shots = self._reward_methods[reward_method](qc, params)
         self._total_shots.append(total_shots)
         self._hardware_runtime.append(
-            get_hardware_runtime_single_circuit(
-                qc,
-                self.config.backend_config.instruction_durations_dict.duration_by_name_qubits,
-            )
             get_hardware_runtime_single_circuit(
                 qc,
                 self.config.backend_config.instruction_durations_dict.duration_by_name_qubits,

@@ -102,7 +102,7 @@ class TrainFunctionSettings:
 
 @dataclass
 class TrainingDetails:
-    training_constraint: Union[TotalUpdates, HardwareRuntime] = None
+    training_constraint: Union[TotalUpdates, HardwareRuntime] = TotalUpdates(250)
     target_fidelities: Optional[list] = field(default_factory=lambda: [0.999, 0.9999, 0.99999])
     lookback_window: Optional[int] = 10
     anneal_learning_rate: Optional[bool] = False
