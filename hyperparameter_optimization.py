@@ -11,13 +11,13 @@ import pickle
 import optuna
 from base_q_env import BaseQuantumEnvironment, GateTarget, StateTarget
 from quantumenvironment import QuantumEnvironment
-from context_aware_quantum_environment import ContextAwareQuantumEnvironment, SpilloverNoiseQuantumEnvironment
+from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from helper_functions import (
     load_from_yaml_file,
     create_hpo_agent_config,
     save_to_pickle
 )
-from gate_level_abstraction.spillover_noise_use_case.noise_utils.utils import get_baseline_fid_from_phi_gamma
+from gate_level_abstraction.spillover_noise_use_case.spillover_noise_quantum_environment import SpilloverNoiseQuantumEnvironment
 from ppoV2 import CustomPPOV2
 
 from hpo_training_config import (
@@ -131,7 +131,7 @@ class HyperparameterOptimizer:
         logging.warning("Parameters:")
         if self.training_mode == 'spillover_noise_use_case' and isinstance(self.q_env.unwrapped, SpilloverNoiseQuantumEnvironment):
             param_str = "phi: {}pi; gamma: {}; Baseline Fidelity: {}; ".format(
-                self.phi/np.pi, self.gamma, self.q_env.unwrapped.get_n_reps(self.target_fidelities)
+                self.q_env.unwrapped.phi/np.pi, self.q_env.unwrapped.gamma, self.q_env.unwrapped.get_n_reps(self.target_fidelities)
             )
         param_str += "N_Reps: {}; Target Fidelities: {}; Lookback Window: {}".format(
                 self.q_env.unwrapped.n_reps,
@@ -264,7 +264,7 @@ class HyperparameterOptimizer:
     def _generate_filename(self):
         """Generate the file name where the best configuration will be saved."""
         if self.training_mode == 'spillover_noise_use_case' and isinstance(self.q_env.unwrapped, SpilloverNoiseQuantumEnvironment):
-            start_file_name = f"phi-{self.phi/np.pi}pi_gamma-{round(self.gamma, 2)}"
+            start_file_name = f"phi-{self.q_env.unwrapped.phi/np.pi}pi_gamma-{round(self.q_env.unwrapped.gamma, 2)}"
         elif self.training_mode == 'normal_calibration':
             start_file_name = "gate_calibration"
         else:
@@ -421,14 +421,6 @@ class HyperparameterOptimizer:
     @property
     def training_mode(self):
         return self.training_config.training_mode
-
-    @property
-    def phi(self):
-        return self.q_env.unwrapped.phi_gamma_tuple[0] if isinstance(self.q_env.unwrapped, SpilloverNoiseQuantumEnvironment) else None
-    
-    @property
-    def gamma(self):
-        return self.q_env.unwrapped.phi_gamma_tuple[1] if isinstance(self.q_env.unwrapped, SpilloverNoiseQuantumEnvironment) else None
     
     @property
     def target_type(self):
