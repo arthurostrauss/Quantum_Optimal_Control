@@ -4,7 +4,7 @@ This ReadMe file is supposed to provide a brief overview of the type of noise ca
 
 ## Motivation
 
-Pulse spillover is a form of noise that occurs in quantum computing systems and arises when control pulses meant to manipulate specific qubits inadvertently affect neighboring qubits. This noise can degrade the performance and reliability of quantum computations and lowering the quality of quantum gate operations. Therefore, it is an important aspect worth studying and addressing in noise-surpression strategies.
+Pulse spillover is a form of noise that occurs in quantum computing systems and arises when control pulses meant to manipulate specific qubits inadvertently affect neighboring qubits. This noise can degrade the performance and reliability of quantum computations and lowering the quality of quantum gate operations. Therefore, it is an important aspect worth studying and addressing in noise-suppression strategies.
 
 ## Sources of Pulse Spillover
 
@@ -28,11 +28,11 @@ The orange gate depicts the parametrized target gate operation with action vecto
 
 ![Spillover Noise Quantum Circuit Representation](noise_utils/spillover_noise_gate_level_circuit.png)
 
-We argue the noise to be linear in $\phi$ and $\gamma$ since the pulse for different rotation angles $\phi$ would lead to a different amplitude in the pulse played on qubit 1. The noise-strenght (or alternatively spillover-rate) is hardware-specific to the tuple (qubit 1, qubit 2). \
-Let now $\vec{a}^{*}$ be the ideal action vector for the noise-free case leading to circuit fidelity 1.0 with respect to (wrt.) a circuit that does not parameterize (so static) the target operation. The agent of the Reinforcement Learning (RL) is now tasked to find the action $\vec{a}'$ that is successfully counter-acting the introduced spillover noise again leading to circuit fidelity 1.0.
+We argue the noise to be linear in $\phi$ and $\gamma$ since the pulse for different rotation angles $\phi$ would lead to a different amplitude in the pulse played on qubit 1. The noise-strength (or alternatively spillover-rate) is hardware-specific to the tuple (qubit 1, qubit 2). \
+Let now $\vec{a}^{*}$ be the ideal action vector for the noise-free case leading to circuit fidelity 1.0 with respect to (wrt.) a circuit that does not parameterize (so static) the target operation. The Reinforcement Learning (RL) agent is now tasked to find the action $\vec{a}'$ that is successfully counter-acting the introduced spillover noise again leading to circuit fidelity 1.0.
 
 ## How-To (Formulated)
-Similiarly to the normal, noise-free calibration task, the user sets details in a configuration script. For this use-case, thes script is called *spillover_noise_q_env_config.py*. Here, the rotation angle $\phi$ and the noise parameter $\gamma$ have to be set. There is a dedicated class `SpilloverNoiseQuantumEnvironment` that can be found in the `context_aware_quantum_environment.py` file. It inherits from the `ContextAwareQuantumEnvironmentV2` class making all functionalities of the parent class available by extending them with one related to the specific use case the class serves. Since we are now studying noise of different strenghts $\mathcal{O}(\gamma)$, we now enable the user to increase the noise sensitivity of the RL agent by repeating the target gate $U(\vec{a})$ $n_{\text{reps}}$ times.
+Similiarly to the usual, noise-free calibration task, the user sets details in a configuration script. For this use-case, this script is called *spillover_noise_q_env_config.py*. Here, the rotation angle $\phi$ and the noise parameter $\gamma$ have to be set. There is a dedicated class `SpilloverNoiseQuantumEnvironment` that can be found in the `context_aware_quantum_environment.py` file. It inherits from the `ContextAwareQuantumEnvironmentV2` class making all functionalities of the parent class available by extending them with one related to the specific use case the class serves. Since we are now studying noise of different strengths $\mathcal{O}(\gamma)$, we now enable the user to increase the noise sensitivity of the RL agent by repeating the target gate $U(\vec{a})$ $n_{\text{reps}}$ times.
 There are no additional modifications to any other files needed.
 
 ### Quick HowTo
