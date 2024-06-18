@@ -323,7 +323,7 @@ class GateTarget(BaseTarget):
             for op, input_circuits_list in zip(self.target_op, input_circuits)
         ]
         self.input_states = input_states
-        self.Chi = _calculate_chi_target(Operator(gate))
+        self.Chi = _calculate_chi_target(Operator(gate).power(n_reps))
 
 
 class QiskitBackendInfo:
@@ -886,6 +886,8 @@ class BaseQuantumEnvironment(ABC, Env):
                     front=True,
                     inplace=False,
                 )
+                for _ in range(self.n_reps - 1):
+                    prep_circuit.compose(qc, inplace=True)
                 prep_circuit = self.backend_info.custom_transpile(
                     prep_circuit,
                     initial_layout=self.layout[self._inside_trunc_tracker],
