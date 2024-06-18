@@ -2,7 +2,7 @@ import sys
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-from typing import Tuple, Union, Optional, Dict, List
+from typing import Callable, Tuple, Union, Optional, Dict, List
 import numpy as np
 import math
 import time
@@ -67,18 +67,18 @@ class HyperparameterOptimizer:
     def __init__(
         self,
         hpo_config: HPOConfig,
+        callback: Optional[Callable] = None,
     ):
         """
         Initializes the HyperparameterOptimizer with configurations for the quantum environment,
         agent, hyperparameter optimization, and other settings.
 
         Parameters:
-        - q_env: QuantumEnvironment or ContextAwareQuantumEnvironment instance.
-        - config_paths: Dictionary containing paths to the configuration files for the agent, HPO and where to save results to.
-        - hardware_penalty_weights: Optional dictionary specifying penalty weights for experimentally costly hyperparameters.
-        - log_results: Flag indicating whether to log the optimization results at the end of the process.
+        - hpo_config: HPOConfig object containing the configurations for the hyperparameter optimization, such as the quantum environment and trining specific details. 
+        - callback: Optional callback function to be called after each trial. The callback function should accept a dictionary containing the trial data.
         """
         self.hpo_config = hpo_config
+        self.callback = callback
         self.all_trials_data = []
 
     def optimize_hyperparameters(
@@ -127,13 +127,9 @@ class HyperparameterOptimizer:
         return studyname
 
     def _log_training_parameters(self):
-        param_str = ""
         logging.warning("Parameters:")
-        if self.training_mode == 'spillover_noise_use_case' and isinstance(self.q_env.unwrapped, SpilloverNoiseQuantumEnvironment):
-            param_str = "phi: {}pi; gamma: {}; Baseline Fidelity: {}; ".format(
-                self.q_env.unwrapped.phi/np.pi, self.q_env.unwrapped.gamma, self.q_env.unwrapped.get_n_reps(self.target_fidelities)
-            )
-        param_str += "N_Reps: {}; Target Fidelities: {}; Lookback Window: {}".format(
+        param_str = self.q_env.unwrapped.__repr__()
+        param_str += "\nN_Reps: {}; Target Fidelities: {}; Lookback Window: {}".format(
                 self.q_env.unwrapped.n_reps,
                 self.target_fidelities,
                 self.lookback_window,
@@ -207,6 +203,9 @@ class HyperparameterOptimizer:
         }
         self.all_trials_data.append(trial_data)
 
+        if self.callback is not None:
+            self.callback(trial_data)        
+
         return custom_cost_value
 
     def _calculate_custom_cost(
@@ -263,17 +262,8 @@ class HyperparameterOptimizer:
 
     def _generate_filename(self):
         """Generate the file name where the best configuration will be saved."""
-        if self.training_mode == 'spillover_noise_use_case' and isinstance(self.q_env.unwrapped, SpilloverNoiseQuantumEnvironment):
-            start_file_name = f"phi-{self.q_env.unwrapped.phi/np.pi}pi_gamma-{round(self.q_env.unwrapped.gamma, 2)}"
-        elif self.training_mode == 'normal_calibration':
-            start_file_name = "gate_calibration"
-        else:
-            start_file_name = "state_preparation"
-
-        start_file_name += f"_{self.training_constraint}_"
-
         return (
-            start_file_name
+            f"{self.q_env.unwrapped.ident_str}_{self.training_constraint}_"
             + f"custom-cost-value-{round(self.best_trial.value, 6)}"
             + "_timestamp_"
             + datetime.now().strftime("%d-%m-%Y_%H-%M-%S")

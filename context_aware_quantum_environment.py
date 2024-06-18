@@ -667,6 +667,11 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
         except AssertionError:
             raise ValueError("Training steps number should be positive integer.")
 
+    def _ident_str(self):
+        """ This is a one-line description of the environment with some key parameters. """
+        base_ident_str = super()._ident_str()
+        return f"ContextAwareQEnv_{self.tgt_instruction_counts}-gates_{base_ident_str}"
+
     def __repr__(self):
         string = QuantumEnvironment.__repr__(self)
         string += f"Number of target gates in circuit context: {self.tgt_instruction_counts}\n"

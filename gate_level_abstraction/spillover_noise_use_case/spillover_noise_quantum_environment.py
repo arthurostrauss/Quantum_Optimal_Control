@@ -70,9 +70,9 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironmentV2):
         return min([smallest_N_reps, 150])
 
     def get_baseline_fid_from_phi_gamma(self):
-        ideal_circ = self._get_ideal_circ(self.phi)
-        noisy_circ = self._build_noisy_circ(self.phi)
-        backend = self._bind_noise_get_backend(self.phi, self.gamma)
+        ideal_circ = self._get_ideal_circ()
+        noisy_circ = self._build_noisy_circ()
+        backend = self._bind_noise_get_backend()
         process_results = backend.run(noisy_circ).result()
         q_process_list = [
             process_results.data(0)["superop"],
@@ -88,13 +88,13 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironmentV2):
         )
         return avg_fidelity
 
-    def _get_noisy_circuit(self, phi, gamma):
+    def _get_noisy_circuit(self):
         circuit = QuantumCircuit(2)
 
-        rx_phi_op = Operator(RXGate(phi))
+        rx_phi_op = Operator(RXGate(self.phi))
         circuit.unitary(rx_phi_op, [0], label="RX(phi)")
 
-        rx_phi_gamma_op = Operator(RXGate(gamma * phi))
+        rx_phi_gamma_op = Operator(RXGate(self.gamma * self.phi))
         circuit.unitary(rx_phi_gamma_op, [1], label="RX(gamma*phi)")
 
         # Model custom CX gate
@@ -117,9 +117,9 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironmentV2):
 
         return circuit
 
-    def _bind_noise_get_backend(self, phi, gamma):
+    def _bind_noise_get_backend(self):
         identity_op = Operator(IGate())
-        rx_op = Operator(RXGate(gamma * phi))
+        rx_op = Operator(RXGate(self.gamma * self.phi))
         ident_rx_op = rx_op.tensor(identity_op)
 
         custom_rx_gate_label = "custom_kron(rx,ident)_gate"
@@ -167,6 +167,17 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironmentV2):
         ideal_circ.rx(self.phi, 0)
         ideal_circ.cx(0, 1)
         return ideal_circ
+    
+    def _ident_str(self):
+        """ This is a one-line description of the environment with some key parameters. """
+        base_ident_str = super()._ident_str()
+        return f"SpilloverNoise_phi-{self.phi/np.pi}pi_gamma-{self.gamma}_{base_ident_str}"
+        
+    def __repr__(self):
+        string = ContextAwareQuantumEnvironmentV2.__repr__(self)
+        string += f"Custom Spillover Noise Use Case with noisy RX(phi={self.phi/np.pi}pi) rotation on qubit 0\n"
+        string += f"Spillover Noise leads to the unwanted noise effect on qubit 1 in form of RX({self.gamma} * {self.phi/np.pi}pi) with gamma as the noise strength parameter.\n"
+        return string
 
     @property
     def phi(self):

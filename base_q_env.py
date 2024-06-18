@@ -1335,6 +1335,16 @@ class BaseQuantumEnvironment(ABC, Env):
             }
         return info
 
+    def _ident_str(self):
+        """ This is a one-line description of the environment with some key parameters. """
+        if isinstance(self.target, GateTarget):
+            ident_str = f"gate_calibration_{self.target.gate.name}-gate_physical_qubits_{'-'.join(map(str, self.target.physical_qubits))}"
+        elif isinstance(self.target, StateTarget):
+            ident_str = f"state_preparation_physical_qubits_{'-'.join(map(str, self.target.physical_qubits))}"
+        else:
+            raise ValueError("Target type not recognized")
+        return ident_str
+
     def __repr__(self):
         string = f"QuantumEnvironment composed of {self.n_qubits} qubits, \n"
         string += (
@@ -1441,6 +1451,10 @@ class BaseQuantumEnvironment(ABC, Env):
     @std_action.setter
     def std_action(self, value):
         self._std_action = np.array(value)
+
+    @property
+    def ident_str(self):
+        return self._ident_str()
 
     @property
     @abstractmethod
