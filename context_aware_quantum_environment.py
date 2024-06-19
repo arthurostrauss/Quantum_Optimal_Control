@@ -6,9 +6,7 @@ Author: Arthur Strauss
 Created on 26/06/2023
 """
 
-from abc import abstractmethod
 from itertools import product
-import math
 import sys
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
@@ -24,29 +22,21 @@ from qiskit.circuit import (
     CircuitInstruction,
     Delay,
 )
-from qiskit.circuit.library import ECRGate
 from qiskit.quantum_info import (
-    partial_trace,
     state_fidelity,
     Statevector,
-    DensityMatrix,
-    Operator,
+
 )
-from qiskit.quantum_info.states import DensityMatrix, Statevector
-from qiskit.circuit.library import RXGate, IGate
+from qiskit.quantum_info.states import Statevector
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity
 
-from qiskit.transpiler import Layout, InstructionProperties
+from qiskit.transpiler import Layout
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_aer import noise
 from qiskit_aer.noise import NoiseModel
 from qiskit_dynamics import DynamicsBackend
-from qiskit_experiments.calibration_management import (
-    Calibrations,
-    FixedFrequencyTransmon,
-    EchoedCrossResonance,
-)
+
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 from qiskit_ibm_runtime import EstimatorV2
 from qiskit_ibm_runtime import EstimatorV2
@@ -55,7 +45,6 @@ from helper_functions import (
     projected_statevector,
     remove_unused_wires,
     get_instruction_timings,
-    fidelity_from_tomography,
 )
 from qconfig import QEnvConfig
 from base_q_env import (

@@ -43,27 +43,12 @@ QUANTUM_ENVIRONMENT = Union[
 
 class HyperparameterOptimizer:
     """
-    A class designed to optimize the hyperparameters of a Proximal Policy Optimization (PPO)
-    agent operating within a quantum environment, leveraging the Optuna framework for
-    hyperparameter optimization.
+    A class that performs hyperparameter optimization for a quantum environment and agent.
 
-    This optimizer facilitates a systematic exploration of the hyperparameter space to identify
-    configurations that minimize a custom cost function. The cost function is designed to
-    account not only for the performance of the quantum operation (e.g., infidelity) but also
-    for the experimental cost associated with certain hyperparameters, such as the number of
-    shots in quantum measurements or batch sizes during training. The class supports saving
-    the best found configurations and provides tools for logging the optimization process.
-
-    Attributes:
-        q_env (Any valid QuantumEnvironment instance):
-            The quantum environment in which the PPO agent operates. This environment
-            must comply with either the QuantumEnvironment or
-            ContextAwareQuantumEnvironment interface.
-        config_paths (Dict[str, str]): Dictionary containing paths to the configuration files
-        log_progress (bool): Indicates whether the progress of the hyperparameter optimization
-            should be logged. Useful for monitoring the optimization process in real time.
+    Based on a custom cost function, the HyperparameterOptimizer evaluates the performance of the agent. 
+    The custom cost function considers the number of shots used to achieve the highest target fidelity, rewards achieving target fidelities, and penalizes unachieved target fidelities.
+    Final result will be saved to a pickle.gzip file.
     """
-
     def __init__(
         self,
         hpo_config: HPOConfig,
@@ -120,9 +105,9 @@ class HyperparameterOptimizer:
         self._log_results(study, start_time_hpo) if self.log_progress else None
 
     def _get_study_name(self):
-        if isinstance(self.target_type, GateTarget):
+        if isinstance(self.env_target, GateTarget):
             studyname = f'{self.target_operation["target_gate"].name}-calibration'
-        elif isinstance(self.target_type, StateTarget):
+        elif isinstance(self.env_target, StateTarget):
             studyname = "state-preparation"
         return studyname
 
@@ -192,7 +177,7 @@ class HyperparameterOptimizer:
             training_results
         )
 
-        # Keep traaack of all trials data
+        # Keep track of all trials data
         trial_data = {
             "trial_number": trial.number,
             "training_results": training_results,
@@ -413,7 +398,7 @@ class HyperparameterOptimizer:
         return self.training_config.training_mode
     
     @property
-    def target_type(self):
+    def env_target(self):
         return self.q_env.unwrapped.target
     @property
     def target_operation(self):
@@ -423,13 +408,13 @@ class HyperparameterOptimizer:
         Returns:
         - A dictionary containing 'target_gate' and 'target_register' keys with their corresponding values.
         """
-        if isinstance(self.target_type, GateTarget):
+        if isinstance(self.env_target, GateTarget):
             return {
-                "target_gate": self.target_type.gate,
-                "target_register": self.target_type.physical_qubits,
+                "target_gate": self.env_target.gate,
+                "target_register": self.env_target.physical_qubits,
             }
-        elif hasattr(self.target_type, StateTarget):
+        elif hasattr(self.env_target, StateTarget):
             return {
-                "target_state": self.target_type.dm,
-                "target_register": self.target_type.physical_qubits,
+                "target_state": self.env_target.dm,
+                "target_register": self.env_target.physical_qubits,
             }

@@ -101,41 +101,12 @@ class TrainFunctionSettings:
             "num_prints must be an integer greater than 0"
 
 @dataclass
-class TrainingDetails:
+class TrainingConfig:
     training_constraint: Union[TotalUpdates, HardwareRuntime] = field(default_factory=lambda: TotalUpdates(250))
     target_fidelities: Optional[list] = field(default_factory=lambda: [0.999, 0.9999, 0.99999])
     lookback_window: Optional[int] = 10
     anneal_learning_rate: Optional[bool] = False
     std_actions_eps: Optional[float] = 1e-2
-
-@dataclass
-class TrainingConfig:
-    training_mode: Literal["normal_calibration", "spillover_noise_use_case"] = None # Forces the user to make an explicit choice
-    training_details: TrainingDetails = None
-    
-    @property
-    def training_constraint(self):
-        return self.training_details.training_constraint
-
-    @property
-    def target_fidelities(self):
-        return self.training_details.target_fidelities
-    
-    @property
-    def lookback_window(self):
-        return self.training_details.lookback_window
-    
-    @property
-    def anneal_learning_rate(self):
-        return self.training_details.anneal_learning_rate
-    
-    @property
-    def std_actions_eps(self):
-        return self.training_details.std_actions_eps
-    
-    @property
-    def phi_gamma_tuple(self):
-        return self.training_details.phi_gamma_tuple
     
     @property
     def as_dict(self):

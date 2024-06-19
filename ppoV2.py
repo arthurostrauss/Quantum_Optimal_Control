@@ -26,7 +26,7 @@ from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 import sys
 import logging
 
-from hpo_training_config import HardwareRuntime, TotalUpdates, TrainFunctionSettings, TrainingConfig, TrainingDetails
+from hpo_training_config import HardwareRuntime, TotalUpdates, TrainFunctionSettings, TrainingConfig
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -819,7 +819,7 @@ class CustomPPOV2:
         fidelity_info,
     ):
         return {
-            "training_mode": self.training_mode,
+            "env_ident_str": self.env.unwrapped.ident_str,
             "reward_method": self.env.unwrapped.config.reward_config.reward_method,
             "training_constraint": self.training_constraint,
             "avg_reward": avg_reward,
@@ -1194,10 +1194,6 @@ class CustomPPOV2:
     @property
     def training_constraint(self):
         return self.training_config.training_constraint
-    
-    @property
-    def training_mode(self):
-        return self.training_config.training_mode
     
     @property
     def lookback_window(self):
