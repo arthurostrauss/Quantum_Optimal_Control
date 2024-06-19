@@ -281,10 +281,12 @@ def initialize_optimizer(agent, agent_config):
     return optimizer
 
 
-def plot_curves(env):
+def plot_curves(env: QUANTUM_ENVIRONMENT):
     """
     Plots the reward history and fidelity history of the environment
     """
+    fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
+    plt.plot(np.mean(env.reward_history, axis=1), label="Reward")
     fidelity_range = [
         i * env.unwrapped.benchmark_cycle
         for i in range(len(env.unwrapped.fidelity_history))
@@ -1074,7 +1076,7 @@ class CustomPPOV2:
         if self.global_step % num_prints == 0:
             clear_output(wait=True)
             if self.plot_real_time:
-                plot_curves(self.env)
+                plot_curves(self.env.unwrapped)
 
         write_to_tensorboard(
             self.writer,
