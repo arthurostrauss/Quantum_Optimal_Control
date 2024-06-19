@@ -4,7 +4,6 @@ from typing import Iterable, List
 
 from qiskit.circuit import ParameterExpression
 from qiskit.providers import BackendV2 as Backend
-from qiskit.providers import Provider
 from qiskit.providers.models import PulseBackendConfiguration
 from qiskit.transpiler import Target, InstructionProperties, InstructionDurations
 
@@ -17,6 +16,10 @@ from qualang_tools.addons.variables import assign_variables_to_element
 from qualang_tools.config import QuaConfig
 from qiskit.compiler import schedule as build_schedule
 from quam.components import *
+from quaqsim.architectures.from_qua_channels import (
+    TransmonPairBackendChannel,
+    ChannelType,
+)
 from quam.examples.superconducting_qubits import QuAM, Transmon
 from QUA_files.qua_utils import (
     prepare_input_state,
@@ -26,7 +29,7 @@ from QUA_files.qua_utils import (
 from qualang_tools.video_mode import ParameterTable
 
 
-class QMProvider(Provider):
+class QMProvider:
     def __init__(self, host, port, cluster_name, octave_config):
         """
         Qiskit Provider for the Quantum Orchestration Platform (QOP)

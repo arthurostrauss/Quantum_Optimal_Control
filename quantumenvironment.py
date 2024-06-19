@@ -60,7 +60,6 @@ from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
     SamplerV1 as RuntimeSamplerV1,
     QiskitRuntimeService,
-    IBMBackend,
 )
 
 from base_q_env import (
