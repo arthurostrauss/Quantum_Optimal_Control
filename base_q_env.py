@@ -1131,7 +1131,7 @@ class BaseQuantumEnvironment(ABC, Env):
             return array_obs
         else:
             raise NotImplementedError("Channel estimator not yet implemented")
-        
+
     def modify_environment_params(self, **kwargs):
         """
         Modify environment parameters
@@ -1342,7 +1342,7 @@ class BaseQuantumEnvironment(ABC, Env):
         return info
 
     def _ident_str(self):
-        """ This is a one-line description of the environment with some key parameters. """
+        """This is a one-line description of the environment with some key parameters."""
         if isinstance(self.target, GateTarget):
             ident_str = f"gate_calibration_{self.target.gate.name}-gate_physical_qubits_{'-'.join(map(str, self.target.physical_qubits))}"
         elif isinstance(self.target, StateTarget):

@@ -15,16 +15,14 @@ from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from helper_functions import (
     load_from_yaml_file,
     create_hpo_agent_config,
-    save_to_pickle
+    save_to_pickle,
 )
-from gate_level_abstraction.spillover_noise_use_case.spillover_noise_quantum_environment import SpilloverNoiseQuantumEnvironment
+from gate_level_abstraction.spillover_noise_use_case.spillover_noise_quantum_environment import (
+    SpilloverNoiseQuantumEnvironment,
+)
 from ppoV2 import CustomPPOV2
 
-from hpo_training_config import (
-    HPOConfig, 
-    TrainFunctionSettings,
-    TrainingConfig
-)
+from hpo_training_config import HPOConfig, TrainFunctionSettings, TrainingConfig
 
 import logging
 
@@ -41,14 +39,16 @@ QUANTUM_ENVIRONMENT = Union[
     ContextAwareQuantumEnvironment,
 ]
 
+
 class HyperparameterOptimizer:
     """
     A class that performs hyperparameter optimization for a quantum environment and agent.
 
-    Based on a custom cost function, the HyperparameterOptimizer evaluates the performance of the agent. 
+    Based on a custom cost function, the HyperparameterOptimizer evaluates the performance of the agent.
     The custom cost function considers the number of shots used to achieve the highest target fidelity, rewards achieving target fidelities, and penalizes unachieved target fidelities.
     Final result will be saved to a pickle.gzip file.
     """
+
     def __init__(
         self,
         hpo_config: HPOConfig,
@@ -59,7 +59,7 @@ class HyperparameterOptimizer:
         agent, hyperparameter optimization, and other settings.
 
         Parameters:
-        - hpo_config: HPOConfig object containing the configurations for the hyperparameter optimization, such as the quantum environment and training specific details. 
+        - hpo_config: HPOConfig object containing the configurations for the hyperparameter optimization, such as the quantum environment and training specific details.
         - callback: Optional callback function to be called after each trial. The callback function should accept a dictionary containing the trial data.
         """
         self.hpo_config = hpo_config
@@ -87,12 +87,14 @@ class HyperparameterOptimizer:
             direction="minimize",
             study_name=f'{self._get_study_name()}_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}',
         )
-        self.q_env.unwrapped.modify_environment_params(target_fidelities = self.target_fidelities)
-        
+        self.q_env.unwrapped.modify_environment_params(
+            target_fidelities=self.target_fidelities
+        )
+
         self._log_training_parameters()
         time.sleep(4)
         # Start the hyperparameter optimization process
-        start_time_hpo = time.time()        
+        start_time_hpo = time.time()
         study.optimize(self._objective, n_trials=self.num_hpo_trials)
         self._post_processing(study, start_time_hpo)
 
@@ -115,12 +117,11 @@ class HyperparameterOptimizer:
         logging.warning("Parameters:")
         param_str = self.q_env.unwrapped.__repr__()
         param_str += "\nN_Reps: {}; Target Fidelities: {}; Lookback Window: {}".format(
-                self.q_env.unwrapped.n_reps,
-                self.target_fidelities,
-                self.lookback_window,
-            )
+            self.q_env.unwrapped.n_reps,
+            self.target_fidelities,
+            self.lookback_window,
+        )
         logging.warning(param_str)
-
 
     def _catch_all_trials_failed(self, study: optuna.study.Study):
         if all([trial.value == float("inf") for trial in study.trials]):
@@ -162,8 +163,8 @@ class HyperparameterOptimizer:
         ppo_agent = CustomPPOV2(self.agent_config, self.q_env)
         start_time = time.time()
         training_results = ppo_agent.train(
-            training_config=self.training_config, 
-            train_function_settings=self.train_function_settings
+            training_config=self.training_config,
+            train_function_settings=self.train_function_settings,
         )
 
         simulation_training_time = time.time() - start_time
@@ -173,9 +174,7 @@ class HyperparameterOptimizer:
         else:
             return float("inf")  # Catch errors in the trianing process
 
-        custom_cost_value = self._calculate_custom_cost(
-            training_results
-        )
+        custom_cost_value = self._calculate_custom_cost(training_results)
 
         # Keep track of all trials data
         trial_data = {
@@ -189,13 +188,11 @@ class HyperparameterOptimizer:
         self.all_trials_data.append(trial_data)
 
         if self.callback is not None:
-            self.callback(trial_data)        
+            self.callback(trial_data)
 
         return custom_cost_value
 
-    def _calculate_custom_cost(
-        self, training_results: dict
-    ) -> float:
+    def _calculate_custom_cost(self, training_results: dict) -> float:
         """
         Calculates a custom cost with considerations for:
         - The number of shots used to achieve the highest target fidelity,
@@ -288,7 +285,9 @@ class HyperparameterOptimizer:
                     data_to_save = [best_config]
                 save_to_pickle(data_to_save, pickle_file_name)
                 self.data = data_to_save
-                logging.warning(f"{'All trials have' if self.saving_mode == 'all' else 'Best trial has'} been saved to {pickle_file_name}.")
+                logging.warning(
+                    f"{'All trials have' if self.saving_mode == 'all' else 'Best trial has'} been saved to {pickle_file_name}."
+                )
             else:
                 logging.warning("WARNING: No best trial data to save.")
         else:
@@ -305,7 +304,9 @@ class HyperparameterOptimizer:
         """
         logging.warning("---------------- FINISHED HPO ----------------")
         logging.warning(
-            "HPO completed in {} minutes.".format(round((time.time() - start_time) / 60, 2))
+            "HPO completed in {} minutes.".format(
+                round((time.time() - start_time) / 60, 2)
+            )
         )
 
         logging.warning("Best trial:")
@@ -315,20 +316,24 @@ class HyperparameterOptimizer:
         for key, value in study.best_trial.params.items():
             logging.warning("    {}: {}".format(key, value))
 
-        logging.warning(
-            "The best action vector: {}".format(
-                self.data[0]['training_results']['best_action_vector']
+        (
+            logging.warning(
+                "The best action vector: {}".format(
+                    self.data[0]["training_results"]["best_action_vector"]
+                )
             )
-        ) if len(self.data) > 0 else None
+            if len(self.data) > 0
+            else None
+        )
 
     @property
     def fidelity_reward(self):
         return self.hardware_penalty_weights.fidelity_reward
-    
+
     @property
     def penalty_n_shots(self):
         return self.hardware_penalty_weights.shots_penalty
-    
+
     @property
     def penalty_per_missed_fidelity(self):
         return self.hardware_penalty_weights.missed_fidelity_penalty
@@ -336,7 +341,7 @@ class HyperparameterOptimizer:
     @property
     def hpo_config_file_data(self):
         return load_from_yaml_file(self.hpo_config_path)
-    
+
     @property
     def hpo_config_path(self):
         return self.hpo_config.hpo_config_path
@@ -344,7 +349,7 @@ class HyperparameterOptimizer:
     @property
     def training_details(self):
         return self.training_config.training_details
-    
+
     @property
     def num_hpo_trials(self):
         return self.hpo_config.num_trials
@@ -356,23 +361,23 @@ class HyperparameterOptimizer:
     @property
     def target_fidelities(self):
         return self.training_config.target_fidelities
-    
+
     @property
     def training_constraint(self):
         return self.training_config.training_constraint
-    
+
     @property
     def lookback_window(self):
         return self.training_config.lookback_window
-    
+
     @property
     def std_actions_eps(self):
         return self.training_config.std_actions_eps
-    
+
     @property
     def anneal_learning_rate(self):
         return self.training_config.anneal_learning_rate
-    
+
     @property
     def q_env(self):
         return self.hpo_config.q_env
@@ -380,26 +385,27 @@ class HyperparameterOptimizer:
     @property
     def path_agent_config(self):
         return self.hpo_config.agent_config_path
-    
+
     @property
     def save_results_path(self):
         return self.hpo_config.save_results_path
-    
+
     @property
     def log_progress(self):
         return self.hpo_config.log_results
-    
+
     @property
     def saving_mode(self):
         return self.hpo_config.saving_mode
-    
+
     @property
     def training_mode(self):
         return self.training_config.training_mode
-    
+
     @property
     def env_target(self):
         return self.q_env.unwrapped.target
+
     @property
     def target_operation(self):
         """

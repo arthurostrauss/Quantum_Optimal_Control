@@ -22,9 +22,7 @@ from qiskit.circuit import (
     CircuitInstruction,
     Delay,
 )
-from qiskit.quantum_info import (
-    state_fidelity,
-    Statevector,
+from qiskit.quantum_info import state_fidelity, Statevector
 from qiskit.transpiler import Layout
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
@@ -651,7 +649,7 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             raise ValueError("Training steps number should be positive integer.")
 
     def _ident_str(self):
-        """ This is a one-line description of the environment with some key parameters. """
+        """This is a one-line description of the environment with some key parameters."""
         base_ident_str = super()._ident_str()
         return f"ContextAwareQEnv_{self.tgt_instruction_counts}-gates_{base_ident_str}"
 

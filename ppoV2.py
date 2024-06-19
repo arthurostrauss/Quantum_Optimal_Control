@@ -26,7 +26,12 @@ from context_aware_quantum_environment import ContextAwareQuantumEnvironment
 import sys
 import logging
 
-from hpo_training_config import HardwareRuntime, TotalUpdates, TrainFunctionSettings, TrainingConfig
+from hpo_training_config import (
+    HardwareRuntime,
+    TotalUpdates,
+    TrainFunctionSettings,
+    TrainingConfig,
+)
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -854,7 +859,7 @@ class CustomPPOV2:
         """
         self.training_config = training_config
         self.train_function_settings = train_function_settings
-        
+
         try:
             fidelity_info = {
                 fidelity: {
@@ -866,12 +871,11 @@ class CustomPPOV2:
                 for fidelity in self.target_fidelities
             }
 
-            if self.clear_history or self.hpo_mode: 
+            if self.clear_history or self.hpo_mode:
                 self.env.unwrapped.clear_history()
                 self.global_step = 0
             else:
                 self.global_step = self.env.unwrapped.step_tracker
-
 
             (
                 self.obs,
@@ -906,7 +910,7 @@ class CustomPPOV2:
                         break
 
             elif isinstance(self.training_constraint, HardwareRuntime):
-            # Hardware Constraint Mode: Train until hardware runtime exceeds maximum
+                # Hardware Constraint Mode: Train until hardware runtime exceeds maximum
                 self.max_hardware_runtime = self.training_constraint.hardware_runtime
                 logging.warning("Training Constraint: Hardware Runtime")
                 iteration = 0
@@ -935,13 +939,13 @@ class CustomPPOV2:
             return self.training_results
 
         except Exception as e:
-            if self.hpo_mode: # Return a default value for HPO
+            if self.hpo_mode:  # Return a default value for HPO
                 logging.error(f"An error occurred during training: {e}")
                 return {
                     "avg_reward": -1.0,
                     "fidelity_history": [0] * self.total_updates,
                 }
-            else: # Raise the error for debugging in the normal mode
+            else:  # Raise the error for debugging in the normal mode
                 raise
 
     def perform_training_iteration(
@@ -1143,7 +1147,7 @@ class CustomPPOV2:
         )
 
         return check_convergence_std_actions(std_action, self.std_actions_eps)
-    
+
     def log_fidelity_info_summary(self, fidelity_info):
         """
         Logs a summary of fidelity information.
@@ -1179,7 +1183,8 @@ class CustomPPOV2:
             frac = 1.0 - (iteration - 1.0) / self.training_constraint.total_updates
         elif isinstance(self.training_constraint, HardwareRuntime):
             frac = 1.0 - (
-                np.sum(self.env.unwrapped.hardware_runtime) / self.training_constraint.hardware_runtime
+                np.sum(self.env.unwrapped.hardware_runtime)
+                / self.training_constraint.hardware_runtime
             )
         lrnow = frac * self.lr
         self.optimizer.param_groups[0]["lr"] = lrnow
@@ -1187,27 +1192,27 @@ class CustomPPOV2:
     @property
     def training_results(self):
         return self._training_results
-    
+
     @property
     def target_fidelities(self):
         return self.training_config.target_fidelities
-    
+
     @property
     def training_constraint(self):
         return self.training_config.training_constraint
-    
+
     @property
     def lookback_window(self):
         return self.training_config.lookback_window
-    
+
     @property
     def std_actions_eps(self):
         return self.training_config.std_actions_eps
-    
+
     @property
     def anneal_learning_rate(self):
         return self.training_config.anneal_learning_rate
-    
+
     @property
     def plot_real_time(self):
         return self.train_function_settings.plot_real_time
@@ -1215,15 +1220,15 @@ class CustomPPOV2:
     @property
     def print_debug(self):
         return self.train_function_settings.print_debug
-    
+
     @property
     def num_prints(self):
         return self.train_function_settings.num_prints
-    
+
     @property
     def hpo_mode(self):
         return self.train_function_settings.hpo_mode
-    
+
     @property
     def clear_history(self):
         return self.train_function_settings.clear_history
