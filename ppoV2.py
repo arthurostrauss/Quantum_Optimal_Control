@@ -241,7 +241,7 @@ def initialize_networks(
 
     """
     actor_net = ActorNetwork(
-        env.unwrapped.observation_space,
+        env.observation_space,
         hidden_units,
         n_actions,
         activation_functions,
@@ -249,7 +249,7 @@ def initialize_networks(
         chkpt_dir,
     )
     critic_net = CriticNetwork(
-        env.unwrapped.observation_space, hidden_units, activation_functions, chkpt_dir_critic
+        env.observation_space, hidden_units, activation_functions, chkpt_dir_critic
     )
 
     if include_critic:
@@ -426,7 +426,7 @@ def take_step(
     actions[step] = action
     logprobs[step] = logprob
 
-    next_obs, reward, terminated, truncated, infos = env.unwrapped.step(action.cpu().numpy())
+    next_obs, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
     next_obs = torch.Tensor(next_obs)
     done = int(np.logical_or(terminated, truncated))
     reward = torch.Tensor(reward)
@@ -761,7 +761,6 @@ class CustomPPOV2:
         Returns:
             train (function): The training function for the PPO algorithm.
         """
-        self.env.unwrapped.clear_history()
         # Initialize environment parameters
         (
             self.seed,
