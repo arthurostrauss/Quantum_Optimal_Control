@@ -780,19 +780,23 @@ class BaseQuantumEnvironment(ABC, Env):
         Retrieve observables and input state to sample for the DFE protocol for a target state
         """
         if isinstance(self.target, GateTarget):
-            for _ in range(self.n_reps - 1):  # Repeat circuit for noise amplification
-                qc.compose(self.circuits[self._inside_trunc_tracker], inplace=True)
             # Append input state prep circuit to the custom circuit with front composition
-            qc.compose(self._input_state.circuit, inplace=True, front=True)
+            prep_circuit = qc.compose(
+                self._input_state.circuit, inplace=False, front=True
+            )
+            for _ in range(self.n_reps - 1):  # Repeat circuit for noise amplification
+                prep_circuit.compose(qc, inplace=True)
 
-        qc = self.backend_info.custom_transpile(
-            qc, initial_layout=self.layout[self._inside_trunc_tracker], scheduling=False
+        prep_circuit = self.backend_info.custom_transpile(
+            prep_circuit,
+            initial_layout=self.layout[self._inside_trunc_tracker],
+            scheduling=False,
         )
 
         pubs = [
             (
-                qc,
-                obs.apply_layout(qc.layout),
+                prep_circuit,
+                obs.apply_layout(prep_circuit.layout),
                 params,
                 1 / np.sqrt(self.n_shots * pauli_shots),
             )
@@ -860,9 +864,9 @@ class BaseQuantumEnvironment(ABC, Env):
         pubs = []
         total_shots = 0
         for prep, obs, shot in zip(pauli_prep, self._observables, self._pauli_shots):
-            max_input_states = 2**qc.num_qubits // nb_states
+            max_input_states = d // nb_states
             selected_input_states = np.random.choice(
-                2**qc.num_qubits, size=max_input_states, replace=False
+                d, size=max_input_states, replace=False
             )
             for input_state in selected_input_states:
                 prep_indices = []
@@ -904,7 +908,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 )
                 total_shots += dedicated_shots * self.n_shots * self.batch_size
         if len(pubs) == 0:
-            self.channel_reward_pubs(qc, params)
+            pubs, total_shots = self.channel_reward_pubs(qc, params)
 
         return pubs, total_shots
 
