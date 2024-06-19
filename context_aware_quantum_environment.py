@@ -7,6 +7,7 @@ Created on 26/06/2023
 """
 
 from itertools import product
+import sys
 from typing import Dict, Optional, List, Any, Tuple, TypeVar, SupportsFloat, Union
 
 import numpy as np
@@ -22,16 +23,16 @@ from qiskit.circuit import (
     Delay,
 )
 from qiskit.quantum_info import (
-    partial_trace,
     state_fidelity,
     Statevector,
-)
 from qiskit.transpiler import Layout
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
+from qiskit_aer import noise
 from qiskit_aer.noise import NoiseModel
 from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
+from qiskit_ibm_runtime import EstimatorV2
 from qiskit_ibm_runtime import EstimatorV2
 
 from helper_functions import (
@@ -49,6 +50,15 @@ from quantumenvironment import (
     QuantumEnvironment,
 )
 from custom_jax_sim import JaxSolver
+
+import logging
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s INFO %(message)s",  # hardcoded INFO level
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
 
 ObsType = TypeVar("ObsType")
 ActType = TypeVar("ActType")
@@ -639,6 +649,11 @@ class ContextAwareQuantumEnvironment(QuantumEnvironment):
             self._training_steps_per_gate = nb_of_steps
         except AssertionError:
             raise ValueError("Training steps number should be positive integer.")
+
+    def _ident_str(self):
+        """ This is a one-line description of the environment with some key parameters. """
+        base_ident_str = super()._ident_str()
+        return f"ContextAwareQEnv_{self.tgt_instruction_counts}-gates_{base_ident_str}"
 
     def __repr__(self):
         string = QuantumEnvironment.__repr__(self)

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+import sys
 import pickle
 import warnings
+import gzip
 from dataclasses import asdict
 
 from qiskit import pulse, schedule, transpile, QuantumRegister
@@ -123,6 +126,14 @@ from qconfig import (
     FidelityConfig,
 )
 from custom_jax_sim import JaxSolver, DynamicsBackendEstimator, PauliToQuditOperator
+
+import logging
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s INFO %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
 
 Estimator_type = Union[
     AerEstimator,
@@ -908,7 +919,7 @@ def retrieve_primitives(
         Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
     ] = None,
     circuit: Optional[QuantumCircuit] = None,
-) -> (Estimator_type, Sampler_type):
+) -> Tuple[Estimator_type, Sampler_type]:
     """
     Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
 
@@ -1608,19 +1619,36 @@ def load_from_yaml_file(file_path: str):
 
 
 def load_from_pickle(file_path: str):
-    """
-    Load object from pickle file
-    """
-    with open(file_path, "rb") as file:
-        return pickle.load(file)
+    """Load data from a pickle or gzip file."""
+    try:
+        if file_path.endswith(".gz"):
+            with gzip.open(file_path, "rb") as file:
+                data = pickle.load(file)
+        else:
+            with open(file_path, "rb") as file:
+                data = pickle.load(file)
+    except Exception as e:
+        logging.warning(f"Failed to open file {file_path}")
+        logging.warning(f"Error Message: {e}")
+        return None
+    return data
 
 
-def save_to_pickle(obj, file_path: str):
-    """
-    Save object to pickle file
-    """
-    with open(file_path, "wb") as file:
-        pickle.dump(obj, file)
+def save_to_pickle(data, file_path: str) -> None:
+    """Save data as a pickle or gzip file."""
+    dir = os.path.dirname(file_path)
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+    try:
+        if file_path.endswith(".gz"):
+            with gzip.open(file_path, "wb") as file:
+                pickle.dump(data, file)
+        else:
+            with open(file_path, "wb") as file:
+                pickle.dump(data, file)
+    except Exception as e:
+        logging.warning(f"Failed to save file {file_path}")
+        logging.warning(f"Error Message: {e}")
 
 
 def create_hpo_agent_config(

@@ -1,0 +1,20 @@
+N_TRIALS: 1
+N_UPDATES: 1
+N_EPOCHS: 8
+MINIBATCH_SIZE: [10, 16, 24, 32] #, 48, 64, 96, 128]
+NUM_MINIBATCHES: [5, 8, 10, 12] #, 15, 20, 25, 30, 40, 50, 100]
+LR: 0.0005
+N_SHOTS: 
+  - 1
+  - 100
+SAMPLE_PAULIS:
+  - 10
+  - 150
+GAMMA: 0.99 # Discount factor
+GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
+ENT_COEF: 0.0 # Entropy coefficient
+V_COEF: 0.5 # Value (critic) function coefficient
+GRADIENT_CLIP: 0.5 # Gradient clipping
+CLIP_VALUE_LOSS: True # Whether to clip value loss
+CLIP_VALUE_COEF: 0.2 # Clipping coefficient for value loss
+CLIP_RATIO: 0.2 # Clipping ratio for PPO
