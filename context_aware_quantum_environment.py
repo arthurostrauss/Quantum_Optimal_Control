@@ -21,24 +21,16 @@ from qiskit.circuit import (
     CircuitInstruction,
     Delay,
 )
-from qiskit.circuit.library import ECRGate
 from qiskit.quantum_info import (
     partial_trace,
     state_fidelity,
     Statevector,
-    DensityMatrix,
-    Operator,
 )
-from qiskit.transpiler import Layout, InstructionProperties
+from qiskit.transpiler import Layout
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_aer.noise import NoiseModel
 from qiskit_dynamics import DynamicsBackend
-from qiskit_experiments.calibration_management import (
-    Calibrations,
-    FixedFrequencyTransmon,
-    EchoedCrossResonance,
-)
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 from qiskit_ibm_runtime import EstimatorV2
 
@@ -46,7 +38,6 @@ from helper_functions import (
     projected_statevector,
     remove_unused_wires,
     get_instruction_timings,
-    fidelity_from_tomography,
 )
 from qconfig import QEnvConfig
 from base_q_env import (

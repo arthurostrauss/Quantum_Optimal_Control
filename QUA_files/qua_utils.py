@@ -150,22 +150,21 @@ def measure_observable(final_state, observable_indices, qubits: List[Transmon]):
     for i in range(len(qubits)):
         qubit = qubits[i]
         with switch_(observable_indices[i], unsafe=True):
-            with case_(0):  # I
+            with case_(0):  # Pauli I
                 Id(qubit)
-            with case_(1):  # X
+            with case_(1):  # Pauli X
                 H(qubit)
-            with case_(2):  # Y
+            with case_(2):  # Pauli Y
                 Sdg(qubit)
                 H(qubit)
-            with case_(3):  # Z
+            with case_(3):  # Pauli Z
                 Id(qubit)
         qubit.resonator.measure("readout", qua_vars=(I[i], Q[i]))
         assign(states[i], I[i] > thresholds[i])
         assign(final_state, final_state + 2**i * Cast.to_int(states[i]))
         reset_qubit(
             "active",
-            qubit.xy.name,
-            qubit.resonator.name,
+            qubit,
             threshold=thresholds[i],
             max_tries=5,
             Ig=I[i],
@@ -178,7 +177,7 @@ def Id(qubit: Transmon):
     pass
 
 
-def X(qubit: Transmon):
+def X(qubit: Transmon, condition=None):
     pass
 
 
@@ -198,7 +197,7 @@ def Sdg(qubit: Transmon):
     pass
 
 
-def reset_qubit(method: str, qubit: str, resonator: str, **kwargs):
+def reset_qubit(method: str, qubit: Transmon, **kwargs):
     """
     Macro to reset the qubit state.
 
@@ -211,14 +210,14 @@ def reset_qubit(method: str, qubit: str, resonator: str, **kwargs):
     **Example**: reset_qubit('active', threshold=-0.003, max_tries=3)
 
     :param method: Method the reset the qubit state. Can be either 'cooldown' or 'active'.
-    :param qubit: The qubit element. Must be defined in the config.
-    :param resonator: The resonator element. Must be defined in the config.
+    :param qubit: The qubit to be addressed in QuAM
     :key cooldown_time: qubit relaxation time in clock cycle, needed if method is 'cooldown'. Must be an integer > 4.
     :key threshold: threshold to discriminate between the ground and excited state, needed if method is 'active'.
     :key max_tries: python integer for the maximum number of tries used to perform active reset,
         needed if method is 'active'. Must be an integer > 0 and default value is 1.
     :key Ig: A QUA variable for the information in the `I` quadrature used for active reset. If not given, a new
         variable will be created. Must be of type `Fixed`.
+    :key pi_pulse: The pulse to play to get back to the ground state. Default is 'x180'.
     :return:
     """
     if method == "cooldown":
@@ -227,7 +226,7 @@ def reset_qubit(method: str, qubit: str, resonator: str, **kwargs):
         if (cooldown_time is None) or (cooldown_time < 4):
             raise Exception("'cooldown_time' must be an integer > 4 clock cycles")
         # Reset qubit state
-        wait(cooldown_time, qubit)
+        qubit.xy.wait(cooldown_time)
     elif method == "active":
         # Check threshold
         threshold = kwargs.get("threshold", None)
@@ -244,11 +243,11 @@ def reset_qubit(method: str, qubit: str, resonator: str, **kwargs):
         # Check Ig
         Ig = kwargs.get("Ig", None)
         # Reset qubit state
-        return active_reset(threshold, qubit, resonator, max_tries=max_tries, Ig=Ig)
+        return active_reset(threshold, qubit, max_tries=max_tries, Ig=Ig)
 
 
 # Macro for performing active reset until successful for a given number of tries.
-def active_reset(threshold: float, qubit: str, resonator: str, max_tries=1, Ig=None):
+def active_reset(threshold: float, qubit: Transmon, max_tries=1, Ig=None):
     """Macro for performing active reset until successful for a given number of tries.
 
     :param threshold: threshold for the 'I' quadrature discriminating between ground and excited state.
@@ -257,6 +256,7 @@ def active_reset(threshold: float, qubit: str, resonator: str, max_tries=1, Ig=N
     :param max_tries: python integer for the maximum number of tries used to perform active reset. Must >= 1.
     :param Ig: A QUA variable for the information in the `I` quadrature. Should be of type `Fixed`. If not given, a new
         variable will be created
+    :param pi_pulse: The pulse to play to get back to the ground state. Default is 'x180'.
     :return: A QUA variable for the information in the `I` quadrature and the number of tries after success.
     """
     if Ig is None:
@@ -271,18 +271,15 @@ def active_reset(threshold: float, qubit: str, resonator: str, max_tries=1, Ig=N
     assign(counter, 0)
 
     # Perform active feedback
-    align(qubit, resonator)
+    qubit.xy.align(qubit.resonator.name)
     # Use a while loop and counter for other protocols and tests
     with while_((Ig > threshold) & (counter < max_tries)):
         # Measure the resonator
-        measure(
-            "readout",
-            resonator,
-            None,
-            dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", Ig),
-        )
+        qubit.resonator.measure("readout")
         # Play a pi pulse to get back to the ground state
-        play("x180", qubit, condition=(Ig > threshold))
+        with if_(Ig > threshold):
+            qubit.xy.play("x180")
+            X(qubit, condition=(Ig > threshold))
         # Increment the number of tries
         assign(counter, counter + 1)
     return Ig, counter

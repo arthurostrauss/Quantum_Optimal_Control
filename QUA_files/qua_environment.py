@@ -1,18 +1,54 @@
 import numpy as np
+from qiskit.circuit import ParameterVector
 from qm.jobs.running_qm_job import RunningQmJob
 
-from quantumenvironment import QuantumEnvironment
-from qconfig import QEnvConfig
+from base_q_env import BaseQuantumEnvironment, BaseTarget
+from qconfig import QEnvConfig, QuaConfig
 from qiskit import QuantumCircuit, schedule as build_schedule
 from qualang_tools.video_mode import ParameterTable
 from qm.qua import *
-from qua_backend import QMBackend
+from qua_backend import QMBackend, schedule_to_qua_instructions
 from qua_utils import *
 
 
-class QUAEnvironment(QuantumEnvironment):
+class QUAEnvironment(BaseQuantumEnvironment):
+    def episode_length(self, global_step: int) -> int:
+        pass
+
+    def define_target_and_circuits(
+        self,
+    ) -> tuple[BaseTarget, List[QuantumCircuit], List[QuantumCircuit]]:
+        pass
+
+    def _get_obs(self):
+        pass
+
+    def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
+        pass
+
+    @property
+    def tgt_instruction_counts(self) -> int:
+        pass
+
+    @property
+    def parameters(self) -> List[ParameterVector] | ParameterVector:
+        pass
+
+    @property
+    def trunc_index(self) -> int:
+        pass
+
+    @property
+    def backend(self) -> QMBackend:
+        return self.backend
+
     def __init__(self, training_config: QEnvConfig):
         super().__init__(training_config)
+        if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
+            self.backend, QMBackend
+        ):
+            raise ValueError("The backend should be a QMBackend object")
+
         self.parameter_table = [
             ParameterTable(
                 {
@@ -20,18 +56,16 @@ class QUAEnvironment(QuantumEnvironment):
                     for j in range(len(self.parameters[i]))
                 }
             )
-            for i in range(self.circuit_truncations)
+            for i in range(self.circuits)
         ]
-        self.progs = [self.rl_qoc_qua_prog(qc) for qc in self.circuit_truncations]
-        self.job = self.start_program(self.circuit_truncations[0])
+        self.progs = [self.rl_qoc_qua_prog(qc) for qc in self.circuits]
+        self.job = self.start_program(self.circuits[0])
 
     def rl_qoc_qua_prog(self, qc: QuantumCircuit):
         """
-        Generate a QUA program tailormade for the RL based calibration project
+        Generate a QUA program tailor-made for the RL based calibration project
         """
         # TODO: Set IO2 and IO1 to be the number of input states and the number of observables respectively
-        if not isinstance(self.backend, QMBackend) or self.config_type != "qua":
-            raise ValueError("The backend should be a QMBackend object")
         trunc_index = self.trunc_index
         n_actions = self.action_space.shape[-1]
         real_time_parameters = self.parameter_table[trunc_index]
@@ -43,7 +77,7 @@ class QUAEnvironment(QuantumEnvironment):
 
         with program() as rl_qoc:
             # Declare necessary variables
-            batchsize, n_shots = declare(int), declare(int)
+            batchsize, n_shots, n_reps = declare(int), declare(int), declare(int)
             counts = declare(int, value=[0] * dim)
             state_int = declare(int, value=0)
             input_state_count, observable_count = declare(int, value=0), declare(
@@ -94,9 +128,10 @@ class QUAEnvironment(QuantumEnvironment):
                                 # Prepare the input states
                                 prepare_input_state(input_state_indices, qubits)
                                 # Run the circuit
-                                schedule_to_qua_instructions(
-                                    sched_qc, self.backend, real_time_parameters
-                                )
+                                with for_(n_reps, 0, n_reps < self.n_reps, n_reps + 1):
+                                    schedule_to_qua_instructions(
+                                        sched_qc, self.backend, real_time_parameters
+                                    )
 
                                 # Measure the observables
                                 state_int = measure_observable(
@@ -130,7 +165,7 @@ class QUAEnvironment(QuantumEnvironment):
         Perform the actions on the quantum environment
         """
         trunc_index = self._inside_trunc_tracker
-        qc = self.circuit_truncations[trunc_index].copy()
+        qc = self.circuits[trunc_index].copy()
         self.backend.qm.set_io1_value()
         self.backend.qm.set_io2_value(self._index_input_state)
 
