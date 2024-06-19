@@ -74,7 +74,7 @@ class HyperparameterOptimizer:
         agent, hyperparameter optimization, and other settings.
 
         Parameters:
-        - hpo_config: HPOConfig object containing the configurations for the hyperparameter optimization, such as the quantum environment and trining specific details. 
+        - hpo_config: HPOConfig object containing the configurations for the hyperparameter optimization, such as the quantum environment and training specific details. 
         - callback: Optional callback function to be called after each trial. The callback function should accept a dictionary containing the trial data.
         """
         self.hpo_config = hpo_config
