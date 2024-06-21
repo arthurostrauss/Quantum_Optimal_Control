@@ -1,0 +1,77 @@
+SERVICE: # Relevant only when using the Qiskit runtime service
+  CHANNEL: "ibm_quantum"
+  INSTANCE: "ibm-q/open/main"
+
+RUNTIME_OPTIONS: # Relevant only when using the Qiskit runtime service
+  optimization_level: 0
+  resilience_level: null
+  max_execution_time: null
+  execution:
+    init_qubits: True
+    rep_delay: null
+  resilience:
+    measure_mitigation: null
+    measure_noise_learning:
+      num_randomizations: null
+      shots_per_randomization: null
+    zne_mitigation: False
+    zne:
+      noise_factors: null
+      extrapolator: null
+    pec_mitigation: False
+    pec:
+      max_overhead: null
+      noise_gain: null
+    layer_noise_learning:
+      max_layers_to_learn: null
+      shots_per_randomization: null
+      num_randomizations: null
+      layer_pair_depths: null
+  environment:
+    log_level: "WARNING"
+    job_tags: null
+
+BACKEND: # Backend configuration (If all set to null, the user needs to specify its own backend in q_env_config.py's get_backend() function)
+  REAL_BACKEND: null # True: real or False: fake Aer backend
+  NAME: null # Name of the backend
+  DYNAMICS: # Use a DynamicsBackend (if fields above are not null, build a DynamicsBackend.from_backend() with the specified backend)
+    USE_DYNAMICS: True # Whether to use a DynamicsBackend
+    PHYSICAL_QUBITS: [ 0, 1 ] # qubit indices of the device to be used for modelling the system
+    SOLVER_OPTIONS:
+      method: "jax_odeint"
+      atol: 1e-5
+      rtol: 1e-7
+      hmax: 'auto' # Maximum step size, if 'auto' the solver will automatically determine the step size with backend.dt
+    CALIBRATION_FILES: null # Path to the calibration files for the device (if null, the device will be calibrated on the fly)
+
+
+TARGET: # Target Gate configuration
+  GATE: "ECR" # Gate to be implemented (if null, the target state should be specified)
+  #  STATE: "1" # Target state (if GATE is null)
+  PHYSICAL_QUBITS: [ 0, 1 ] # qubit indices for the target gate (qubits for which the gate should be calibrated)
+
+ENV: # Environment configuration
+  EXECUTION:
+    SAMPLING_PAULIS: 80 # Number of Pauli strings to sample
+    N_SHOTS: 1 # Number of shots for each Pauli
+    N_REPS: 1 # Number of repetitions for the fidelity benchmarking
+    C_FACTOR: 1. # Cost factor for the reward function
+    BATCH_SIZE: 256 # Number of actions to evaluate per policy iteration
+    SEED: 100
+  ACTION_SPACE:
+    LOW: [ -1., -3.14, -1., -3.14 ]
+    HIGH: [ 1., 3.14, 1., 3.14 ]
+  REWARD:
+    REWARD_METHOD: "state" # Choose between "fidelity", "state", "channel", "xeb", "cafe"
+  REWARD_PARAMS: # All unused parameters should be set to null (only assign values to parameters used by chosen reward method)
+    USE_INTERLEAVED: null # Whether to use interleaved RB (target must be Clifford) for ORBIT reward
+    NUM_EIGENSTATES_PER_PAULI: null # Number of eigenstates per Pauli to consider for channel fidelity reward
+    INPUT_STATES_CHOICE: null # Choice of input states for CAFE reward
+  BENCHMARKING:
+    BENCHMARK_CYCLE: 20 # Number of steps between two fidelity benchmarks
+    BENCHMARK_BATCH_SIZE: 20 # Number of actions to evaluate per fidelity benchmark
+    CHECK_ON_EXP: True # Whether to perform fidelity benchmarking with tomographic experiments or just using simulation
+    TOMOGRAPHY_ANALYSIS: "default" # Analysis method for tomography experiment
+    DFE_PRECISION: [ 0.001,0.001 ] # Precision tuple (eps, delta) for the DFE analysis
+  TRAINING_WITH_CAL: True
+

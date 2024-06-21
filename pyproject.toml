@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rl_qoc"
+version = "0.1.0"
+description = "Reinforcement Learning for Quantum Optimal Control"
+readme = "README.md"
+authors = [
+    { name = "Arthur Strauss", email = "arthur.strauss@u.nus.edu" }
+]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "matplotlib>=3.5.2",
+    "qiskit>=1.0.2",
+    "qiskit_aer>=0.13.3",
+    "qiskit_algorithms>=0.3.0",
+    "qiskit_dynamics>=0.5.0",
+    "qiskit_experiments>=0.6.0",
+    "qiskit_ibm_runtime>=0.22.0",
+    "scipy>=1.8.1",
+    "tqdm>=4.64.0",
+    "torch>=2.0.1",
+    "gymnasium>=0.29.1",
+    "jax>=0.4.24",
+    "jaxlib>=0.4.24",
+    "sympy2jax>=0.0.5",
+    "pyyaml>=6.0.1",
+    "optuna~=3.5.0",
+    "qualang-tools>=0.16.0",
+    "pylatexenc>=2.10",
+    "chardet",
+]
+
+[tool.setuptools]
+packages = ["rl_qoc"]
+
+[tool.setuptools.package-data]
+rl_qoc = ["*.py"]
+
+[tool.setuptools.exclude-package-data]
+rl_qoc = ["gate_level/*", "pulse_level/*"]

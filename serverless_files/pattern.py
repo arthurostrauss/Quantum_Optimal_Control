@@ -1,9 +1,9 @@
-from helper_functions import load_from_yaml_file
-from quantumenvironment import QuantumEnvironment
-from context_aware_quantum_environment import ContextAwareQuantumEnvironment
+from rl_qoc.helper_functions import load_from_yaml_file
+from rl_qoc.quantumenvironment import QuantumEnvironment
+from rl_qoc.context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from gymnasium.wrappers import RescaleAction, ClipAction
 from ppo import CustomPPO
-from quantum_serverless import save_result, get_arguments
+from qiskit_serverless import save_result, get_arguments
 import numpy as np
 
 arguments = get_arguments()

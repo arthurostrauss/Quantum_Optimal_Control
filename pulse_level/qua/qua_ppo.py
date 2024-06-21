@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 from torch.distributions import Normal
 from rl_qoc.agent import ActorNetwork, CriticNetwork, Agent
-from rl_qoc.quantumenvironment import QuantumEnvironment
+from quantumenvironment import QuantumEnvironment
 
 import sys
 import logging
@@ -70,7 +70,7 @@ def get_optimizer_from_str(optim_str):
     return optim_dict[optim_str]
 
 
-class CustomPPO:
+class Custom_QUA_PPO:
     def __init__(
         self,
         agent_config: Dict,
@@ -180,6 +180,7 @@ class CustomPPO:
         plt.legend()
         plt.xlabel("Iteration")
         plt.ylabel("Reward")
+        plt.show()
 
     def train(
         self,
@@ -203,9 +204,6 @@ class CustomPPO:
             global_step = 0
         else:
             global_step = self.env.unwrapped.step_tracker
-
-        if plot_real_time:
-            plt.ion()
 
         obs = torch.zeros(
             (self.num_time_steps, self.batchsize) + self.env.observation_space.shape
@@ -234,9 +232,12 @@ class CustomPPO:
 
                 with torch.no_grad():
                     mean_action, std_action, critic_value = self.agent(batch_obs)
-                    self.env.unwrapped.mean_action = mean_action[0]
-                    self.env.unwrapped.std_action = std_action[0]
                     probs = Normal(mean_action, std_action)
+                    if isinstance(self.env.unwrapped.estimator, QuaEstimator):
+                        self.env.unwrapped.estimator.mean_action = mean_action
+                        self.env.unwrapped.estimator.std_action = std_action
+
+                    # TODO: The action and log_prob must be retrieved from the QUA program (sampled on the fly)
                     action = torch.clip(
                         probs.sample(),
                         torch.Tensor(self.min_action),
@@ -392,8 +393,8 @@ class CustomPPO:
 
             if global_step % num_prints == 0:
                 clear_output(wait=True)
-            if plot_real_time:
-                self.plot_curves()
+                if plot_real_time:
+                    self.plot_curves()
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             self.writer.add_scalar(
@@ -573,8 +574,6 @@ def make_train_ppo(
 
                     with torch.no_grad():
                         mean_action, std_action, critic_value = agent(batch_obs)
-                        env.unwrapped.mean_action = mean_action[0]
-                        env.unwrapped.std_action = std_action[0]
                         probs = Normal(mean_action, std_action)
                         action = torch.clip(
                             probs.sample(),
