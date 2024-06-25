@@ -5,6 +5,12 @@ from dataclasses import field, asdict
 
 @dataclass
 class TotalUpdates:
+    """
+    Total updates constraint for training
+
+    :param total_updates: Total number of updates
+    """
+
     total_updates: int = None
 
     def __post_init__(self):
@@ -15,6 +21,14 @@ class TotalUpdates:
 
 @dataclass
 class HardwareRuntime:
+    """
+    Hardware runtime constraint for training (in seconds). To use this mode, you should ensure that the selected backend
+    does have a non trivial InstructionDurations attribute (the user can set this attribute manually in the config as
+    well).
+
+    :param hardware_runtime: Hardware runtime constraint for training (in seconds)
+    """
+
     hardware_runtime: Union[int, float] = None
 
     def __post_init__(self):
@@ -23,6 +37,16 @@ class HardwareRuntime:
 
 @dataclass
 class TrainFunctionSettings:
+    """
+    Training function settings
+
+    :param plot_real_time: Whether to plot the training progress in real time
+    :param print_debug: Whether to print debug information
+    :param num_prints: Number of prints to be displayed during training
+    :param hpo_mode: Whether to use hyperparameter optimization mode
+    :param clear_history: Whether to clear the history of the training (e.g. rewards, losses, etc.)
+    """
+
     plot_real_time: bool = False
     print_debug: Optional[bool] = False
     num_prints: Optional[int] = 40
@@ -37,6 +61,17 @@ class TrainFunctionSettings:
 
 @dataclass
 class TrainingConfig:
+    """
+    PPO training configuration
+
+    :param training_constraint: TotalUpdates or HardwareRuntime
+    :param target_fidelities: List of target fidelities to be achieved during training
+    :param lookback_window: Number of episodes to look back to estimate if the agent has settled for a policy
+    :param anneal_learning_rate: Whether to anneal the learning rate during training
+    :param std_actions_eps: Threshold for deciding if the standard deviation of the actions is indicating a stuck policy
+
+    """
+
     training_constraint: Union[TotalUpdates, HardwareRuntime] = field(
         default_factory=lambda: TotalUpdates(250)
     )

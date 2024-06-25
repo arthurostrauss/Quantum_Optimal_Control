@@ -278,7 +278,7 @@ def plot_curves(env: BaseQuantumEnvironment):
     Plots the reward history and fidelity history of the environment
     """
     fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
-    plt.plot(np.mean(env.unwrapped.reward_history, axis=1), label="Reward")
+    plt.plot(np.mean(env.reward_history, axis=1), label="Reward")
     plt.plot(
         fidelity_range,
         env.fidelity_history,
@@ -373,16 +373,16 @@ def take_step(
     Takes a step in the environment using the PPO algorithm.
 
     Args:
-        step (int): The current step index.
-        global_step (int): The global step index.
-        batchsize (int): The size of the batch.
-        num_steps (int): The total number of steps.
-        obs (list): List to store the observations.
-        dones (list): List to store the done flags.
-        actions (list): List to store the actions.
-        logprobs (list): List to store the log probabilities.
-        rewards (list): List to store the rewards.
-        values (list): List to store the critic values.
+        step (int): current step index.
+        global_step (int): global step index.
+        batchsize (int): Size of the batch.
+        num_steps (int): Total number of steps.
+        obs (list): List to store observations.
+        dones (list): List to store done flags.
+        actions (list): List to store actions.
+        logprobs (list): List to store log probabilities.
+        rewards (list): List to store rewards.
+        values (list): List to store critic values.
         batch_obs (torch.Tensor): Batch of observations.
         batch_done (torch.Tensor): Batch of done flags.
         min_action (list): List of minimum action values.

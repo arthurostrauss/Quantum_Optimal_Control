@@ -333,7 +333,7 @@ class QEnvConfig:
 
     @reward_method.setter
     def reward_method(
-            self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
+        self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
     ):
         self.reward_config.reward_method = value
 
