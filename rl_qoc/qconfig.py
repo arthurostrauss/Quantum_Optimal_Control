@@ -179,8 +179,6 @@ class XEBConfig(RewardConfig):
     """
 
     reward_method: Literal["xeb"] = field(default="xeb", init=False)
-    num_sequences: int = 10
-    depth: int = 1
 
 
 @dataclass
@@ -200,8 +198,6 @@ class ORBITConfig(RewardConfig):
     """
 
     reward_method: Literal["orbit"] = field(default="orbit", init=False)
-    num_sequences: int = 3
-    depth: int = 1
     use_interleaved: bool = False
 
 
@@ -267,17 +263,33 @@ class QEnvConfig:
     def batch_size(self):
         return self.execution_config.batch_size
 
+    @batch_size.setter
+    def batch_size(self, value: int):
+        self.execution_config.batch_size = value
+
     @property
     def sampling_paulis(self):
         return self.execution_config.sampling_paulis
+
+    @sampling_paulis.setter
+    def sampling_paulis(self, value: int):
+        self.execution_config.sampling_paulis = value
 
     @property
     def n_shots(self):
         return self.execution_config.n_shots
 
+    @n_shots.setter
+    def n_shots(self, value: int):
+        self.execution_config.n_shots = value
+
     @property
     def n_reps(self):
         return self.execution_config.n_reps
+
+    @n_reps.setter
+    def n_reps(self, value: int):
+        self.execution_config.n_reps = value
 
     @property
     def c_factor(self):
@@ -287,13 +299,25 @@ class QEnvConfig:
     def seed(self):
         return self.execution_config.seed
 
+    @seed.setter
+    def seed(self, value: int):
+        self.execution_config.seed = value
+
     @property
     def benchmark_cycle(self):
         return self.benchmark_config.benchmark_cycle
 
+    @benchmark_cycle.setter
+    def benchmark_cycle(self, value: int):
+        self.benchmark_config.benchmark_cycle = value
+
     @property
     def benchmark_batch_size(self):
         return self.benchmark_config.benchmark_batch_size
+
+    @benchmark_batch_size.setter
+    def benchmark_batch_size(self, value: int):
+        self.benchmark_config.benchmark_batch_size = value
 
     @property
     def tomography_analysis(self):
@@ -309,7 +333,7 @@ class QEnvConfig:
 
     @reward_method.setter
     def reward_method(
-        self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
+            self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
     ):
         self.reward_config.reward_method = value
 

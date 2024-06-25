@@ -1,9 +1,12 @@
+from typing import Optional
+
 import numpy as np
-from qiskit.circuit import ParameterVector
+from qiskit.circuit import ParameterVector, QuantumCircuit
 from qm.jobs.running_qm_job import RunningQmJob
 
-from base_q_env import BaseQuantumEnvironment, BaseTarget
-from qconfig import QEnvConfig, QuaConfig
+from rl_qoc.base_q_env import BaseQuantumEnvironment, BaseTarget
+from rl_qoc import ContextAwareQuantumEnvironment, QuantumEnvironment
+from rl_qoc.qconfig import QEnvConfig, QuaConfig
 from qiskit import QuantumCircuit, schedule as build_schedule
 from qualang_tools.video_mode import ParameterTable
 from qm.qua import *
@@ -11,32 +14,7 @@ from qua_backend import QMBackend, schedule_to_qua_instructions
 from qua_utils import *
 
 
-class QUAEnvironment(BaseQuantumEnvironment):
-    def episode_length(self, global_step: int) -> int:
-        pass
-
-    def define_target_and_circuits(
-        self,
-    ) -> tuple[BaseTarget, List[QuantumCircuit], List[QuantumCircuit]]:
-        pass
-
-    def _get_obs(self):
-        pass
-
-    def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
-        pass
-
-    @property
-    def tgt_instruction_counts(self) -> int:
-        pass
-
-    @property
-    def parameters(self) -> List[ParameterVector] | ParameterVector:
-        pass
-
-    @property
-    def trunc_index(self) -> int:
-        pass
+class QUAEnvironment(QuantumEnvironment):
 
     @property
     def backend(self) -> QMBackend:
@@ -48,16 +26,9 @@ class QUAEnvironment(BaseQuantumEnvironment):
             self.backend, QMBackend
         ):
             raise ValueError("The backend should be a QMBackend object")
-
-        self.parameter_table = [
-            ParameterTable(
-                {
-                    self.parameters[i][j].name: 0.0
-                    for j in range(len(self.parameters[i]))
-                }
-            )
-            for i in range(self.circuits)
-        ]
+        self.parameter_table = ParameterTable(
+            {param.name: 0.0 for param in self.parameters}
+        )
         self.progs = [self.rl_qoc_qua_prog(qc) for qc in self.circuits]
         self.job = self.start_program(self.circuits[0])
 
@@ -66,9 +37,9 @@ class QUAEnvironment(BaseQuantumEnvironment):
         Generate a QUA program tailor-made for the RL based calibration project
         """
         # TODO: Set IO2 and IO1 to be the number of input states and the number of observables respectively
-        trunc_index = self.trunc_index
+        trunc_index = self._inside_trunc_tracker
         n_actions = self.action_space.shape[-1]
-        real_time_parameters = self.parameter_table[trunc_index]
+        real_time_parameters = self.parameter_table
         sched_qc = build_schedule(qc, self.backend)
         qubits = [
             list(self.backend.quam.qubits.values())[i] for i in self.layout[trunc_index]
