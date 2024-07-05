@@ -413,7 +413,7 @@ class QiskitBackendInfo:
         return (
             self.backend.instruction_durations
             if self.backend is not None
-            and not self.backend.instruction_durations.duration_by_name_qubits
+            and self.backend.instruction_durations.duration_by_name_qubits
             else self._instruction_durations
         )
 
@@ -659,6 +659,9 @@ class BaseQuantumEnvironment(ABC, Env):
                 if self.config.reward_method == "xeb":
                     # TODO: Implement XEB reward computation using Sampler
                     reward_table = np.zeros(self.batch_size)
+                    raise NotImplementedError(
+                        "XEB reward computation not implemented yet"
+                    )
                 else:
                     survival_probability = [
                         [
@@ -779,6 +782,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Retrieve observables and input state to sample for the DFE protocol for a target state
         """
+
         prep_circuit = qc.copy()
         if isinstance(self.target, GateTarget):
             # Append input state prep circuit to the custom circuit with front composition
@@ -908,7 +912,7 @@ class BaseQuantumEnvironment(ABC, Env):
                     )
                 )
                 total_shots += dedicated_shots * self.n_shots * self.batch_size
-        if len(pubs) == 0:
+        if len(pubs) == 0:  # If nothing was sampled, retry
             pubs, total_shots = self.channel_reward_pubs(qc, params)
 
         return pubs, total_shots
@@ -1153,6 +1157,10 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def sampler(self) -> BaseSamplerV1 | BaseSamplerV2:
         return self._sampler
+
+    @sampler.setter
+    def sampler(self, sampler: BaseSamplerV1 | BaseSamplerV2):
+        self._sampler = sampler
 
     @property
     def primitive(self) -> BaseEstimatorV2 | BaseSamplerV2:

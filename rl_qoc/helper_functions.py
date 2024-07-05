@@ -950,7 +950,6 @@ def retrieve_primitives(
         estimator = StatevectorEstimator()
 
     elif isinstance(backend, RuntimeBackend):
-        # TODO: Next update: will switch to keyword 'mode' instead of 'session'
         estimator = RuntimeEstimatorV2(
             mode=Session(backend=backend),
             options=estimator_options,
@@ -965,30 +964,6 @@ def retrieve_primitives(
         sampler = BackendSamplerV2(backend=backend)
 
     return estimator, sampler
-
-
-def substitute_target_gate(
-    circuit: QuantumCircuit,
-    target_gate: Gate,
-    custom_gate: Gate,
-):
-    """
-    Substitute target gate in Quantum Circuit with a parametrized version of the gate.
-    The parametrized_circuit function signature should match the expected one for a QiskitConfig instance.
-
-    Args:
-        circuit: Quantum Circuit instance
-        target_gate: Target gate to be substituted
-        custom_gate: Custom gate to be substituted with
-    """
-    ref_label = target_gate.label
-    qc = circuit.copy_empty_like()
-    for instruction in circuit.data:
-        if instruction.operation.label != ref_label:
-            qc.append(instruction)
-        else:
-            qc.append(custom_gate, instruction.qubits)
-    return qc
 
 
 def substitute_target_gate(
@@ -1753,99 +1728,13 @@ def get_hardware_runtime_single_circuit(
     return total_execution_time
 
 
-# def get_hardware_runtime_single_circuit(
-#     qc: QuantumCircuit, circuit_gate_times: Optional[Dict]=None, backend: Optional[BackendV2]=None
-# ) -> float:
-#     """
-#     Return a worst-case estimate of the runtime for a single execution of the circuit on the hardware
-
-#     :param qc: QuantumCircuit to be executed
-#     """
-
-#     if backend is not None and backend.target.InstructionDurations is not None:
-#         instruction_durations = backend.target.InstructionDurations
-#         total_execution_time = sum(instruction_durations.get(instr[0].name, instr[1]) for instr in qc.data)
-#         return total_execution_time
-
-#     if not circuit_gate_times:
-#         raise ValueError(
-#             "Empty circuit_gate_time dictionary received. Please add durations for your gates."
-#         )
-
-#     total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
-#     for instruction in qc.decompose().data:
-#         for qubit in instruction.qubits:
-#             # Custom gates only appear in the circuit context for the CAQEnv case
-#             if instruction.operation.label in circuit_gate_times:
-#                 total_time_per_qubit[qubit] += circuit_gate_times[
-#                     instruction.operation.label
-#                 ]
-#             else:
-#                 total_time_per_qubit[qubit] += circuit_gate_times[
-#                     instruction.operation.name
-#                 ]
-
-#     # Find the maximum execution time among all qubits
-#     total_execution_time = (
-#         max(total_time_per_qubit.values())
-#         + circuit_gate_times["reset"]
-#         + circuit_gate_times["measure"]
-#     )
-
-#     return total_execution_time
-
-
 def get_hardware_runtime_cumsum(
     qc: QuantumCircuit, circuit_gate_times: Dict, total_shots: List[int]
-) -> List[float]:
+) -> np.array:
     return np.cumsum(
         get_hardware_runtime_single_circuit(qc, circuit_gate_times)
         * np.array(total_shots)
     )
-
-
-def retrieve_backend_info(
-    backend: Optional[Backend_type] = None,
-    instruction_durations_dict: Optional[Dict[str, float]] = None,
-):
-    """
-    Retrieve useful Backend data to run context aware gate calibration
-
-    Args:
-        backend: Backend instance
-        instruction_durations_dict: Instruction duration dictionary
-
-
-    Returns:
-    dt: Time step
-    coupling_map: Coupling map
-    basis_gates: Basis gates
-    instruction_durations: Instruction durations
-
-    """
-
-    if isinstance(backend, Backend_type):
-        backend_data = BackendData(backend)
-        dt = backend_data.dt if backend_data.dt is not None else 2.2222222222222221e-10
-        coupling_map = CouplingMap(backend_data.coupling_map)
-        # Check basis_gates and their respective durations of backend (for identifying timing context)
-        if isinstance(backend, BackendV1):
-            instruction_durations = InstructionDurations.from_backend(backend)
-            basis_gates = backend.configuration().basis_gates.copy()
-        elif isinstance(backend, BackendV2):
-            instruction_durations = backend.instruction_durations
-            basis_gates = backend.operation_names.copy()
-        else:
-            instruction_durations = instruction_durations_dict
-            basis_gates = None
-    else:
-        warnings.warn(
-            "No Backend was provided, using default values for dt, coupling_map, basis_gates and instruction_durations"
-        )
-
-        return 2.222e-10, CouplingMap.from_full(5), ["x", "sx", "cx", "rz"], None
-
-    return dt, coupling_map, basis_gates, instruction_durations
 
 
 def retrieve_neighbor_qubits(coupling_map: CouplingMap, target_qubits: List):
@@ -1880,11 +1769,11 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     Retrieve count of target instruction in Quantum Circuit
 
     Args:
-        qc: Quantum Circuit
-        target: Target in form of {"gate": "X", "register": [0, 1]}
+        qc: Quantum Circuit (ideally already transpiled)
+        target: Target in form of {"gate": "X", "physical_qubits": [0, 1]}
     """
     tgt_instruction = CircuitInstruction(
-        target["gate"], [qc.qubits[i] for i in target["register"]]
+        target["gate"], [qc.qubits[i] for i in target["physical_qubits"]]
     )
     return qc.data.count(tgt_instruction)
 
