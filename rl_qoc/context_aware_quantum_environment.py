@@ -21,7 +21,12 @@ from qiskit.circuit import (
     ParameterVector,
     CircuitInstruction,
 )
-from qiskit.quantum_info import state_fidelity, Statevector
+from qiskit.quantum_info import (
+    state_fidelity,
+    Statevector,
+    average_gate_fidelity,
+    Operator,
+)
 from qiskit.transpiler import Layout
 from qiskit_aer.backends import AerSimulator
 from qiskit_aer.backends.aerbackend import AerBackend
@@ -261,17 +266,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                         except TypeError:
                             raise TypeError("Failed to call parametrized_circuit_func")
                         counts += 1
-            # custom_circuits[i] = remove_unused_wires(custom_circuits[i])
-            # baseline_circuits[i] = remove_unused_wires(baseline_circuits[i])
 
-        target = GateTarget(
-            self.config.target["gate"],
-            self.physical_target_qubits,
-            self.config.n_reps,
-            baseline_circuits,
-            tgt_register,
-            layouts,
-        )
+        target = [
+            GateTarget(
+                self.config.target["gate"],
+                self.physical_target_qubits,
+                self.config.n_reps,
+                baseline_circuit,
+                tgt_register,
+                layout,
+            )
+            for baseline_circuit, layout in zip(baseline_circuits, layouts)
+        ]
         return target, custom_circuits, baseline_circuits
 
     def reset(
@@ -378,8 +384,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
-                    self._index_input_state
-                    / len(self.target.input_states[self.trunc_index]),
+                    self._index_input_state / len(self.target.input_states),
                     self._target_instruction_timings[self._inside_trunc_tracker],
                 ]
                 + list(self._observable_to_observation())
@@ -394,13 +399,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: Batch of actions
         """
-        new_qc = qc.copy()
+        qc_channel, qc_state = qc.copy("qc_channel"), qc.copy("qc_state")
         n_actions = self.action_space.shape[-1]
         n_custom_instructions = (
             self.trunc_index + 1
         )  # Count custom instructions present in the current truncation
         baseline_circ = self.baseline_circuits[self.trunc_index]
-        target = Statevector(baseline_circ)
+        channel_target = Operator(baseline_circ)
+        state_target = Statevector(baseline_circ)
 
         if (
             self.config.check_on_exp
@@ -431,7 +437,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 )
                 if self.abstraction_level == "circuit":
                     new_qc = self.backend_info.custom_transpile(
-                        new_qc,
+                        qc_state,
                         initial_layout=self.layout[self.trunc_index],
                         scheduling=False,
                     )
@@ -463,64 +469,136 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         else:  # Perform ideal simulation at circuit or pulse level
             if self.abstraction_level == "circuit":
                 # Calculate circuit fidelity with statevector simulation
-                if isinstance(self.backend, AerBackend):
-                    backend = self.backend
-                elif self.backend is None:
-                    backend = AerSimulator(method="statevector")
+
+                if self.backend is None or (
+                    isinstance(self.backend, AerBackend)
+                    and self.backend.options.noise_model is None
+                ):
+
+                    backend = AerSimulator()
+                    qc_channel.save_unitary()
+                    qc_state.save_statevector()
+                    channel_output = "unitary"
+                    state_output = "statevector"
 
                 else:
                     noise_model = NoiseModel.from_backend(self.backend)
-                    backend = AerSimulator(
-                        noise_model=noise_model, method="density_matrix"
-                    )
-                new_qc.save_density_matrix()
-                circ = transpile(new_qc, backend=backend, optimization_level=0)
+                    backend = AerSimulator(noise_model=noise_model)
+                    qc_channel.save_superop()
+                    qc_state.save_density_matrix()
+                    channel_output = "superop"
+                    state_output = "density_matrix"
 
-                states_result = backend.run(
-                    circ,
-                    parameter_binds=[
-                        {
-                            self._parameters[i][j]: params[:, i * n_actions + j]
-                            for i in range(n_custom_instructions)
-                            for j in range(n_actions)
-                        }
-                    ],
-                ).result()
-                output_states = [
-                    states_result.data(i)["density_matrix"]
-                    for i in range(self.batch_size)
-                ]
+                qc_channel = transpile(
+                    qc_channel, backend=backend, optimization_level=0
+                )
+                qc_state = transpile(qc_state, backend=backend, optimization_level=0)
+
+                if self.config.reward_method == "fidelity":
+                    channel_result = backend.run(
+                        qc_channel,
+                        parameter_binds=[
+                            {
+                                self._parameters[i][j]: params[:, i * n_actions + j]
+                                for i in range(n_custom_instructions)
+                                for j in range(n_actions)
+                            }
+                        ],
+                        method=channel_output,
+                    ).result()
+                    output_channels = [
+                        channel_result.data(i)[channel_output]
+                        for i in range(self.batch_size)
+                    ]
+                    gate_fidelities = [
+                        average_gate_fidelity(channel, channel_target)
+                        for channel in output_channels
+                    ]
+
+                    state_result = backend.run(
+                        qc_state,
+                        parameter_binds=[
+                            {
+                                self._parameters[i][j]: params[:, i * n_actions + j]
+                                for i in range(n_custom_instructions)
+                                for j in range(n_actions)
+                            }
+                        ],
+                        method=state_output,
+                    ).result()
+                    output_states = [
+                        state_result.data(i)[state_output]
+                        for i in range(self.batch_size)
+                    ]
+                    state_fidelities = [
+                        state_fidelity(state, state_target) for state in output_states
+                    ]
+
+                    self.circuit_fidelity_history.append(np.mean(state_fidelities))
+                    self.avg_fidelity_history.append(np.mean(gate_fidelities))
+                    print("Fidelity stored", np.mean(self.avg_fidelity_history[-1]))
+                    return gate_fidelities
+
+                else:
+                    state_result = backend.run(
+                        qc_state,
+                        parameter_binds=[
+                            {
+                                self._parameters[i][j]: [
+                                    self.mean_action[i * n_actions + j]
+                                ]
+                                for i in range(n_custom_instructions)
+                                for j in range(n_actions)
+                            }
+                        ],
+                        method=state_output,
+                    ).result()
+                    output_state = state_result.data(0)[state_output]
+                    state_fid = state_fidelity(output_state, state_target)
+                    self.circuit_fidelity_history.append(np.mean(state_fid))
+
+                    channel_result = backend.run(
+                        qc_channel,
+                        parameter_binds=[
+                            {
+                                self._parameters[i][j]: [
+                                    self.mean_action[i * n_actions + j]
+                                ]
+                                for i in range(n_custom_instructions)
+                                for j in range(n_actions)
+                            }
+                        ],
+                        method=channel_output,
+                    ).result()
+                    output_channel = channel_result.data(0)[channel_output]
+                    gate_fidelity = average_gate_fidelity(
+                        output_channel, channel_target
+                    )
+                    self.avg_fidelity_history.append(np.mean(gate_fidelity))
+
+                    print("Fidelity stored", self.avg_fidelity_history[-1])
+                    return gate_fidelity
 
             else:  # Pulse simulation
                 # Calculate circuit fidelity with pulse simulation
-                if isinstance(self.backend, DynamicsBackend) and isinstance(
-                    self.backend.options.solver, JaxSolver
-                ):
-                    # Jax compatible pulse simulation
+                # if isinstance(self.backend, DynamicsBackend) and isinstance(
+                #         self.backend.options.solver, JaxSolver
+                # ):
+                #     # Jax compatible pulse simulation
+                #
+                #     output_states = np.array(self.backend.options.solver.batched_sims)[
+                #                     :, 1, :
+                #                     ]
+                #
+                #     output_states = [
+                #         projected_statevector(s, self.backend.options.subsystem_dims)
+                #         for s in output_states
+                #     ]
 
-                    output_states = np.array(self.backend.options.solver.batched_sims)[
-                        :, 1, :
-                    ]
+                raise NotImplementedError(
+                    "Pulse simulation not yet implemented for this backend"
+                )
 
-                    output_states = [
-                        projected_statevector(s, self.backend.options.subsystem_dims)
-                        for s in output_states
-                    ]
-
-                else:
-                    raise NotImplementedError(
-                        "Pulse simulation not yet implemented for this backend"
-                    )
-            circuit_fidelities = [
-                state_fidelity(state, Statevector(baseline_circ))
-                for state in output_states
-            ]
-            # circuit_fidelities = [state_fidelity(partial_trace(state,
-            #                                                    list(range(state.num_qubits))[target.num_qubits:]),
-            #                                      partial_trace(Statevector(baseline_circ),
-            #                                                    list(range(state.num_qubits))[target.num_qubits:]))
-            #                       for state in output_states]
-        self.circuit_fidelity_history.append(np.mean(circuit_fidelities))
         print("Fidelity stored", self.circuit_fidelity_history[-1])
         return circuit_fidelities
 
@@ -530,11 +608,28 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     @property
     def fidelity_history(self):
-        return self.circuit_fidelity_history
+        return self.avg_fidelity_history
 
     @property
     def tgt_instruction_counts(self) -> int:
         return self._tgt_instruction_counts
+
+    @property
+    def target(self):
+        """
+        Return current target to be calibrated
+        """
+        return self._target[self.trunc_index]
+
+    def get_target(self, trunc_index: Optional[int] = None):
+        """
+        Return target to be calibrated at given truncation index.
+        If no index is provided, return list of all targets.
+
+        Args:
+            trunc_index: Index of truncation to return target for.
+        """
+        return self._target[trunc_index] if trunc_index is not None else self._target
 
     @property
     def trunc_index(self) -> int:

@@ -404,7 +404,7 @@ def take_step(
     with torch.no_grad():
         mean_action, std_action, critic_value = agent(batch_obs)
         probs = Normal(mean_action, std_action)
-        env.unwrapped.mean_action = mean_action[0]
+        env.unwrapped.mean_action = env.action(mean_action.cpu().numpy())[0]
         env.unwrapped.std_action = std_action[0]
         action = torch.clip(
             probs.sample(),

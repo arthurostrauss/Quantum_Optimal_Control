@@ -38,7 +38,7 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
 )
-from qiskit.quantum_info import Clifford, random_clifford
+from qiskit.quantum_info import Clifford, random_clifford, PauliList
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
@@ -133,8 +133,17 @@ class BaseTarget(ABC):
         physical_qubits: int | List[int],
         target_type: str,
         tgt_register: Optional[QuantumRegister] = None,
-        layout: Optional[List[Layout]] = None,
+        layout: Optional[Layout] = None,
     ):
+        """
+        Initialize the base target for the quantum environment
+        :param physical_qubits: Physical qubits on which the target is defined
+        :param target_type: Type of the target (state / gate)
+        :param tgt_register: Optional existing QuantumRegister for the target
+        :param layout: Optional existing layout for the target (used when target touches a subset of
+        all physical qubits present in a circuit)
+
+        """
         self.physical_qubits = (
             list(range(physical_qubits))
             if isinstance(physical_qubits, int)
@@ -146,15 +155,13 @@ class BaseTarget(ABC):
             if tgt_register is None
             else tgt_register
         )
-        self._layout: List[Layout] = (
-            [
-                Layout(
-                    {
-                        self._tgt_register[i]: self.physical_qubits[i]
-                        for i in range(len(self.physical_qubits))
-                    }
-                )
-            ]
+        self._layout: Layout = (
+            Layout(
+                {
+                    self._tgt_register[i]: self.physical_qubits[i]
+                    for i in range(len(self.physical_qubits))
+                }
+            )
             if layout is None
             else layout
         )
@@ -165,13 +172,16 @@ class BaseTarget(ABC):
         return self._tgt_register
 
     @property
-    def layout(self) -> List[Layout]:
+    def layout(self) -> Layout:
+        """
+        Layout for the target
+        """
         return self._layout
 
     @layout.setter
-    def layout(self, layout: List[Layout] | Layout):
-        if isinstance(layout, Layout):
-            layout = [layout]
+    def layout(self, layout: Layout):
+        if not isinstance(layout, Layout):
+            raise ValueError("Layout should be a Layout object")
         self._layout = layout
 
     @property
@@ -250,7 +260,7 @@ class InputState(StateTarget):
         raise AttributeError("Input state does not have a layout")
 
     @layout.setter
-    def layout(self, layout: List[Layout] | Layout):
+    def layout(self, layout: Layout):
         raise AttributeError("Input state does not have a layout")
 
     @property
@@ -268,9 +278,9 @@ class GateTarget(BaseTarget):
         gate: Gate,
         physical_qubits: Optional[List[int]] = None,
         n_reps: int = 1,
-        target_op: Optional[Gate | QuantumCircuit | List[QuantumCircuit]] = None,
+        target_op: Optional[Gate | QuantumCircuit] = None,
         tgt_register: Optional[QuantumRegister] = None,
-        layout: Optional[List[Layout]] = None,
+        layout: Optional[Layout] = None,
     ):
         """
         Initialize the gate target for the quantum environment
@@ -283,15 +293,10 @@ class GateTarget(BaseTarget):
         """
         self.gate = gate
         if target_op is not None:
-            if not isinstance(target_op, List):
-                target_op = [target_op]
-            if not all([isinstance(op, (QuantumCircuit, Gate)) for op in target_op]):
-                raise ValueError(
-                    "target_op should be either Gate or QuantumCircuit, or a list of them"
-                )
-
+            if not isinstance(target_op, (QuantumCircuit, Gate)):
+                raise ValueError("target_op should be either Gate or QuantumCircuit")
         else:
-            target_op = [gate]
+            target_op = gate
         self.target_op = target_op
         self.n_reps = n_reps
         super().__init__(
@@ -301,26 +306,21 @@ class GateTarget(BaseTarget):
             layout,
         )
         input_circuits = [
-            [
-                PauliPreparationBasis().circuit(s)
-                for s in product(range(4), repeat=op.num_qubits)
-            ]
-            for op in self.target_op
+            PauliPreparationBasis().circuit(s)
+            for s in product(range(4), repeat=self.target_op.num_qubits)
         ]
-        input_states = [
-            [
-                InputState(
-                    input_circuit=circ,
-                    target_op=op,
-                    tgt_register=self.tgt_register,
-                    n_reps=n_reps,
-                )
-                for circ in input_circuits_list
-            ]
-            for op, input_circuits_list in zip(self.target_op, input_circuits)
+
+        self.input_states = [
+            InputState(
+                input_circuit=circ,
+                target_op=self.target_op,
+                tgt_register=self.tgt_register,
+                n_reps=n_reps,
+            )
+            for circ in input_circuits
         ]
-        self.input_states = input_states
-        self.Chi = _calculate_chi_target(Operator(gate).power(n_reps))
+
+        self.Chi = _calculate_chi_target(Operator(self.target_op.power(n_reps)))
 
 
 class QiskitBackendInfo:
@@ -505,7 +505,7 @@ class BaseQuantumEnvironment(ABC, Env):
         else:
             estimator_options = None
 
-        self.target, self.circuits, self.baseline_circuits = (
+        self._target, self.circuits, self.baseline_circuits = (
             self.define_target_and_circuits()
         )
         self.abstraction_level = "pulse" if self.circuits[0].calibrations else "circuit"
@@ -551,9 +551,7 @@ class BaseQuantumEnvironment(ABC, Env):
         signal.signal(signal.SIGTERM, self.signal_handler)
 
         if isinstance(self.target, GateTarget):
-            self._input_state = self.target.input_states[self.trunc_index][
-                self._index_input_state
-            ]
+            self._input_state = self.target.input_states[self._index_input_state]
             self.process_fidelity_history = []
             self.avg_fidelity_history = []
 
@@ -563,7 +561,7 @@ class BaseQuantumEnvironment(ABC, Env):
     @abstractmethod
     def define_target_and_circuits(
         self,
-    ) -> tuple[BaseTarget, List[QuantumCircuit], List[QuantumCircuit]]:
+    ) -> tuple[GateTarget | BaseTarget, List[QuantumCircuit], List[QuantumCircuit]]:
         raise NotImplementedError("Define target method not implemented")
 
     @abstractmethod
@@ -700,7 +698,7 @@ class BaseQuantumEnvironment(ABC, Env):
         target_state = None
         if isinstance(self.target, GateTarget):
             if self.config.reward_method == "state":
-                input_states = self.target.input_states[self.trunc_index]
+                input_states = self.target.input_states
                 self._index_input_state = np.random.randint(len(input_states))
                 self._input_state = input_states[self._index_input_state]
                 target_state = self._input_state.target_state  # (Gate |input>=|target>)
@@ -737,12 +735,14 @@ class BaseQuantumEnvironment(ABC, Env):
             print("probabilities renormalized")
             probabilities = probabilities / np.sum(probabilities)
 
-        l = (
+        sample_size = (
             self.sampling_Pauli_space
             if dfe_tuple is None
             else int(np.ceil(1 / (dfe_tuple[0] ** 2 * dfe_tuple[1])))
         )
-        k_samples = np.random.choice(len(probabilities), size=l, p=probabilities)
+        k_samples = np.random.choice(
+            len(probabilities), size=sample_size, p=probabilities
+        )
 
         pauli_indices, pauli_shots = np.unique(k_samples, return_counts=True)
         reward_factor = self.c_factor / (
@@ -755,7 +755,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 * np.log(2 / dfe_tuple[1])
                 / (
                     target_state.dm.dim
-                    * l
+                    * sample_size
                     * dfe_tuple[0] ** 2
                     * target_state.Chi[pauli_indices] ** 2
                 )
@@ -794,7 +794,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         prep_circuit = self.backend_info.custom_transpile(
             prep_circuit,
-            initial_layout=self.layout[self._inside_trunc_tracker],
+            initial_layout=self.layout,
             scheduling=False,
         )
 
@@ -828,7 +828,8 @@ class BaseQuantumEnvironment(ABC, Env):
         :param dfe_precision: Optional Tuple (Ɛ, δ) from DFE paper
         :return: Observables to sample, input state to prepare
         """
-        assert isinstance(self.target, GateTarget), "Target type should be a gate"
+        if not isinstance(self.target, GateTarget):
+            raise TypeError("Target type should be a gate")
         assert isinstance(
             self.config.reward_config, ChannelConfig
         ), "ChannelConfig object required for channel reward method"
@@ -850,15 +851,18 @@ class BaseQuantumEnvironment(ABC, Env):
             np.random.choice(len(probabilities), size=l, p=probabilities),
             return_counts=True,
         )
-
-        pauli_indices = [np.unravel_index(sample, (d**2, d**2)) for sample in samples]
+        pauli_indices = np.array(
+            [np.unravel_index(sample, (d**2, d**2)) for sample in samples]
+        )
         pauli_prep, pauli_meas = zip(
             *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )
+        pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
         reward_factor = [self.c_factor / (d * self.target.Chi[p]) for p in samples]
-        self._observables = [
-            SparsePauliOp(pauli_meas[i], reward_factor[i]) for i in range(len(samples))
-        ]
+        self._observables = SparsePauliOp(
+            pauli_meas[pauli_indices[:, 1]], reward_factor
+        )
+
         if dfe_precision is not None:
             self._pauli_shots = np.ceil(
                 2
@@ -866,8 +870,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 / (d * l * eps**2 * self.target.Chi[pauli_indices] ** 2)
             )
 
-        pubs = []
-        total_shots = 0
+        pubs, total_shots = [], 0
+
         for prep, obs, shot in zip(pauli_prep, self._observables, self._pauli_shots):
             max_input_states = d // nb_states
             selected_input_states = np.random.choice(
@@ -875,11 +879,12 @@ class BaseQuantumEnvironment(ABC, Env):
             )
             for input_state in selected_input_states:
                 prep_indices = []
-                dedicated_shots = shot // (
-                    max_input_states
+                dedicated_shots = (
+                    shot * self.n_shots // (max_input_states)
                 )  # Number of shots per Pauli eigenstate (divided equally)
                 if dedicated_shots == 0:
                     continue
+                # Convert input state to Pauli6 basis: preparing pure eigenstates of Pauli_prep
                 inputs = np.unravel_index(input_state, (2,) * qc.num_qubits)
                 parity = (-1) ** np.sum(inputs)
                 for i, pauli_op in enumerate(reversed(prep.to_label())):
@@ -899,7 +904,7 @@ class BaseQuantumEnvironment(ABC, Env):
                     prep_circuit.compose(qc, inplace=True)
                 prep_circuit = self.backend_info.custom_transpile(
                     prep_circuit,
-                    initial_layout=self.layout[self._inside_trunc_tracker],
+                    initial_layout=self.layout,
                     scheduling=False,
                 )
 
@@ -908,10 +913,10 @@ class BaseQuantumEnvironment(ABC, Env):
                         prep_circuit,
                         parity * obs.apply_layout(prep_circuit.layout),
                         params,
-                        1 / np.sqrt(dedicated_shots * self.n_shots),
+                        1 / np.sqrt(dedicated_shots),
                     )
                 )
-                total_shots += dedicated_shots * self.n_shots * self.batch_size
+                total_shots += dedicated_shots * self.batch_size
         if len(pubs) == 0:  # If nothing was sampled, retry
             pubs, total_shots = self.channel_reward_pubs(qc, params)
 
@@ -933,7 +938,7 @@ class BaseQuantumEnvironment(ABC, Env):
         pubs = []
         total_shots = 0
         circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
-        layout = self.layout[self._inside_trunc_tracker]
+        layout = self.layout
 
         input_circuits = [
             Pauli6PreparationBasis().circuit(s)
@@ -1007,7 +1012,7 @@ class BaseQuantumEnvironment(ABC, Env):
         assert isinstance(
             self.config.reward_config, XEBConfig
         ), "XEBConfig object required for XEB reward method"
-        layout = self.layout[self._inside_trunc_tracker]
+        layout = self.layout
         circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
         pubs = []
         total_shots = 0
@@ -1037,7 +1042,7 @@ class BaseQuantumEnvironment(ABC, Env):
         assert isinstance(
             self.config.reward_config, ORBITConfig
         ), "ORBITConfig object required for ORBIT reward method"
-        layout = self.layout[self._inside_trunc_tracker]
+        layout = self.layout
         circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
         pubs = []
         total_shots = 0
@@ -1324,9 +1329,7 @@ class BaseQuantumEnvironment(ABC, Env):
                     "arg max circuit fidelity": np.argmax(self.fidelity_history),
                     "optimal action": self.optimal_action,
                     "input_state": (
-                        self.target.input_states[self.trunc_index][
-                            self._index_input_state
-                        ].circuit.name
+                        self.target.input_states[self._index_input_state].circuit.name
                         if isinstance(self.target, GateTarget)
                         else None
                     ),
@@ -1339,9 +1342,7 @@ class BaseQuantumEnvironment(ABC, Env):
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "optimal action": self.optimal_action,
                     "input_state": (
-                        self.target.input_states[self.trunc_index][
-                            self._index_input_state
-                        ].circuit.name
+                        self.target.input_states[self._index_input_state].circuit.name
                         if isinstance(self.target, GateTarget)
                         else None
                     ),
@@ -1351,7 +1352,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 "reset_stage": self._inside_trunc_tracker == 0,
                 "step": step,
                 "gate_index": self._inside_trunc_tracker,
-                "input_state": self.target.input_states[self.trunc_index][
+                "input_state": self.target.input_states[
                     self._index_input_state
                 ].circuit.name,
                 "truncation_index": self.trunc_index,
@@ -1404,6 +1405,13 @@ class BaseQuantumEnvironment(ABC, Env):
             raise ValueError("Batch size should be positive integer.")
 
     @property
+    def target(self):
+        """
+        Return the target object (GateTarget | StateTarget) of the environment
+        """
+        return self._target
+
+    @property
     def n_qubits(self):
         return self.target.n_qubits
 
@@ -1419,9 +1427,9 @@ class BaseQuantumEnvironment(ABC, Env):
         return self.target.layout
 
     @layout.setter
-    def layout(self, layout: Layout | List[Layout]):
-        if isinstance(layout, Layout):
-            layout = [layout]
+    def layout(self, layout: Layout):
+        if not isinstance(layout, Layout):
+            raise ValueError("Layout should be a Qiskit Layout object")
         self.target.layout = layout
 
     @property
@@ -1437,7 +1445,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the qubits involved in the calibration task
         """
-        return list(self.layout[self._inside_trunc_tracker].get_physical_bits().keys())
+        return list(self.layout.get_physical_bits().keys())
 
     @property
     def observables(self) -> SparsePauliOp:
