@@ -54,6 +54,8 @@ from qiskit.providers import (
     QiskitBackendNotFoundError,
 )
 from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
+from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackendV2, FakeBackend
+from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_ibm_runtime import (
     Session,
     IBMBackend as RuntimeBackend,
@@ -940,11 +942,15 @@ def retrieve_primitives(
         if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
             calibration_files = config.calibration_files
             _, _ = perform_standard_calibrations(backend, calibration_files)
-    # elif isinstance(backend, (FakeBackend, FakeBackendV2, AerBackend)):
-    #     from qiskit_aer.primitives import EstimatorV2 as AerEstimatorV2, SamplerV2 as AerSamplerV2
-    #     print("Aer Backend created out of backend", backend)
-    #     estimator = AerEstimatorV2.from_backend(backend=backend)
-    #     sampler = AerSamplerV2.from_backend(backend=backend)
+    elif isinstance(backend, (FakeBackend, FakeBackendV2, AerBackend)):
+        from qiskit_aer.primitives import (
+            EstimatorV2 as AerEstimatorV2,
+            SamplerV2 as AerSamplerV2,
+        )
+
+        print("Aer Backend created out of backend", backend)
+        estimator = AerEstimatorV2.from_backend(backend=backend)
+        sampler = AerSamplerV2.from_backend(backend=backend)
     elif backend is None:  # No backend specified, ideal state-vector simulation
         sampler = StatevectorSampler()
         estimator = StatevectorEstimator()

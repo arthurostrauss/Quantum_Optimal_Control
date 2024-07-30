@@ -866,8 +866,6 @@ class CustomPPO:
             if self.clear_history or self.hpo_mode:
                 self.env.unwrapped.clear_history()
                 self.global_step = 0
-            else:
-                self.global_step = self.env.unwrapped.step_tracker
 
             (
                 self.obs,
@@ -940,15 +938,9 @@ class CustomPPO:
             else:  # Raise the error for debugging in the normal mode
                 raise
 
-    def perform_training_iteration(
-        self,
-        num_prints,
-    ):
+    def perform_training_iteration(self):
         """
         Perform a single training iteration of the Proximal Policy Optimization (PPO) algorithm.
-
-        Args:
-            num_prints (int): The number of times to print training progress.
 
         Returns:
             mean_action: The mean action taken during the training iteration.
@@ -1041,7 +1033,7 @@ class CustomPPO:
         if self.print_debug:
             print_debug_info(self.env, mean_action, std_action, b_returns, b_advantages)
 
-        if self.global_step % num_prints == 0:
+        if self.global_step % self.num_prints == 0:
             clear_output(wait=True)
             if self.plot_real_time:
                 plot_curves(self.env.unwrapped)
@@ -1076,7 +1068,7 @@ class CustomPPO:
         if self.anneal_learning_rate:
             self.learning_rate_annealing(iteration=iteration)
 
-        mean_action, std_action = self.perform_training_iteration(num_prints)
+        mean_action, std_action = self.perform_training_iteration()
 
         update_metric_lists(
             self.env,
@@ -1152,6 +1144,14 @@ class CustomPPO:
             )
         lrnow = frac * self.lr
         self.optimizer.param_groups[0]["lr"] = lrnow
+
+    @property
+    def global_step(self):
+        return self.env.unwrapped.step_tracker
+
+    @global_step.setter
+    def global_step(self, value: int):
+        self.env.unwrapped.step_tracker = value
 
     @property
     def training_results(self):

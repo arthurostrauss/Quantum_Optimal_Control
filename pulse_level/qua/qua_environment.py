@@ -10,7 +10,7 @@ from rl_qoc.qconfig import QEnvConfig, QuaConfig
 from qiskit import QuantumCircuit, schedule as build_schedule
 from qualang_tools.video_mode import ParameterTable
 from qm.qua import *
-from qua_backend import QMBackend, schedule_to_qua_instructions
+from qua_backend import QMBackend
 from qua_utils import *
 
 
@@ -40,9 +40,9 @@ class QUAEnvironment(QuantumEnvironment):
         trunc_index = self._inside_trunc_tracker
         n_actions = self.action_space.shape[-1]
         real_time_parameters = self.parameter_table
-        sched_qc = build_schedule(qc, self.backend)
         qubits = [
-            list(self.backend.quam.qubits.values())[i] for i in self.layout[trunc_index]
+            list(self.backend.machine.qubits.values())[i]
+            for i in self.layout[trunc_index]
         ]
         dim = 2**self.n_qubits
 
@@ -87,7 +87,9 @@ class QUAEnvironment(QuantumEnvironment):
                 advance_input_stream(max_observable)
 
                 with for_(batchsize, 0, batchsize < self.batch_size, batchsize + 1):
-                    self.sample_actions(mean_action, std_action, batch_r, action_stream)
+                    variables = self.sample_actions(
+                        mean_action, std_action, batch_r, action_stream
+                    )
                     with while_(input_state_count < max_input_state):
                         advance_input_stream(
                             input_state_indices
@@ -100,9 +102,7 @@ class QUAEnvironment(QuantumEnvironment):
                                 prepare_input_state(input_state_indices, qubits)
                                 # Run the circuit
                                 with for_(n_reps, 0, n_reps < self.n_reps, n_reps + 1):
-                                    schedule_to_qua_instructions(
-                                        sched_qc, self.backend, real_time_parameters
-                                    )
+                                    pass
 
                                 # Measure the observables
                                 state_int = measure_observable(
@@ -172,10 +172,11 @@ class QUAEnvironment(QuantumEnvironment):
                 z1[i], z2[i], mean_action[i], std_action[i], batch_r
             )
             assign(parameter.var, z1[i])
-            save(parameter.var, action_stream)
+
             clip_qua_var(
                 parameter.var, self.action_space.low[i], self.action_space.high[i]
             )
+            save(parameter.var, action_stream)
         return self.parameter_table[self.trunc_index].variables
 
     def close(self) -> None:

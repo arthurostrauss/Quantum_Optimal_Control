@@ -8,6 +8,8 @@ Last updated: 16/02/2024
 """
 
 from __future__ import annotations
+
+import time
 from abc import ABC, abstractmethod
 
 # For compatibility for options formatting between Estimators.
@@ -38,11 +40,18 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
 )
-from qiskit.quantum_info import Clifford, random_clifford, PauliList
+from qiskit.quantum_info import (
+    Clifford,
+    random_clifford,
+    PauliList,
+    state_fidelity,
+    average_gate_fidelity,
+)
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
 from qiskit.quantum_info.states import DensityMatrix, Statevector
+from qiskit.quantum_info.states.quantum_state import QuantumState, QuantumChannel
 from qiskit.transpiler import (
     Layout,
     InstructionProperties,
@@ -218,6 +227,20 @@ class StateTarget(BaseTarget):
             self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
         )
 
+    def fidelity(self, state: QuantumState | QuantumCircuit):
+        """
+        Compute the fidelity of the state with the target state
+        :param state: State to compare with the target state
+        """
+        if isinstance(state, QuantumCircuit):
+            try:
+                state = DensityMatrix(state)
+            except Exception as e:
+                raise ValueError("Input could not be converted to state") from e
+        if not isinstance(state, (Statevector, DensityMatrix)):
+            raise ValueError("Input should be a Statevector or DensityMatrix object")
+        return state_fidelity(state, self.dm)
+
 
 class InputState(StateTarget):
     """
@@ -320,7 +343,54 @@ class GateTarget(BaseTarget):
             for circ in input_circuits
         ]
 
-        self.Chi = _calculate_chi_target(Operator(self.target_op.power(n_reps)))
+        self.Chi = _calculate_chi_target(Operator(self.target_op).power(n_reps))
+
+    def gate_fidelity(self, channel: QuantumChannel | Operator | Gate | QuantumCircuit):
+        """
+        Compute the average gate fidelity of the gate with the target gate
+        If the target has a circuit context, the fidelity is computed with respect to the channel derived from the
+        target circuit
+        :param channel: channel to compare with the target gate
+        """
+        if isinstance(channel, (QuantumCircuit, Gate)):
+            try:
+                channel = Operator(channel)
+            except Exception as e:
+                raise ValueError("Input could not be converted to channel") from e
+        if not isinstance(channel, (Operator, QuantumChannel)):
+            raise ValueError("Input should be an Operator object")
+        return average_gate_fidelity(channel, Operator(self.target_op))
+
+    def state_fidelity(self, state: QuantumState):
+        """
+        Compute the fidelity of the state with the target state derived from the application of the target gate/circuit
+        context to |0...0>
+        :param state: State to compare with target state
+        """
+        if not isinstance(state, (Statevector, DensityMatrix)):
+            raise ValueError("Input should be a Statevector or DensityMatrix object")
+        return state_fidelity(state, Statevector(self.target_op))
+
+    def fidelity(self, op: QuantumState | QuantumChannel | Operator):
+        """
+        Compute the fidelity of the input op with respect to the target circuit context channel/output state.
+        :param op: Object to compare with the target. If QuantumState, computes state fidelity, if QuantumChannel or
+            Operator, computes gate fidelity
+        """
+        if isinstance(op, (QuantumCircuit, Gate)):
+            try:
+                op = Operator(op)
+            except Exception as e:
+                raise ValueError("Input could not be converted to channel") from e
+        if isinstance(op, (Operator, QuantumChannel)):
+            return self.gate_fidelity(op)
+        elif isinstance(op, (Statevector, DensityMatrix)):
+            return self.state_fidelity(op)
+        else:
+            raise ValueError(
+                f"Input should be a Statevector, DensityMatrix, Operator or QuantumChannel object, "
+                f"received {type(op)}"
+            )
 
 
 class QiskitBackendInfo:
@@ -638,12 +708,14 @@ class BaseQuantumEnvironment(ABC, Env):
         print(
             f"Sending {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job..."
         )
+        start = time.time()
         if isinstance(self.estimator, BaseEstimatorV1):
             # TODO: Remove V1 support (once pulse support for V2 is added)
             reward_table = self.run_v1_primitive(qc, params)
         else:  # EstimatorV2
             job = self.primitive.run(pubs=self._pubs)
             pub_results = job.result()
+            print("Time for running", time.time() - start)
 
             if self.config.dfe:
                 reward_table = np.sum(
@@ -830,49 +902,59 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         if not isinstance(self.target, GateTarget):
             raise TypeError("Target type should be a gate")
-        assert isinstance(
-            self.config.reward_config, ChannelConfig
-        ), "ChannelConfig object required for channel reward method"
+        if not isinstance(self.config.reward_config, ChannelConfig):
+            raise TypeError("ChannelConfig object required for channel reward method")
+
         nb_states = self.config.reward_config.num_eigenstates_per_pauli
-        assert (
-            nb_states <= 2**qc.num_qubits
-        ), f"Number of eigenstates per Pauli should be less than {2 ** qc.num_qubits}"
+        if nb_states <= 2**qc.num_qubits:
+            raise ValueError(
+                f"Number of eigenstates per Pauli should be less than {2 ** qc.num_qubits}"
+            )
         d = 2**qc.num_qubits
         probabilities = self.target.Chi**2 / (d**2)
+        non_zero_indices = np.nonzero(probabilities)[0]
+        non_zero_probabilities = probabilities[non_zero_indices]
         basis = pauli_basis(num_qubits=qc.num_qubits)
 
         if dfe_precision is not None:
             eps, delta = dfe_precision
-            l = int(np.ceil(1 / (eps**2 * delta)))
+            pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
         else:
-            l = self.sampling_Pauli_space
+            pauli_sampling = self.sampling_Pauli_space
 
         samples, self._pauli_shots = np.unique(
-            np.random.choice(len(probabilities), size=l, p=probabilities),
+            np.random.choice(
+                non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
+            ),
             return_counts=True,
         )
         pauli_indices = np.array(
-            [np.unravel_index(sample, (d**2, d**2)) for sample in samples]
+            [np.unravel_index(sample, (d**2, d**2)) for sample in samples], dtype=int
         )
+
         pauli_prep, pauli_meas = zip(
             *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )
         pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
         reward_factor = [self.c_factor / (d * self.target.Chi[p]) for p in samples]
-        self._observables = SparsePauliOp(
-            pauli_meas[pauli_indices[:, 1]], reward_factor
-        )
+
+        self._observables = SparsePauliOp(pauli_meas, reward_factor)
 
         if dfe_precision is not None:
             self._pauli_shots = np.ceil(
                 2
                 * np.log(2 / delta)
-                / (d * l * eps**2 * self.target.Chi[pauli_indices] ** 2)
+                / (d * pauli_sampling * eps**2 * self.target.Chi[samples] ** 2)
             )
 
         pubs, total_shots = [], 0
+        used_prep_indices, used_indices, idx = (
+            [],
+            [],
+            0,
+        )  # Track used input states to reduce number of PUBs
 
-        for prep, obs, shot in zip(pauli_prep, self._observables, self._pauli_shots):
+        for prep, obs, shots in zip(pauli_prep, self._observables, self._pauli_shots):
             max_input_states = d // nb_states
             selected_input_states = np.random.choice(
                 d, size=max_input_states, replace=False
@@ -880,7 +962,7 @@ class BaseQuantumEnvironment(ABC, Env):
             for input_state in selected_input_states:
                 prep_indices = []
                 dedicated_shots = (
-                    shot * self.n_shots // (max_input_states)
+                    shots * self.n_shots // (max_input_states)
                 )  # Number of shots per Pauli eigenstate (divided equally)
                 if dedicated_shots == 0:
                     continue
@@ -892,31 +974,55 @@ class BaseQuantumEnvironment(ABC, Env):
                         prep_indices.append(inputs[i])
                     elif pauli_op == "X":
                         prep_indices.append(2 + inputs[i])
-                    else:
+                    elif pauli_op == "Y":
                         prep_indices.append(4 + inputs[i])
-
-                prep_circuit = qc.compose(
-                    Pauli6PreparationBasis().circuit(prep_indices),
-                    front=True,
-                    inplace=False,
-                )
-                for _ in range(self.n_reps - 1):
-                    prep_circuit.compose(qc, inplace=True)
-                prep_circuit = self.backend_info.custom_transpile(
-                    prep_circuit,
-                    initial_layout=self.layout,
-                    scheduling=False,
-                )
-
-                pubs.append(
-                    (
-                        prep_circuit,
-                        parity * obs.apply_layout(prep_circuit.layout),
-                        params,
-                        1 / np.sqrt(dedicated_shots),
+                if tuple(prep_indices) not in used_prep_indices:
+                    used_prep_indices.append(tuple(prep_indices))
+                    used_indices.append(idx)
+                    idx += 1
+                    prep_circuit = qc.compose(
+                        Pauli6PreparationBasis().circuit(prep_indices),
+                        front=True,
+                        inplace=False,
                     )
-                )
-                total_shots += dedicated_shots * self.batch_size
+                    for _ in range(self.n_reps - 1):
+                        prep_circuit.compose(qc, inplace=True)
+
+                    prep_circuit = self.backend_info.custom_transpile(
+                        prep_circuit,
+                        initial_layout=self.layout,
+                        scheduling=False,
+                        optimization_level=1,
+                    )
+                    pubs.append(
+                        (
+                            prep_circuit,
+                            parity * obs.apply_layout(prep_circuit.layout),
+                            params,
+                            1 / np.sqrt(dedicated_shots),
+                        )
+                    )
+                    total_shots += dedicated_shots * self.batch_size
+                else:
+                    pub_ref_index: int = used_indices[
+                        used_prep_indices.index(tuple(prep_indices))
+                    ]
+                    prep_circuit, ref_obs, ref_params, ref_precision = pubs[
+                        pub_ref_index
+                    ]
+                    ref_shots = 1 / ref_precision**2
+                    new_precision = min(ref_precision, 1 / np.sqrt(dedicated_shots))
+                    new_shots = 1 / new_precision**2
+                    new_pub = (
+                        prep_circuit,
+                        ref_obs + parity * obs.apply_layout(prep_circuit.layout),
+                        ref_params,
+                        new_precision,
+                    )
+                    pubs[pub_ref_index] = new_pub
+                    total_shots -= ref_shots * self.batch_size
+                    total_shots += new_shots * self.batch_size
+
         if len(pubs) == 0:  # If nothing was sampled, retry
             pubs, total_shots = self.channel_reward_pubs(qc, params)
 

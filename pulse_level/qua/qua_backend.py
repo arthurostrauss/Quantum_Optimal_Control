@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import Iterable, List, Sequence, Dict, Union, Tuple
 
 from quam.components import Channel as QuAMChannel
@@ -22,10 +23,11 @@ from qiskit.pulse import (
     UnassignedDurationError,
     PulseError,
 )
-from qiskit.transpiler import Target
+from qiskit.transpiler import Target, InstructionProperties
+from qiskit.qasm3 import dumps as qasm3_dumps
 from qiskit.pulse.transforms import block_to_schedule
 from qiskit.pulse.channels import Channel as QiskitChannel
-from qiskit.pulse.library.pulse import Pulse as QiskitPulse
+from qiskit.pulse.library import SymbolicPulse
 from qiskit.pulse.library.waveform import Waveform
 from qm.jobs.running_qm_job import RunningQmJob
 from qm.jobs.pending_job import QmPendingJob, QmJob
@@ -34,13 +36,21 @@ from qm import QuantumMachinesManager, Program
 from qualang_tools.addons.variables import assign_variables_to_element
 from quam_components.quam import QuAM
 from qualang_tools.video_mode import ParameterTable
-from oqc import Compiler, HardwareConfig, OperationIdentifier, OperationsMapping
+from oqc import (
+    Compiler,
+    HardwareConfig,
+    OperationIdentifier,
+    OperationsMapping,
+    QubitsMapping,
+)
 
 _real_time_parameters = {
     "amp",
     "angle",
     "frequency",
 }  # Parameters that can be used in real-time
+_ref_amp = 0.1
+_ref_phase = 0.0
 
 
 # TODO: Add duration to the list of real-time parameters (need ScheduleBlock to QUA compiler)
@@ -49,9 +59,9 @@ class FluxChannel(QiskitChannel):
 
 
 @quam_dataclass
-class QuAM_from_QiskitPulse(QuAMPulse):
-    def __init__(self, pulse: QiskitPulse):
-        self.pulse: QiskitPulse = pulse
+class QuAMQiskitPulse(QuAMPulse):
+    def __init__(self, pulse: SymbolicPulse | Waveform):
+        self.pulse: SymbolicPulse | Waveform = pulse
         super().__init__(
             length=self.pulse.duration if not self.pulse.is_parameterized() else 0,
             id=pulse.name,
@@ -68,10 +78,10 @@ class QuAM_from_QiskitPulse(QuAMPulse):
         Tuple[List[float], List[float]],
     ]:
         if isinstance(self.pulse, Waveform):
-            return self.pulse.samples
-        else:
+            return self.pulse.samples.tolist()
+        elif isinstance(self.pulse, SymbolicPulse):
             try:
-                return self.pulse.get_waveform().samples
+                return self.pulse.get_waveform().samples.tolist()
             except (AttributeError, PulseError) as e:
                 raise PulseError(
                     "Pulse waveform could not be retrieved from the given pulse"
@@ -79,6 +89,25 @@ class QuAM_from_QiskitPulse(QuAMPulse):
 
     def is_parametrized(self):
         return self.pulse.is_parametrized()
+
+    def is_compile_time_parametrized(self):
+        """
+        Check if the pulse is parametrized with compile-time parameters
+        """
+        return any(
+            isinstance(self.pulse.parameters[param], ParameterExpression)
+            and param not in _real_time_parameters
+            for param in self.pulse.parameters
+        )
+
+    def is_real_time_parametrized(self):
+        """
+        Check if the pulse is parametrized with real-time parameters
+        """
+        return any(
+            isinstance(self.pulse.parameters[param], ParameterExpression)
+            for param in _real_time_parameters
+        )
 
 
 class QMProvider:
@@ -97,7 +126,7 @@ class QMProvider:
         )
 
     def get_backend(self, quam: QuAM):
-        return QMBackend(self, self.qmm, quam)
+        return QMBackend(self, quam)
 
     def backends(self, name=None, filters=None, **kwargs):
         raise NotImplementedError("Not implemented yet")
@@ -109,30 +138,39 @@ class QMProvider:
         pass
 
 
-class QMBackend(Backend):
+class QMBackend(Backend, ABC):
     def __init__(
         self,
-        provider: QMProvider,
-        qmm: QuantumMachinesManager,
-        quam: QuAM,
+        machine: QuAM,
     ):
-        Backend.__init__(self, provider=provider, name="QUA backend")
+        Backend.__init__(self, name="QUA backend")
         self._target = Target(
             description="QUA target",
             dt=1e-9,
             granularity=4,
-            num_qubits=len(quam.qubits),
+            num_qubits=len(machine.qubits),
+            min_length=16,
         )
-        self.quam = quam
+        self.machine = machine
         self._pulse_to_quam_channels: Dict[QiskitChannel, QuAMChannel] = {}
-        self._quam_to_pulse_channels: Dict[QuAMChannel, QiskitChannel] = {}
+        self._quam_to_pulse_channels: Dict[
+            QuAMChannel, QiskitChannel | Sequence[QiskitChannel]
+        ] = {}
         self._operation_mapping_QUA: OperationsMapping = {}
-        self.populate_target(quam)
-        self.qua_config = quam.generate_config()
+        self.populate_target(machine)
 
     @property
     def target(self):
         return self._target
+
+    @abstractmethod
+    @property
+    def qubit_mapping(self) -> QubitsMapping:
+        """
+        Build the qubit to quantum elements mapping for the backend.
+        Should be of the form {qubit_index: (quantum_element1, quantum_element2, ...)}
+        """
+        pass
 
     @property
     def max_circuits(self):
@@ -142,31 +180,14 @@ class QMBackend(Backend):
     def _default_options(cls):
         pass
 
-    def populate_target(self, quam: QuAM):
+    @abstractmethod
+    def populate_target(self, machine: QuAM):
         """
         Populate the target instructions with the QOP configuration (currently hardcoded for
         Transmon based QuAM architecture)
 
         """
-        for i, qubit in enumerate(quam.qubits.values()):
-            self._target.qubit_properties[i] = QubitProperties(
-                t1=qubit.T1, t2=qubit.T2ramsey, frequency=qubit.f_01
-            )
-            self._quam_to_pulse_channels[qubit.xy] = DriveChannel(i)
-            self._pulse_to_quam_channels[DriveChannel(i)] = qubit.xy
-            self._quam_to_pulse_channels[qubit.z] = FluxChannel(i)
-            self._pulse_to_quam_channels[FluxChannel(i)] = qubit.z
-            self._quam_to_pulse_channels[qubit.resonator] = MeasureChannel(i)
-            self._pulse_to_quam_channels[MeasureChannel(i)] = qubit.resonator
-            self._pulse_to_quam_channels[AcquireChannel(i)] = qubit.resonator
-            self._quam_to_pulse_channels[qubit.resonator] = AcquireChannel(i)
-            # TODO: Add the rest of the channels for QubitPairs (ControlChannels)
-
-            self._target.add_instruction()
-            # TODO: Update the instructions both in Qiskit and in the OQC operations mapping
-            # TODO: Figure out if pulse calibrations should be added to Target
-
-        self._coupling_map = self._target.build_coupling_map()
+        pass
 
     def get_quam_channel(self, channel: QiskitChannel):
         """
@@ -224,8 +245,7 @@ class QMBackend(Backend):
             qua_progs = []
             for qc in run_input:
                 qua_prog = self.qua_prog_from_qc(qc)
-                program_id = self.qm.compile(qua_prog)
-                qua_progs.append(program_id)
+                qua_progs.append(qua_prog)
 
     def schedule_to_qua_macro(self, sched: Schedule):
 
@@ -283,17 +303,49 @@ class QMBackend(Backend):
 
         basis_gates = self.operation_names.copy()
 
-        if qc.calibrations:
+        if qc.calibrations:  # Check for custom calibrations
             for gate_name, cal_info in qc.calibrations.items():
-                if gate_name not in basis_gates:
+                if gate_name not in basis_gates:  # Make it a basis gate for OQ compiler
                     basis_gates.append(gate_name)
                 for (qubits, parameters), schedule in cal_info.items():
+                    if not isinstance(schedule, Schedule):
+                        raise ValueError(
+                            f"Calibration schedule for {gate_name} is not a Schedule"
+                        )
                     parametrized_channels_count = 0
                     for channel in schedule.channels:
                         if channel.is_parameterized():
                             parametrized_channels_count += 1
                     if parametrized_channels_count == 0:
                         parametrized_channels_count = None
+
+                    # Update QuAM with additional pulses
+                    for idx, (time, instruction) in enumerate(
+                        schedule.filter(instruction_types=[Play]).instructions
+                    ):
+                        instruction: Play
+                        pulse, channel = instruction.pulse, instruction.channel
+                        pulse_name = pulse.name
+                        if pulse_name in self.get_quam_channel(channel).operations:
+                            pulse_name += str(pulse.id)
+
+                        quam_pulse = QuAMQiskitPulse(pulse)
+                        if quam_pulse.is_compile_time_parametrized():
+                            raise ValueError(
+                                "Compile-time parametrized pulses are not supported in this execution"
+                                "mode."
+                            )
+                        if quam_pulse.is_real_time_parametrized():
+                            for param in _real_time_parameters:
+                                if isinstance(
+                                    pulse.parameters[param], ParameterExpression
+                                ):
+                                    pass
+                                    # TODO: Add the real-time parameters to the QuAM pulse
+
+                        self.get_quam_channel(channel).operations[pulse.name] = (
+                            QuAMQiskitPulse(pulse)
+                        )
 
                     self._operation_mapping_QUA[
                         OperationIdentifier(
@@ -303,6 +355,19 @@ class QMBackend(Backend):
                             parametrized_channels_count,
                         )
                     ] = self.schedule_to_qua_macro(schedule)
+        hardware_config = HardwareConfig(
+            quantum_operations_db=self._operation_mapping_QUA,
+            physical_qubits=self._qubit_mapping,
+        )
+        compiler = Compiler(hardware_config=hardware_config)
+        open_qasm_code = qasm3_dumps(qc, includes=(), basis_gates=basis_gates)
+        open_qasm_code = "\n".join(
+            line
+            for line in open_qasm_code.splitlines()
+            if not line.strip().startswith(("barrier",))
+        )
+        result = compiler.compile(open_qasm_code)
+        return result.result_program
 
     def qua_prog_from_qc(self, qc: QuantumCircuit | Schedule | ScheduleBlock | Program):
         """
@@ -316,6 +381,7 @@ class QMBackend(Backend):
             try:
                 schedule = block_to_schedule(qc)
             except (UnassignedDurationError, PulseError) as e:
+                # TODO: Build ScheduleBlock to QUA compiler
                 raise RuntimeError(
                     "ScheduleBlock could not be converted to Schedule (required"
                     "for converting it to QUA program"
@@ -332,6 +398,52 @@ class QMBackend(Backend):
         Convert a Qiskit Play instruction to a QUA Play instruction
         """
         return param_counter
+
+
+class FluxTunableTransmonBackend(QMBackend):
+
+    def __init__(
+        self,
+        machine: QuAM,
+    ):
+        super().__init__(machine)
+
+    @property
+    def qubit_mapping(self) -> QubitsMapping:
+        """
+        Retrieve the qubit to quantum elements mapping for the backend.
+        """
+        return {
+            i: (qubit.xy.name, qubit.z.name, qubit.resonator.name)
+            for i, qubit in enumerate(self.machine.qubits.values())
+        }
+
+    def populate_target(self, machine: QuAM):
+        """
+        Populate the target instructions with the QOP configuration (currently hardcoded for
+        Transmon based QuAM architecture)
+
+        """
+        for i, qubit in enumerate(machine.qubits.values()):
+            self._target.qubit_properties[i] = QubitProperties(
+                t1=qubit.T1, t2=qubit.T2ramsey, frequency=qubit.f_01
+            )
+            self._quam_to_pulse_channels[qubit.xy] = DriveChannel(i)
+            self._pulse_to_quam_channels[DriveChannel(i)] = qubit.xy
+            self._quam_to_pulse_channels[qubit.z] = FluxChannel(i)
+            self._pulse_to_quam_channels[FluxChannel(i)] = qubit.z
+            self._quam_to_pulse_channels[qubit.resonator] = [
+                MeasureChannel(i),
+                AcquireChannel(i),
+            ]
+            self._pulse_to_quam_channels[MeasureChannel(i)] = qubit.resonator
+            self._pulse_to_quam_channels[AcquireChannel(i)] = qubit.resonator
+            # TODO: Add the rest of the channels for QubitPairs (ControlChannels)
+
+            # TODO: Update the instructions both in Qiskit and in the OQC operations mapping
+            # TODO: Figure out if pulse calibrations should be added to Target
+
+        self._coupling_map = self._target.build_coupling_map()
 
 
 def qua_declaration(n_qubits, readout_elements):
@@ -354,7 +466,7 @@ def get_el_from_channel(channel: QiskitChannel):
 
 
 def get_pulse_from_instruction(
-    pulse_instance: QiskitPulse,
+    pulse_instance: Waveform | SymbolicPulse,
     channel: QiskitChannel,
     channel_mapping: dict = None,
     parameter_table: ParameterTable = None,
