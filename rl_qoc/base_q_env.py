@@ -40,18 +40,21 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
 )
-from qiskit.quantum_info import (
-    Clifford,
-    random_clifford,
-    PauliList,
-    state_fidelity,
-    average_gate_fidelity,
-)
 
 # Qiskit Quantum Information, for fidelity benchmarking
-from qiskit.quantum_info.operators import SparsePauliOp, Operator, pauli_basis
+from qiskit.quantum_info.states.measures import state_fidelity
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.quantum_info.states.quantum_state import QuantumState, QuantumChannel
+from qiskit.quantum_info.operators import (
+    SparsePauliOp,
+    Operator,
+    pauli_basis,
+    PauliList,
+    Clifford,
+)
+from qiskit.quantum_info.operators.measures import average_gate_fidelity
+from qiskit.quantum_info.random import random_clifford
+
 from qiskit.transpiler import (
     Layout,
     InstructionProperties,
@@ -273,9 +276,9 @@ class InputState(StateTarget):
             if isinstance(target_op, Gate):
                 circ.append(target_op, tgt_register)
             else:
-                for instr in target_op.data:
-                    circ.append(instr)
-                # circ.compose(target_op, inplace=True)
+                # for instr in target_op.data:
+                #     circ.append(instr)
+                circ.compose(target_op, inplace=True)
         self.target_state = StateTarget(circuit=circ)
 
     @property
@@ -312,7 +315,7 @@ class GateTarget(BaseTarget):
         :param n_reps: Number of repetitions of the target gate / circuit
         :param target_op: Element to be repeated in the calibration (default is the gate to be calibrated)
         :param tgt_register: Specify target QuantumRegister if already declared
-        :param layout: Specify layout or list of layouts if already declared
+        :param layout: Specify layout if already declared
         """
         self.gate = gate
         if target_op is not None:
@@ -342,8 +345,10 @@ class GateTarget(BaseTarget):
             )
             for circ in input_circuits
         ]
-
-        self.Chi = _calculate_chi_target(Operator(self.target_op).power(n_reps))
+        if self.target_op.num_qubits <= 3:
+            self.Chi = _calculate_chi_target(Operator(self.target_op).power(n_reps))
+        else:
+            self.Chi = None
 
     def gate_fidelity(self, channel: QuantumChannel | Operator | Gate | QuantumCircuit):
         """
@@ -402,11 +407,13 @@ class QiskitBackendInfo:
         self,
         backend: Optional[BackendV2] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
+        n_qubits: int = 0,
     ):
         if backend is not None and backend.coupling_map is None:
             raise QiskitError("Backend does not have a coupling map")
         self.backend = backend
         self._instruction_durations = custom_instruction_durations
+        self._n_qubits = n_qubits if backend is None else backend.num_qubits
 
     def custom_transpile(
         self,
@@ -454,7 +461,7 @@ class QiskitBackendInfo:
         return (
             self.backend.coupling_map
             if self.backend is not None
-            else CouplingMap.from_full(5)
+            else CouplingMap.from_full(self._n_qubits)
         )
 
     @property
@@ -465,7 +472,7 @@ class QiskitBackendInfo:
         return (
             self.backend.operation_names
             if self.backend is not None
-            else ["x", "sx", "cx", "rz", "measure", "reset"]
+            else ["u", "rzx", "cx", "rz", "measure", "reset"]
         )
 
     @property
@@ -486,6 +493,19 @@ class QiskitBackendInfo:
             and self.backend.instruction_durations.duration_by_name_qubits
             else self._instruction_durations
         )
+
+    @property
+    def num_qubits(self):
+        return self._n_qubits
+
+    @num_qubits.setter
+    def num_qubits(self, n_qubits: int):
+        assert n_qubits > 0, "Number of qubits should be positive"
+        if self.backend is not None:
+            raise ValueError(
+                "Number of qubits should not be set if backend is provided"
+            )
+        self._n_qubits = n_qubits
 
 
 class BaseQuantumEnvironment(ABC, Env):
@@ -652,12 +672,12 @@ class BaseQuantumEnvironment(ABC, Env):
     @abstractmethod
     def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
         """
-        Benchmark through tomography the fidelity of the quantum system
+        Benchmark through tomography or through simulation the policy
         Args:
             qc: Quantum circuit to benchmark
             params:
 
-        Returns:
+        Returns: Fidelity metric or array of fidelities for all actions in the batch
 
         """
 
@@ -904,9 +924,11 @@ class BaseQuantumEnvironment(ABC, Env):
             raise TypeError("Target type should be a gate")
         if not isinstance(self.config.reward_config, ChannelConfig):
             raise TypeError("ChannelConfig object required for channel reward method")
+        if qc.num_qubits > 3:
+            raise ValueError("Channel reward method is only supported for 1-3 qubits")
 
         nb_states = self.config.reward_config.num_eigenstates_per_pauli
-        if nb_states <= 2**qc.num_qubits:
+        if nb_states >= 2**qc.num_qubits:
             raise ValueError(
                 f"Number of eigenstates per Pauli should be less than {2 ** qc.num_qubits}"
             )
@@ -992,7 +1014,7 @@ class BaseQuantumEnvironment(ABC, Env):
                         prep_circuit,
                         initial_layout=self.layout,
                         scheduling=False,
-                        optimization_level=1,
+                        optimization_level=0,
                     )
                     pubs.append(
                         (
@@ -1043,7 +1065,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         pubs = []
         total_shots = 0
-        circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
+        circuit_ref = self.baseline_circuits[self.trunc_index]
         layout = self.layout
 
         input_circuits = [
@@ -1119,7 +1141,7 @@ class BaseQuantumEnvironment(ABC, Env):
             self.config.reward_config, XEBConfig
         ), "XEBConfig object required for XEB reward method"
         layout = self.layout
-        circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
+        circuit_ref = self.baseline_circuits[self.trunc_index]
         pubs = []
         total_shots = 0
 
@@ -1149,7 +1171,7 @@ class BaseQuantumEnvironment(ABC, Env):
             self.config.reward_config, ORBITConfig
         ), "ORBITConfig object required for ORBIT reward method"
         layout = self.layout
-        circuit_ref = self.baseline_circuits[self._inside_trunc_tracker]
+        circuit_ref = self.baseline_circuits[self.trunc_index]
         pubs = []
         total_shots = 0
         if self.config.reward_config.use_interleaved:  # Interleaved RB
