@@ -284,7 +284,7 @@ class QEnvConfig:
         self.execution_config.n_shots = value
 
     @property
-    def n_reps(self):
+    def n_reps(self) -> int:
         return self.execution_config.n_reps
 
     @n_reps.setter

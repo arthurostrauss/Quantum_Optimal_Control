@@ -29,6 +29,7 @@ from qiskit.quantum_info.operators import Operator
 from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit_aer import AerSimulator
+from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_aer.noise import NoiseModel
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
@@ -57,6 +58,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             training_config: QEnvConfig object containing the training configuration
         """
         self._parameters = ParameterVector("θ", training_config.n_actions)
+
         super().__init__(training_config)
 
         # self.observation_space = Box(
@@ -84,7 +86,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         return 1
 
     def define_target_and_circuits(
-        self,
+            self,
     ) -> Tuple[
         GateTarget | StateTarget,
         List[QuantumCircuit],
@@ -129,7 +131,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             return np.array([0, 0])
 
     def step(
-        self, action: ActType
+            self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         self._step_tracker += 1
         if self._episode_ended:
@@ -151,7 +153,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             self._optimal_action = self.mean_action
         self.reward_history.append(reward)
         assert (
-            len(reward) == self.batch_size
+                len(reward) == self.batch_size
         ), f"Reward table size mismatch {len(reward)} != {self.batch_size} "
         assert not np.any(np.isinf(reward)) and not np.any(
             np.isnan(reward)
@@ -195,25 +197,6 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         :param params: List of Action vectors to execute on quantum system
         :return: None
         """
-        new_qc = qc.copy()
-        if isinstance(self.target, StateTarget):
-            key, cls = "dm", DensityMatrix
-            benchmark = state_fidelity
-            method_str = "statevector" if self.backend is None else "density_matrix"
-            method_qc = (
-                new_qc.save_statevector
-                if self.backend is None
-                else new_qc.save_density_matrix
-            )
-        else:
-            key, cls = "gate", Operator
-            benchmark = average_gate_fidelity
-            method_str = "unitary" if self.backend is None else "superop"
-            method_qc = (
-                new_qc.save_unitary if self.backend is None else new_qc.save_superop
-            )
-
-        target: DensityMatrix | Operator = cls(getattr(self.target, key))
 
         if self.config.check_on_exp:
 
@@ -229,9 +212,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     self.action_space.high,
                 )
 
-                qc_list = [
-                    new_qc.assign_parameters(angle_set) for angle_set in angle_sets
-                ]
+                qc_list = [qc.assign_parameters(angle_set) for angle_set in angle_sets]
                 print("Starting tomography...")
                 session = (
                     self.estimator.session
@@ -241,7 +222,11 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 fids = fidelity_from_tomography(
                     qc_list,
                     self.backend,
-                    target,
+                    (
+                        Operator(self.target.gate)
+                        if isinstance(self.target, GateTarget)
+                        else Statevector(self.target.dm)
+                    ),
                     self.target.physical_qubits,
                     analysis=self.config.tomography_analysis,
                     sampler=self.sampler,
@@ -252,44 +237,14 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 self.close()
                 raise e
             if isinstance(self.target, StateTarget):
-                self.state_fidelity_history.append(np.mean(fids))
+                self.circuit_fidelity_history.append(np.mean(fids))
             else:
                 self.avg_fidelity_history.append(np.mean(fids))
 
         else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
             print("Starting simulation benchmark...")
-            if self.abstraction_level == "circuit":
-                if isinstance(self.backend, AerSimulator):
-                    aer_backend = self.backend
-                else:
-                    noise_model = (
-                        NoiseModel.from_backend(self.backend)
-                        if self.backend is not None
-                        else None
-                    )
-                    aer_backend = AerSimulator(
-                        noise_model=noise_model, method=method_str
-                    )
-
-                method_qc()
-                circ = transpile(new_qc, backend=aer_backend, optimization_level=0)
-                job = aer_backend.run(
-                    circ,
-                    False,
-                    [{self.parameters[j]: params[:, j] for j in range(self.n_actions)}],
-                )
-                result = job.result()
-                output_states = [
-                    result.data(i)[method_str] for i in range(self.batch_size)
-                ]
-
-                fids = [benchmark(state, target) for state in output_states]
-
-                if isinstance(self.target, StateTarget):
-                    self.state_fidelity_history.append(np.mean(fids))
-                else:
-                    self.avg_fidelity_history.append(np.mean(fids))
-
+            if self.abstraction_level == "circuit":  # Circuit simulation
+                return self.simulate_circuit(qc, params)
             else:  # Pulse simulation
                 assert isinstance(
                     self.backend, DynamicsBackend
@@ -301,12 +256,10 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 if hasattr(self.backend.options.solver, "unitary_solve"):
                     # Jax compatible pulse simulation
                     unitaries = self.backend.options.solver.unitary_solve(params)[
-                        :, 1, :, :
-                    ]
+                                :, 1, :, :
+                                ]
                 else:
-                    qc_list = [
-                        new_qc.assign_parameters(angle_set) for angle_set in params
-                    ]
+                    qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
                     scheds = schedule(qc_list, backend=self.backend)
                     dt = self.backend.dt
                     durations = [sched.duration for sched in scheds]
@@ -329,7 +282,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                         for unitary in qubitized_unitaries
                     ]
                     density_matrix = DensityMatrix(np.mean(states, axis=0))
-                    if target.num_qubits != density_matrix.num_qubits:
+                    if self.target.n_qubits != density_matrix.num_qubits:
                         states = [
                             partial_trace(
                                 state,
@@ -350,19 +303,18 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                             ],
                         )
 
-                    self.state_fidelity_history.append(
-                        state_fidelity(target, density_matrix, validate=False)
+                    self.circuit_fidelity_history.append(
+                        self.target.fidelity(density_matrix)
                     )
-                    fids = [
-                        state_fidelity(target, state, validate=False)
-                        for state in states
-                    ]
+                    fids = [self.target.fidelity(state) for state in states]
 
                 else:  # Gate calibration task
-                    if target.num_qubits < len(subsystem_dims):
+                    if self.target.n_qubits < len(subsystem_dims):
                         qc = QuantumCircuit(len(subsystem_dims))
                         qc.append(self.target.gate, self.target.physical_qubits)
                         target = Operator(qc)
+                    else:
+                        target = Operator(self.target.target_op)
 
                     fids = [
                         average_gate_fidelity(unitary, target)
@@ -385,7 +337,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     self.avg_fidelity_history.append(avg_fid_batch)
 
             if self.target.target_type == "state":
-                print("State fidelity:", self.state_fidelity_history[-1])
+                print("State fidelity:", self.circuit_fidelity_history[-1])
             else:
                 print("Avg gate fidelity:", self.avg_fidelity_history[-1])
             print("Finished simulation benchmark")

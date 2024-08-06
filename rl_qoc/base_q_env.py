@@ -322,7 +322,8 @@ class GateTarget(BaseTarget):
             if not isinstance(target_op, (QuantumCircuit, Gate)):
                 raise ValueError("target_op should be either Gate or QuantumCircuit")
         else:
-            target_op = gate
+            target_op = QuantumCircuit(gate.num_qubits)
+            target_op.append(gate, list(range(gate.num_qubits)))
         self.target_op = target_op
         self.n_reps = n_reps
         super().__init__(
@@ -350,12 +351,17 @@ class GateTarget(BaseTarget):
         else:
             self.Chi = None
 
-    def gate_fidelity(self, channel: QuantumChannel | Operator | Gate | QuantumCircuit):
+    def gate_fidelity(
+        self,
+        channel: QuantumChannel | Operator | Gate | QuantumCircuit,
+        n_reps: int = 1,
+    ):
         """
         Compute the average gate fidelity of the gate with the target gate
         If the target has a circuit context, the fidelity is computed with respect to the channel derived from the
         target circuit
         :param channel: channel to compare with the target gate
+        :param n_reps: Number of repetitions of the target gate (default is 1)
         """
         if isinstance(channel, (QuantumCircuit, Gate)):
             try:
@@ -364,23 +370,27 @@ class GateTarget(BaseTarget):
                 raise ValueError("Input could not be converted to channel") from e
         if not isinstance(channel, (Operator, QuantumChannel)):
             raise ValueError("Input should be an Operator object")
-        return average_gate_fidelity(channel, Operator(self.target_op))
+        return average_gate_fidelity(channel, Operator(self.target_op).power(n_reps))
 
-    def state_fidelity(self, state: QuantumState):
+    def state_fidelity(self, state: QuantumState, n_reps: int = 1):
         """
         Compute the fidelity of the state with the target state derived from the application of the target gate/circuit
         context to |0...0>
         :param state: State to compare with target state
+        :param n_reps: Number of repetitions of the target gate (default is 1)
         """
         if not isinstance(state, (Statevector, DensityMatrix)):
             raise ValueError("Input should be a Statevector or DensityMatrix object")
-        return state_fidelity(state, Statevector(self.target_op))
+        return state_fidelity(
+            state, Statevector(self.target_op.power(n_reps, True, True))
+        )
 
-    def fidelity(self, op: QuantumState | QuantumChannel | Operator):
+    def fidelity(self, op: QuantumState | QuantumChannel | Operator, n_reps: int = 1):
         """
         Compute the fidelity of the input op with respect to the target circuit context channel/output state.
         :param op: Object to compare with the target. If QuantumState, computes state fidelity, if QuantumChannel or
             Operator, computes gate fidelity
+        :param n_reps: Specify number of repetitions of the target gate (default is 1)
         """
         if isinstance(op, (QuantumCircuit, Gate)):
             try:
@@ -388,9 +398,9 @@ class GateTarget(BaseTarget):
             except Exception as e:
                 raise ValueError("Input could not be converted to channel") from e
         if isinstance(op, (Operator, QuantumChannel)):
-            return self.gate_fidelity(op)
+            return self.gate_fidelity(op, n_reps)
         elif isinstance(op, (Statevector, DensityMatrix)):
-            return self.state_fidelity(op)
+            return self.state_fidelity(op, n_reps)
         else:
             raise ValueError(
                 f"Input should be a Statevector, DensityMatrix, Operator or QuantumChannel object, "
@@ -642,11 +652,11 @@ class BaseQuantumEnvironment(ABC, Env):
 
         if isinstance(self.target, GateTarget):
             self._input_state = self.target.input_states[self._index_input_state]
-            self.process_fidelity_history = []
-            self.avg_fidelity_history = []
-
-        else:
-            self.state_fidelity_history = []
+        self.process_fidelity_history = []
+        self.avg_fidelity_history = []
+        self.circuit_fidelity_history = []
+        self.circuit_fidelity_history_nreps = []
+        self.avg_fidelity_history_nreps = []
 
     @abstractmethod
     def define_target_and_circuits(
@@ -1252,6 +1262,143 @@ class BaseQuantumEnvironment(ABC, Env):
 
         return pubs, total_shots
 
+    def simulate_circuit(self, qc: QuantumCircuit, params: np.array) -> np.array:
+        """
+        Method to store in lists all relevant data to assess performance of training (fidelity information)
+        This method should be called only when the abstraction level is "circuit"
+        :param qc: QuantumCircuit to execute on quantum system
+        :param params: List of Action vectors to execute on quantum system
+        :param returned_fidelity_type: Type of fidelity to be returned (average gate or state fidelity)
+        :return: None
+        """
+        from qiskit_aer import AerSimulator
+        from qiskit_aer.noise import NoiseModel
+
+        if self.abstraction_level != "circuit":
+            raise ValueError(
+                "This method should only be called when the abstraction level is 'circuit'"
+            )
+
+        names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
+        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = [
+            qc.copy(name=name) for name in names
+        ]
+        returned_fidelity_type = (
+            "gate"
+            if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
+            else "state"
+        )
+        returned_fidelities = []
+
+        for _ in range(self.config.n_reps - 1):
+            qc_channel_nreps.compose(qc, inplace=True)
+            qc_state_nreps.compose(qc, inplace=True)
+
+        print("Starting simulation benchmark...")
+        if self.abstraction_level == "circuit":
+            backend = AerSimulator()
+            if self.backend is None or (
+                isinstance(self.backend, AerSimulator)
+                and self.backend.options.noise_model is None
+            ):
+
+                qc_channel.save_unitary()
+                qc_channel_nreps.save_unitary()
+                qc_state.save_statevector()
+                qc_state_nreps.save_statevector()
+                channel_output = "unitary"
+                state_output = "statevector"
+                noise_model = None
+
+            else:
+                if isinstance(self.backend, AerSimulator):
+                    noise_model = self.backend.options.noise_model
+                else:
+                    noise_model = NoiseModel.from_backend(self.backend)
+                qc_channel.save_superop()
+                qc_channel_nreps.save_superop()
+                qc_state.save_density_matrix()
+                qc_state_nreps.save_density_matrix()
+                channel_output = "superop"
+                state_output = "density_matrix"
+
+            basis_gates = backend.operation_names
+            if noise_model is not None:
+                basis_gates += noise_model.basis_gates
+            qc_channel, qc_channel_nreps, qc_state, qc_state_nreps = transpile(
+                [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
+                backend=backend,
+                optimization_level=0,
+                basis_gates=basis_gates,
+            )
+            if isinstance(self.parameters, ParameterVector):
+                parameters = [self.parameters]
+                n_custom_instructions = 1
+            else:
+                parameters = self.parameters
+                n_custom_instructions = len(self.parameters)
+
+            if self.config.reward_method == "fidelity":
+                parameter_binds = [
+                    {
+                        parameters[i][j]: params[:, i * self.n_actions + j]
+                        for i in range(n_custom_instructions)
+                        for j in range(self.n_actions)
+                    }
+                ]
+                data_length = self.batch_size
+            else:
+                parameter_binds = [
+                    {
+                        parameters[i][j]: [self.mean_action[i * self.n_actions + j]]
+                        for i in range(n_custom_instructions)
+                        for j in range(self.n_actions)
+                    }
+                ]
+                data_length = 1
+
+            for circ, method, fid_array in zip(
+                [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
+                [channel_output] * 2 + [state_output] * 2,
+                [
+                    self.avg_fidelity_history,
+                    self.avg_fidelity_history_nreps,
+                    self.circuit_fidelity_history,
+                    self.circuit_fidelity_history_nreps,
+                ],
+            ):
+                # Avoid channel simulation for more than 3 qubits
+                if (method == "superop" or method == "unitary") and circ.num_qubits > 3:
+                    fidelities = [0.0] * data_length
+                else:
+                    result = backend.run(
+                        circ,
+                        parameter_binds=parameter_binds,
+                        method=method,
+                        noise_model=noise_model,
+                    ).result()
+                    outputs = [result.data(i)[method] for i in range(data_length)]
+                    n_reps = self.n_reps if "nreps" in circ.name else 1
+                    fidelities = [
+                        self.target.fidelity(output, n_reps) for output in outputs
+                    ]
+                if (
+                    (method == "superop" or method == "unitary")
+                    and returned_fidelity_type == "gate"
+                    and n_reps == 1
+                ):
+                    returned_fidelities = fidelities
+                elif (
+                    (method == "density_matrix" or method == "statevector")
+                    and returned_fidelity_type == "state"
+                    and n_reps == 1
+                ):
+                    returned_fidelities = fidelities
+
+                fid_array.append(np.mean(fidelities))
+            print("Fidelity stored", np.mean(returned_fidelities))
+            return returned_fidelities
+
     def _observable_to_observation(self):
         """
         Convert the observable to an observation to be given to the agent
@@ -1330,7 +1477,7 @@ class BaseQuantumEnvironment(ABC, Env):
         return (
             self.avg_fidelity_history
             if self.target.target_type == "gate"
-            else self.state_fidelity_history
+            else self.circuit_fidelity_history
         )
 
     @property
