@@ -192,12 +192,13 @@ class JaxSolver(Solver):
         self._schedule_func = func
 
         def run_sim_function(t_span, y0, params, y0_input, y0_cls):
+            original_signals = self.model.signals
             model_sigs = self.get_signals(params)
             results = solve_lmde(
                 generator=self.model, t_span=t_span, y0=y0, **self._kwargs
             )
             results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
-            self.model.signals = model_sigs
+            self.model.signals = original_signals
 
             return results.t, results.y
 

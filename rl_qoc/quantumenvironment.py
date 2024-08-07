@@ -86,7 +86,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         return 1
 
     def define_target_and_circuits(
-            self,
+        self,
     ) -> Tuple[
         GateTarget | StateTarget,
         List[QuantumCircuit],
@@ -121,8 +121,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
-                    self._index_input_state
-                    / len(self.target.input_states[self.trunc_index]),
+                    self._index_input_state / len(self.target.input_states),
                     0.0,
                 ]
                 + list(self._observable_to_observation())
@@ -131,7 +130,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             return np.array([0, 0])
 
     def step(
-            self, action: ActType
+        self, action: ActType
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         self._step_tracker += 1
         if self._episode_ended:
@@ -153,7 +152,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             self._optimal_action = self.mean_action
         self.reward_history.append(reward)
         assert (
-                len(reward) == self.batch_size
+            len(reward) == self.batch_size
         ), f"Reward table size mismatch {len(reward)} != {self.batch_size} "
         assert not np.any(np.isinf(reward)) and not np.any(
             np.isnan(reward)
@@ -256,8 +255,8 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 if hasattr(self.backend.options.solver, "unitary_solve"):
                     # Jax compatible pulse simulation
                     unitaries = self.backend.options.solver.unitary_solve(params)[
-                                :, 1, :, :
-                                ]
+                        :, 1, :, :
+                    ]
                 else:
                     qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
                     scheds = schedule(qc_list, backend=self.backend)

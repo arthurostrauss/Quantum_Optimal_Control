@@ -4,7 +4,7 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, List, Any, Literal, Tuple
 
-from quam.components.channels import Channel as QuamChannel
+# from quam.components.channels import Channel as QuamChannel
 import torch
 from gymnasium.spaces import Box
 from qiskit import pulse
@@ -72,21 +72,21 @@ class QiskitConfig(BackendConfig):
     do_calibrations: bool = True
 
 
-@dataclass
-class QuaConfig(BackendConfig):
-    """
-    QUA Configuration
-
-    Args:
-        parametrized_circuit: Function applying parametrized transformation to a QUA program
-        backend: Quantum Machine backend
-        hardware_config: Hardware configuration
-        channel_mapping: Dictionary mapping channels to quantum elements
-    """
-
-    channel_mapping: Dict[pulse.channels.Channel, QuamChannel] = (
-        None  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
-    )
+# @dataclass
+# class QuaConfig(BackendConfig):
+#     """
+#     QUA Configuration
+#
+#     Args:
+#         parametrized_circuit: Function applying parametrized transformation to a QUA program
+#         backend: Quantum Machine backend
+#         hardware_config: Hardware configuration
+#         channel_mapping: Dictionary mapping channels to quantum elements
+#     """
+#
+#     channel_mapping: Dict[pulse.channels.Channel, QuamChannel] = (
+#         None  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
+#     )
 
 
 @dataclass
