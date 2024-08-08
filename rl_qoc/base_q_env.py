@@ -244,6 +244,9 @@ class StateTarget(BaseTarget):
             raise ValueError("Input should be a Statevector or DensityMatrix object")
         return state_fidelity(state, self.dm)
 
+    def __repr__(self):
+        return f"StateTarget({self.dm} on qubits {self.physical_qubits})"
+
 
 class InputState(StateTarget):
     """
@@ -276,8 +279,6 @@ class InputState(StateTarget):
             if isinstance(target_op, Gate):
                 circ.append(target_op, tgt_register)
             else:
-                # for instr in target_op.data:
-                #     circ.append(instr)
                 circ.compose(target_op, inplace=True)
         self.target_state = StateTarget(circuit=circ)
 
@@ -1324,109 +1325,111 @@ class BaseQuantumEnvironment(ABC, Env):
             qc_state_nreps.compose(qc, inplace=True)
 
         print("Starting simulation benchmark...")
-        if self.abstraction_level == "circuit":
-            backend = AerSimulator()
-            if self.backend is None or (
-                isinstance(self.backend, AerSimulator)
-                and self.backend.options.noise_model is None
-            ):
+        backend = AerSimulator()
+        if self.backend is None or (
+            isinstance(self.backend, AerSimulator)
+            and self.backend.options.noise_model is None
+        ):  # Ideal simulation
 
-                qc_channel.save_unitary()
-                qc_channel_nreps.save_unitary()
-                qc_state.save_statevector()
-                qc_state_nreps.save_statevector()
-                channel_output = "unitary"
-                state_output = "statevector"
-                noise_model = None
+            qc_channel.save_unitary()
+            qc_channel_nreps.save_unitary()
+            qc_state.save_statevector()
+            qc_state_nreps.save_statevector()
+            channel_output = "unitary"
+            state_output = "statevector"
+            noise_model = None
 
+        else:  # Noisy simulation
+            if isinstance(self.backend, AerSimulator):
+                noise_model = self.backend.options.noise_model
             else:
-                if isinstance(self.backend, AerSimulator):
-                    noise_model = self.backend.options.noise_model
-                else:
-                    noise_model = NoiseModel.from_backend(self.backend)
-                qc_channel.save_superop()
-                qc_channel_nreps.save_superop()
-                qc_state.save_density_matrix()
-                qc_state_nreps.save_density_matrix()
-                channel_output = "superop"
-                state_output = "density_matrix"
+                noise_model = NoiseModel.from_backend(self.backend)
+            qc_channel.save_superop()
+            qc_channel_nreps.save_superop()
+            qc_state.save_density_matrix()
+            qc_state_nreps.save_density_matrix()
+            channel_output = "superop"
+            state_output = "density_matrix"
 
-            basis_gates = backend.operation_names
-            if noise_model is not None:
-                basis_gates += noise_model.basis_gates
-            qc_channel, qc_channel_nreps, qc_state, qc_state_nreps = transpile(
-                [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
-                backend=backend,
-                optimization_level=0,
-                basis_gates=basis_gates,
-            )
-            if isinstance(self.parameters, ParameterVector):
-                parameters = [self.parameters]
-                n_custom_instructions = 1
+        basis_gates = backend.operation_names
+        if noise_model is not None:
+            basis_gates += noise_model.basis_gates
+        qc_channel, qc_channel_nreps, qc_state, qc_state_nreps = transpile(
+            [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
+            backend=backend,
+            optimization_level=0,
+            basis_gates=basis_gates,
+        )
+        if isinstance(self.parameters, ParameterVector):
+            parameters = [self.parameters]
+            n_custom_instructions = 1
+        else:
+            parameters = self.parameters
+            n_custom_instructions = len(self.parameters)
+
+        if (
+            self.config.reward_method == "fidelity"
+        ):  # Return batch of fidelities for each action
+            parameter_binds = [
+                {
+                    parameters[i][j]: params[:, i * self.n_actions + j]
+                    for i in range(n_custom_instructions)
+                    for j in range(self.n_actions)
+                }
+            ]
+            data_length = self.batch_size
+        else:  # Return fidelity for the mean action (policy mean parameter)
+            parameter_binds = [
+                {
+                    parameters[i][j]: [self.mean_action[i * self.n_actions + j]]
+                    for i in range(n_custom_instructions)
+                    for j in range(self.n_actions)
+                }
+            ]
+            data_length = 1
+
+        for circ, method, fid_array in zip(
+            [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
+            [channel_output] * 2 + [state_output] * 2,
+            [
+                self.avg_fidelity_history,
+                self.avg_fidelity_history_nreps,
+                self.circuit_fidelity_history,
+                self.circuit_fidelity_history_nreps,
+            ],
+        ):
+            # Avoid channel simulation for more than 3 qubits
+            if (method == "superop" or method == "unitary") and circ.num_qubits > 3:
+                fidelities = [0.0] * data_length
+                n_reps = 1
             else:
-                parameters = self.parameters
-                n_custom_instructions = len(self.parameters)
-
-            if self.config.reward_method == "fidelity":
-                parameter_binds = [
-                    {
-                        parameters[i][j]: params[:, i * self.n_actions + j]
-                        for i in range(n_custom_instructions)
-                        for j in range(self.n_actions)
-                    }
+                result = backend.run(
+                    circ,
+                    parameter_binds=parameter_binds,
+                    method=method,
+                    noise_model=noise_model,
+                ).result()
+                outputs = [result.data(i)[method] for i in range(data_length)]
+                n_reps = self.n_reps if "nreps" in circ.name else 1
+                fidelities = [
+                    self.target.fidelity(output, n_reps) for output in outputs
                 ]
-                data_length = self.batch_size
-            else:
-                parameter_binds = [
-                    {
-                        parameters[i][j]: [self.mean_action[i * self.n_actions + j]]
-                        for i in range(n_custom_instructions)
-                        for j in range(self.n_actions)
-                    }
-                ]
-                data_length = 1
-
-            for circ, method, fid_array in zip(
-                [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
-                [channel_output] * 2 + [state_output] * 2,
-                [
-                    self.avg_fidelity_history,
-                    self.avg_fidelity_history_nreps,
-                    self.circuit_fidelity_history,
-                    self.circuit_fidelity_history_nreps,
-                ],
+            if (
+                (method == "superop" or method == "unitary")
+                and returned_fidelity_type == "gate"
+                and n_reps == 1
             ):
-                # Avoid channel simulation for more than 3 qubits
-                if (method == "superop" or method == "unitary") and circ.num_qubits > 3:
-                    fidelities = [0.0] * data_length
-                else:
-                    result = backend.run(
-                        circ,
-                        parameter_binds=parameter_binds,
-                        method=method,
-                        noise_model=noise_model,
-                    ).result()
-                    outputs = [result.data(i)[method] for i in range(data_length)]
-                    n_reps = self.n_reps if "nreps" in circ.name else 1
-                    fidelities = [
-                        self.target.fidelity(output, n_reps) for output in outputs
-                    ]
-                if (
-                    (method == "superop" or method == "unitary")
-                    and returned_fidelity_type == "gate"
-                    and n_reps == 1
-                ):
-                    returned_fidelities = fidelities
-                elif (
-                    (method == "density_matrix" or method == "statevector")
-                    and returned_fidelity_type == "state"
-                    and n_reps == 1
-                ):
-                    returned_fidelities = fidelities
+                returned_fidelities = fidelities
+            elif (
+                (method == "density_matrix" or method == "statevector")
+                and returned_fidelity_type == "state"
+                and n_reps == 1
+            ):
+                returned_fidelities = fidelities
 
-                fid_array.append(np.mean(fidelities))
-            print("Fidelity stored", np.mean(returned_fidelities))
-            return returned_fidelities
+            fid_array.append(np.mean(fidelities))
+        print("Fidelity stored", np.mean(returned_fidelities))
+        return returned_fidelities
 
     def _observable_to_observation(self):
         """
@@ -1447,7 +1450,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     def modify_environment_params(self, **kwargs):
         """
-        Modify environment parameters
+        Modify environment parameters (can be overridden by subclasses to modify specific parameters)
         """
         pass
 
@@ -1817,10 +1820,10 @@ class BaseQuantumEnvironment(ABC, Env):
             }
         )
 
-    def compute_channel_reward(self, params, trunc_index):
-        pass
-
     def run_v1_primitive(self, qc: QuantumCircuit, params: np.array):
+        """
+        Run the primitive for the EstimatorV1 case (relevant only for DynamicsBackendEstimator call)
+        """
         if self.config.reward_method == "channel":
             raise NotImplementedError(
                 "Channel estimator not implemented for EstimatorV1"
