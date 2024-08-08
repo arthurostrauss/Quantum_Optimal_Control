@@ -4,7 +4,7 @@ from quam import QuamComponent
 from .flux_line import FluxLine
 from .readout_resonator import ReadoutResonator
 from qualang_tools.octave_tools import octave_calibration_tool
-from qm import QuantumMachine
+from qm import QuantumMachine, logger
 from typing import Union
 
 
@@ -89,12 +89,15 @@ class Transmon(QuamComponent):
         Args:
             QM (QuantumMachine): the running quantum machine.
         """
+        logger.info(f"Calibrating {self.xy.name}")
         octave_calibration_tool(
             QM,
             self.xy.name,
             lo_frequencies=self.xy.frequency_converter_up.LO_frequency,
             intermediate_frequencies=self.xy.intermediate_frequency,
         )
+
+        logger.info(f"Calibrating {self.resonator.name}")
         octave_calibration_tool(
             QM,
             self.resonator.name,
@@ -111,3 +114,24 @@ class Transmon(QuamComponent):
     def name(self):
         """The name of the transmon"""
         return self.id if isinstance(self.id, str) else f"q{self.id}"
+
+    def __matmul__(self, other):
+        if not isinstance(other, Transmon):
+            raise ValueError(
+                "Cannot create a qubit pair (q1 @ q2) with a non-qubit object, "
+                f"where q1={self} and q2={other}"
+            )
+
+        if self is other:
+            raise ValueError(
+                "Cannot create a qubit pair with same qubit (q1 @ q1), where q1={self}"
+            )
+
+        for qubit_pair in self._root.qubit_pairs:
+            if qubit_pair.qubit_control is self and qubit_pair.qubit_target is other:
+                return qubit_pair
+        else:
+            raise ValueError(
+                "Qubit pair not found: qubit_control={self.name}, "
+                "qubit_target={other.name}"
+            )

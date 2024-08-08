@@ -19,6 +19,8 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 config_file_name = "q_env_gate_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
 
+default_num_qubits = 2
+
 
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: ParameterVector, q_reg: QuantumRegister, **kwargs
@@ -112,18 +114,33 @@ def get_circuit_context(
     :param initial_layout: Initial layout of the qubits
     :return: QuantumCircuit instance
     """
-    circuit = QuantumCircuit(5)
-    circuit.h(0)
-    for i in range(1, 5):
-        circuit.cx(0, i)
+    from qiskit.transpiler import CouplingMap, Layout
 
-    if backend is not None and backend.target.has_calibration("x", (0,)):
-        circuit = transpile(
-            circuit,
-            backend,
-            optimization_level=1,
-            seed_transpiler=42,
+    coupling_map = CouplingMap.from_full(default_num_qubits)
+    tgt_reg = QuantumRegister(2, name="tgt")
+    # nn_reg = QuantumRegister(3, name="nn")
+    layout = Layout(
+        input_dict=(
+            {tgt_reg[i]: initial_layout[i] for i in range(len(initial_layout))}
+            if initial_layout is not None
+            else {tgt_reg[i]: i for i in range(2)}
         )
+    )
+    # layout.add_register(nn_reg)
+    circuit = QuantumCircuit(tgt_reg)
+    circuit.cx(0, 1)
+
+    transpile_input = (
+        {"backend": backend} if backend is not None else {"coupling_map": coupling_map}
+    )
+    circuit = transpile(
+        circuit,
+        **transpile_input,
+        initial_layout=layout,
+        optimization_level=1,
+        seed_transpiler=42,
+    )
+
     print("Circuit context")
     circuit.draw("mpl")
     return circuit
@@ -174,7 +191,9 @@ q_env_config.parametrized_circuit_kwargs = {
     "backend": q_env_config.backend,
 }
 q_env_config.instruction_durations_dict = custom_instruction_durations(
-    q_env_config.backend.num_qubits if q_env_config.backend is not None else 5
+    q_env_config.backend.num_qubits
+    if q_env_config.backend is not None
+    else default_num_qubits
 )
 circuit_context = get_circuit_context(
     q_env_config.backend, q_env_config.physical_qubits

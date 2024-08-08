@@ -244,7 +244,7 @@ def perform_standard_calibrations(
             "Backend must be a DynamicsBackend instance (given: {type(backend)})"
         )
 
-    target, qubits = backend.target, range(backend.num_qubits)
+    target, qubits, dt = backend.target, range(backend.num_qubits), backend.dt
     num_qubits = len(qubits)
     single_qubit_properties = {(qubit,): None for qubit in qubits}
     single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
@@ -340,21 +340,20 @@ def perform_standard_calibrations(
             pulse.delay(delay_param, pulse.DriveChannel(qubit))
 
         # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
-        target.update_instruction_properties(
-            "rz", (qubit,), InstructionProperties(calibration=rz_cal, error=0.0)
-        )
-        target.update_instruction_properties(
-            "id", (qubit,), InstructionProperties(calibration=id_cal, error=0.0)
-        )
-        target.update_instruction_properties(
-            "reset", (qubit,), InstructionProperties(calibration=id_cal, error=0.0)
-        )
-        target.update_instruction_properties(
-            "delay", (qubit,), InstructionProperties(calibration=delay_cal, error=0.0)
-        )
+        for name, cal, duration in zip(
+            ["rz", "id", "delay", "reset"],
+            [rz_cal, id_cal, delay_cal, id_cal],
+            [0, 20 * dt, None, 1000 * dt],
+        ):
+            target.update_instruction_properties(
+                name, (qubit,), InstructionProperties(duration, 0.0, cal)
+            )
+
         for phase, gate in zip(fixed_phases, fixed_phase_gates):
             gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
-            instruction_prop = InstructionProperties(calibration=gate_cal, error=0.0)
+            instruction_prop = InstructionProperties(
+                gate_cal.duration * dt, 0.0, gate_cal
+            )
             target.update_instruction_properties(gate, (qubit,), instruction_prop)
 
         # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
@@ -385,7 +384,11 @@ def perform_standard_calibrations(
         target.update_instruction_properties(
             "h",
             (qubit,),
-            properties=InstructionProperties(calibration=h_schedule, error=0.0),
+            properties=InstructionProperties(h_schedule.duration * dt, 0.0, h_schedule),
+        )
+        measure_cal = target.get_calibration("measure", (qubit,))
+        target.update_instruction_properties(
+            "measure", (qubit,), InstructionProperties(1000 * dt, 0.0, measure_cal)
         )
 
     print("All single qubit calibrations are done")

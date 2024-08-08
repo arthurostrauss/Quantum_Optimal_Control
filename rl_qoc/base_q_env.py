@@ -324,7 +324,7 @@ class GateTarget(BaseTarget):
         else:
             target_op = QuantumCircuit(gate.num_qubits)
             target_op.append(gate, list(range(gate.num_qubits)))
-        self.target_op = target_op
+        self.target_op: QuantumCircuit = target_op
         self.n_reps = n_reps
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits,
@@ -406,6 +406,36 @@ class GateTarget(BaseTarget):
                 f"Input should be a Statevector, DensityMatrix, Operator or QuantumChannel object, "
                 f"received {type(op)}"
             )
+
+    @property
+    def target_operator(self):
+        """
+        Get the target unitary operator
+        """
+        return Operator(self.target_op)
+
+    @property
+    def target_circuit(self):
+        """
+        Get the target circuit
+        """
+        return self.target_op
+
+    @property
+    def has_context(self):
+        """
+        Check if the target has a circuit context attached or if only composed of the target gate
+        """
+        gate_qc = QuantumCircuit(self.gate.num_qubits)
+        gate_qc.append(self.gate, list(range(self.gate.num_qubits)))
+
+        return self.target_op != gate_qc
+
+    def __repr__(self):
+        return (
+            f"GateTarget({self.gate.name}, on qubits {self.physical_qubits}"
+            f" with{'' if self.has_context else 'out'} context)"
+        )
 
 
 class QiskitBackendInfo:
@@ -700,7 +730,6 @@ class BaseQuantumEnvironment(ABC, Env):
 
         trunc_index = self._inside_trunc_tracker
         qc = self.circuits[trunc_index].copy()
-        input_state_circ = None
         params, batch_size = np.array(actions), actions.shape[0]
         if batch_size != self.batch_size:
             raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
@@ -733,7 +762,7 @@ class BaseQuantumEnvironment(ABC, Env):
             else trunc_index
         )
         self.estimator = handle_session(
-            self.estimator, self.backend, counts, qc, input_state_circ
+            self.estimator, self.backend, counts, qc, self._input_state.circuit
         )
         print(
             f"Sending {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job..."
@@ -1509,13 +1538,10 @@ class BaseQuantumEnvironment(ABC, Env):
         self.reward_history.clear()
         self._total_shots.clear()
         self._hardware_runtime.clear()
-        if isinstance(self.target, GateTarget):
-            self.avg_fidelity_history.clear()
-            self.process_fidelity_history.clear()
-
-        else:
-            self.state_fidelity_history.clear()
-            self.density_matrix_history.clear()
+        self.avg_fidelity_history.clear()
+        self.process_fidelity_history.clear()
+        self.circuit_fidelity_history.clear()
+        self.density_matrix_history.clear()
 
     def update_gate_calibration(self):
         """
@@ -1530,7 +1556,7 @@ class BaseQuantumEnvironment(ABC, Env):
             sched = schedule(self.circuits[0], self.backend).assign_parameters(
                 {
                     param: action
-                    for param, action in zip(self.parameters[0], self._optimal_action)
+                    for param, action in zip(self.parameters, self._optimal_action)
                 }
             )
             duration = sched.duration

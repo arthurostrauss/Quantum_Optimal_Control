@@ -42,8 +42,8 @@ def format_meas_map(meas_map: List[List[int]]) -> Dict[int, List[int]]:
 
 
 def format_parameter_value(
-        operand: ParameterExpression,
-        decimal: int = 10,
+    operand: ParameterExpression,
+    decimal: int = 10,
 ) -> Union[ParameterExpression, complex]:
     """Convert ParameterExpression into the most suitable data type.
 

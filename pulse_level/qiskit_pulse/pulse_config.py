@@ -261,7 +261,7 @@ def get_backend(
         # rabi_freqs = [0.22e9]
         # couplings = None
 
-        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
+        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[0]
         # backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
         # backend = surface_code_plaquette()[0]
         _, _ = perform_standard_calibrations(backend, calibration_files)

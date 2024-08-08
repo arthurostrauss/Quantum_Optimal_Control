@@ -19,6 +19,8 @@ from qiskit.pulse import (
     Play,
     ShiftPhase,
     ShiftFrequency,
+    SetFrequency,
+    SetPhase,
     Delay,
     UnassignedDurationError,
     PulseError,
@@ -34,7 +36,7 @@ from qm.jobs.pending_job import QmPendingJob, QmJob
 from qm.qua import *
 from qm import QuantumMachinesManager, Program
 from qualang_tools.addons.variables import assign_variables_to_element
-from quam_components.quam import QuAM
+from quam_components import QuAM
 from qualang_tools.video_mode import ParameterTable
 from oqc import (
     Compiler,
@@ -62,6 +64,7 @@ class FluxChannel(QiskitChannel):
 class QuAMQiskitPulse(QuAMPulse):
     def __init__(self, pulse: SymbolicPulse | Waveform):
         self.pulse: SymbolicPulse | Waveform = pulse
+
         super().__init__(
             length=self.pulse.duration if not self.pulse.is_parameterized() else 0,
             id=pulse.name,
@@ -80,6 +83,22 @@ class QuAMQiskitPulse(QuAMPulse):
         if isinstance(self.pulse, Waveform):
             return self.pulse.samples.tolist()
         elif isinstance(self.pulse, SymbolicPulse):
+            if (
+                self.pulse.is_parametrized()
+            ):  # Assign reference values to the parameters
+                sched = Schedule(Play(self.pulse, DriveChannel(0)))
+                for param_name, param_value in self.pulse.parameters.items():
+                    if param_name == "amp" and isinstance(
+                        param_value, ParameterExpression
+                    ):
+                        sched = sched.assign_parameters({param_name: _ref_amp})
+                    elif param_name == "angle" and isinstance(
+                        param_value, ParameterExpression
+                    ):
+                        sched = sched.assign_parameters({param_name: _ref_phase})
+                    elif param_name == "duration":
+                        raise ValueError("Duration parameter cannot be parametrized")
+
             try:
                 return self.pulse.get_waveform().samples.tolist()
             except (AttributeError, PulseError) as e:
@@ -108,6 +127,10 @@ class QuAMQiskitPulse(QuAMPulse):
             isinstance(self.pulse.parameters[param], ParameterExpression)
             for param in _real_time_parameters
         )
+
+    @property
+    def parameters(self):
+        return self.pulse.parameters
 
 
 class QMProvider:
@@ -283,7 +306,9 @@ class QMBackend(Backend, ABC):
 
                 elif isinstance(instruction, ShiftFrequency):
                     if instruction.is_parameterized():
-                        freq = params[param_counter]
+                        freq = (
+                            params[param_counter] + quam_channel.intermediate_frequency
+                        )
                         param_counter += 1
                     else:
                         freq = instruction.frequency
@@ -291,8 +316,27 @@ class QMBackend(Backend, ABC):
 
                 elif isinstance(instruction, Delay):
                     quam_channel.wait(instruction.duration)
+
+                elif isinstance(instruction, SetFrequency):
+                    if instruction.is_parameterized():
+                        freq = params[param_counter]
+                        param_counter += 1
+                    else:
+                        freq = instruction.frequency
+                    quam_channel.set_frequency(freq)
+
+                elif isinstance(instruction, SetPhase):
+                    if instruction.is_parameterized():
+                        phase = params[param_counter]
+                        param_counter += 1
+                    else:
+                        phase = instruction.phase
+                    reset_phase(quam_channel.name)
+                    quam_channel.frame_rotation(phase)
                 else:
-                    raise ValueError(f"Unknown instruction {instruction}")
+                    raise ValueError(
+                        f"instruction {instruction} not supported on the QUA backend"
+                    )
 
         return qua_macro
 
@@ -325,9 +369,14 @@ class QMBackend(Backend, ABC):
                     ):
                         instruction: Play
                         pulse, channel = instruction.pulse, instruction.channel
+                        if not isinstance(pulse, (SymbolicPulse, Waveform)):
+                            raise ValueError(
+                                "Only SymbolicPulse and Waveform pulses are supported"
+                            )
                         pulse_name = pulse.name
                         if pulse_name in self.get_quam_channel(channel).operations:
                             pulse_name += str(pulse.id)
+                            pulse.name = pulse_name
 
                         quam_pulse = QuAMQiskitPulse(pulse)
                         if quam_pulse.is_compile_time_parametrized():
@@ -357,7 +406,7 @@ class QMBackend(Backend, ABC):
                     ] = self.schedule_to_qua_macro(schedule)
         hardware_config = HardwareConfig(
             quantum_operations_db=self._operation_mapping_QUA,
-            physical_qubits=self._qubit_mapping,
+            physical_qubits=self.qubit_mapping,
         )
         compiler = Compiler(hardware_config=hardware_config)
         open_qasm_code = qasm3_dumps(qc, includes=(), basis_gates=basis_gates)

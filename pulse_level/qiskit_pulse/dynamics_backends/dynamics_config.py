@@ -4,13 +4,7 @@ import jax
 from qiskit_dynamics import DynamicsBackend, Solver
 from rl_qoc.custom_jax_sim import JaxSolver
 import numpy as np
-from pulse_level.qiskit_pulse.dynamics_backends import (
-    create_quantum_operators,
-    expand_operators,
-    get_full_identity,
-    construct_static_hamiltonian,
-    get_couplings,
-)
+from .utils import *
 
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU

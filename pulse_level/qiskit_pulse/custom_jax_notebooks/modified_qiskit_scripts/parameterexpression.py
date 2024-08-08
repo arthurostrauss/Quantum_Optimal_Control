@@ -94,7 +94,7 @@ class ParameterExpression:
         return self.bind({parameter: value})
 
     def bind(
-            self, parameter_values: dict, allow_unknown_parameters: bool = False
+        self, parameter_values: dict, allow_unknown_parameters: bool = False
     ) -> "ParameterExpression":
         """Binds the provided set of parameters to their corresponding values.
 
@@ -146,7 +146,8 @@ class ParameterExpression:
         }
         if not jax_tracer:
             if (
-                    hasattr(bound_symbol_expr, "is_infinite") and bound_symbol_expr.is_infinite
+                hasattr(bound_symbol_expr, "is_infinite")
+                and bound_symbol_expr.is_infinite
             ) or bound_symbol_expr == float("inf"):
                 raise ZeroDivisionError(
                     "Binding provided for expression "
@@ -157,7 +158,7 @@ class ParameterExpression:
         return ParameterExpression(free_parameter_symbols, bound_symbol_expr)
 
     def subs(
-            self, parameter_map: dict, allow_unknown_parameters: bool = False
+        self, parameter_map: dict, allow_unknown_parameters: bool = False
     ) -> "ParameterExpression":
         """Returns a new Expression with replacement Parameters.
 
@@ -216,14 +217,18 @@ class ParameterExpression:
 
     def _raise_if_passed_nan(self, parameter_values):
         nan_parameter_values = {
-            p: v for p, v in parameter_values.items() if not isinstance(v, numbers.Number)
+            p: v
+            for p, v in parameter_values.items()
+            if not isinstance(v, numbers.Number)
         }
         if nan_parameter_values:
             raise CircuitError(
                 f"Expression cannot bind non-numeric values ({nan_parameter_values})"
             )
 
-    def _raise_if_parameter_names_conflict(self, inbound_parameters, outbound_parameters=None):
+    def _raise_if_parameter_names_conflict(
+        self, inbound_parameters, outbound_parameters=None
+    ):
         if outbound_parameters is None:
             outbound_parameters = set()
             outbound_names = {}
@@ -242,7 +247,7 @@ class ParameterExpression:
             )
 
     def _apply_operation(
-            self, operation: Callable, other: ParameterValueType, reflected: bool = False
+        self, operation: Callable, other: ParameterValueType, reflected: bool = False
     ) -> "ParameterExpression":
         """Base method implementing math operations between Parameters and
         either a constant or a second ParameterExpression.
@@ -539,7 +544,7 @@ class ParameterExpression:
             # Integer evaluation is reliable, as far as we know.
             return int(self._symbol_expr)
         # We've come across several ways in which symengine's general-purpose evaluators
-        # introduce spurious imaginary components can get involved in the output.  The most
+        # introduce spurious imaginary quam_components can get involved in the output.  The most
         # reliable strategy "try it and see" while forcing real floating-point evaluation.
         try:
             real_expr = self._symbol_expr.evalf(real=True)
