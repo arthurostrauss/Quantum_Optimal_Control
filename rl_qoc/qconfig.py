@@ -169,7 +169,7 @@ class ChannelConfig(RewardConfig):
     """
 
     reward_method: Literal["channel"] = field(default="channel", init=False)
-    num_eigenstates_per_pauli: int
+    num_eigenstates_per_pauli: int = 1
 
 
 @dataclass

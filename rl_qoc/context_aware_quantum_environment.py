@@ -144,7 +144,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
 
         assert "gate" in self.config.target, "Target should be a gate"
-        if self.backend_info.coupling_map.size() == 0:
+        if self.backend_info.coupling_map.size() == 0 and self.backend is None:
             self.backend_info.num_qubits = self.circuit_context.num_qubits
             self._physical_neighbor_qubits = retrieve_neighbor_qubits(
                 self.backend_info.coupling_map, self.physical_target_qubits

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import sys
 import pickle
-import warnings
 import gzip
 from dataclasses import asdict
 
@@ -41,7 +40,6 @@ from qiskit.quantum_info import (
 )
 from qiskit.transpiler import (
     CouplingMap,
-    InstructionDurations,
     InstructionProperties,
     Target,
 )
@@ -78,7 +76,7 @@ from qiskit_dynamics.backend.dynamics_backend import (
 )
 
 from qiskit_experiments.calibration_management import Calibrations
-from qiskit_experiments.framework import BatchExperiment, BaseAnalysis, BackendData
+from qiskit_experiments.framework import BatchExperiment, BaseAnalysis
 from qiskit_experiments.library import (
     StateTomography,
     ProcessTomography,
@@ -90,7 +88,7 @@ from qiskit_experiments.calibration_management.basis_gate_library import (
     EchoedCrossResonance,
 )
 
-from itertools import permutations, chain
+from itertools import chain
 from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any
 import yaml
 
@@ -248,6 +246,7 @@ def perform_standard_calibrations(
     num_qubits = len(qubits)
     single_qubit_properties = {(qubit,): None for qubit in qubits}
     single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
+    two_qubit_properties = None
 
     control_channel_map = backend.options.control_channel_map
     coupling_map = None
@@ -261,7 +260,7 @@ def perform_standard_calibrations(
                 for qubit_pair in control_channel_map
             }
         else:
-            all_to_all_connectivity = tuple(permutations(qubits, 2))
+            all_to_all_connectivity = CouplingMap.from_full(num_qubits).get_edges()
             control_channel_map = {
                 (q[0], q[1]): index for index, q in enumerate(all_to_all_connectivity)
             }
@@ -272,6 +271,7 @@ def perform_standard_calibrations(
         backend.set_options(control_channel_map=control_channel_map)
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
         two_qubit_properties = {qubits: None for qubits in control_channel_map}
+
     standard_gates: Dict[str, Gate] = gate_map()  # standard gate library
     fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array(
         [1, 0.5, -0.5, 0.25, -0.25]
@@ -951,7 +951,6 @@ def retrieve_primitives(
             SamplerV2 as AerSamplerV2,
         )
 
-        print("Aer Backend created out of backend", backend)
         estimator = AerEstimatorV2.from_backend(backend=backend)
         sampler = AerSamplerV2.from_backend(backend=backend)
     elif backend is None:  # No backend specified, ideal state-vector simulation
@@ -1146,6 +1145,23 @@ def select_backend(
             )
 
     return backend
+
+
+def has_noise_model(backend: AerBackend):
+    """
+    Check if Aer backend has noise model or not
+
+    Args:
+        backend: AerBackend instance
+    """
+    if (
+        backend.options.noise_model is None
+        or backend.options.noise_model.to_dict() == {}
+        or len(backend.options.noise_model.to_dict()["errors"]) == 0
+    ):
+        return False
+    else:
+        return True
 
 
 def custom_dynamics_from_backend(
@@ -1688,13 +1704,14 @@ def create_hpo_agent_config(
 
 
 def get_hardware_runtime_single_circuit(
-    qc: QuantumCircuit, instruction_durations_dict: Dict[str, float]
+    qc: QuantumCircuit,
+    instruction_durations_dict: Dict[Tuple[str, Tuple[int, ...]], Tuple[float, str]],
 ):
     total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
 
     for instruction in qc.data:
         qubits_involved = instruction.qubits
-        gate_name = (
+        gate_name: str = (
             instruction.operation.name
             if not instruction.operation.label
             else instruction.operation.label
@@ -1702,7 +1719,7 @@ def get_hardware_runtime_single_circuit(
 
         if len(qubits_involved) == 1:
             qbit1 = qubits_involved[0]
-            qbit1_index = qc.find_bit(qbit1).index
+            qbit1_index = qc.find_bit(qbit1)[0]
             key = (gate_name, (qbit1_index,))
             if key in instruction_durations_dict:
                 gate_time = instruction_durations_dict[key][0]
@@ -1710,8 +1727,8 @@ def get_hardware_runtime_single_circuit(
 
         elif len(qubits_involved) == 2:
             qbit1, qbit2 = qubits_involved
-            qbit1_index = qc.find_bit(qbit1).index
-            qbit2_index = qc.find_bit(qbit2).index
+            qbit1_index = qc.find_bit(qbit1)[0]
+            qbit2_index = qc.find_bit(qbit2)[0]
             key = (gate_name, (qbit1_index, qbit2_index))
             if key in instruction_durations_dict:
                 gate_time = instruction_durations_dict[key][0]

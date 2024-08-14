@@ -31,6 +31,7 @@ from qiskit.circuit import (
     QuantumRegister,
     Gate,
     ParameterVector,
+    CircuitInstruction,
 )
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
@@ -77,7 +78,6 @@ from qiskit_ibm_runtime import (
     EstimatorV1 as RuntimeEstimatorV1,
     EstimatorV2 as RuntimeEstimatorV2,
     SamplerV1 as RuntimeSamplerV1,
-    IBMBackend,
 )
 
 from rl_qoc.helper_functions import (
@@ -87,6 +87,7 @@ from rl_qoc.helper_functions import (
     retrieve_neighbor_qubits,
     substitute_target_gate,
     get_hardware_runtime_single_circuit,
+    has_noise_model,
 )
 from rl_qoc.qconfig import (
     QiskitConfig,
@@ -232,7 +233,7 @@ class StateTarget(BaseTarget):
 
     def fidelity(self, state: QuantumState | QuantumCircuit):
         """
-        Compute the fidelity of the state with the target state
+        Compute the fidelity of the state with the target
         :param state: State to compare with the target state
         """
         if isinstance(state, QuantumCircuit):
@@ -267,15 +268,17 @@ class InputState(StateTarget):
         :param tgt_register: Quantum register for the target gate
         :param n_reps: Number of repetitions of the target gate
         """
-
+        self._n_reps = n_reps
+        self._target_op = target_op
         if isinstance(target_op, Gate):
             circ = QuantumCircuit(tgt_register)
+            circ.append(target_op, tgt_register)
         else:
-            circ = target_op.copy_empty_like()
+            circ = target_op.copy("target")
 
-        circ.compose(input_circuit, inplace=True)
+        circ.compose(input_circuit, inplace=True, front=True)
         super().__init__(circuit=input_circuit)
-        for _ in range(n_reps):
+        for _ in range(self.n_reps - 1):
             if isinstance(target_op, Gate):
                 circ.append(target_op, tgt_register)
             else:
@@ -293,6 +296,49 @@ class InputState(StateTarget):
     @property
     def tgt_register(self):
         raise AttributeError("Input state does not have a target register")
+
+    @property
+    def n_reps(self) -> int:
+        return self._n_reps
+
+    @n_reps.setter
+    def n_reps(self, n_reps: int):
+        assert n_reps > 0, "Number of repetitions should be positive"
+        self._n_reps = n_reps
+        if isinstance(self._target_op, Gate):
+            circ = QuantumCircuit(self.tgt_register)
+            circ.append(self._target_op, self.tgt_register)
+        else:
+            circ = self._target_op.copy("target")
+
+        circ.compose(self.input_circuit, inplace=True, front=True)
+        for _ in range(self.n_reps - 1):
+            if isinstance(self._target_op, Gate):
+                circ.append(self._target_op, self.tgt_register)
+            else:
+                circ.compose(self._target_op, inplace=True)
+        self.target_state = StateTarget(circuit=circ)
+
+    @property
+    def input_circuit(self) -> QuantumCircuit:
+        """
+        Get the input state preparation circuit
+        """
+        return self.circuit
+
+    @property
+    def target_circuit(self) -> QuantumCircuit:
+        """
+        Get the target circuit for the input state
+        """
+        return self.target_state.circuit
+
+    @property
+    def target_dm(self) -> DensityMatrix:
+        """
+        Get the target density matrix for the input state
+        """
+        return self.target_state.dm
 
 
 class GateTarget(BaseTarget):
@@ -322,11 +368,15 @@ class GateTarget(BaseTarget):
         if target_op is not None:
             if not isinstance(target_op, (QuantumCircuit, Gate)):
                 raise ValueError("target_op should be either Gate or QuantumCircuit")
+            if isinstance(target_op, Gate):
+                target_circuit = QuantumCircuit(target_op.num_qubits)
+                target_circuit.append(target_op, range(target_op.num_qubits))
+                target_op = target_circuit
         else:
             target_op = QuantumCircuit(gate.num_qubits)
             target_op.append(gate, list(range(gate.num_qubits)))
-        self.target_op: QuantumCircuit = target_op
-        self.n_reps = n_reps
+        self._target_op: QuantumCircuit = target_op
+        self._n_reps = n_reps
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits,
             "gate",
@@ -335,20 +385,20 @@ class GateTarget(BaseTarget):
         )
         input_circuits = [
             PauliPreparationBasis().circuit(s)
-            for s in product(range(4), repeat=self.target_op.num_qubits)
+            for s in product(range(4), repeat=self._target_op.num_qubits)
         ]
 
         self.input_states = [
             InputState(
                 input_circuit=circ,
-                target_op=self.target_op,
+                target_op=self._target_op,
                 tgt_register=self.tgt_register,
                 n_reps=n_reps,
             )
             for circ in input_circuits
         ]
-        if self.target_op.num_qubits <= 3:
-            self.Chi = _calculate_chi_target(Operator(self.target_op).power(n_reps))
+        if self._target_op.num_qubits <= 3:
+            self.Chi = _calculate_chi_target(Operator(self._target_op).power(n_reps))
         else:
             self.Chi = None
 
@@ -371,7 +421,7 @@ class GateTarget(BaseTarget):
                 raise ValueError("Input could not be converted to channel") from e
         if not isinstance(channel, (Operator, QuantumChannel)):
             raise ValueError("Input should be an Operator object")
-        return average_gate_fidelity(channel, Operator(self.target_op).power(n_reps))
+        return average_gate_fidelity(channel, Operator(self._target_op).power(n_reps))
 
     def state_fidelity(self, state: QuantumState, n_reps: int = 1):
         """
@@ -383,7 +433,7 @@ class GateTarget(BaseTarget):
         if not isinstance(state, (Statevector, DensityMatrix)):
             raise ValueError("Input should be a Statevector or DensityMatrix object")
         return state_fidelity(
-            state, Statevector(self.target_op.power(n_reps, True, True))
+            state, Statevector(self._target_op.power(n_reps, True, True))
         )
 
     def fidelity(self, op: QuantumState | QuantumChannel | Operator, n_reps: int = 1):
@@ -391,7 +441,7 @@ class GateTarget(BaseTarget):
         Compute the fidelity of the input op with respect to the target circuit context channel/output state.
         :param op: Object to compare with the target. If QuantumState, computes state fidelity, if QuantumChannel or
             Operator, computes gate fidelity
-        :param n_reps: Specify number of repetitions of the target gate (default is 1)
+        :param n_reps: Specify number of repetitions of the target operation (default is 1)
         """
         if isinstance(op, (QuantumCircuit, Gate)):
             try:
@@ -409,18 +459,42 @@ class GateTarget(BaseTarget):
             )
 
     @property
+    def target_instruction(self):
+        """
+        Get the target instruction
+        """
+        return CircuitInstruction(self.gate, (q for q in self.tgt_register))
+
+    @property
     def target_operator(self):
         """
         Get the target unitary operator
         """
-        return Operator(self.target_op)
+        return Operator(self._target_op)
 
     @property
     def target_circuit(self):
         """
         Get the target circuit
         """
-        return self.target_op
+        return self._target_op
+
+    @target_circuit.setter
+    def target_circuit(self, target_op: QuantumCircuit):
+        """
+        Set the target circuit
+        """
+        self._target_op = target_op
+        self.input_states = [
+            InputState(input_state.circuit, target_op, self.tgt_register, self.n_reps)
+            for input_state in self.input_states
+        ]
+        if target_op.num_qubits <= 3:
+            self.Chi = np.round(
+                _calculate_chi_target(Operator(self._target_op).power(self.n_reps)), 5
+            )
+        else:
+            self.Chi = None
 
     @property
     def has_context(self):
@@ -430,7 +504,19 @@ class GateTarget(BaseTarget):
         gate_qc = QuantumCircuit(self.gate.num_qubits)
         gate_qc.append(self.gate, list(range(self.gate.num_qubits)))
 
-        return self.target_op != gate_qc
+        return Operator(self._target_op) != Operator(gate_qc)
+
+    @property
+    def n_reps(self) -> int:
+        return self._n_reps
+
+    @n_reps.setter
+    def n_reps(self, n_reps: int):
+        assert n_reps > 0, "Number of repetitions should be positive"
+        self._n_reps = n_reps
+        self.Chi = _calculate_chi_target(Operator(self._target_op).power(n_reps))
+        for input_state in self.input_states:
+            input_state.n_reps = n_reps
 
     def __repr__(self):
         return (
@@ -454,7 +540,7 @@ class QiskitBackendInfo:
             raise QiskitError("Backend does not have a coupling map")
         self.backend = backend
         self._instruction_durations = custom_instruction_durations
-        self._n_qubits = n_qubits if backend is None else backend.num_qubits
+        self._n_qubits = backend.num_qubits if backend is not None else n_qubits
 
     def custom_transpile(
         self,
@@ -794,10 +880,12 @@ class BaseQuantumEnvironment(ABC, Env):
                     )
                 else:
                     survival_probability = [
-                        [
-                            count.get("0" * qc.num_qubits, 0) / self.n_shots
-                            for count in counts
-                        ]
+                        np.array(
+                            [
+                                count.get("0" * qc.num_qubits, 0) / self.n_shots
+                                for count in counts
+                            ]
+                        )
                         for counts in pub_counts
                     ]
                     reward_table = np.mean(survival_probability, axis=0)
@@ -806,7 +894,7 @@ class BaseQuantumEnvironment(ABC, Env):
             f"Finished {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job"
         )
 
-        return reward_table  # Shape [batchsize]
+        return reward_table  # Shape [batch size]
 
     def reset(
         self,
@@ -864,7 +952,7 @@ class BaseQuantumEnvironment(ABC, Env):
         full_basis = pauli_basis(qc.num_qubits)
         if not np.isclose(np.sum(probabilities), 1, atol=1e-5):
             print("probabilities sum um to", np.sum(probabilities))
-            print("probabilities renormalized")
+            print("probabilities normalized")
             probabilities = probabilities / np.sum(probabilities)
 
         sample_size = (
@@ -982,6 +1070,7 @@ class BaseQuantumEnvironment(ABC, Env):
             eps, delta = dfe_precision
             pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
         else:
+            eps, delta = None, None
             pauli_sampling = self.sampling_Pauli_space
 
         samples, self._pauli_shots = np.unique(
@@ -995,7 +1084,7 @@ class BaseQuantumEnvironment(ABC, Env):
         )
 
         pauli_prep, pauli_meas = zip(
-            *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
+            *[(basis[p[1]], basis[p[0]]) for p in pauli_indices]
         )
         pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
         reward_factor = [self.c_factor / (d * self.target.Chi[p]) for p in samples]
@@ -1024,7 +1113,7 @@ class BaseQuantumEnvironment(ABC, Env):
             for input_state in selected_input_states:
                 prep_indices = []
                 dedicated_shots = (
-                    shots * self.n_shots // (max_input_states)
+                    shots * self.n_shots // max_input_states
                 )  # Number of shots per Pauli eigenstate (divided equally)
                 if dedicated_shots == 0:
                     continue
@@ -1038,18 +1127,23 @@ class BaseQuantumEnvironment(ABC, Env):
                         prep_indices.append(2 + inputs[i])
                     elif pauli_op == "Y":
                         prep_indices.append(4 + inputs[i])
-                if tuple(prep_indices) not in used_prep_indices:
+                if (
+                    tuple(prep_indices) not in used_prep_indices
+                ):  # If input state not already used, add a PUB
                     used_prep_indices.append(tuple(prep_indices))
                     used_indices.append(idx)
                     idx += 1
+                    # Prepare input state in Pauli6 basis (front composition)
                     prep_circuit = qc.compose(
                         Pauli6PreparationBasis().circuit(prep_indices),
                         front=True,
                         inplace=False,
                     )
+                    # Repeat circuit for noise amplification
                     for _ in range(self.n_reps - 1):
                         prep_circuit.compose(qc, inplace=True)
 
+                    # Transpile the circuit again to decompose input state preparation
                     prep_circuit = self.backend_info.custom_transpile(
                         prep_circuit,
                         initial_layout=self.layout,
@@ -1065,7 +1159,7 @@ class BaseQuantumEnvironment(ABC, Env):
                         )
                     )
                     total_shots += dedicated_shots * self.batch_size
-                else:
+                else:  # If input state already used, reuse PUB and just update observable and precision
                     pub_ref_index: int = used_indices[
                         used_prep_indices.index(tuple(prep_indices))
                     ]
@@ -1298,8 +1392,7 @@ class BaseQuantumEnvironment(ABC, Env):
         This method should be called only when the abstraction level is "circuit"
         :param qc: QuantumCircuit to execute on quantum system
         :param params: List of Action vectors to execute on quantum system
-        :param returned_fidelity_type: Type of fidelity to be returned (average gate or state fidelity)
-        :return: None
+        :return: Fidelity metric or array of fidelities for all actions in the batch
         """
         from qiskit_aer import AerSimulator
         from qiskit_aer.noise import NoiseModel
@@ -1320,24 +1413,23 @@ class BaseQuantumEnvironment(ABC, Env):
         )
         returned_fidelities = []
 
-        for _ in range(self.config.n_reps - 1):
+        for _ in range(self.n_reps - 1):
             qc_channel_nreps.compose(qc, inplace=True)
             qc_state_nreps.compose(qc, inplace=True)
 
         print("Starting simulation benchmark...")
         backend = AerSimulator()
         if self.backend is None or (
-            isinstance(self.backend, AerSimulator)
-            and self.backend.options.noise_model is None
+            isinstance(self.backend, AerSimulator) and not has_noise_model(self.backend)
         ):  # Ideal simulation
 
+            noise_model = None
             qc_channel.save_unitary()
             qc_channel_nreps.save_unitary()
             qc_state.save_statevector()
             qc_state_nreps.save_statevector()
             channel_output = "unitary"
             state_output = "statevector"
-            noise_model = None
 
         else:  # Noisy simulation
             if isinstance(self.backend, AerSimulator):
@@ -1527,7 +1619,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.close()
 
     def close(self) -> None:
-        if isinstance(self.backend, IBMBackend):
+        if hasattr(self.estimator, "session"):
             self.estimator.session.close()
 
     def clear_history(self):
@@ -1556,25 +1648,25 @@ class BaseQuantumEnvironment(ABC, Env):
             raise ValueError("Target type should be a gate for gate calibration task.")
 
         if self.abstraction_level == "pulse":
-            sched = schedule(self.circuits[0], self.backend).assign_parameters(
+            schedule_ = schedule(self.circuits[0], self.backend).assign_parameters(
                 {
                     param: action
                     for param, action in zip(self.parameters, self._optimal_action)
                 }
             )
-            duration = sched.duration
+            duration = schedule_.duration
             if isinstance(self.backend, DynamicsBackend):
                 error = 1.0
                 error -= simulate_pulse_schedule(
                     self.backend,
-                    sched,
+                    schedule_,
                     target_unitary=Operator(self.target.gate),
                     target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
                 )["gate_fidelity"]["optimal"]
 
             else:
                 error = 1.0 - np.max(self.avg_fidelity_history)
-            instruction_prop = InstructionProperties(duration, error, sched)
+            instruction_prop = InstructionProperties(duration, error, schedule_)
             self.backend.target.update_instruction_properties(
                 self.target.gate.name,
                 tuple(self.physical_target_qubits),
@@ -1709,7 +1801,7 @@ class BaseQuantumEnvironment(ABC, Env):
             raise ValueError("Batch size should be positive integer.")
 
     @property
-    def target(self):
+    def target(self) -> GateTarget | StateTarget:
         """
         Return the target object (GateTarget | StateTarget) of the environment
         """
@@ -1815,7 +1907,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 "fidelity_history": (
                     self.avg_fidelity_history
                     if self.target.target_type == "gate"
-                    else self.state_fidelity_history
+                    else self.circuit_fidelity_history
                 ),
             }
         )

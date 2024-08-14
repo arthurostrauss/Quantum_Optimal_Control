@@ -6,7 +6,7 @@ from dataclasses import field, asdict
 @dataclass
 class TotalUpdates:
     """
-    Total updates constraint for training
+    Total updates constraint for training (number of epochs)
 
     :param total_updates: Total number of updates
     """
@@ -23,7 +23,7 @@ class TotalUpdates:
 class HardwareRuntime:
     """
     Hardware runtime constraint for training (in seconds). To use this mode, you should ensure that the selected backend
-    does have a non trivial InstructionDurations attribute (the user can set this attribute manually in the config as
+    does have a non-trivial InstructionDurations attribute (the user can set this attribute manually in the config as
     well).
 
     :param hardware_runtime: Hardware runtime constraint for training (in seconds)
@@ -45,13 +45,15 @@ class TrainFunctionSettings:
     :param num_prints: Number of prints to be displayed during training
     :param hpo_mode: Whether to use hyperparameter optimization mode
     :param clear_history: Whether to clear the history of the training (e.g. rewards, losses, etc.)
+    :param save_data: Whether to save the data during training through tensorboard
     """
 
     plot_real_time: bool = False
     print_debug: Optional[bool] = False
-    num_prints: Optional[int] = 40
+    num_prints: Optional[int] = 10
     hpo_mode: Optional[bool] = False
     clear_history: Optional[bool] = False
+    save_data: Optional[bool] = False
 
     def __post_init__(self):
         assert (

@@ -313,7 +313,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                         qc.append(self.target.gate, self.target.physical_qubits)
                         target = Operator(qc)
                     else:
-                        target = Operator(self.target.target_op)
+                        target = Operator(self.target._target_op)
 
                     fids = [
                         average_gate_fidelity(unitary, target)
