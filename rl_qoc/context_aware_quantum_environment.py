@@ -22,6 +22,7 @@ from qiskit.circuit import (
     CircuitInstruction,
     Qubit,
 )
+from qiskit.providers import BackendV2
 from qiskit.quantum_info import (
     state_fidelity,
     Statevector,
@@ -44,6 +45,7 @@ from rl_qoc.qconfig import QEnvConfig
 from rl_qoc.base_q_env import (
     GateTarget,
     BaseQuantumEnvironment,
+    QiskitBackendInfo,
 )
 from rl_qoc.custom_jax_sim import JaxSolver
 
@@ -65,6 +67,24 @@ def create_array(circ_trunc, batchsize, n_actions):
     for i in range(circ_trunc):
         arr[i] = np.zeros((i + 1, batchsize, n_actions))
     return arr
+
+
+def target_instruction_timings(
+    circuit_context: QuantumCircuit, target_instruction: CircuitInstruction
+) -> tuple[List[int], List[int]]:
+    """
+    Return the timings of the target instructions in the circuit context
+    """
+    try:
+        op_start_times = circuit_context.op_start_times
+    except AttributeError:
+        op_start_times = get_instruction_timings(circuit_context)
+
+    target_instruction_timings = []
+    for i, instruction in enumerate(circuit_context.data):
+        if instruction == target_instruction:
+            target_instruction_timings.append(op_start_times[i])
+    return op_start_times, target_instruction_timings
 
 
 class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
@@ -91,49 +111,36 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         self._training_steps_per_gate = training_steps_per_gate
         self._intermediate_rewards = intermediate_rewards
-        self.circuit_fidelity_history = []
-        self.avg_fidelity_history_nreps = []
-        self.circuit_fidelity_history_nreps = []
-        self.circuit_context = circuit_context
-        # Define target register and nearest neighbor register for truncated circuits
+        self._circuit_context = circuit_context
+        self._unbound_circuit_context = circuit_context.copy()
         self.circ_tgt_register = QuantumRegister(
             bits=[
-                self.circuit_context.qubits[i] for i in training_config.physical_qubits
+                self._circuit_context.qubits[i] for i in training_config.physical_qubits
             ],
             name="tgt",
         )
-
-        # Adjust target register to match it with circuit context
         self.target_instruction = CircuitInstruction(
             training_config.target["gate"], (qubit for qubit in self.circ_tgt_register)
         )
-        self._tgt_instruction_counts = self.circuit_context.data.count(
-            self.target_instruction
-        )
         if self.tgt_instruction_counts == 0:
             raise ValueError("Target gate not found in circuit context")
+        # Store time and instruction indices where target gate is played in circuit
+        self._op_start_times, self._target_instruction_timings = (
+            target_instruction_timings(self._circuit_context, self.target_instruction)
+        )
 
         self._parameters = [
             ParameterVector(f"a_{j}", training_config.n_actions)
             for j in range(self.tgt_instruction_counts)
         ]
-
-        # Store time and instruction indices where target gate is played in circuit
-        try:
-            self._op_start_times = self.circuit_context.op_start_times
-        except AttributeError:
-            self._op_start_times = get_instruction_timings(self.circuit_context)
-
-        self._target_instruction_timings = []
-        for i, instruction in enumerate(self.circuit_context.data):
-            if instruction == self.target_instruction:
-                self._target_instruction_timings.append(self._op_start_times[i])
+        self._param_values = create_array(
+            self.tgt_instruction_counts,
+            training_config.batch_size,
+            training_config.action_space.shape[-1],
+        )
 
         super().__init__(training_config)
 
-        self._param_values = create_array(
-            self.tgt_instruction_counts, self.batch_size, self.action_space.shape[-1]
-        )
         self.observation_space = Box(
             low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
         )
@@ -142,10 +149,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         Define target gate and circuits for calibration
         """
-
+        if self.circuit_context.parameters:
+            raise ValueError("Circuit context still contains unassigned parameters")
         assert "gate" in self.config.target, "Target should be a gate"
+
         if self.backend_info.coupling_map.size() == 0 and self.backend is None:
-            self.backend_info.num_qubits = self.circuit_context.num_qubits
+            self.backend_info.num_qubits = self._circuit_context.num_qubits
             self._physical_neighbor_qubits = retrieve_neighbor_qubits(
                 self.backend_info.coupling_map, self.physical_target_qubits
             )
@@ -168,10 +177,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         ]
 
         circ_nn_qubits = [
-            self.circuit_context.qubits[i] for i in self.physical_neighbor_qubits
+            self._circuit_context.qubits[i] for i in self.physical_neighbor_qubits
         ]  # Nearest neighbors
         circ_anc_qubits = [
-            self.circuit_context.qubits[i] for i in self.physical_next_neighbor_qubits
+            self._circuit_context.qubits[i] for i in self.physical_next_neighbor_qubits
         ]  # Next neighbors
 
         nn_register = QuantumRegister(
@@ -205,7 +214,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         for i in range(self.tgt_instruction_counts):  # Loop over target gates
             counts = 0
             for start_time, instruction in zip(
-                self._op_start_times, self.circuit_context.data
+                self._op_start_times, self._circuit_context.data
             ):  # Loop over instructions in circuit context
 
                 # Check if instruction involves target or nearest neighbor qubits
@@ -477,7 +486,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     @property
     def tgt_instruction_counts(self) -> int:
-        return self._tgt_instruction_counts
+        """
+        Return number of target instructions present in circuit context
+        """
+        return self.circuit_context.data.count(self.target_instruction)
 
     @property
     def target(self) -> GateTarget:
@@ -529,4 +541,100 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
     def clear_history(self) -> None:
         """Reset all counters related to training"""
         super().clear_history()
-        self.circuit_fidelity_history.clear()
+
+    @property
+    def unbound_circuit_context(self) -> QuantumCircuit:
+        """
+        Return the unbound circuit context (relevant when circuit context is parameterized)
+        """
+        return self._unbound_circuit_context
+
+    def set_unbound_circuit_context(self, new_context: QuantumCircuit, **kwargs):
+        """
+        Update the unbound circuit context
+        Keyword arguments can be used to assign values to parameters in the new context for immediate target calculation
+
+        """
+        self._unbound_circuit_context = new_context
+        self.set_circuit_context(new_context.copy(), **kwargs)
+        if self._circuit_context.parameters:
+            raise ValueError("Unbound circuit context still contains parameters")
+
+    @property
+    def circuit_context(self) -> QuantumCircuit:
+        """
+        Return the current circuit context
+        """
+        return self._circuit_context
+
+    def set_circuit_context(
+        self,
+        new_context: Optional[QuantumCircuit] = None,
+        backend: Optional[BackendV2] = None,
+        **kwargs,
+    ):
+        """
+        Update the circuit context and all relevant attributes
+        """
+        if new_context is not None:  # Update circuit context from scratch
+            self._circuit_context = new_context
+            # Define target register and nearest neighbor register for truncated circuits
+            self.circ_tgt_register = QuantumRegister(
+                bits=[
+                    self._circuit_context.qubits[i] for i in self.physical_target_qubits
+                ],
+                name="tgt",
+            )
+
+            # Adjust target register to match it with circuit context
+            self.target_instruction = CircuitInstruction(
+                self.target.gate, (qubit for qubit in self.circ_tgt_register)
+            )
+            if self.tgt_instruction_counts == 0:
+                raise ValueError("Target gate not found in circuit context")
+
+            self._parameters = [
+                ParameterVector(f"a_{j}", self.n_actions)
+                for j in range(self.tgt_instruction_counts)
+            ]
+
+            self._op_start_times, self._target_instruction_timings = (
+                target_instruction_timings(
+                    self._circuit_context, self.target_instruction
+                )
+            )
+
+            self._target, self.circuits, self.baseline_circuits = (
+                self.define_target_and_circuits()
+            )
+
+            self._param_values = create_array(
+                self.tgt_instruction_counts,
+                self.batch_size,
+                self.action_space.shape[-1],
+            )
+
+        else:
+            for param in kwargs:
+                if self._circuit_context.has_parameter(param):
+                    self._circuit_context.assign_parameters(
+                        {param: kwargs[param]}, inplace=True
+                    )
+                else:
+                    raise ValueError(f"Parameter {param} not found in circuit context")
+            self._target, self.circuits, self.baseline_circuits = (
+                self.define_target_and_circuits()
+            )
+
+        if backend is not None:
+            self.backend = backend
+            self.backend_info = QiskitBackendInfo(
+                backend, self.config.backend_config.instruction_durations_dict
+            )
+            self._physical_neighbor_qubits = retrieve_neighbor_qubits(
+                self.backend_info.coupling_map, self.physical_target_qubits
+            )
+            self._physical_next_neighbor_qubits = retrieve_neighbor_qubits(
+                self.backend_info.coupling_map,
+                self.physical_target_qubits + self.physical_neighbor_qubits,
+            )
