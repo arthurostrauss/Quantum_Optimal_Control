@@ -57,11 +57,9 @@ from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_ibm_runtime import (
     Session,
     IBMBackend as RuntimeBackend,
-    EstimatorV1 as RuntimeEstimatorV1,
     EstimatorV2 as RuntimeEstimatorV2,
     Options as RuntimeOptions,
     EstimatorOptions as RuntimeEstimatorOptions,
-    SamplerV1 as RuntimeSamplerV1,
     SamplerV2 as RuntimeSamplerV2,
     QiskitRuntimeService,
 )
@@ -97,10 +95,7 @@ import numpy as np
 from gymnasium.spaces import Box
 import optuna
 
-import tensorflow as tf
 from scipy.optimize import minimize
-from tensorflow.keras import Model, Input
-from tensorflow.keras.layers import Dense
 
 import keyword
 import re
@@ -134,7 +129,6 @@ logging.basicConfig(
 
 Estimator_type = Union[
     AerEstimator,
-    RuntimeEstimatorV1,
     RuntimeEstimatorV2,
     Estimator,
     BackendEstimator,
@@ -144,7 +138,6 @@ Estimator_type = Union[
 ]
 Sampler_type = Union[
     AerSampler,
-    RuntimeSamplerV1,
     RuntimeSamplerV2,
     Sampler,
     BackendSampler,
@@ -916,7 +909,7 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
 
 def retrieve_primitives(
     backend: Backend_type,
-    config: Union[Dict, BackendConfig],
+    config: BackendConfig,
     estimator_options: Optional[
         Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
     ] = None,
@@ -927,15 +920,14 @@ def retrieve_primitives(
 
     Args:
         backend: Backend instance
-        layout: Layout instance
         config: Configuration dictionary
-        abstraction_level: Abstraction level ("circuit" or "pulse")
         estimator_options: Estimator options
         circuit: QuantumCircuit instance implementing the custom gate (for DynamicsBackend)
     """
     if isinstance(backend, DynamicsBackend) and isinstance(
         backend.options.solver, JaxSolver
     ):
+        assert isinstance(config, QiskitConfig), "Configuration must be a QiskitConfig"
         estimator = DynamicsBackendEstimator(
             backend, options=estimator_options, skip_transpilation=True
         )
@@ -1018,7 +1010,7 @@ def handle_session(
         Updated Estimator instance
     """
     if (
-        isinstance(estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2))
+        isinstance(estimator, RuntimeEstimatorV2)
         and estimator.session.status() == "Closed"
     ):
         old_session = estimator.session
@@ -1088,7 +1080,6 @@ def select_backend(
         real_backend: Boolean indicating if real backend should be used
         channel: Channel to use for Runtime Service
         instance: Instance to use for Runtime Service
-        token: Token to use for Runtime Service
         backend_name: Name of the backend to use for training
         use_dynamics: Boolean indicating if DynamicsBackend should be used
         physical_qubits: Physical qubits on which DynamicsBackend should be used
@@ -1134,6 +1125,9 @@ def select_backend(
                 solver_options["hmax"] = backend.configuration().dt
             for key in ["atol", "rtol"]:
                 solver_options[key] = float(solver_options[key])
+            assert isinstance(
+                backend, BackendV1
+            ), "DynamicsBackend can only be used with BackendV1 instances"
             backend = custom_dynamics_from_backend(
                 backend,
                 subsystem_list=list(physical_qubits),
@@ -1879,111 +1873,3 @@ def generate_default_instruction_durations_dict(
                 default_instruction_durations_dict[(gate, (qubit,))] = (0.0, "s")
 
     return default_instruction_durations_dict
-
-
-def select_optimizer(
-    lr: float,
-    optimizer: str = "Adam",
-    grad_clip: Optional[float] = None,
-    concurrent_optimization: bool = True,
-    lr2: Optional[float] = None,
-):
-    if concurrent_optimization:
-        if optimizer == "Adam":
-            return tf.optimizers.Adam(learning_rate=lr, clipvalue=grad_clip)
-        elif optimizer == "SGD":
-            return tf.optimizers.SGD(learning_rate=lr, clipvalue=grad_clip)
-    else:
-        if optimizer == "Adam":
-            return tf.optimizers.Adam(learning_rate=lr), tf.optimizers.Adam(
-                learning_rate=lr2, clipvalue=grad_clip
-            )
-        elif optimizer == "SGD":
-            return tf.optimizers.SGD(learning_rate=lr), tf.optimizers.SGD(
-                learning_rate=lr2, clipvalue=grad_clip
-            )
-
-
-def constrain_mean_value(mu_var):
-    return [tf.clip_by_value(m, -1.0, 1.0) for m in mu_var]
-
-
-def constrain_std_value(std_var):
-    return [tf.clip_by_value(std, 1e-3, 3) for std in std_var]
-
-
-def generate_model(
-    input_shape: Tuple,
-    hidden_units: Union[List, Tuple],
-    n_actions: int,
-    actor_critic_together: bool = True,
-    hidden_units_critic: Optional[Union[List, Tuple]] = None,
-):
-    """
-    Helper function to generate fully connected NN
-    :param input_shape: Input shape of the NN
-    :param hidden_units: List containing number of neurons per hidden layer
-    :param n_actions: Output shape of the NN on the actor part, i.e. dimension of action space
-    :param actor_critic_together: Decide if actor and critic network should be distinct or should be sharing layers
-    :param hidden_units_critic: If actor_critic_together set to False, List containing number of neurons per hidden
-           layer for critic network
-    :return: Model or Tuple of two Models for actor critic network
-    """
-    input_layer = Input(shape=input_shape)
-    Net = Dense(
-        hidden_units[0],
-        activation="relu",
-        input_shape=input_shape,
-        kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-        bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-        name=f"hidden_{0}",
-    )(input_layer)
-    for i in range(1, len(hidden_units)):
-        Net = Dense(
-            hidden_units[i],
-            activation="relu",
-            kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-            bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-            name=f"hidden_{i}",
-        )(Net)
-
-    mean_param = Dense(n_actions, activation="tanh", name="mean_vec")(
-        Net
-    )  # Mean vector output
-    sigma_param = Dense(n_actions, activation="softplus", name="sigma_vec")(
-        Net
-    )  # Diagonal elements of cov matrix
-    # output
-
-    if actor_critic_together:
-        critic_output = Dense(1, activation="linear", name="critic_output")(Net)
-        return Model(
-            inputs=input_layer, outputs=[mean_param, sigma_param, critic_output]
-        )
-    else:
-        assert (
-            hidden_units_critic is not None
-        ), "Network structure for critic network not provided"
-        input_critic = Input(shape=input_shape)
-        Critic_Net = Dense(
-            hidden_units_critic[0],
-            activation="relu",
-            input_shape=input_shape,
-            kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-            bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-            name=f"hidden_{0}",
-        )(input_critic)
-        for i in range(1, len(hidden_units)):
-            Critic_Net = Dense(
-                hidden_units[i],
-                activation="relu",
-                kernel_initializer=tf.initializers.RandomNormal(stddev=0.1),
-                bias_initializer=tf.initializers.RandomNormal(stddev=0.5),
-                name=f"hidden_{i}",
-            )(Critic_Net)
-            critic_output = Dense(1, activation="linear", name="critic_output")(
-                Critic_Net
-            )
-            return Model(inputs=input_layer, outputs=[mean_param, sigma_param]), Model(
-                inputs=input_critic, outputs=critic_output
-            )

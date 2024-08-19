@@ -75,9 +75,7 @@ from qiskit_experiments.library.tomography.basis import (
     Pauli6PreparationBasis,
 )
 from qiskit_ibm_runtime import (
-    EstimatorV1 as RuntimeEstimatorV1,
     EstimatorV2 as RuntimeEstimatorV2,
-    SamplerV1 as RuntimeSamplerV1,
 )
 
 from rl_qoc.helper_functions import (
@@ -732,16 +730,8 @@ class BaseQuantumEnvironment(ABC, Env):
             estimator_options,
             self.circuits[0],
         )
-        if not isinstance(self.sampler, BaseSamplerV1):
-            if hasattr(self.estimator, "session"):
-                self.fidelity_checker = ComputeUncompute(
-                    RuntimeSamplerV1(session=self.estimator.session)
-                )
-            else:
-                # TODO: Account for BackendSampler vs AerSampler
-                self.fidelity_checker = None
-        else:
-            self.fidelity_checker = ComputeUncompute(self._sampler)
+
+        self.fidelity_checker = ComputeUncompute(self._sampler)
 
         self._mean_action = np.zeros(self.action_space.shape[-1])
         self._std_action = np.ones(self.action_space.shape[-1])
@@ -845,7 +835,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         counts = (
             self._session_counts
-            if isinstance(self.estimator, (RuntimeEstimatorV1, RuntimeEstimatorV2))
+            if isinstance(self.estimator, RuntimeEstimatorV2)
             else trunc_index
         )
         self.estimator = handle_session(
