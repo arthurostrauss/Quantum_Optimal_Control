@@ -98,7 +98,7 @@ def get_optimizer_from_str(optim_str):
     return optim_dict[optim_str]
 
 
-def initialize_environment(env: BaseQuantumEnvironment | Wrapper) -> tuple:
+def initialize_environment(env: BaseQuantumEnvironment) -> tuple:
     """
     Initializes the environment by extracting necessary information.
 
@@ -325,7 +325,7 @@ def get_empty_tensors(env, num_time_steps, batchsize):
 
 
 def reset_env(
-    env: BaseQuantumEnvironment | Wrapper, seed, global_step, batchsize, dones
+    env: BaseQuantumEnvironment, seed, global_step, batchsize, dones
 ):
     """
     Resets the environment and returns the initial observation, number of steps, batch observations, and batch done flags.
@@ -366,7 +366,7 @@ def take_step(
     min_action,
     max_action,
     agent: Agent,
-    env: BaseQuantumEnvironment | Wrapper,
+    env: BaseQuantumEnvironment,
     writer,
 ):
     """
@@ -476,7 +476,7 @@ def do_bootstrap(
 
 
 def flatten_batch(
-    env: BaseQuantumEnvironment | Wrapper,
+    env: BaseQuantumEnvironment,
     obs,
     logprobs,
     actions,
@@ -740,7 +740,7 @@ class CustomPPO:
     def __init__(
         self,
         agent_config: Dict,
-        env: BaseQuantumEnvironment | Wrapper,
+        env: BaseQuantumEnvironment,
         chkpt_dir: Optional[str] = "tmp/ppo",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
     ):
