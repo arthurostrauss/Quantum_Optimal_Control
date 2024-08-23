@@ -1,12 +1,9 @@
 import functools
-
-from qiskit.circuit import ParameterExpression, Parameter
 import qm.qua as qua
 import sympy as sp
 import symengine as se
 from functools import partial
-import numpy as np
-from qualang_tools.video_mode.videomode import ParameterTable, ParameterValue
+from qualang_tools.video_mode.videomode import ParameterValue
 
 sympy_to_qua_dict = {
     sp.Float: qua.fixed,
@@ -24,22 +21,6 @@ sympy_to_qua_dict = {
     sp.Pow: qua.Math.pow,
     sp.sqrt: qua.Math.sqrt,
 }
-sym_engine_to_qua = {
-    se.Float: qua.fixed,
-    se.Integer: int,
-    se.Abs: qua.Math.abs,
-    se.cos: qua.Math.cos,
-    se.sin: qua.Math.sin,
-    se.exp: qua.Math.exp,
-    se.ln: qua.Math.ln,
-    se.log: qua.Math.log,
-    partial(se.log, 10): qua.Math.log10,
-    partial(se.log, 2): qua.Math.log2,
-    partial(se.Pow, -1): qua.Math.inv,
-    partial(se.Pow, 0.5): qua.Math.sqrt,
-    se.Pow: qua.Math.pow,
-    se.sqrt: qua.Math.sqrt,
-}
 
 
 def match_expr(expr: sp.Function):
@@ -56,7 +37,7 @@ def match_expr(expr: sp.Function):
 
 
 def sympy_to_qua(
-        sympy_expr: sp.Basic, parameter_val: ParameterValue
+    sympy_expr: sp.Basic, parameter_val: ParameterValue
 ) -> qua.QuaVariableType:
     """
     Convert a Sympy expression to a QuaVariableType

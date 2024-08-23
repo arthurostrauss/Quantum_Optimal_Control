@@ -12,7 +12,6 @@ from qiskit.providers import BackendV2 as Backend, QubitProperties
 from qiskit.pulse import (
     ScheduleBlock,
     Schedule,
-    ControlChannel,
     DriveChannel,
     MeasureChannel,
     AcquireChannel,
@@ -37,7 +36,7 @@ from qm import QuantumMachinesManager, Program
 from qualang_tools.addons.variables import assign_variables_to_element
 from quam_components import QuAM
 from qualang_tools.video_mode import ParameterTable
-from parameter_to_qua import sympy_to_qua
+from sympy_to_qua import sympy_to_qua
 from oqc import (
     Compiler,
     HardwareConfig,
@@ -56,8 +55,11 @@ _ref_phase = 0.0
 
 
 def _handle_parameterized_instruction(
-        instruction: Instruction, param_table: ParameterTable,
-        params, quam_channel: QuAMChannel, action: Callable
+        instruction: Instruction,
+        param_table: ParameterTable,
+        params,
+        quam_channel: QuAMChannel,
+        action: Callable,
 ):
     qiskit_param: Parameter = list(instruction.parameters)[0]
     param_name = list(instruction.parameters)[0].name
@@ -252,9 +254,7 @@ def _instruction_to_qua(
             )
 
     else:
-        raise ValueError(
-            f"instruction {instruction} not supported on the QUA backend"
-        )
+        raise ValueError(f"instruction {instruction} not supported on the QUA backend")
 
 
 class QMBackend(Backend, ABC):
@@ -366,7 +366,9 @@ class QMBackend(Backend, ABC):
                 qua_prog = self.qua_prog_from_qc(qc)
                 qua_progs.append(qua_prog)
 
-    def schedule_to_qua_macro(self, sched: Schedule, param_table: Optional[ParameterTable] = None):
+    def schedule_to_qua_macro(
+            self, sched: Schedule, param_table: Optional[ParameterTable] = None
+    ):
         """
         Convert a Qiskit Pulse Schedule to a QUA macro
 
@@ -385,7 +387,10 @@ class QMBackend(Backend, ABC):
                 *params,
         ):  # Define the QUA macro with parameters
 
-            param_mapping = {param_name: arg for param_name, arg in zip(param_table.table.keys(), params)}
+            param_mapping = {
+                param_name: arg
+                for param_name, arg in zip(param_table.table.keys(), params)
+            }
             time_tracker = {channel: 0 for channel in sched.channels}
             for time, instruction in sched.instructions:
 
@@ -416,7 +421,10 @@ class QMBackend(Backend, ABC):
                                         (time - time_tracker[qiskit_channel])
                                     )
                                 _instruction_to_qua(
-                                    instruction, quam_channel, param_mapping, param_table
+                                    instruction,
+                                    quam_channel,
+                                    param_mapping,
+                                    param_table,
                                 )
                 else:
                     quam_channel = self.get_quam_channel(qiskit_channel)
