@@ -30,7 +30,6 @@ from qiskit.primitives import (
     BackendEstimatorV2,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
-from qiskit_aer.primitives import Estimator as AerEstimator, Sampler as AerSampler
 from qiskit.quantum_info import (
     Operator,
     Statevector,
@@ -128,7 +127,6 @@ logging.basicConfig(
 )
 
 Estimator_type = Union[
-    AerEstimator,
     RuntimeEstimatorV2,
     Estimator,
     BackendEstimator,
@@ -137,7 +135,6 @@ Estimator_type = Union[
     StatevectorEstimator,
 ]
 Sampler_type = Union[
-    AerSampler,
     RuntimeSamplerV2,
     Sampler,
     BackendSampler,

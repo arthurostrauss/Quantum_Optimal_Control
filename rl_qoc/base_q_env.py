@@ -1152,7 +1152,12 @@ class BaseQuantumEnvironment(ABC, Env):
                             1 / np.sqrt(dedicated_shots),
                         )
                     )
-                    total_shots += dedicated_shots * self.batch_size
+                    obs: SparsePauliOp
+                    total_shots += (
+                        dedicated_shots
+                        * self.batch_size
+                        * len(obs.group_commuting(qubit_wise=True))
+                    )
                 else:  # If input state already used, reuse PUB and just update observable and precision
                     pub_ref_index: int = used_indices[
                         used_prep_indices.index(tuple(prep_indices))
@@ -1170,8 +1175,16 @@ class BaseQuantumEnvironment(ABC, Env):
                         new_precision,
                     )
                     pubs[pub_ref_index] = new_pub
-                    total_shots -= ref_shots * self.batch_size
-                    total_shots += new_shots * self.batch_size
+                    total_shots -= (
+                        ref_shots
+                        * self.batch_size
+                        * len(ref_obs.group_commuting(qubit_wise=True))
+                    )
+                    total_shots += (
+                        new_shots
+                        * self.batch_size
+                        * len(new_pub[1].group_commuting(qubit_wise=True))
+                    )
 
         if len(pubs) == 0:  # If nothing was sampled, retry
             pubs, total_shots = self.channel_reward_pubs(qc, params)
