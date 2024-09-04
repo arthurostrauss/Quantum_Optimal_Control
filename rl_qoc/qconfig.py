@@ -145,7 +145,7 @@ class RewardConfig:
 
     @property
     def reward_args(self):
-        return
+        return {}
 
 
 @dataclass

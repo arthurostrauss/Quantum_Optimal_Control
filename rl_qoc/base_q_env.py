@@ -396,7 +396,7 @@ class GateTarget(BaseTarget):
                 Pauli6PreparationBasis().circuit(s)
                 for s in product(range(6), repeat=n_qubits)
             ]
-        else:  # 2-design
+        elif input_states_choice == "2-design":  # 2-design
 
             d = 2**n_qubits
             unitaries = [random_unitary(d) for _ in range(4**n_qubits)]
@@ -404,6 +404,10 @@ class GateTarget(BaseTarget):
             for circ, unitary in zip(circuits, unitaries):
                 circ.unitary(unitary, range(n_qubits))
             input_circuits = circuits
+        else:
+            raise ValueError(
+                f"Input states choice {input_states_choice} not recognized. Should be 'pauli4', 'pauli6' or '2-design'"
+            )
 
         self.input_states = [
             InputState(
