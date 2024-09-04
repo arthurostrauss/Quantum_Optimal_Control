@@ -213,19 +213,27 @@ class StateTarget(BaseTarget):
 
     def __init__(
         self,
-        dm: Optional[DensityMatrix] = None,
+        state: Optional[DensityMatrix | Statevector] = None,
         circuit: Optional[QuantumCircuit] = None,
         physical_qubits: Optional[List[int]] = None,
     ):
-
-        if dm is None and circuit is None:
+        if isinstance(state, DensityMatrix) and state.purity() != 1:
+            raise ValueError("Density matrix should be pure")
+        if isinstance(state, DensityMatrix):
+            state = Statevector(state)
+        if state is None and circuit is None:
             raise ValueError("No target provided")
-        if dm is not None and circuit is not None:
+        if state is not None and circuit is not None:
             assert (
-                DensityMatrix(circuit) == dm
-            ), "Provided circuit does not generate the provided density matrix"
-        self.dm = DensityMatrix(circuit) if dm is None else dm
+                Statevector(circuit) == state
+            ), "Provided circuit does not generate the provided state"
+        self.dm = DensityMatrix(circuit) if state is None else DensityMatrix(state)
         self.circuit = circuit if isinstance(circuit, QuantumCircuit) else None
+        if self.circuit is None:
+            qc = QuantumCircuit(self.dm.num_qubits)
+            qc.initialize(state)
+            self.circuit = qc
+
         self.Chi = _calculate_chi_target(self.dm)
         super().__init__(
             self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
@@ -770,7 +778,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self._max_return = 0
         self._episode_ended = False
         self._episode_tracker = 0
-        self._benchmark_cycle = training_config.benchmark_cycle
         self.action_history = []
         self.density_matrix_history = []
         self.reward_history = []
@@ -783,6 +790,12 @@ class BaseQuantumEnvironment(ABC, Env):
 
         if isinstance(self.target, GateTarget):
             self._input_state = self.target.input_states[self._index_input_state]
+        else:
+            self._input_state = InputState(
+                QuantumCircuit(self.target.n_qubits),
+                self.target.circuit,
+                self.target.tgt_register,
+            )
         self.process_fidelity_history = []
         self.avg_fidelity_history = []
         self.circuit_fidelity_history = []
@@ -1567,6 +1580,16 @@ class BaseQuantumEnvironment(ABC, Env):
         else:
             raise NotImplementedError("Channel estimator not yet implemented")
 
+    def simulate_pulse_circuit(self, qc: QuantumCircuit, params: np.array):
+        """
+        Method to store in lists all relevant data to assess performance of training (fidelity information)
+        This method should be called only when the abstraction level is "pulse"
+        """
+        if self.abstraction_level != "pulse":
+            raise ValueError(
+                "This method should only be called when the abstraction level is 'pulse'"
+            )
+
     def modify_environment_params(self, **kwargs):
         """
         Modify environment parameters (can be overridden by subclasses to modify specific parameters)
@@ -1715,7 +1738,7 @@ class BaseQuantumEnvironment(ABC, Env):
         Cycle at which fidelity benchmarking is performed
         :return:
         """
-        return self._benchmark_cycle
+        return self.config.benchmark_cycle
 
     @benchmark_cycle.setter
     def benchmark_cycle(self, step: int) -> None:
@@ -1776,9 +1799,11 @@ class BaseQuantumEnvironment(ABC, Env):
                 "reset_stage": self._inside_trunc_tracker == 0,
                 "step": step,
                 "gate_index": self._inside_trunc_tracker,
-                "input_state": self.target.input_states[
-                    self._index_input_state
-                ].circuit.name,
+                "input_state": (
+                    self.target.input_states[self._index_input_state].circuit.name
+                    if isinstance(self.target, GateTarget)
+                    else None
+                ),
                 "truncation_index": self.trunc_index,
             }
         return info

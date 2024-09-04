@@ -1524,7 +1524,7 @@ def load_q_env_from_yaml_file(file_path: str):
     if "GATE" in config["TARGET"]:
         params["target"]["gate"] = gate_map()[config["TARGET"]["GATE"].lower()]
     else:
-        params["target"]["dm"] = DensityMatrix.from_label(config["TARGET"]["STATE"])
+        params["target"]["state"] = Statevector.from_label(config["TARGET"]["STATE"])
 
     backend_params = {
         "real_backend": config["BACKEND"]["REAL_BACKEND"],

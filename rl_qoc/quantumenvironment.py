@@ -262,17 +262,32 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                         :, 1, :, :
                     ]
                 else:
-                    qc_list = [qc.assign_parameters(angle_set) for angle_set in params]
-                    scheds = schedule(qc_list, backend=self.backend)
-                    dt = self.backend.dt
-                    durations = [sched.duration for sched in scheds]
-                    results = self.backend.solve(
-                        scheds,
-                        durations,
-                        y0=np.eye(np.prod(subsystem_dims)),
-                        convert_results=False,
-                    )
-                    unitaries = np.array([result.y[-1] for result in results])
+                    if self.config.reward_method == "fidelity":
+                        qc_list = [
+                            qc.assign_parameters(angle_set) for angle_set in params
+                        ]
+                        scheds = schedule(qc_list, backend=self.backend)
+                        dt = self.backend.dt
+                        durations = [[0, sched.duration * dt] for sched in scheds]
+                        results = self.backend.solve(
+                            scheds,
+                            durations,
+                            y0=np.eye(np.prod(subsystem_dims)),
+                            convert_results=False,
+                        )
+                        unitaries = np.array([result.y[-1] for result in results])
+                    else:
+                        circ = qc.assign_parameters(self.mean_action)
+                        sched = schedule(circ, backend=self.backend)
+                        dt = self.backend.dt
+                        duration = sched.duration
+                        result = self.backend.solve(
+                            sched,
+                            [0, duration * dt],
+                            y0=np.eye(np.prod(subsystem_dims)),
+                            convert_results=False,
+                        )
+                        unitaries = np.array([result[0].y[-1]])
 
                 qubitized_unitaries = [
                     qubit_projection(unitaries[i, :, :], subsystem_dims)
@@ -282,8 +297,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 if self.target.target_type == "state":
                     states = [
                         Statevector.from_int(0, dims=subsystem_dims).evolve(unitary)
-                        for unitary in qubitized_unitaries
+                        for unitary in unitaries
                     ]
+
                     density_matrix = DensityMatrix(np.mean(states, axis=0))
                     if self.target.n_qubits != density_matrix.num_qubits:
                         states = [
