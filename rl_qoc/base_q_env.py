@@ -9,6 +9,7 @@ Last updated: 16/02/2024
 
 from __future__ import annotations
 
+import math
 import time
 from abc import ABC, abstractmethod
 
@@ -17,7 +18,7 @@ import json
 import signal
 from dataclasses import asdict, dataclass
 from itertools import product
-from typing import Optional, List, Callable, Any, Tuple
+from typing import Optional, List, Callable, Any, Tuple, Literal
 
 from gymnasium import Env
 import numpy as np
@@ -41,6 +42,7 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
 )
+from qiskit.quantum_info import random_unitary
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.states.measures import state_fidelity
@@ -352,6 +354,7 @@ class GateTarget(BaseTarget):
         target_op: Optional[Gate | QuantumCircuit] = None,
         tgt_register: Optional[QuantumRegister] = None,
         layout: Optional[Layout] = None,
+        input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4",
     ):
         """
         Initialize the gate target for the quantum environment
@@ -361,6 +364,7 @@ class GateTarget(BaseTarget):
         :param target_op: Element to be repeated in the calibration (default is the gate to be calibrated)
         :param tgt_register: Specify target QuantumRegister if already declared
         :param layout: Specify layout if already declared
+        :param input_states_choice: Type of input states to be used for the calibration
         """
         self.gate = gate
         if target_op is not None:
@@ -375,16 +379,31 @@ class GateTarget(BaseTarget):
             target_op.append(gate, list(range(gate.num_qubits)))
         self._target_op: QuantumCircuit = target_op
         self._n_reps = n_reps
+        n_qubits = self._target_op.num_qubits
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits,
             "gate",
             tgt_register,
             layout,
         )
-        input_circuits = [
-            PauliPreparationBasis().circuit(s)
-            for s in product(range(4), repeat=self._target_op.num_qubits)
-        ]
+        if input_states_choice == "pauli4":
+            input_circuits = [
+                PauliPreparationBasis().circuit(s)
+                for s in product(range(4), repeat=n_qubits)
+            ]
+        elif input_states_choice == "pauli6":
+            input_circuits = [
+                Pauli6PreparationBasis().circuit(s)
+                for s in product(range(6), repeat=n_qubits)
+            ]
+        else:  # 2-design
+
+            d = 2**n_qubits
+            unitaries = [random_unitary(d) for _ in range(4**n_qubits)]
+            circuits = [QuantumCircuit(n_qubits) for _ in range(4**n_qubits)]
+            for circ, unitary in zip(circuits, unitaries):
+                circ.unitary(unitary, range(n_qubits))
+            input_circuits = circuits
 
         self.input_states = [
             InputState(
@@ -395,7 +414,7 @@ class GateTarget(BaseTarget):
             )
             for circ in input_circuits
         ]
-        if self._target_op.num_qubits <= 3:
+        if n_qubits <= 3:
             self.Chi = _calculate_chi_target(Operator(self._target_op).power(n_reps))
         else:
             self.Chi = None
@@ -656,6 +675,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 f"Reward method {self.config.reward_method} not implemented. Only "
                 f"{list(self._reward_methods.keys())} are supported."
             )
+
         self.n_shots = training_config.n_shots
         self.n_reps = training_config.n_reps
         self.sampling_Pauli_space = training_config.sampling_paulis
@@ -1165,9 +1185,9 @@ class BaseQuantumEnvironment(ABC, Env):
                     prep_circuit, ref_obs, ref_params, ref_precision = pubs[
                         pub_ref_index
                     ]
-                    ref_shots = 1 / ref_precision**2
+                    ref_shots = int(math.ceil(1.0 / ref_precision**2))
                     new_precision = min(ref_precision, 1 / np.sqrt(dedicated_shots))
-                    new_shots = 1 / new_precision**2
+                    new_shots = int(math.ceil(1.0 / new_precision**2))
                     new_pub = (
                         prep_circuit,
                         ref_obs + parity * obs.apply_layout(prep_circuit.layout),
@@ -1209,16 +1229,12 @@ class BaseQuantumEnvironment(ABC, Env):
         circuit_ref = self.baseline_circuits[self.trunc_index]
         layout = self.layout
 
-        input_circuits = [
-            Pauli6PreparationBasis().circuit(s)
-            for s in product(range(6), repeat=circuit.num_qubits)
-        ]
         # samples, shots = np.unique(
         #     np.random.choice(len(input_circuits), self.sampling_Pauli_space),
         #     return_counts=True,
         # )
         # for sample, shot in zip(samples, shots):
-        for sample in range(len(input_circuits)):
+        for sample in range(len(self.target.input_states)):
             run_qc = QuantumCircuit.copy_empty_like(
                 circuit, name="cafe_circ"
             )  # Circuit with custom target gate
@@ -1228,7 +1244,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
             for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
                 # Bind input states to the circuits
-                qc.compose(input_circuits[sample], inplace=True)
+                qc.compose(self.target.input_states[sample].circuit, inplace=True)
                 qc.barrier()
                 for _ in range(
                     self.n_reps
@@ -1659,7 +1675,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 {
                     param: action
                     for param, action in zip(self.parameters, self._optimal_action)
-                }
+                },
+                inplace=False,
             )
             duration = schedule_.duration
             if isinstance(self.backend, DynamicsBackend):

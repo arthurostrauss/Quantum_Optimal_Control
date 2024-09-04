@@ -98,7 +98,11 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             target: GateTarget or StateTarget object
         """
         if "gate" in self.config.target:
-            target = GateTarget(n_reps=self.config.n_reps, **self.config.target)
+            target = GateTarget(
+                n_reps=self.config.n_reps,
+                **self.config.target,
+                **self.config.reward_config.reward_args,
+            )
         else:
             target = StateTarget(**self.config.target)
 

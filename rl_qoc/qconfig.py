@@ -143,6 +143,10 @@ class RewardConfig:
         else:
             self.dfe = False
 
+    @property
+    def reward_args(self):
+        return
+
 
 @dataclass
 class FidelityConfig(RewardConfig):
@@ -171,6 +175,10 @@ class ChannelConfig(RewardConfig):
     reward_method: Literal["channel"] = field(default="channel", init=False)
     num_eigenstates_per_pauli: int = 1
 
+    @property
+    def reward_args(self):
+        return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli}
+
 
 @dataclass
 class XEBConfig(RewardConfig):
@@ -188,7 +196,11 @@ class CAFEConfig(RewardConfig):
     """
 
     reward_method: Literal["cafe"] = field(default="cafe", init=False)
-    input_states_choice: str = "all"
+    input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
+
+    @property
+    def reward_args(self):
+        return {"input_states_choice": self.input_states_choice}
 
 
 @dataclass
