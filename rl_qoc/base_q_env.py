@@ -1603,14 +1603,16 @@ class BaseQuantumEnvironment(ABC, Env):
             "gate"
             if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
             else "state"
-        )
+        )  # Fidelity type to return (gate or state fidelity metric)
         returned_fidelities = []
         subsystem_dims = list(
             filter(lambda x: x > 1, self.backend.options.subsystem_dims)
-        )
-        n_benchmarks = 1
+        )  # Filter out qubits with dimension 1 (trivial dimension stated for DynamicsBackend)
+        n_benchmarks = 1  # Number of benchmarks to run (1 if no n_reps, 2 if n_reps > 1, to benchmark both qc and qc_nreps)
         qc_nreps = None
-        if self.n_reps > 1 and isinstance(self.target, GateTarget):
+        if self.n_reps > 1 and isinstance(
+            self.target, GateTarget
+        ):  # No need to benchmark n_reps for state targets
             qc_nreps = qc.copy("qc_nreps")
             for _ in range(self.n_reps - 1):
                 qc_nreps.compose(qc, inplace=True)
@@ -1626,8 +1628,10 @@ class BaseQuantumEnvironment(ABC, Env):
         if isinstance(self.backend.options.solver, (JaxSolver, JaxSolverV2)):
             # TODO: Handle this case
             raise ValueError("Pulse simulation is not supported with JAX solvers")
-        else:
-            if self.config.reward_method == "fidelity":
+        else:  # Standard Dynamics simulation
+            if (
+                self.config.reward_method == "fidelity"
+            ):  # Benchmark all actions in the batch
                 circuits = [qc.assign_parameters(p) for p in params]
                 circuits_n_reps = (
                     [qc_nreps.assign_parameters(p) for p in params]
@@ -1635,7 +1639,7 @@ class BaseQuantumEnvironment(ABC, Env):
                     else []
                 )
                 data_length = self.batch_size
-            else:
+            else:  # Benchmark only the mean action (policy mean parameter)
                 circuits = [qc.assign_parameters(self.mean_action)]
                 circuits_n_reps = (
                     [qc_nreps.assign_parameters(self.mean_action)]
@@ -1644,23 +1648,28 @@ class BaseQuantumEnvironment(ABC, Env):
                 )
                 data_length = 1
 
-            y0_list = [y0_state] * n_benchmarks * data_length
+            y0_list = (
+                [y0_state] * n_benchmarks * data_length
+            )  # Initial state for each benchmark
             circuits_list = circuits + circuits_n_reps
-            if qc.num_qubits < 3 and self.target.target_type == "gate":
+            if qc.num_qubits < 3 and isinstance(
+                self.target, GateTarget
+            ):  # Benchmark channel only for 1-2 qubits
                 y0_list += [y0_gate] * n_benchmarks * data_length
                 circuits_list += circuits + circuits_n_reps
-                n_benchmarks *= 2
-            # Simulate circuits
+                n_benchmarks *= (
+                    2  # Double the number of benchmarks to include channel fidelity
+                )
+            # Simulate all circuits
             results = self.backend.solve(circuits_list, y0=y0_list)
 
         output_data = [result.y[-1] for result in results]
-        # Reshape data to isolate circuits outputs (Should filter by circuit and by benchmark type, i.e. state or operator)
+        # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
         output_data = [
             output_data[i * data_length : (i + 1) * data_length]
             for i in range(n_benchmarks)
         ]
 
-        # TODO: Simplify if self.n_reps is 1
         if self.n_reps > 1:  # Benchmark both qc and qc_nreps
             circ_list = [qc, qc_nreps, qc, qc_nreps]
             fid_arrays = [
@@ -1677,8 +1686,12 @@ class BaseQuantumEnvironment(ABC, Env):
             n_reps = 1 if "nreps" not in circ.name else self.n_reps
 
             if isinstance(data[0], (Statevector, DensityMatrix)):
-                data = [projected_state(state, subsystem_dims) for state in data]
-                if self.target.n_qubits != len(subsystem_dims):
+                data = [
+                    projected_state(state, subsystem_dims) for state in data
+                ]  # Project state to qubit subspace
+                if self.target.n_qubits != len(
+                    subsystem_dims
+                ):  # If state has less qubits than the backend, trace out the rest
                     data = [
                         partial_trace(
                             state,
@@ -1690,9 +1703,10 @@ class BaseQuantumEnvironment(ABC, Env):
                         )
                         for state in data
                     ]
-            elif isinstance(data[0], Operator):
+            elif isinstance(data[0], Operator):  # Project channel to qubit subspace
                 data = [qubit_projection(op, subsystem_dims) for op in data]
 
+            # Compute fidelities (type of input automatically detected and handled -> state -> state fidelity, channel -> gate fidelity)
             fidelities = [
                 (
                     self.target.fidelity(output, n_reps)
@@ -1702,7 +1716,9 @@ class BaseQuantumEnvironment(ABC, Env):
                 for output in data
             ]
 
-            if returned_fidelity_type == "gate":
+            if (
+                returned_fidelity_type == "gate"
+            ):  # Optimize gate fidelity by finding optimal Z-rotations before and after gate
                 fidelities = self._handle_virtual_rotations(
                     data, fidelities, subsystem_dims, n_reps
                 )
@@ -1715,7 +1731,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     def _handle_virtual_rotations(self, operations, fidelities, subsystem_dims, n_reps):
         """
-        Handle virtual rotations for the fidelity calculation
+        Optimize gate fidelity by finding optimal Z-rotations before and after gate
         """
         best_op = operations[np.argmax(fidelities)]
         res = get_optimal_z_rotation(
@@ -1725,6 +1741,14 @@ class BaseQuantumEnvironment(ABC, Env):
         fidelities = [self.target.fidelity(op, n_reps) for op in rotated_unitaries]
 
         return fidelities
+
+    def update_gate_calibration(self):
+        """
+        Update gate calibration parameters
+        """
+        raise NotImplementedError(
+            "Gate calibration not implemented for this environment"
+        )
 
     def modify_environment_params(self, **kwargs):
         """
@@ -1824,50 +1848,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self.circuit_fidelity_history.clear()
         self.density_matrix_history.clear()
 
-    def update_gate_calibration(self):
-        """
-        Update backend target with the optimal action found during training
-
-        :return: Pulse calibration for the target gate
-        """
-        if not isinstance(self.target, GateTarget):
-            raise ValueError("Target type should be a gate for gate calibration task.")
-
-        if self.abstraction_level == "pulse":
-            schedule_ = schedule(self.circuits[0], self.backend).assign_parameters(
-                {
-                    param: action
-                    for param, action in zip(self.parameters, self._optimal_action)
-                },
-                inplace=False,
-            )
-            duration = schedule_.duration
-            if isinstance(self.backend, DynamicsBackend):
-                error = 1.0
-                error -= simulate_pulse_schedule(
-                    self.backend,
-                    schedule_,
-                    target_unitary=Operator(self.target.gate),
-                    target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
-                )["gate_fidelity"]["optimal"]
-
-            else:
-                error = 1.0 - np.max(self.avg_fidelity_history)
-            instruction_prop = InstructionProperties(duration, error, schedule_)
-            self.backend.target.update_instruction_properties(
-                self.target.gate.name,
-                tuple(self.physical_target_qubits),
-                instruction_prop,
-            )
-
-            return self.backend.target.get_calibration(
-                self.target.gate.name, tuple(self.physical_target_qubits)
-            )
-        else:
-            return self.circuits[0].assign_parameters(
-                {self.parameters[0]: self._optimal_action}
-            )
-
     @property
     def benchmark_cycle(self) -> int:
         """
@@ -1884,7 +1864,7 @@ class BaseQuantumEnvironment(ABC, Env):
         :return:
         """
         assert step >= 0, "Cycle needs to be a positive integer"
-        self._benchmark_cycle = step
+        self.config.benchmark_cycle = step
 
     def do_benchmark(self) -> bool:
         """

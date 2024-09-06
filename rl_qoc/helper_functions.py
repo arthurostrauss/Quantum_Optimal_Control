@@ -763,27 +763,33 @@ def simulate_pulse_schedule(
         output_dims=tuple(subsystem_dims),
     )
     projected_unitary = qubit_projection(output_unitary, subsystem_dims)
+
     initial_state = (
-        Statevector.from_int(0, subsystem_dims)
+        DensityMatrix.from_int(0, subsystem_dims)
         if initial_state is None
         else initial_state
     )
+
     final_state = initial_state.evolve(output_op)
     projected_statevec = projected_state(final_state, subsystem_dims, normalize)
     rotated_state = None
 
     final_results = {
         "unitary": output_op,
-        "statevector": final_state,
+        "state": final_state,
         "projected_unitary": projected_unitary,
-        "projected_statevector": projected_statevec,
+        "projected_state": projected_statevec,
     }
     if target_unitary is not None:
         optimal_rots = get_optimal_z_rotation(
             projected_unitary, target_unitary, len(subsystem_dims)
         )
         rotated_unitary = rotate_unitary(optimal_rots.x, projected_unitary)
-        rotated_state = initial_state.evolve(Operator(rotated_unitary))
+        try:
+            rotated_state = initial_state.evolve(rotated_unitary)
+        except QiskitError:
+            pass
+
         gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
         optimal_gate_fid = average_gate_fidelity(rotated_unitary, target_unitary)
         final_results["gate_fidelity"] = {
@@ -804,6 +810,45 @@ def simulate_pulse_schedule(
             "rotated_state": rotated_state,
         }
     return final_results
+
+
+def density_matrix_to_statevector(density_matrix: DensityMatrix):
+    """
+    Convert a density matrix to a statevector (if the density matrix represents a pure state)
+
+    Args:
+        density_matrix: DensityMatrix object representing the pure state
+
+    Returns:
+        Statevector: Statevector object representing the pure state
+
+    Raises:
+        ValueError: If the density matrix does not represent a pure state
+    """
+    # Check if the state is pure by examining if Tr(rho^2) is 1
+    if np.isclose(density_matrix.purity(), 1):
+        # Eigenvalue decomposition
+        eigenvalues, eigenvectors = np.linalg.eigh(density_matrix.data)
+
+        # Find the eigenvector corresponding to the eigenvalue 1 (pure state)
+        # The statevector is the eigenvector corresponding to the maximum eigenvalue
+        max_eigenvalue_index = np.argmax(eigenvalues)
+        statevector = eigenvectors[:, max_eigenvalue_index]
+
+        # Return the Statevector object
+        return Statevector(statevector)
+    else:
+        raise ValueError("The density matrix does not represent a pure state.")
+
+
+# Example: A pure state density matrix
+psi = Statevector([1, 0])  # Example: |0> state
+rho = DensityMatrix(psi)
+
+# Convert back to statevector
+statevector = density_matrix_to_statevector(rho)
+
+print("Statevector:", statevector)
 
 
 def run_jobs(session: Session, circuits: List[QuantumCircuit], **run_options):
@@ -1411,7 +1456,7 @@ def qubit_projection(
     Project unitary on qubit space
 
     Args:
-        unitary: Unitary, given as numpy array
+        unitary: Unitary, given as numpy array or Operator object
         subsystem_dims: Subsystem dimensions
 
     Returns: unitary projected on qubit space as a Qiskit Operator object
@@ -1432,7 +1477,11 @@ def qubit_projection(
         SuperOp(proj) @ SuperOp(unitary_op) @ SuperOp(proj.adjoint())
     )  # Projected unitary (in qubit space)
     # (Note that is actually not unitary at this point, it's a Channel on the multi-qubit system)
-    return SuperOp(qubitized_op)
+    return SuperOp(
+        qubitized_op,
+        input_dims=(2,) * len(subsystem_dims),
+        output_dims=(2,) * len(subsystem_dims),
+    )
 
 
 def rotate_unitary(x, op: SuperOp | Operator) -> SuperOp:

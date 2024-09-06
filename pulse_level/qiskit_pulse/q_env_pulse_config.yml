@@ -61,10 +61,10 @@ ENV: # Environment configuration
   ACTION_SPACE:
     #    LOW: [ -1., -3.14, -1., -3.14 ]
     #    HIGH: [ 1., 3.14, 1., 3.14 ]
-    LOW: [ -1. ]
-    HIGH: [ 1. ]
+    LOW: [ 0. ]
+    HIGH: [ 0.25 ]
   REWARD:
-    REWARD_METHOD: "fidelity" # Choose between "fidelity", "state", "channel", "xeb", "cafe"
+    REWARD_METHOD: "state" # Choose between "fidelity", "state", "channel", "xeb", "cafe"
   REWARD_PARAMS: # All unused parameters should be set to null (only assign values to parameters used by chosen reward method)
     USE_INTERLEAVED: null # Whether to use interleaved RB (target must be Clifford) for ORBIT reward
     NUM_EIGENSTATES_PER_PAULI: null # Number of eigenstates per Pauli to consider for channel fidelity reward
