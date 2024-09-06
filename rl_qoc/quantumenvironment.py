@@ -4,7 +4,7 @@ quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
-Last updated: 20/06/2024
+Last updated: 05/09/2024
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from typing import List, Any, SupportsFloat, Tuple
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule, transpile
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -22,31 +21,22 @@ from qiskit.circuit import (
     ParameterVector,
 )
 
-from qiskit.quantum_info import partial_trace
-
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import Operator
-from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity
 from qiskit.quantum_info.states import DensityMatrix, Statevector
-from qiskit_aer import AerSimulator
-from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit_aer.noise import NoiseModel
 
-# Qiskit dynamics for pulse simulation (& benchmarking)
-from qiskit_dynamics import DynamicsBackend
-
-from rl_qoc.base_q_env import (
+from .base_q_env import (
     BaseQuantumEnvironment,
     GateTarget,
     StateTarget,
 )
-from rl_qoc.helper_functions import (
+from .helper_functions import (
     qubit_projection,
     rotate_unitary,
     get_optimal_z_rotation,
     fidelity_from_tomography,
 )
-from rl_qoc.qconfig import QEnvConfig
+from .qconfig import QEnvConfig
 
 
 class QuantumEnvironment(BaseQuantumEnvironment):
@@ -247,114 +237,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
             print("Starting simulation benchmark...")
             if self.abstraction_level == "circuit":  # Circuit simulation
-                return self.simulate_circuit(qc, params)
+                fids = self.simulate_circuit(qc, params)
             else:  # Pulse simulation
-                assert isinstance(
-                    self.backend, DynamicsBackend
-                ), "Pulse simulation not yet implemented for this backend"
-                subsystem_dims = list(
-                    filter(lambda x: x > 1, self.backend.options.subsystem_dims)
-                )
-
-                if hasattr(self.backend.options.solver, "unitary_solve"):
-                    # Jax compatible pulse simulation
-                    unitaries = self.backend.options.solver.unitary_solve(params)[
-                        :, 1, :, :
-                    ]
-                else:
-                    if self.config.reward_method == "fidelity":
-                        qc_list = [
-                            qc.assign_parameters(angle_set) for angle_set in params
-                        ]
-                        scheds = schedule(qc_list, backend=self.backend)
-                        dt = self.backend.dt
-                        durations = [[0, sched.duration * dt] for sched in scheds]
-                        results = self.backend.solve(
-                            scheds,
-                            durations,
-                            y0=np.eye(np.prod(subsystem_dims)),
-                            convert_results=False,
-                        )
-                        unitaries = np.array([result.y[-1] for result in results])
-                    else:
-                        circ = qc.assign_parameters(self.mean_action)
-                        sched = schedule(circ, backend=self.backend)
-                        dt = self.backend.dt
-                        duration = sched.duration
-                        result = self.backend.solve(
-                            sched,
-                            [0, duration * dt],
-                            y0=np.eye(np.prod(subsystem_dims)),
-                            convert_results=False,
-                        )
-                        unitaries = np.array([result[0].y[-1]])
-
-                qubitized_unitaries = [
-                    qubit_projection(unitaries[i, :, :], subsystem_dims)
-                    for i in range(self.batch_size)
-                ]
-
-                if self.target.target_type == "state":
-                    states = [
-                        Statevector.from_int(0, dims=subsystem_dims).evolve(unitary)
-                        for unitary in unitaries
-                    ]
-
-                    density_matrix = DensityMatrix(np.mean(states, axis=0))
-                    if self.target.n_qubits != density_matrix.num_qubits:
-                        states = [
-                            partial_trace(
-                                state,
-                                [
-                                    qubit
-                                    for qubit in range(state.num_qubits)
-                                    if qubit not in self.target.physical_qubits
-                                ],
-                            )
-                            for state in states
-                        ]
-                        density_matrix = partial_trace(
-                            density_matrix,
-                            [
-                                qubit
-                                for qubit in list(range(density_matrix.num_qubits))
-                                if qubit not in self.target.physical_qubits
-                            ],
-                        )
-
-                    self.circuit_fidelity_history.append(
-                        self.target.fidelity(density_matrix)
-                    )
-                    fids = [self.target.fidelity(state) for state in states]
-
-                else:  # Gate calibration task
-                    if self.target.n_qubits < len(subsystem_dims):
-                        qc = QuantumCircuit(len(subsystem_dims))
-                        qc.append(self.target.gate, self.target.physical_qubits)
-                        target = Operator(qc)
-                    else:
-                        target = Operator(self.target._target_op)
-
-                    fids = [
-                        average_gate_fidelity(unitary, target)
-                        for unitary in qubitized_unitaries
-                    ]
-                    best_unitary = qubitized_unitaries[np.argmax(fids)]
-                    res = get_optimal_z_rotation(
-                        best_unitary, target, len(subsystem_dims)
-                    )
-                    rotated_unitaries = [
-                        rotate_unitary(res.x, unitary)
-                        for unitary in qubitized_unitaries
-                    ]
-                    fids = [
-                        average_gate_fidelity(unitary, target)
-                        for unitary in rotated_unitaries
-                    ]
-                    avg_fid_batch = np.mean(fids)
-
-                    self.avg_fidelity_history.append(avg_fid_batch)
-
+                fids = self.simulate_pulse_circuit(qc, params)
             if self.target.target_type == "state":
                 print("State fidelity:", self.circuit_fidelity_history[-1])
             else:

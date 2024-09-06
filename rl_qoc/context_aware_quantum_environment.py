@@ -36,13 +36,13 @@ from qiskit_aer.noise import NoiseModel
 from qiskit_dynamics import DynamicsBackend
 from qiskit_ibm_runtime import EstimatorV2
 
-from rl_qoc.helper_functions import (
-    projected_statevector,
+from .helper_functions import (
+    projected_state,
     get_instruction_timings,
     retrieve_neighbor_qubits,
 )
-from rl_qoc.qconfig import QEnvConfig
-from rl_qoc.base_q_env import (
+from .qconfig import QEnvConfig
+from .base_q_env import (
     GateTarget,
     BaseQuantumEnvironment,
     QiskitBackendInfo,

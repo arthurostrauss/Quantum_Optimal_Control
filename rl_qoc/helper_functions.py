@@ -36,6 +36,7 @@ from qiskit.quantum_info import (
     DensityMatrix,
     average_gate_fidelity,
     state_fidelity,
+    SuperOp,
 )
 from qiskit.transpiler import (
     CouplingMap,
@@ -94,7 +95,7 @@ import numpy as np
 from gymnasium.spaces import Box
 import optuna
 
-from scipy.optimize import minimize
+from scipy.optimize import minimize, OptimizeResult
 
 import keyword
 import re
@@ -768,7 +769,7 @@ def simulate_pulse_schedule(
         else initial_state
     )
     final_state = initial_state.evolve(output_op)
-    projected_statevec = projected_statevector(final_state, subsystem_dims, normalize)
+    projected_statevec = projected_state(final_state, subsystem_dims, normalize)
     rotated_state = None
 
     final_results = {
@@ -794,7 +795,9 @@ def simulate_pulse_schedule(
 
     if target_state is not None:
         state_fid1 = state_fidelity(projected_statevec, target_state, validate=False)
-        state_fid2 = state_fidelity(rotated_state, target_state, validate=False)
+        state_fid2 = None
+        if rotated_state is not None:
+            state_fid2 = state_fidelity(rotated_state, target_state, validate=False)
         final_results["state_fidelity"] = {
             "raw": state_fid1,
             "optimal": state_fid2,
@@ -1324,7 +1327,7 @@ def custom_dynamics_from_backend(
     )
 
 
-def build_qubit_space_projector(initial_subsystem_dims: list):
+def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
     """
     Build projector on qubit space from initial subsystem dimensions
 
@@ -1334,10 +1337,12 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
     Returns: Projector on qubit space as a Qiskit Operator object
     """
     total_dim = np.prod(initial_subsystem_dims)
+    output_dims = (2,) * len(initial_subsystem_dims)
+    total_qubit_dim = np.prod(output_dims)
     projector = Operator(
-        np.zeros((total_dim, total_dim), dtype=np.complex128),
+        np.zeros((total_qubit_dim, total_dim), dtype=np.complex128),
         input_dims=tuple(initial_subsystem_dims),
-        output_dims=tuple(initial_subsystem_dims),
+        output_dims=output_dims,
     )  # Projector initialized in the qudit space
     for i in range(
         total_dim
@@ -1349,8 +1354,12 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
             if all(
                 c in "01" for c in key
             ):  # Check if the statevector is in the qubit space
-                projector += (
-                    s.to_operator()
+                s_qubit = Statevector.from_label(key)
+                projector += Operator(
+                    s_qubit.data.reshape(total_qubit_dim, 1)
+                    @ s.data.reshape(total_dim, 1).conj().T,
+                    input_dims=tuple(initial_subsystem_dims),
+                    output_dims=output_dims,
                 )  # Add the statevector to the projector if it is in the qubit space
                 break
             else:
@@ -1358,43 +1367,46 @@ def build_qubit_space_projector(initial_subsystem_dims: list):
     return projector
 
 
-def projected_statevector(
-    statevector: np.array, subsystem_dims: List[int], normalize: bool = True
-):
+def projected_state(
+    state: np.ndarray | Statevector | DensityMatrix,
+    subsystem_dims: List[int],
+    normalize: bool = True,
+) -> Statevector | DensityMatrix:
     """
     Project statevector on qubit space
 
     Args:
-        statevector: Statevector, given as numpy array
+        state: State, given as numpy array or QuantumState object
         subsystem_dims: Subsystem dimensions
         normalize: Normalize statevector
     """
+    if not isinstance(state, (np.ndarray, QuantumState)):
+        raise TypeError("State must be either numpy array or QuantumState object")
     proj = build_qubit_space_projector(
         subsystem_dims
     )  # Projector on qubit space (in qudit space)
-    new_dim = 2 ** len(subsystem_dims)  # Dimension of the qubit space
-    qubitized_statevector = np.zeros(new_dim, dtype=np.complex128)
-    qubit_count = 0
-    new_statevector = Statevector(statevector, dims=subsystem_dims).evolve(
-        proj
-    )  # Projected statevec (in qudit space)
-    for i in range(np.prod(subsystem_dims)):
-        if (
-            new_statevector.data[i] != 0
-        ):  # All zeros components correspond to qudit states (due to projection)
-            qubitized_statevector[qubit_count] = new_statevector.data[i]
-            qubit_count += 1
+    if isinstance(state, np.ndarray):
+        state_type = DensityMatrix if state.ndim == 2 else Statevector
+        output_state: Statevector | DensityMatrix = state_type(state)
+    else:
+        output_state: Statevector | DensityMatrix = state
+    qubitized_state = output_state.evolve(proj)
+
     if (
         normalize
-    ):  # Normalize the projected statevector (which is for now unnormalized due to selection of components)
-        qubitized_statevector = qubitized_statevector / np.linalg.norm(
-            qubitized_statevector
+    ) and qubitized_state.trace() != 0:  # Normalize the projected state (which is for now unnormalized due to selection of components)
+        qubitized_state = (
+            qubitized_state / qubitized_state.trace()
+            if isinstance(qubitized_state, DensityMatrix)
+            else qubitized_state / np.linalg.norm(qubitized_state.data)
         )
-    qubitized_statevector = Statevector(qubitized_statevector)
-    return qubitized_statevector
+
+    return qubitized_state
 
 
-def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
+def qubit_projection(
+    unitary: np.array | Operator, subsystem_dims: List[int]
+) -> SuperOp:
     """
     Project unitary on qubit space
 
@@ -1408,48 +1420,32 @@ def qubit_projection(unitary: np.array, subsystem_dims: List[int]):
     proj = build_qubit_space_projector(
         subsystem_dims
     )  # Projector on qubit space (in qudit space)
-    new_dim = 2 ** len(subsystem_dims)  # Dimension of the qubit space
-    unitary_op = Operator(
-        unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
+    unitary_op = (
+        Operator(
+            unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
+        )
+        if isinstance(unitary, np.ndarray)
+        else unitary
     )  # Unitary operator (in qudit space)
-    qubitized_unitary = np.zeros((new_dim, new_dim), dtype=np.complex128)
-    qubit_count1 = qubit_count2 = 0
-    new_unitary = proj @ unitary_op @ proj  # Projected unitary (in qudit space)
 
-    for i in range(
-        np.prod(subsystem_dims)
-    ):  # Select elements in the projection to build a qubitized unitary
-        for j in range(np.prod(subsystem_dims)):
-            if (
-                new_unitary.data[i, j] != 0
-            ):  # All zeros components correspond to qudit states (due to projection)
-                qubitized_unitary[qubit_count1, qubit_count2] = new_unitary.data[
-                    i, j
-                ]  # Fill the qubitized unitary
-                qubit_count2 += 1
-                if (
-                    qubit_count2 == new_dim
-                ):  # Reset qubit_count2 when it reaches the dimension of the qubit space
-                    qubit_count2 = 0
-                    qubit_count1 += 1
-                    break
-    qubitized_unitary = Operator(
-        qubitized_unitary,
-        input_dims=(2,) * len(subsystem_dims),
-        output_dims=(2,) * len(subsystem_dims),
-    )  # Qubitized unitary as a Qiskit Operator object (Note that is actually not unitary at this point, it's a Channel)
-    return qubitized_unitary
+    qubitized_op = (
+        SuperOp(proj) @ SuperOp(unitary_op) @ SuperOp(proj.adjoint())
+    )  # Projected unitary (in qubit space)
+    # (Note that is actually not unitary at this point, it's a Channel on the multi-qubit system)
+    return SuperOp(qubitized_op)
 
 
-def rotate_unitary(x, unitary: Operator):
+def rotate_unitary(x, op: SuperOp | Operator) -> SuperOp:
     """
     Rotate input unitary with virtual Z rotations on all qubits
     x: Rotation parameters
     unitary: Rotated unitary
     """
     assert len(x) % 2 == 0, "Rotation parameters should be a pair"
+    if isinstance(op, Operator):
+        op = SuperOp(op)
     ops = [
-        Operator(RZGate(x[i])) for i in range(len(x))
+        SuperOp(RZGate(x[i])) for i in range(len(x))
     ]  # Virtual Z rotations to be applied on all qubits
     pre_rot, post_rot = (
         ops[0],
@@ -1459,12 +1455,12 @@ def rotate_unitary(x, unitary: Operator):
         pre_rot = pre_rot.tensor(ops[i])
         post_rot = post_rot.expand(ops[-i - 1])
 
-    return pre_rot @ unitary @ post_rot
+    return pre_rot @ op @ post_rot
 
 
 def get_optimal_z_rotation(
-    unitary: Operator, target_gate: Gate | Operator, n_qubits: int
-):
+    unitary: Operator | SuperOp, target_gate: Gate | Operator, n_qubits: int
+) -> OptimizeResult:
     """
     Get optimal Z rotation angles for input unitary to match target gate (minimize gate infidelity)
     Args:
@@ -1521,10 +1517,17 @@ def load_q_env_from_yaml_file(file_path: str):
             "physical_qubits": config["TARGET"]["PHYSICAL_QUBITS"],
         },
     }
-    if "GATE" in config["TARGET"]:
+    if "GATE" in config["TARGET"] and config["TARGET"]["GATE"] is not None:
         params["target"]["gate"] = gate_map()[config["TARGET"]["GATE"].lower()]
     else:
-        params["target"]["state"] = Statevector.from_label(config["TARGET"]["STATE"])
+        try:
+            params["target"]["state"] = Statevector.from_label(
+                config["TARGET"]["STATE"]
+            )
+        except KeyError:
+            raise KeyError(
+                "Target gate or state must be specified in the configuration"
+            )
 
     backend_params = {
         "real_backend": config["BACKEND"]["REAL_BACKEND"],
@@ -1590,7 +1593,13 @@ def get_q_env_config(
     return q_env_config
 
 
-def remove_none_values(dictionary):
+def remove_none_values(dictionary: Dict):
+    """
+    Remove None values from dictionary
+
+    Args:
+        dictionary: Dictionary
+    """
     new_dict = {}
     for k, v in dictionary.items():
         if isinstance(v, dict):

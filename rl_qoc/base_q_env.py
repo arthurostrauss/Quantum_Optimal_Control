@@ -4,7 +4,7 @@ quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
-Last updated: 16/02/2024
+Last updated: 05/09/2024
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
 )
-from qiskit.quantum_info import random_unitary
+from qiskit.quantum_info import random_unitary, partial_trace
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.states.measures import state_fidelity
@@ -80,7 +80,9 @@ from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
 )
 
-from rl_qoc.helper_functions import (
+from .custom_jax_sim import JaxSolver
+from .custom_jax_sim.jax_solver_v2 import JaxSolver as JaxSolverV2
+from .helper_functions import (
     retrieve_primitives,
     handle_session,
     simulate_pulse_schedule,
@@ -88,8 +90,12 @@ from rl_qoc.helper_functions import (
     substitute_target_gate,
     get_hardware_runtime_single_circuit,
     has_noise_model,
+    get_optimal_z_rotation,
+    rotate_unitary,
+    projected_state,
+    qubit_projection,
 )
-from rl_qoc.qconfig import (
+from .qconfig import (
     QiskitConfig,
     QEnvConfig,
     CAFEConfig,
@@ -1589,6 +1595,136 @@ class BaseQuantumEnvironment(ABC, Env):
             raise ValueError(
                 "This method should only be called when the abstraction level is 'pulse'"
             )
+        if not isinstance(self.backend, DynamicsBackend):
+            raise ValueError(
+                f"Pulse simulation requires a DynamicsBackend; got {self.backend}"
+            )
+        returned_fidelity_type = (
+            "gate"
+            if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
+            else "state"
+        )
+        returned_fidelities = []
+        subsystem_dims = list(
+            filter(lambda x: x > 1, self.backend.options.subsystem_dims)
+        )
+        n_benchmarks = 1
+        qc_nreps = None
+        if self.n_reps > 1 and isinstance(self.target, GateTarget):
+            qc_nreps = qc.copy("qc_nreps")
+            for _ in range(self.n_reps - 1):
+                qc_nreps.compose(qc, inplace=True)
+            n_benchmarks *= 2
+
+        y0_gate = Operator(
+            np.eye(np.prod(subsystem_dims)),
+            input_dims=tuple(subsystem_dims),
+            output_dims=tuple(subsystem_dims),
+        )
+        y0_state = Statevector.from_int(0, dims=subsystem_dims)
+
+        if isinstance(self.backend.options.solver, (JaxSolver, JaxSolverV2)):
+            # TODO: Handle this case
+            raise ValueError("Pulse simulation is not supported with JAX solvers")
+        else:
+            if self.config.reward_method == "fidelity":
+                circuits = [qc.assign_parameters(p) for p in params]
+                circuits_n_reps = (
+                    [qc_nreps.assign_parameters(p) for p in params]
+                    if qc_nreps is not None
+                    else []
+                )
+                data_length = self.batch_size
+            else:
+                circuits = [qc.assign_parameters(self.mean_action)]
+                circuits_n_reps = (
+                    [qc_nreps.assign_parameters(self.mean_action)]
+                    if qc_nreps is not None
+                    else []
+                )
+                data_length = 1
+
+            y0_list = [y0_state] * n_benchmarks * data_length
+            circuits_list = circuits + circuits_n_reps
+            if qc.num_qubits < 3 and self.target.target_type == "gate":
+                y0_list += [y0_gate] * n_benchmarks * data_length
+                circuits_list += circuits + circuits_n_reps
+                n_benchmarks *= 2
+            # Simulate circuits
+            results = self.backend.solve(circuits_list, y0=y0_list)
+
+        output_data = [result.y[-1] for result in results]
+        # Reshape data to isolate circuits outputs (Should filter by circuit and by benchmark type, i.e. state or operator)
+        output_data = [
+            output_data[i * data_length : (i + 1) * data_length]
+            for i in range(n_benchmarks)
+        ]
+
+        # TODO: Simplify if self.n_reps is 1
+        if self.n_reps > 1:  # Benchmark both qc and qc_nreps
+            circ_list = [qc, qc_nreps, qc, qc_nreps]
+            fid_arrays = [
+                self.circuit_fidelity_history,
+                self.avg_fidelity_history,
+                self.circuit_fidelity_history_nreps,
+                self.avg_fidelity_history_nreps,
+            ]
+        else:  # Benchmark only qc
+            circ_list = [qc] * 2
+            fid_arrays = [self.circuit_fidelity_history, self.avg_fidelity_history]
+
+        for circ, data, fid_array in zip(circ_list, output_data, fid_arrays):
+            n_reps = 1 if "nreps" not in circ.name else self.n_reps
+
+            if isinstance(data[0], (Statevector, DensityMatrix)):
+                data = [projected_state(state, subsystem_dims) for state in data]
+                if self.target.n_qubits != len(subsystem_dims):
+                    data = [
+                        partial_trace(
+                            state,
+                            [
+                                qubit
+                                for qubit in range(state.num_qubits)
+                                if qubit not in self.target.physical_qubits
+                            ],
+                        )
+                        for state in data
+                    ]
+            elif isinstance(data[0], Operator):
+                data = [qubit_projection(op, subsystem_dims) for op in data]
+
+            fidelities = [
+                (
+                    self.target.fidelity(output, n_reps)
+                    if n_reps > 1
+                    else self.target.fidelity(output)
+                )
+                for output in data
+            ]
+
+            if returned_fidelity_type == "gate":
+                fidelities = self._handle_virtual_rotations(
+                    data, fidelities, subsystem_dims, n_reps
+                )
+                if n_reps == 1:
+                    returned_fidelities = fidelities
+            elif returned_fidelity_type == "state" and n_reps == 1:
+                returned_fidelities = fidelities
+            fid_array.append(np.mean(fidelities))
+        return returned_fidelities
+
+    def _handle_virtual_rotations(self, operations, fidelities, subsystem_dims, n_reps):
+        """
+        Handle virtual rotations for the fidelity calculation
+        """
+        best_op = operations[np.argmax(fidelities)]
+        res = get_optimal_z_rotation(
+            best_op, self.target.target_operator.power(n_reps), len(subsystem_dims)
+        )
+        rotated_unitaries = [rotate_unitary(res.x, op) for op in operations]
+        fidelities = [self.target.fidelity(op, n_reps) for op in rotated_unitaries]
+
+        return fidelities
 
     def modify_environment_params(self, **kwargs):
         """
