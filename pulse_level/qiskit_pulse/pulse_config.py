@@ -51,8 +51,8 @@ def custom_schedule(
     # Here we focus on real time tunable pulse parameters (amp, angle, duration)
 
     ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
-    sq_pulse_features = ["amp", "angle"]  # For single qubit gates
-    sq_name = "x"  # Name of the single qubit gate baseline to pick
+    sq_pulse_features = ["amp"]  # For single qubit gates
+    sq_name = "x"  # Name of the single qubit gate baseline to pick ("x" or "sx")
     keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
     include_baseline = False  # Choose if original calibration shall be included as baseline in parametrization
     include_duration = (
@@ -255,16 +255,16 @@ def get_backend(
         rabi_freqs = [0.22e9, 0.26e9]
         couplings = {(0, 1): 0.002e9}
 
-        # dims = [2]
-        # freqs = [4.86e9]
-        # anharmonicities = [-0.33e9]
-        # rabi_freqs = [0.22e9]
-        # couplings = None
+        dims = [3]
+        freqs = [4.86e9]
+        anharmonicities = [-0.33e9]
+        rabi_freqs = [0.22e9]
+        couplings = None
 
-        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[0]
+        backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
         # backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
         # backend = surface_code_plaquette()[0]
-        _, _ = perform_standard_calibrations(backend, calibration_files)
+        cals, exps = perform_standard_calibrations(backend, calibration_files)
 
     if backend is None:
         warnings.warn("No backend was provided, State vector simulation will be used")
@@ -288,9 +288,10 @@ def get_circuit_context(
     circuit.h(0)
     circuit.cx(0, 1)
 
-    if backend is not None and backend.target.has_calibration("x", (0,)):
+    try:
         circuit = transpile(circuit, backend, initial_layout=initial_layout)
-
+    except Exception as e:
+        pass
     print("Circuit context: ")
     print(circuit)
 
