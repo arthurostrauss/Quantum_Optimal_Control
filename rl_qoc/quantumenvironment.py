@@ -240,6 +240,10 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
         else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
             print("Starting simulation benchmark...")
+            if not self.config.reward_method == "fidelity":
+                params = np.array(
+                    [self.mean_action]
+                )  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":  # Circuit simulation
                 fids = self.simulate_circuit(qc, params)
             else:  # Pulse simulation

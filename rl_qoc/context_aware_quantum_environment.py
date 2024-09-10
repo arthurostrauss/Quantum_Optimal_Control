@@ -455,27 +455,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 raise exc
 
         else:  # Perform simulation at circuit or pulse level
+            print("Starting simulation benchmark...")
+            if not self.config.reward_method == "fidelity":
+                params = np.array(
+                    [self.mean_action]
+                )  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":
-                return self.simulate_circuit(qc, params)
+                fids = self.simulate_circuit(qc, params)
             else:  # Pulse simulation
-                # Calculate circuit fidelity with pulse simulation
-                # if isinstance(self.backend, DynamicsBackend) and isinstance(
-                #         self.backend.options.solver, JaxSolver
-                # ):
-                #     # Jax compatible pulse simulation
-                #
-                #     output_states = np.array(self.backend.options.solver.batched_sims)[
-                #                     :, 1, :
-                #                     ]
-                #
-                #     output_states = [
-                #         projected_statevector(s, self.backend.options.subsystem_dims)
-                #         for s in output_states
-                #     ]
-
-                raise NotImplementedError(
-                    "Pulse simulation not yet implemented for this backend"
-                )
+                fids = self.simulate_pulse_circuit(qc, params)
+            print("Avg gate fidelity:", self.avg_fidelity_history[-1])
+            print("Finished simulation benchmark")
+            return fids
 
     @property
     def parameters(self) -> List[ParameterVector]:

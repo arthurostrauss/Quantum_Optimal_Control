@@ -1501,30 +1501,18 @@ class BaseQuantumEnvironment(ABC, Env):
         if isinstance(self.parameters, ParameterVector):
             parameters = [self.parameters]
             n_custom_instructions = 1
-        else:
+        else:  # List of ParameterVectors
             parameters = self.parameters
             n_custom_instructions = len(self.parameters)
 
-        if (
-            self.config.reward_method == "fidelity"
-        ):  # Return batch of fidelities for each action
-            parameter_binds = [
-                {
-                    parameters[i][j]: params[:, i * self.n_actions + j]
-                    for i in range(n_custom_instructions)
-                    for j in range(self.n_actions)
-                }
-            ]
-            data_length = self.batch_size
-        else:  # Return fidelity for the mean action (policy mean parameter)
-            parameter_binds = [
-                {
-                    parameters[i][j]: [self.mean_action[i * self.n_actions + j]]
-                    for i in range(n_custom_instructions)
-                    for j in range(self.n_actions)
-                }
-            ]
-            data_length = 1
+        parameter_binds = [
+            {
+                parameters[i][j]: params[:, i * self.n_actions + j]
+                for i in range(n_custom_instructions)
+                for j in range(self.n_actions)
+            }
+        ]
+        data_length = len(params)
 
         for circ, method, fid_array in zip(
             [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
@@ -1629,24 +1617,14 @@ class BaseQuantumEnvironment(ABC, Env):
             # TODO: Handle this case
             raise ValueError("Pulse simulation is not supported with JAX solvers")
         else:  # Standard Dynamics simulation
-            if (
-                self.config.reward_method == "fidelity"
-            ):  # Benchmark all actions in the batch
-                circuits = [qc.assign_parameters(p) for p in params]
-                circuits_n_reps = (
-                    [qc_nreps.assign_parameters(p) for p in params]
-                    if qc_nreps is not None
-                    else []
-                )
-                data_length = self.batch_size
-            else:  # Benchmark only the mean action (policy mean parameter)
-                circuits = [qc.assign_parameters(self.mean_action)]
-                circuits_n_reps = (
-                    [qc_nreps.assign_parameters(self.mean_action)]
-                    if qc_nreps is not None
-                    else []
-                )
-                data_length = 1
+
+            circuits = [qc.assign_parameters(p) for p in params]
+            circuits_n_reps = (
+                [qc_nreps.assign_parameters(p) for p in params]
+                if qc_nreps is not None
+                else []
+            )
+            data_length = len(params)
 
             y0_list = (
                 [y0_state] * n_benchmarks * data_length

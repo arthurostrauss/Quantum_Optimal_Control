@@ -841,16 +841,6 @@ def density_matrix_to_statevector(density_matrix: DensityMatrix):
         raise ValueError("The density matrix does not represent a pure state.")
 
 
-# Example: A pure state density matrix
-psi = Statevector([1, 0])  # Example: |0> state
-rho = DensityMatrix(psi)
-
-# Convert back to statevector
-statevector = density_matrix_to_statevector(rho)
-
-print("Statevector:", statevector)
-
-
 def run_jobs(session: Session, circuits: List[QuantumCircuit], **run_options):
     """
     Run batch of Quantum Circuits on provided backend
@@ -1166,10 +1156,7 @@ def select_backend(
 
     if backend is not None:
         if use_dynamics:
-            if solver_options["hmax"] == "auto":
-                solver_options["hmax"] = backend.configuration().dt
-            for key in ["atol", "rtol"]:
-                solver_options[key] = float(solver_options[key])
+            solver_options = convert_solver_options(solver_options)
             assert isinstance(
                 backend, BackendV1
             ), "DynamicsBackend can only be used with BackendV1 instances"
@@ -1184,6 +1171,21 @@ def select_backend(
             )
 
     return backend
+
+
+def convert_solver_options(
+    solver_options: Optional[Dict], dt: Optional[float | int] = None
+) -> Optional[Dict]:
+    """
+    Convert solver options passed from YAML to correct format
+    """
+    if solver_options["hmax"] == "auto" and dt is not None:
+        solver_options["hmax"] = dt
+    if solver_options["hmax"] == "auto" and dt is None:
+        raise ValueError("dt must be specified for hmax='auto'")
+    for key in ["atol", "rtol"]:
+        solver_options[key] = float(solver_options[key])
+    return solver_options
 
 
 def has_noise_model(backend: AerBackend):
@@ -1375,6 +1377,8 @@ def custom_dynamics_from_backend(
 def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
     """
     Build projector on qubit space from initial subsystem dimensions
+    The returned operator is a non-square matrix mapping the qudit space to the qubit space.
+    It can be applied to convert multi-qudit states/unitaries to multi-qubit states/unitaries.
 
     Args:
         initial_subsystem_dims: Initial subsystem dimensions
@@ -1392,20 +1396,18 @@ def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
     for i in range(
         total_dim
     ):  # Loop over all computational basis states in the qudit space
-        s = Statevector.from_int(
-            i, initial_subsystem_dims
-        )  # Statevector initialized in the qudit space
-        for key in s.to_dict().keys():
+        s = Statevector.from_int(i, initial_subsystem_dims)  # Computational qudit state
+        for key in s.to_dict().keys():  # Loop over all computational basis states
             if all(
                 c in "01" for c in key
-            ):  # Check if the statevector is in the qubit space
-                s_qubit = Statevector.from_label(key)
+            ):  # Check if basis state is in the qubit space
+                s_qubit = Statevector.from_label(key)  # Computational qubit state
                 projector += Operator(
                     s_qubit.data.reshape(total_qubit_dim, 1)
                     @ s.data.reshape(total_dim, 1).conj().T,
                     input_dims=tuple(initial_subsystem_dims),
                     output_dims=output_dims,
-                )  # Add the statevector to the projector if it is in the qubit space
+                )  # Add |s_qubit><s_qudit| to projector
                 break
             else:
                 continue
@@ -1451,7 +1453,7 @@ def projected_state(
 
 def qubit_projection(
     unitary: np.array | Operator, subsystem_dims: List[int]
-) -> SuperOp:
+) -> Operator:
     """
     Project unitary on qubit space
 
@@ -1474,27 +1476,21 @@ def qubit_projection(
     )  # Unitary operator (in qudit space)
 
     qubitized_op = (
-        SuperOp(proj) @ SuperOp(unitary_op) @ SuperOp(proj.adjoint())
+        proj @ unitary_op @ proj.adjoint()
     )  # Projected unitary (in qubit space)
     # (Note that is actually not unitary at this point, it's a Channel on the multi-qubit system)
-    return SuperOp(
-        qubitized_op,
-        input_dims=(2,) * len(subsystem_dims),
-        output_dims=(2,) * len(subsystem_dims),
-    )
+    return qubitized_op
 
 
-def rotate_unitary(x, op: SuperOp | Operator) -> SuperOp:
+def rotate_unitary(x, op: Operator) -> Operator:
     """
     Rotate input unitary with virtual Z rotations on all qubits
     x: Rotation parameters
     unitary: Rotated unitary
     """
     assert len(x) % 2 == 0, "Rotation parameters should be a pair"
-    if isinstance(op, Operator):
-        op = SuperOp(op)
     ops = [
-        SuperOp(RZGate(x[i])) for i in range(len(x))
+        Operator(RZGate(x[i])) for i in range(len(x))
     ]  # Virtual Z rotations to be applied on all qubits
     pre_rot, post_rot = (
         ops[0],
@@ -1508,7 +1504,7 @@ def rotate_unitary(x, op: SuperOp | Operator) -> SuperOp:
 
 
 def get_optimal_z_rotation(
-    unitary: Operator | SuperOp, target_gate: Gate | Operator, n_qubits: int
+    unitary: Operator, target_gate: Gate | Operator, n_qubits: int
 ) -> OptimizeResult:
     """
     Get optimal Z rotation angles for input unitary to match target gate (minimize gate infidelity)
