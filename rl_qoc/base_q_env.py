@@ -1574,10 +1574,19 @@ class BaseQuantumEnvironment(ABC, Env):
         else:
             raise NotImplementedError("Channel estimator not yet implemented")
 
-    def simulate_pulse_circuit(self, qc: QuantumCircuit, params: np.array):
+    def simulate_pulse_circuit(
+        self,
+        qc: QuantumCircuit,
+        params: Optional[np.array] = None,
+        update_env_history: bool = True,
+    ) -> List[float]:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         This method should be called only when the abstraction level is "pulse"
+
+        :param qc: QuantumCircuit to execute on quantum system
+        :param params: List of Action vectors to execute on quantum system
+        :param update_env_history: Boolean to update the environment history
         """
         if self.abstraction_level != "pulse":
             raise ValueError(
@@ -1617,14 +1626,23 @@ class BaseQuantumEnvironment(ABC, Env):
             # TODO: Handle this case
             raise ValueError("Pulse simulation is not supported with JAX solvers")
         else:  # Standard Dynamics simulation
+            if params is None:
+                circuits = [qc]
+                circuits_n_reps = [qc_nreps] if qc_nreps is not None else []
+                data_length = 1
 
-            circuits = [qc.assign_parameters(p) for p in params]
-            circuits_n_reps = (
-                [qc_nreps.assign_parameters(p) for p in params]
-                if qc_nreps is not None
-                else []
-            )
-            data_length = len(params)
+            else:
+                if not isinstance(params, np.ndarray):
+                    params = np.array(params)
+                if len(params.shape) == 1:
+                    params = np.expand_dims(params, axis=0)
+                circuits = [qc.assign_parameters(p) for p in params]
+                circuits_n_reps = (
+                    [qc_nreps.assign_parameters(p) for p in params]
+                    if qc_nreps is not None
+                    else []
+                )
+                data_length = len(params)
 
             y0_list = (
                 [y0_state] * n_benchmarks * data_length
@@ -1704,7 +1722,8 @@ class BaseQuantumEnvironment(ABC, Env):
                     returned_fidelities = fidelities
             elif returned_fidelity_type == "state" and n_reps == 1:
                 returned_fidelities = fidelities
-            fid_array.append(np.mean(fidelities))
+            if update_env_history:
+                fid_array.append(np.mean(fidelities))
         return returned_fidelities
 
     def _handle_virtual_rotations(self, operations, fidelities, subsystem_dims, n_reps):
@@ -1720,9 +1739,12 @@ class BaseQuantumEnvironment(ABC, Env):
 
         return fidelities
 
-    def update_gate_calibration(self):
+    def update_gate_calibration(self, gate_name: Optional[str] = None):
         """
         Update gate calibration parameters
+
+        :param gate_name: Name of custom gate to add to target (if None,
+         use target gate and update its attached calibration)
         """
         raise NotImplementedError(
             "Gate calibration not implemented for this environment"

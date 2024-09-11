@@ -248,7 +248,7 @@ class QEnvConfig:
     device: Optional[torch.device] = None
 
     @property
-    def backend(self):
+    def backend(self) -> Optional[BackendV2]:
         return self.backend_config.backend
 
     @property

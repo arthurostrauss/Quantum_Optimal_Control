@@ -7,7 +7,7 @@ from qiskit.quantum_info import Operator
 
 def create_quantum_operators(
     dims: List[int],
-) -> Tuple[List[Operator], List[Operator], List[Operator], Operator, Operator]:
+) -> Tuple[List[Operator], List[Operator], List[Operator], List[Operator]]:
     """
     Creates quantum operators \(a\), \(a^\dagger\), \(N\), and the identity matrix for each subsystem
     specified by its dimension in `dims`.
@@ -58,9 +58,9 @@ def construct_static_hamiltonian(
     )
     n_qubits = len(dims)
     for i in range(n_qubits):
-        static_ham += 2 * np.pi * freqs[i] * N_ops[i] + np.pi * anharmonicities[
-            i
-        ] * N_ops[i] @ (N_ops[i] - full_ident)
+        static_ham += 2 * np.pi * freqs[i] * N_ops[i] + np.pi * anharmonicities[i] * (
+            N_ops[i] @ (N_ops[i] - full_ident)
+        )
     return static_ham
 
 
@@ -85,7 +85,7 @@ def get_couplings(
         couplings[(j, i)] = couplings[(i, j)]
     for (i, j), coupling in couplings.items():
         static_ham += (
-            2 * np.pi * coupling * (a_ops[i] + adag_ops[i]) @ (a_ops[j] + adag_ops[j])
+            2 * np.pi * coupling * ((a_ops[i] + adag_ops[i]) @ (a_ops[j] + adag_ops[j]))
         )
         channels[f"u{num_controls}"] = freqs[j]
         control_channel_map[(i, j)] = num_controls

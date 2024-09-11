@@ -282,7 +282,7 @@ def plot_curves(env: BaseQuantumEnvironment):
     plt.plot(
         fidelity_range,
         env.fidelity_history,
-        label=f"Circuit Fidelity",
+        label=f"{env.target.target_type.capitalize()} Fidelity",
     )
 
     plt.title("Reward History")

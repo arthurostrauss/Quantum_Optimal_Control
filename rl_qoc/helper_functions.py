@@ -99,7 +99,7 @@ from scipy.optimize import minimize, OptimizeResult
 
 import keyword
 import re
-from rl_qoc.qconfig import (
+from .qconfig import (
     BackendConfig,
     ExecutionConfig,
     BenchmarkConfig,
@@ -112,7 +112,7 @@ from rl_qoc.qconfig import (
     ORBITConfig,
     FidelityConfig,
 )
-from rl_qoc.custom_jax_sim import (
+from .custom_jax_sim import (
     JaxSolver,
     DynamicsBackendEstimator,
     PauliToQuditOperator,
@@ -269,7 +269,7 @@ def perform_standard_calibrations(
     )
     other_gates = ["rz", "id", "h", "x", "sx", "reset", "delay"]
     single_qubit_gates = fixed_phase_gates + other_gates
-    two_qubit_gates = ["ecr"]
+    two_qubit_gates = ["ecr_calibration"]
     exp_results = {}
     existing_cals = calibration_files is not None
 
@@ -283,7 +283,9 @@ def perform_standard_calibrations(
             libraries=(
                 [
                     FixedFrequencyTransmon(basis_gates=["x", "sx"]),
-                    EchoedCrossResonance(basis_gates=["cr45p", "cr45m", "ecr"]),
+                    EchoedCrossResonance(
+                        basis_gates=["cr45p", "cr45m", "ecr_calibration"]
+                    ),
                 ]
                 if num_qubits > 1
                 else [FixedFrequencyTransmon(basis_gates=["x", "sx"])]
@@ -411,17 +413,17 @@ def add_ecr_gate(
     :param basis_gates: Basis gates of the backend
     :param coupling_map: Coupling map of the backend
     """
-    if "ecr" not in basis_gates and backend.num_qubits > 1:
+    if "ecr_calibration" not in basis_gates and backend.num_qubits > 1:
         target = backend.target
         target.add_instruction(
-            gate_map()["ecr"],
+            gate_map()["ecr_calibration"],
             properties={qubits: None for qubits in coupling_map.get_edges()},
         )
         cals = Calibrations.from_backend(
             backend,
             [
                 FixedFrequencyTransmon(["x", "sx"]),
-                EchoedCrossResonance(["cr45p", "cr45m", "ecr"]),
+                EchoedCrossResonance(["cr45p", "cr45m", "ecr_calibration"]),
             ],
             add_parameter_defaults=True,
         )
@@ -431,20 +433,20 @@ def add_ecr_gate(
                 default_params, _, _ = get_ecr_params(backend, qubit_pair)
                 error = backend.target["cx"][qubit_pair].error
                 target.update_instruction_properties(
-                    "ecr",
+                    "ecr_calibration",
                     qubit_pair,
                     InstructionProperties(
                         error=error,
                         calibration=cals.get_schedule(
-                            "ecr", qubit_pair, default_params
+                            "ecr_calibration", qubit_pair, default_params
                         ),
                     ),
                 )
-        basis_gates.append("ecr")
+        basis_gates.append("ecr_calibration")
         for i, gate in enumerate(basis_gates):
             if gate == "cx":
                 basis_gates.pop(i)
-        # raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the
+        # raise ValueError("Backend must carry 'ecr_calibration' as basis_gate for transpilation, will change in the
         # future")
 
 
@@ -470,10 +472,12 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
     )
     if "cx" in basis_gates:
         basis_gate = "cx"
-    elif "ecr" in basis_gates:
-        basis_gate = "ecr"
+    elif "ecr_calibration" in basis_gates:
+        basis_gate = "ecr_calibration"
     else:
-        raise ValueError("No identifiable two-qubit gate found, must be 'cx' or 'ecr'")
+        raise ValueError(
+            "No identifiable two-qubit gate found, must be 'cx' or 'ecr_calibration'"
+        )
     if isinstance(backend, BackendV1):
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
@@ -910,9 +914,12 @@ def fidelity_from_tomography(
     else:
         results = process_tomo.run().block_for_results()
 
-    process_results = [
-        results.analysis_results(fidelity)[i].value for i in range(len(qc_list))
-    ]
+    if len(qc_list) == 1:
+        process_results = [results.analysis_results(fidelity).value]
+    else:
+        process_results = [
+            results.analysis_results(fidelity)[i].value for i in range(len(qc_list))
+        ]
     if isinstance(target, Operator):
         dim, _ = target.dim
         avg_gate_fids = [(dim * f_pro + 1) / (dim + 1) for f_pro in process_results]
@@ -1497,8 +1504,8 @@ def rotate_unitary(x, op: Operator) -> Operator:
         ops[-1],
     )  # Degrees of freedom before and after the unitary
     for i in range(1, len(x) // 2):  # Apply virtual Z rotations on all qubits
-        pre_rot = pre_rot.tensor(ops[i])
-        post_rot = post_rot.expand(ops[-i - 1])
+        pre_rot = pre_rot.expand(ops[i])
+        post_rot = post_rot.tensor(ops[-i - 1])
 
     return pre_rot @ op @ post_rot
 
@@ -1536,34 +1543,76 @@ def load_q_env_from_yaml_file(file_path: str):
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
 
-    low = np.array(config["ENV"]["ACTION_SPACE"]["LOW"], dtype=np.float32)
-    high = np.array(config["ENV"]["ACTION_SPACE"]["HIGH"], dtype=np.float32)
+    if "ENV" not in config:
+        raise KeyError("ENV section must be present in the configuration")
+    elif "BACKEND" not in config:
+        raise KeyError("BACKEND section must be present in the configuration")
+    elif "TARGET" not in config:
+        raise KeyError("TARGET section must be present in the configuration")
+
+    env_config = config["ENV"]
+
+    if "ACTION_SPACE" not in env_config:
+        raise KeyError("ACTION_SPACE section must be present in the configuration")
+    action_space_config = env_config["ACTION_SPACE"]
+    if "LOW" not in action_space_config or "HIGH" not in action_space_config:
+        raise KeyError("LOW and HIGH must be present in the ACTION_SPACE section")
+    if not all(isinstance(val, (int, float)) for val in action_space_config["LOW"]):
+        try:
+            action_space_config["LOW"] = [
+                float(val) for val in action_space_config["LOW"]
+            ]
+        except ValueError:
+            raise ValueError("LOW values in action space must be numeric")
+    if not all(isinstance(val, (int, float)) for val in action_space_config["HIGH"]):
+        try:
+            action_space_config["HIGH"] = [
+                float(val) for val in action_space_config["HIGH"]
+            ]
+        except ValueError:
+            raise ValueError("HIGH values in action space must be numeric")
+    low = np.array(action_space_config["LOW"], dtype=np.float32)
+    high = np.array(action_space_config["HIGH"], dtype=np.float32)
     if low.shape != high.shape:
         raise ValueError(
             "Low and high arrays in action space should have the same shape"
         )
     action_shape = low.shape
-    env_config = config["ENV"]
+
+    try:
+        execution_config = env_config["EXECUTION"]
+    except KeyError:
+        raise KeyError("EXECUTION section must be present in the configuration")
+
     params = {
         "action_space": Box(low=low, high=high, shape=action_shape, dtype=np.float32),
-        "execution_config": ExecutionConfig(
-            **get_lower_keys_dict(env_config["EXECUTION"])
-        ),
+        "execution_config": ExecutionConfig(**get_lower_keys_dict(execution_config)),
         "benchmark_config": BenchmarkConfig(
-            **get_lower_keys_dict(env_config["BENCHMARKING"])
+            **(
+                get_lower_keys_dict(env_config["BENCHMARKING"])
+                if "BENCHMARKING" in env_config
+                else {}
+            )
         ),
         "reward_config": reward_configs[env_config["REWARD"]["REWARD_METHOD"]](
             **remove_none_values(
-                get_lower_keys_dict(env_config.get("REWARD_PARAMS", {}))
+                get_lower_keys_dict(
+                    env_config.get(
+                        "REWARD_PARAMS", env_config["REWARD"].get("REWARD_PARAMS", {})
+                    )
+                )
             )
         ),
-        "training_with_cal": env_config["TRAINING_WITH_CAL"],
+        "training_with_cal": env_config.get("TRAINING_WITH_CAL", False),
         "target": {
             "physical_qubits": config["TARGET"]["PHYSICAL_QUBITS"],
         },
     }
     if "GATE" in config["TARGET"] and config["TARGET"]["GATE"] is not None:
-        params["target"]["gate"] = gate_map()[config["TARGET"]["GATE"].lower()]
+        try:
+            params["target"]["gate"] = gate_map()[config["TARGET"]["GATE"].lower()]
+        except KeyError:
+            raise KeyError("Specified gate not found in standard gate set of Qiskit")
     else:
         try:
             params["target"]["state"] = Statevector.from_label(
@@ -1574,17 +1623,35 @@ def load_q_env_from_yaml_file(file_path: str):
                 "Target gate or state must be specified in the configuration"
             )
 
+    backend_config = config["BACKEND"]
+    dynamics_config = backend_config.get(
+        "DYNAMICS",
+        {
+            "USE_DYNAMICS": None,
+            "PHYSICAL_QUBITS": None,
+            "SOLVER_OPTIONS": {
+                "hmax": "auto",
+                "atol": 1e-6,
+                "rtol": 1e-8,
+                "method": "jax_odeint",
+            },
+            "CALIBRATION_FILES": None,
+        },
+    )
+    service_config = config.get("SERVICE", {"CHANNEL": None, "INSTANCE": None})
     backend_params = {
-        "real_backend": config["BACKEND"]["REAL_BACKEND"],
-        "backend_name": config["BACKEND"]["NAME"],
-        "use_dynamics": config["BACKEND"]["DYNAMICS"]["USE_DYNAMICS"],
-        "physical_qubits": config["BACKEND"]["DYNAMICS"]["PHYSICAL_QUBITS"],
-        "channel": config["SERVICE"]["CHANNEL"],
-        "instance": config["SERVICE"]["INSTANCE"],
-        "solver_options": config["BACKEND"]["DYNAMICS"]["SOLVER_OPTIONS"],
-        "calibration_files": config["BACKEND"]["DYNAMICS"]["CALIBRATION_FILES"],
+        "real_backend": backend_config.get("REAL_BACKEND", None),
+        "backend_name": backend_config.get("NAME", None),
+        "use_dynamics": dynamics_config["USE_DYNAMICS"],
+        "physical_qubits": dynamics_config["PHYSICAL_QUBITS"],
+        "channel": service_config["CHANNEL"],
+        "instance": service_config["INSTANCE"],
+        "solver_options": dynamics_config["SOLVER_OPTIONS"],
+        "calibration_files": dynamics_config["CALIBRATION_FILES"],
     }
-    runtime_options = config["RUNTIME_OPTIONS"]
+
+    runtime_options = config.get("RUNTIME_OPTIONS", {})
+
     if backend_params["real_backend"]:
         print("Runtime Options:", runtime_options)
 
@@ -1606,8 +1673,8 @@ def get_lower_keys_dict(dictionary: Dict[str, Any]):
 
 
 def get_q_env_config(
-    config_file_address: str,
-    get_backend_func: Callable,
+    config_file_path: str,
+    get_backend_func: Callable[[Any], BackendV2],
     parametrized_circ_func: Callable[
         [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
     ],
@@ -1617,13 +1684,13 @@ def get_q_env_config(
     Get Qiskit Quantum Environment configuration
 
     Args:
-        config_file_address: Configuration file address
+        config_file_path: Configuration file path
         get_backend_func: Function to get backend (should be defined in your Python config)
         parametrized_circ_func: Function to get parametrized circuit (should be defined in your Python config)
         parametrized_circ_args: Additional arguments for parametrized circuit function
     """
     params, backend_params, runtime_options = load_q_env_from_yaml_file(
-        config_file_address
+        config_file_path
     )
     backend = get_backend_func(**backend_params)
     backend_config = QiskitConfig(

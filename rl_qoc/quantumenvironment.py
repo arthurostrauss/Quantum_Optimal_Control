@@ -10,16 +10,17 @@ Last updated: 05/09/2024
 from __future__ import annotations
 
 # For compatibility for options formatting between Estimators.
-from typing import List, Any, SupportsFloat, Tuple
+from typing import List, Any, SupportsFloat, Tuple, Optional
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule
+from qiskit import schedule, pulse
 
 # Qiskit imports
 from qiskit.circuit import (
     QuantumCircuit,
     ParameterVector,
+    Gate,
 )
 
 # Qiskit Quantum Information, for fidelity benchmarking
@@ -27,6 +28,7 @@ from qiskit.quantum_info.operators import Operator
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import InstructionProperties
 from qiskit_dynamics import DynamicsBackend
+from torch.utils.hipify.hipify_python import value
 
 from .base_q_env import (
     BaseQuantumEnvironment,
@@ -255,11 +257,14 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             print("Finished simulation benchmark")
         return fids
 
-    def update_gate_calibration(self):
+    def update_gate_calibration(self, gate_name: Optional[str] = None):
         """
         Update backend target with the optimal action found during training
 
-        :return: Pulse calibration for the target gate
+        :param gate_name: Name of custom gate to add to target (if None,
+         use target gate and update its attached calibration)
+
+        :return: Pulse calibration for the custom gate
         """
         if not isinstance(self.target, GateTarget):
             raise ValueError("Target type should be a gate for gate calibration task.")
@@ -268,28 +273,63 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             qc = self.circuits[0].assign_parameters(self.optimal_action, inplace=False)
             schedule_ = schedule(qc, self.backend)
             duration = schedule_.duration
+            sim_data = simulate_pulse_schedule(
+                self.backend,
+                schedule_,
+                target_unitary=Operator(self.target.gate),
+                target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
+            )
             if isinstance(self.backend, DynamicsBackend):
                 error = 1.0
-                error -= simulate_pulse_schedule(
-                    self.backend,
-                    schedule_,
-                    target_unitary=Operator(self.target.gate),
-                    target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
-                )["gate_fidelity"]["optimal"]
+                error -= sim_data["gate_fidelity"]["optimal"]
+            else:
+                if len(self.avg_fidelity_history) == 0:
+                    self.avg_fidelity_history.append(0.0)
+                error = 1.0 - np.max(self.avg_fidelity_history)
+
+            with pulse.build(self.backend) as sched:
+                for i in range(self.n_qubits):
+                    rz_cal = self.backend.target.get_calibration("rz", (i,))
+                    pulse.call(
+                        rz_cal,
+                        value_dict={
+                            parameter: sim_data["gate_fidelity"]["rotations"][i]
+                            for parameter in rz_cal.parameters
+                        },
+                    )
+                pulse.call(schedule_)
+                for i in range(self.n_qubits):
+                    rz_cal = self.backend.target.get_calibration("rz", (i,))
+                    pulse.call(
+                        rz_cal,
+                        value_dict={
+                            parameter: sim_data["gate_fidelity"]["rotations"][i]
+                            for parameter in rz_cal.parameters
+                        },
+                    )
+
+            instruction_prop = InstructionProperties(duration, error, sched)
+            if gate_name is None:
+                gate_name = self.target.gate.name
+
+            if gate_name not in self.backend.operation_names:
+                self.backend.target.add_instruction(
+                    self.target.gate,
+                    {tuple(self.physical_target_qubits): instruction_prop},
+                    name=gate_name,
+                )
 
             else:
-                error = 1.0 - np.max(self.avg_fidelity_history)
-            instruction_prop = InstructionProperties(duration, error, schedule_)
-            self.backend.target.update_instruction_properties(
-                self.target.gate.name,
-                tuple(self.physical_target_qubits),
-                instruction_prop,
-            )
+                self.backend.target.update_instruction_properties(
+                    gate_name,
+                    tuple(self.physical_target_qubits),
+                    instruction_prop,
+                )
 
             return self.backend.target.get_calibration(
-                self.target.gate.name, tuple(self.physical_target_qubits)
+                gate_name, tuple(self.physical_target_qubits)
             )
         else:
             return self.circuits[0].assign_parameters(
-                {self.parameters[0]: self._optimal_action}
+                {self.parameters[0]: self.optimal_action}
             )
