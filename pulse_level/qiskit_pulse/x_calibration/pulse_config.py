@@ -26,9 +26,6 @@ import jax
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
 jax.config.update("jax_platform_name", "cpu")
-current_dir = os.path.dirname(os.path.realpath(__file__))
-config_file_name = "q_env_pulse_config.yml"
-config_file_address = os.path.join(current_dir, config_file_name)
 
 
 def custom_schedule(
@@ -241,25 +238,20 @@ def get_backend(
 
     if backend is None:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        from dynamics_backends import (
+        from pulse_level.qiskit_pulse.dynamics_backends import (
             custom_backend,
             single_qubit_backend,
             surface_code_plaquette,
         )
 
         print("Custom backend used")
-        # TODO: Add here your custom backend
-        dims = [2, 2]
-        freqs = [4.86e9, 4.97e9]
-        anharmonicities = [-0.33e9, -0.32e9]
-        rabi_freqs = [0.22e9, 0.26e9]
-        couplings = {(0, 1): 0.002e9}
 
         dims = [3]
         freqs = [4.86e9]
         anharmonicities = [-0.33e9]
         rabi_freqs = [0.22e9]
         couplings = None
+        gamma = 0.05
 
         backend = custom_backend(dims, freqs, anharmonicities, rabi_freqs, couplings)[1]
         # backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
@@ -296,19 +288,3 @@ def get_circuit_context(
     print(circuit)
 
     return circuit
-
-
-# Do not touch part below, just import in your notebook q_env_config and circuit_context
-
-q_env_config = get_q_env_config(
-    config_file_address,
-    get_backend,
-    apply_parametrized_circuit,
-)
-q_env_config.backend_config.parametrized_circuit_kwargs = {
-    "target": q_env_config.target,
-    "backend": q_env_config.backend,
-}
-circuit_context = get_circuit_context(
-    q_env_config.backend, q_env_config.physical_qubits
-)

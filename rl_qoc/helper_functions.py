@@ -269,7 +269,7 @@ def perform_standard_calibrations(
     )
     other_gates = ["rz", "id", "h", "x", "sx", "reset", "delay"]
     single_qubit_gates = fixed_phase_gates + other_gates
-    two_qubit_gates = ["ecr_calibration"]
+    two_qubit_gates = ["ecr"]
     exp_results = {}
     existing_cals = calibration_files is not None
 
@@ -283,9 +283,7 @@ def perform_standard_calibrations(
             libraries=(
                 [
                     FixedFrequencyTransmon(basis_gates=["x", "sx"]),
-                    EchoedCrossResonance(
-                        basis_gates=["cr45p", "cr45m", "ecr_calibration"]
-                    ),
+                    EchoedCrossResonance(basis_gates=["cr45p", "cr45m", "ecr"]),
                 ]
                 if num_qubits > 1
                 else [FixedFrequencyTransmon(basis_gates=["x", "sx"])]
@@ -413,17 +411,17 @@ def add_ecr_gate(
     :param basis_gates: Basis gates of the backend
     :param coupling_map: Coupling map of the backend
     """
-    if "ecr_calibration" not in basis_gates and backend.num_qubits > 1:
+    if "ecr" not in basis_gates and backend.num_qubits > 1:
         target = backend.target
         target.add_instruction(
-            gate_map()["ecr_calibration"],
+            gate_map()["ecr"],
             properties={qubits: None for qubits in coupling_map.get_edges()},
         )
         cals = Calibrations.from_backend(
             backend,
             [
                 FixedFrequencyTransmon(["x", "sx"]),
-                EchoedCrossResonance(["cr45p", "cr45m", "ecr_calibration"]),
+                EchoedCrossResonance(["cr45p", "cr45m", "ecr"]),
             ],
             add_parameter_defaults=True,
         )
@@ -433,20 +431,20 @@ def add_ecr_gate(
                 default_params, _, _ = get_ecr_params(backend, qubit_pair)
                 error = backend.target["cx"][qubit_pair].error
                 target.update_instruction_properties(
-                    "ecr_calibration",
+                    "ecr",
                     qubit_pair,
                     InstructionProperties(
                         error=error,
                         calibration=cals.get_schedule(
-                            "ecr_calibration", qubit_pair, default_params
+                            "ecr", qubit_pair, default_params
                         ),
                     ),
                 )
-        basis_gates.append("ecr_calibration")
+        basis_gates.append("ecr")
         for i, gate in enumerate(basis_gates):
             if gate == "cx":
                 basis_gates.pop(i)
-        # raise ValueError("Backend must carry 'ecr_calibration' as basis_gate for transpilation, will change in the
+        # raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the
         # future")
 
 
@@ -472,12 +470,10 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
     )
     if "cx" in basis_gates:
         basis_gate = "cx"
-    elif "ecr_calibration" in basis_gates:
-        basis_gate = "ecr_calibration"
+    elif "ecr" in basis_gates:
+        basis_gate = "ecr"
     else:
-        raise ValueError(
-            "No identifiable two-qubit gate found, must be 'cx' or 'ecr_calibration'"
-        )
+        raise ValueError("No identifiable two-qubit gate found, must be 'cx' or 'ecr'")
     if isinstance(backend, BackendV1):
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
