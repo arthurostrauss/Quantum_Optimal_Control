@@ -20,7 +20,6 @@ from qiskit import schedule, pulse
 from qiskit.circuit import (
     QuantumCircuit,
     ParameterVector,
-    Gate,
 )
 
 # Qiskit Quantum Information, for fidelity benchmarking
@@ -28,7 +27,6 @@ from qiskit.quantum_info.operators import Operator
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import InstructionProperties
 from qiskit_dynamics import DynamicsBackend
-from torch.utils.hipify.hipify_python import value
 
 from .base_q_env import (
     BaseQuantumEnvironment,
@@ -36,9 +34,6 @@ from .base_q_env import (
     StateTarget,
 )
 from .helper_functions import (
-    qubit_projection,
-    rotate_unitary,
-    get_optimal_z_rotation,
     fidelity_from_tomography,
     simulate_pulse_schedule,
 )
@@ -93,11 +88,14 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         Returns:
             target: GateTarget or StateTarget object
         """
+        input_states_choice = getattr(
+            self.config.reward_config.reward_args, "input_states_choice", "pauli4"
+        )
         if "gate" in self.config.target:
             target = GateTarget(
                 n_reps=self.config.n_reps,
                 **self.config.target,
-                **self.config.reward_config.reward_args,
+                input_states_choice=input_states_choice,
             )
         else:
             target = StateTarget(**self.config.target)
@@ -201,25 +199,28 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
             # Experiment based fidelity estimation
             try:
-                angle_sets = np.clip(
-                    np.random.normal(
-                        self.mean_action,
-                        self.std_action,
-                        size=(self.config.benchmark_batch_size, self.n_actions),
-                    ),
-                    self.action_space.low,
-                    self.action_space.high,
-                )
+                if not self.config.reward_method == "fidelity":
+                    if self.config.benchmark_config.benchmark_batch_size > 1:
+                        angle_sets = np.clip(
+                            np.random.normal(
+                                self.mean_action,
+                                self.std_action,
+                                size=(self.config.benchmark_batch_size, self.n_actions),
+                            ),
+                            self.action_space.low,
+                            self.action_space.high,
+                        )
+                    else:
+                        angle_sets = [self.mean_action]
+                else:
+                    if len(params.shape) == 1:
+                        params = np.expand_dims(params, axis=0)
+                    angle_sets = params
 
-                qc_list = [qc.assign_parameters(angle_set) for angle_set in angle_sets]
+                qc_input = [qc.assign_parameters(angle_set) for angle_set in angle_sets]
                 print("Starting tomography...")
-                session = (
-                    self.estimator.session
-                    if hasattr(self.estimator, "session")
-                    else None
-                )
                 fids = fidelity_from_tomography(
-                    qc_list,
+                    qc_input,
                     self.backend,
                     (
                         Operator(self.target.gate)

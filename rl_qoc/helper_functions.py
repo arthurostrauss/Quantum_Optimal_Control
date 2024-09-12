@@ -858,7 +858,7 @@ def run_jobs(session: Session, circuits: List[QuantumCircuit], **run_options):
 
 
 def fidelity_from_tomography(
-    qc_list: List[QuantumCircuit],
+    qc_input: List[QuantumCircuit] | QuantumCircuit,
     backend: Optional[Backend],
     target: Operator | QuantumState,
     physical_qubits: Optional[Sequence[int]],
@@ -869,7 +869,7 @@ def fidelity_from_tomography(
     Extract average state or gate fidelity from batch of Quantum Circuit for target state or gate
 
     Args:
-        qc_list: List of Quantum Circuits
+        qc_input: Quantum Circuit input to benchmark
         backend: Backend instance
         physical_qubits: Physical qubits on which state or process tomography is to be performed
         analysis: Analysis instance
@@ -878,6 +878,8 @@ def fidelity_from_tomography(
     Returns:
         avg_fidelity: Average state or gate fidelity (over the batch of Quantum Circuits)
     """
+    if isinstance(qc_input, QuantumCircuit):
+        qc_input = [qc_input]
     if isinstance(target, Operator):
         tomo = ProcessTomography
         fidelity = "process_fidelity"
@@ -895,7 +897,7 @@ def fidelity_from_tomography(
                 analysis=analysis,
                 target=target,
             )
-            for qc in qc_list
+            for qc in qc_input
         ],
         backend=backend,
         flatten_results=True,
@@ -910,17 +912,17 @@ def fidelity_from_tomography(
     else:
         results = process_tomo.run().block_for_results()
 
-    if len(qc_list) == 1:
+    if len(qc_input) == 1:
         process_results = [results.analysis_results(fidelity).value]
     else:
         process_results = [
-            results.analysis_results(fidelity)[i].value for i in range(len(qc_list))
+            results.analysis_results(fidelity)[i].value for i in range(len(qc_input))
         ]
-    if isinstance(target, Operator):
+    if isinstance(target, Operator) and target.is_unitary():
         dim, _ = target.dim
         avg_gate_fids = [(dim * f_pro + 1) / (dim + 1) for f_pro in process_results]
 
-        return avg_gate_fids
+        return avg_gate_fids if len(avg_gate_fids) > 1 else avg_gate_fids[0]
     else:  # target is QuantumState
         return process_results
 
