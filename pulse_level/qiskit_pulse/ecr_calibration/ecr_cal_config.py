@@ -104,7 +104,7 @@ def custom_schedule(
     basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
     if isinstance(
-            backend, BackendV1
+        backend, BackendV1
     ):  # Convert to BackendV2 if needed (to access Target)
         backend = BackendV2Converter(backend)
 
@@ -243,7 +243,7 @@ def get_backend(
 
     if backend is None:
         # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        from dynamics_backends import (
+        from pulse_level.qiskit_pulse.dynamics_backends import (
             custom_backend,
             single_qubit_backend,
             surface_code_plaquette,
