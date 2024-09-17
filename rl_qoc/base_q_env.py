@@ -42,6 +42,7 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
 )
+from qiskit.primitives.containers.sampler_pub import SamplerPub
 from qiskit.quantum_info import random_unitary, partial_trace
 
 # Qiskit Quantum Information, for fidelity benchmarking
@@ -60,11 +61,9 @@ from qiskit.quantum_info.random import random_clifford
 
 from qiskit.transpiler import (
     Layout,
-    InstructionProperties,
     CouplingMap,
     InstructionDurations,
 )
-from qiskit_algorithms.state_fidelities import ComputeUncompute
 from qiskit.providers import BackendV2
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
@@ -80,12 +79,11 @@ from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
 )
 
-from .custom_jax_sim import JaxSolver
-from .custom_jax_sim.jax_solver_v2 import JaxSolver as JaxSolverV2
+from .custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
+
 from .helper_functions import (
     retrieve_primitives,
     handle_session,
-    simulate_pulse_schedule,
     retrieve_neighbor_qubits,
     substitute_target_gate,
     get_hardware_runtime_single_circuit,
@@ -1621,33 +1619,74 @@ class BaseQuantumEnvironment(ABC, Env):
             output_dims=tuple(subsystem_dims),
         )
         y0_state = Statevector.from_int(0, dims=subsystem_dims)
+        if params is None or isinstance(self.estimator, PulseEstimatorV2):
+            circuits = [qc]
+            circuits_n_reps = [qc_nreps] if qc_nreps is not None else []
+            data_length = 1 if params is None else len(params)
+        else:
+            if not isinstance(params, np.ndarray):
+                params = np.array(params)
+            if len(params.shape) == 1:
+                params = np.expand_dims(params, axis=0)
+            circuits = [qc.assign_parameters(p) for p in params]
+            circuits_n_reps = (
+                [qc_nreps.assign_parameters(p) for p in params]
+                if qc_nreps is not None
+                else []
+            )
+            data_length = len(params)
+        circuits_list = circuits + circuits_n_reps
 
-        if isinstance(self.backend.options.solver, (JaxSolver, JaxSolverV2)):
+        if isinstance(self.estimator, PulseEstimatorV2):
             # TODO: Handle this case
-            raise ValueError("Pulse simulation is not supported with JAX solvers")
-        else:  # Standard Dynamics simulation
-            if params is None:
-                circuits = [qc]
-                circuits_n_reps = [qc_nreps] if qc_nreps is not None else []
-                data_length = 1
+            sampler_pubs = [(circ, params) for circ in circuits_list]
+            y0_list = [y0_state]
+            if qc.num_qubits < 3 and isinstance(
+                self.target, GateTarget
+            ):  # Benchmark channel only for 1-2 qubits
+                y0_list += [y0_gate]
+                for circ in circuits_list:
+                    sampler_pubs.append((circ, params))
+                n_benchmarks *= 2
 
-            else:
-                if not isinstance(params, np.ndarray):
-                    params = np.array(params)
-                if len(params.shape) == 1:
-                    params = np.expand_dims(params, axis=0)
-                circuits = [qc.assign_parameters(p) for p in params]
-                circuits_n_reps = (
-                    [qc_nreps.assign_parameters(p) for p in params]
-                    if qc_nreps is not None
-                    else []
-                )
-                data_length = len(params)
+            output_data = []
+            for y0, pub in zip(y0_list, sampler_pubs):
+                results = simulate_pulse_level(pub, self.backend, y0)
+                for result in results:
+                    yf = result.y[-1]
+                    output_data.append(yf)
+
+            # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
+
+            output_data = [
+                output_data[i * data_length : (i + 1) * data_length]
+                for i in range(n_benchmarks)
+            ]
+            # Reorder data to match the order of the circuits
+            qc_data_mapping = {"qc_state": output_data[0], "qc_channel": output_data[1]}
+            if qc_nreps is not None:
+                qc_data_mapping["qc_state_nreps"] = output_data[2]
+                qc_data_mapping["qc_channel_nreps"] = output_data[3]
+
+            circuit_order = [
+                "qc_state",
+                "qc_state_nreps",
+                "qc_channel",
+                "qc_channel_nreps",
+            ]
+            new_output_data = [
+                qc_data_mapping.get(name, None)
+                for name in circuit_order
+                if name in qc_data_mapping
+            ]
+            output_data = new_output_data
+
+        else:  # Standard Dynamics simulation
 
             y0_list = (
                 [y0_state] * n_benchmarks * data_length
             )  # Initial state for each benchmark
-            circuits_list = circuits + circuits_n_reps
+
             if qc.num_qubits < 3 and isinstance(
                 self.target, GateTarget
             ):  # Benchmark channel only for 1-2 qubits
@@ -1657,14 +1696,44 @@ class BaseQuantumEnvironment(ABC, Env):
                     2  # Double the number of benchmarks to include channel fidelity
                 )
             # Simulate all circuits
+            output_data = []
             results = self.backend.solve(circuits_list, y0=y0_list)
+            for solver_result in results:
+                yf = solver_result.y[-1]
+                tf = solver_result.t[-1]
 
-        output_data = [result.y[-1] for result in results]
-        # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
-        output_data = [
-            output_data[i * data_length : (i + 1) * data_length]
-            for i in range(n_benchmarks)
-        ]
+                # # Take state out of frame, put in dressed basis, and normalize
+                # if isinstance(yf, Statevector):
+                #     yf = np.array(backend.options.solver.model.rotating_frame.state_out_of_frame(t=tf, y=yf))
+                #     yf = backend._dressed_states_adjoint @ yf
+                #     yf = Statevector(yf, dims=backend.options.subsystem_dims)
+                #
+                #     if backend.options.normalize_states:
+                #         yf = yf / np.linalg.norm(yf.data)
+                # elif isinstance(yf, DensityMatrix):
+                #     yf = np.array(
+                #         backend.options.solver.model.rotating_frame.operator_out_of_frame(t=tf, operator=yf)
+                #     )
+                #     yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
+                #     yf = DensityMatrix(yf, dims=backend.options.subsystem_dims)
+                #
+                #     if backend.options.normalize_states:
+                #         yf = yf / np.diag(yf.data).sum()
+                # elif isinstance(yf, Operator):
+                #     yf = np.array(
+                #         backend.options.solver.model.rotating_frame.operator_out_of_frame(t=tf, operator=yf)
+                #     )
+                #     yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
+                #     yf = Operator(yf, input_dims=backend.options.subsystem_dims,
+                #                   output_dims=backend.options.subsystem_dims)
+
+                output_data.append(yf)
+
+                # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
+            output_data = [
+                output_data[i * data_length : (i + 1) * data_length]
+                for i in range(n_benchmarks)
+            ]
 
         if self.n_reps > 1:  # Benchmark both qc and qc_nreps
             circ_list = [qc, qc_nreps, qc, qc_nreps]

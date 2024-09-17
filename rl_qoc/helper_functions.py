@@ -99,6 +99,8 @@ from scipy.optimize import minimize, OptimizeResult
 
 import keyword
 import re
+
+from .custom_jax_sim.pulse_estimator_v2 import PulseEstimatorV2
 from .qconfig import (
     BackendConfig,
     ExecutionConfig,
@@ -864,6 +866,7 @@ def fidelity_from_tomography(
     physical_qubits: Optional[Sequence[int]],
     analysis: Union[BaseAnalysis, None, str] = "default",
     sampler: RuntimeSamplerV2 = None,
+    shots: int = 8192,
 ):
     """
     Extract average state or gate fidelity from batch of Quantum Circuit for target state or gate
@@ -873,7 +876,7 @@ def fidelity_from_tomography(
         backend: Backend instance
         physical_qubits: Physical qubits on which state or process tomography is to be performed
         analysis: Analysis instance
-        target: Target state or gate for fidelity calculation
+        target: Target state or gate for fidelity calculation (must be either Operator or QuantumState)
         sampler: Runtime Sampler
     Returns:
         avg_fidelity: Average state or gate fidelity (over the batch of Quantum Circuits)
@@ -910,7 +913,7 @@ def fidelity_from_tomography(
         exp_data.add_data()
         results = process_tomo.analysis.run(exp_data).block_for_results()
     else:
-        results = process_tomo.run().block_for_results()
+        results = process_tomo.run(shots=shots).block_for_results()
 
     if len(qc_input) == 1:
         process_results = [results.analysis_results(fidelity).value]
@@ -964,15 +967,10 @@ def retrieve_primitives(
         estimator_options: Estimator options
         circuit: QuantumCircuit instance implementing the custom gate (for DynamicsBackend)
     """
-    if isinstance(backend, DynamicsBackend) and isinstance(
-        backend.options.solver, JaxSolver
-    ):
+    if isinstance(backend, DynamicsBackend):
         assert isinstance(config, QiskitConfig), "Configuration must be a QiskitConfig"
-        estimator = DynamicsBackendEstimator(
-            backend, options=estimator_options, skip_transpilation=True
-        )
+        estimator = PulseEstimatorV2(backend=backend, options=estimator_options)
         sampler = BackendSamplerV2(backend=backend)
-        backend.options.solver.circuit_macro = lambda: schedule(circuit, backend)
 
         if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
             calibration_files = config.calibration_files
@@ -1457,7 +1455,7 @@ def projected_state(
 
 
 def qubit_projection(
-    unitary: np.array | Operator, subsystem_dims: List[int]
+    unitary: np.ndarray | Operator, subsystem_dims: List[int]
 ) -> Operator:
     """
     Project unitary on qubit space

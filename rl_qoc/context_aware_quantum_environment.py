@@ -14,7 +14,6 @@ import numpy as np
 from gymnasium.spaces import Box
 
 # Qiskit imports
-from qiskit import transpile
 from qiskit.circuit import (
     QuantumCircuit,
     QuantumRegister,
@@ -23,21 +22,10 @@ from qiskit.circuit import (
     Qubit,
 )
 from qiskit.providers import BackendV2
-from qiskit.quantum_info import (
-    state_fidelity,
-    Statevector,
-    average_gate_fidelity,
-    Operator,
-)
 from qiskit.transpiler import Layout
-from qiskit_aer.backends import AerSimulator
-from qiskit_aer.backends.aerbackend import AerBackend
-from qiskit_aer.noise import NoiseModel
-from qiskit_dynamics import DynamicsBackend
 from qiskit_ibm_runtime import EstimatorV2
 
 from .helper_functions import (
-    projected_state,
     get_instruction_timings,
     retrieve_neighbor_qubits,
 )
@@ -47,7 +35,6 @@ from .base_q_env import (
     BaseQuantumEnvironment,
     QiskitBackendInfo,
 )
-from rl_qoc.custom_jax_sim import JaxSolver
 
 import logging
 
