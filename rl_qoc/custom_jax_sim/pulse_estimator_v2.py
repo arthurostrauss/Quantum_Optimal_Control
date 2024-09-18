@@ -55,18 +55,17 @@ def simulate_pulse_level(
         pub_parameters = pub_parameters.reshape(-1)
     parameter_values = pub_parameters.data
     # Build pulse schedule generator function (with or without parameter values)
-    sched_generator = lambda: schedule(pub.circuit, backend)
+    sched = schedule(pub.circuit, backend)
 
     # Compute t_span given the circuit duration
-    sched_duration = schedule(pub.circuit, backend).duration
-    t_span = [0, sched_duration * dt]  # Time span for simulation
+    t_span = [0, sched.duration * dt]  # Time span for simulation
 
     # Define jittable simulation function
     if parameter_values:
 
         def jittable_sim(t_span, y0, y0_input, y0_cls, param_dict):
             return pulse_level_core_sim(
-                sched_generator, backend, t_span, y0, y0_input, y0_cls, param_dict
+                sched, backend, t_span, y0, y0_input, y0_cls, param_dict
             )
 
         param_vmap = vmap(jittable_sim, in_axes=(None, None, None, None, 0))
@@ -74,9 +73,7 @@ def simulate_pulse_level(
     else:
 
         def jittable_sim(t_span, y0, y0_input, y0_cls):
-            return pulse_level_core_sim(
-                sched_generator, backend, t_span, y0, y0_input, y0_cls
-            )
+            return pulse_level_core_sim(sched, backend, t_span, y0, y0_input, y0_cls)
 
         jit_sim = jit(jittable_sim, static_argnums=(3,))
 
@@ -96,9 +93,9 @@ def simulate_pulse_level(
         batch_results_t, batch_results_y = jit_sim(
             unp.asarray(t_span),
             unp.asarray(y0),
-            parameter_values,
-            unp.asarray(y0),
+            unp.asarray(y0_input),
             y0_cls,
+            parameter_values,
         )
     else:
         batch_results_t, batch_results_y = jit_sim(
@@ -110,13 +107,13 @@ def simulate_pulse_level(
     for results_t, results_y in zip(batch_results_t, batch_results_y):
         results = OdeResult(t=results_t, y=results_y)
         if y0_cls is not None:
-            results.y = [y0_cls(np.array(yi)) for yi in results.y]
+            results.y = [state_type_wrapper(np.array(yi)) for yi in results.y]
         all_results.append(results)
     return all_results
 
 
 def pulse_level_core_sim(
-    sched_generator: Callable[[], Schedule],
+    sched: Schedule,
     backend: DynamicsBackend,
     t_span: list[float],
     y0,
@@ -140,13 +137,13 @@ def pulse_level_core_sim(
     solver: Solver = backend.options.solver
     model = solver.model
     model_sigs = model.signals
-    sched = sched_generator()
     if sched.is_parameterized():
         sched.assign_parameters(param_dict)
     signals = solver._schedule_to_signals(sched)
     solver._set_new_signals(signals)
     results = solve_lmde(model, t_span, y0, **backend.options.solver_options)
     results.y = format_final_states(results.y, model, y0_input, y0_cls)
+    # reset signals to ensure purity
     model.signals = model_sigs
     return results.t, results.y
 

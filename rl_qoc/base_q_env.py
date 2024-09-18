@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import time
+import warnings
 from abc import ABC, abstractmethod
 
 # For compatibility for options formatting between Estimators.
@@ -24,7 +25,7 @@ from gymnasium import Env
 import numpy as np
 from gymnasium.core import ObsType
 from gymnasium.spaces import Box
-from qiskit import schedule, transpile, QiskitError
+from qiskit import transpile, QiskitError
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -42,7 +43,7 @@ from qiskit.primitives import (
     BaseSamplerV2,
     BaseSamplerV1,
 )
-from qiskit.primitives.containers.sampler_pub import SamplerPub
+
 from qiskit.quantum_info import random_unitary, partial_trace
 
 # Qiskit Quantum Information, for fidelity benchmarking
@@ -456,7 +457,9 @@ class GateTarget(BaseTarget):
             raise ValueError("Input should be an Operator object")
         return average_gate_fidelity(channel, Operator(self._target_op).power(n_reps))
 
-    def state_fidelity(self, state: QuantumState, n_reps: int = 1):
+    def state_fidelity(
+        self, state: QuantumState, n_reps: int = 1, validate: bool = True
+    ):
         """
         Compute the fidelity of the state with the target state derived from the application of the target gate/circuit
         context to |0...0>
@@ -465,16 +468,28 @@ class GateTarget(BaseTarget):
         """
         if not isinstance(state, (Statevector, DensityMatrix)):
             raise ValueError("Input should be a Statevector or DensityMatrix object")
+        if np.linalg.norm(state) != 1 and not validate:
+            warnings.warn(
+                f"Input state is not normalized (norm = {np.linalg.norm(state)})"
+            )
         return state_fidelity(
-            state, Statevector(self._target_op.power(n_reps, True, True))
+            state,
+            Statevector(self._target_op.power(n_reps, True, True)),
+            validate=validate,
         )
 
-    def fidelity(self, op: QuantumState | QuantumChannel | Operator, n_reps: int = 1):
+    def fidelity(
+        self,
+        op: QuantumState | QuantumChannel | Operator,
+        n_reps: int = 1,
+        validate: bool = True,
+    ):
         """
         Compute the fidelity of the input op with respect to the target circuit context channel/output state.
         :param op: Object to compare with the target. If QuantumState, computes state fidelity, if QuantumChannel or
             Operator, computes gate fidelity
         :param n_reps: Specify number of repetitions of the target operation (default is 1)
+        :param validate: Validate the input state (default is True)
         """
         if isinstance(op, (QuantumCircuit, Gate)):
             try:
@@ -484,7 +499,7 @@ class GateTarget(BaseTarget):
         if isinstance(op, (Operator, QuantumChannel)):
             return self.gate_fidelity(op, n_reps)
         elif isinstance(op, (Statevector, DensityMatrix)):
-            return self.state_fidelity(op, n_reps)
+            return self.state_fidelity(op, n_reps, validate)
         else:
             raise ValueError(
                 f"Input should be a Statevector, DensityMatrix, Operator or QuantumChannel object, "
@@ -1762,9 +1777,7 @@ class BaseQuantumEnvironment(ABC, Env):
             n_reps = 1 if "nreps" not in circ.name else self.n_reps
 
             if isinstance(data[0], (Statevector, DensityMatrix)):
-                data = [
-                    projected_state(state, subsystem_dims) for state in data
-                ]  # Project state to qubit subspace
+                data = [projected_state(state, subsystem_dims) for state in data]
                 if self.target.n_qubits != len(
                     subsystem_dims
                 ):  # If state has less qubits than the backend, trace out the rest
@@ -1785,9 +1798,9 @@ class BaseQuantumEnvironment(ABC, Env):
             # Compute fidelities (type of input automatically detected and handled -> state -> state fidelity, channel -> gate fidelity)
             fidelities = [
                 (
-                    self.target.fidelity(output, n_reps)
+                    self.target.fidelity(output, n_reps, validate=False)
                     if n_reps > 1
-                    else self.target.fidelity(output)
+                    else self.target.fidelity(output, validate=False)
                 )
                 for output in data
             ]
