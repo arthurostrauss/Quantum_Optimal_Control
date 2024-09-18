@@ -263,7 +263,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                         except TypeError:
                             raise TypeError("Failed to call parametrized_circuit_func")
                         counts += 1
-
+        input_states_choice = getattr(
+            self.config.reward_config.reward_args, "input_states_choice", "pauli4"
+        )
         target = [
             GateTarget(
                 self.config.target["gate"],
@@ -272,7 +274,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 baseline_circuit,
                 tgt_register,
                 layout,
-                **self.config.reward_config.reward_args,
+                input_states_choice=input_states_choice,
             )
             for baseline_circuit, layout in zip(baseline_circuits, layouts)
         ]
