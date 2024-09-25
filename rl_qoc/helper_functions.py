@@ -1377,6 +1377,52 @@ def custom_dynamics_from_backend(
     )
 
 
+def rotate_frame(yf: Any, tf: Any, backend: DynamicsBackend):
+    """
+    Rotate the frame of the state or operator to the lab frame
+
+    Args:
+        yf: State or operator in the frame of the rotating frame
+        tf: Time at which the frame is rotated
+        backend: DynamicsBackend object containing the backend information
+    """
+    # Take state out of frame, put in dressed basis, and normalize
+    if isinstance(yf, Statevector):
+        yf = np.array(
+            backend.options.solver.model.rotating_frame.state_out_of_frame(t=tf, y=yf)
+        )
+        yf = backend._dressed_states_adjoint @ yf
+        yf = Statevector(yf, dims=backend.options.subsystem_dims)
+
+        if backend.options.normalize_states:
+            yf = yf / np.linalg.norm(yf.data)
+    elif isinstance(yf, DensityMatrix):
+        yf = np.array(
+            backend.options.solver.model.rotating_frame.operator_out_of_frame(
+                t=tf, operator=yf
+            )
+        )
+        yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
+        yf = DensityMatrix(yf, dims=backend.options.subsystem_dims)
+
+        if backend.options.normalize_states:
+            yf = yf / np.diag(yf.data).sum()
+    elif isinstance(yf, Operator):
+        yf = np.array(
+            backend.options.solver.model.rotating_frame.operator_out_of_frame(
+                t=tf, operator=yf
+            )
+        )
+        yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
+        yf = Operator(
+            yf,
+            input_dims=backend.options.subsystem_dims,
+            output_dims=backend.options.subsystem_dims,
+        )
+
+    return yf
+
+
 def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
     """
     Build projector on qubit space from initial subsystem dimensions

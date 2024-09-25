@@ -21,12 +21,14 @@ from qiskit.circuit import (
     QuantumCircuit,
     ParameterVector,
 )
+from qiskit.quantum_info import average_gate_fidelity
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.operators import Operator
 from qiskit.quantum_info.states import DensityMatrix, Statevector
 from qiskit.transpiler import InstructionProperties
 from qiskit_dynamics import DynamicsBackend
+from qiskit_experiments.library import ProcessTomography
 
 from .base_q_env import (
     BaseQuantumEnvironment,
@@ -36,6 +38,7 @@ from .base_q_env import (
 from .helper_functions import (
     fidelity_from_tomography,
     simulate_pulse_schedule,
+    get_optimal_z_rotation,
 )
 from .qconfig import QEnvConfig
 
@@ -271,22 +274,28 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             raise ValueError("Target type should be a gate for gate calibration task.")
 
         if self.abstraction_level == "pulse":
+            assert self.backend is not None, "Backend must be set for pulse calibration"
             qc = self.circuits[0].assign_parameters(self.optimal_action, inplace=False)
             schedule_ = schedule(qc, self.backend)
             duration = schedule_.duration
-            sim_data = simulate_pulse_schedule(
-                self.backend,
-                schedule_,
-                target_unitary=Operator(self.target.gate),
-                target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
-            )
             if isinstance(self.backend, DynamicsBackend):
-                error = 1.0
-                error -= sim_data["gate_fidelity"]["optimal"]
+                sim_data = simulate_pulse_schedule(
+                    self.backend,
+                    schedule_,
+                    target_unitary=Operator(self.target.gate),
+                    target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
+                )
+                error = 1.0 - sim_data["gate_fidelity"]["optimal"]
+                optimal_rots = sim_data["gate_fidelity"]["rotations"]
             else:
-                if len(self.avg_fidelity_history) == 0:
-                    self.avg_fidelity_history.append(0.0)
-                error = 1.0 - np.max(self.avg_fidelity_history)
+                exp = ProcessTomography(qc, self.backend, self.target.physical_qubits)
+                exp_data = exp.run(shots=10000).block_for_results()
+                process_matrix = exp_data.analysis_results("state").value
+                opt_res = get_optimal_z_rotation(
+                    process_matrix, self.target.target_operator, self.n_qubits
+                )
+                optimal_rots = opt_res.x
+                error = 1.0 - opt_res.fun
 
             with pulse.build(self.backend) as sched:
                 for i in range(self.n_qubits):
@@ -294,7 +303,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     pulse.call(
                         rz_cal,
                         value_dict={
-                            parameter: sim_data["gate_fidelity"]["rotations"][i]
+                            parameter: optimal_rots[i]
                             for parameter in rz_cal.parameters
                         },
                     )
@@ -304,7 +313,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     pulse.call(
                         rz_cal,
                         value_dict={
-                            parameter: sim_data["gate_fidelity"]["rotations"][i]
+                            parameter: optimal_rots[-1 - i]
                             for parameter in rz_cal.parameters
                         },
                     )

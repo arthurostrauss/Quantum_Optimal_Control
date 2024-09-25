@@ -6,12 +6,25 @@ Author: Arthur Strauss
 Created on 26/06/2023
 """
 
-from itertools import product
+from __future__ import annotations
+
 import sys
-from typing import Dict, Optional, List, Any, TypeVar, SupportsFloat, Union
+from typing import (
+    Dict,
+    Optional,
+    List,
+    Any,
+    TypeVar,
+    SupportsFloat,
+    Union,
+    Tuple,
+    Sequence,
+    Callable,
+)
 
 import numpy as np
 from gymnasium.spaces import Box
+from qiskit import schedule, pulse, ClassicalRegister
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -19,15 +32,35 @@ from qiskit.circuit import (
     QuantumRegister,
     ParameterVector,
     CircuitInstruction,
+    Gate,
+    Instruction,
     Qubit,
+    Clbit,
+    Parameter,
 )
+from qiskit.circuit.library.standard_gates import (
+    get_standard_gate_name_mapping as gate_map,
+)
+from qiskit.circuit.parametervector import ParameterVectorElement
+from qiskit.dagcircuit import DAGCircuit
+from qiskit.converters import circuit_to_dag
 from qiskit.providers import BackendV2
-from qiskit.transpiler import Layout
+from qiskit.quantum_info import Operator, Statevector
+from qiskit.transpiler import (
+    Layout,
+    InstructionProperties,
+    TransformationPass,
+    CouplingMap,
+)
+from qiskit.transpiler.passes import FilterOpNodes
+from qiskit_dynamics import DynamicsBackend
+from qiskit_experiments.library import ProcessTomography
 from qiskit_ibm_runtime import EstimatorV2
 
 from .helper_functions import (
     get_instruction_timings,
     retrieve_neighbor_qubits,
+    simulate_pulse_schedule,
 )
 from .qconfig import QEnvConfig
 from .base_q_env import (
@@ -61,6 +94,10 @@ def target_instruction_timings(
 ) -> tuple[List[int], List[int]]:
     """
     Return the timings of the target instructions in the circuit context
+
+    Args:
+        circuit_context: The circuit context containing the target instruction
+        target_instruction: The target instruction to be found in the circuit context
     """
     try:
         op_start_times = circuit_context.op_start_times
@@ -72,6 +109,205 @@ def target_instruction_timings(
         if instruction == target_instruction:
             target_instruction_timings.append(op_start_times[i])
     return op_start_times, target_instruction_timings
+
+
+class CustomGateReplacementPass(TransformationPass):
+    def __init__(
+        self,
+        target_instructions: List[
+            CircuitInstruction
+            | Tuple[
+                str,
+                Optional[QuantumRegister | Sequence[Qubit | int]],
+                Optional[ClassicalRegister | Sequence[Clbit | int]],
+            ]
+        ],
+        parametrized_circuit_functions: List[Callable],
+        parameters: List[ParameterVector | List[Parameter]],
+        parametrized_circuit_functions_args: List[Dict[str, Any]] = None,
+    ):
+        super().__init__()
+
+        if isinstance(target_instructions, CircuitInstruction):
+            target_instructions = [target_instructions]
+        elif isinstance(target_instructions, tuple):
+            target_instructions = [target_instructions]
+        elif not isinstance(target_instructions, List):
+            raise ValueError("Invalid target instructions format")
+        if isinstance(parametrized_circuit_functions, Callable):
+            parametrized_circuit_functions = [parametrized_circuit_functions]
+        elif not isinstance(parametrized_circuit_functions, List):
+            raise ValueError("Invalid parametrized circuit functions format")
+        if isinstance(parameters, ParameterVector) or (
+            isinstance(parameters, List) and isinstance(parameters[0], Parameter)
+        ):
+            parameters = [parameters]
+        elif not isinstance(parameters, List):
+            raise ValueError("Invalid parameters format")
+        if parametrized_circuit_functions_args is not None and not isinstance(
+            parametrized_circuit_functions_args, List
+        ):
+            if isinstance(parametrized_circuit_functions_args, dict):
+                parametrized_circuit_functions_args = [
+                    parametrized_circuit_functions_args
+                ]
+            else:
+                raise ValueError(
+                    "Invalid parametrized circuit functions arguments format"
+                )
+        assert (
+            len(target_instructions)
+            == len(parametrized_circuit_functions)
+            == len(parameters)
+        ), "Number of target instructions, parametrized circuit functions, and parameters must match"
+        self.target_instructions = []
+
+        for target_instruction in target_instructions:
+            if isinstance(target_instruction, CircuitInstruction):
+                self.target_instructions.append(
+                    (
+                        target_instruction.operation,
+                        target_instruction.qubits,
+                        target_instruction.clbits,
+                    )
+                )
+            else:
+                mapping = gate_map()
+                if (
+                    not isinstance(target_instruction[0], str)
+                    or target_instruction[0] not in mapping
+                ):
+                    raise ValueError(
+                        "Provided instruction name is not a valid gate name"
+                    )
+                op = mapping[target_instruction[0]]
+                qargs = target_instruction[1]
+                if isinstance(qargs, QuantumRegister):
+                    qargs = (qargs[i] for i in range(len(qargs)))
+                elif qargs is None:
+                    qargs = ()
+                if len(target_instruction) > 2:
+                    cargs = target_instruction[2]
+                    if isinstance(cargs, ClassicalRegister):
+                        cargs = (cargs[i] for i in range(len(cargs)))
+                else:
+                    cargs = ()
+
+                self.target_instructions.append((op, qargs, cargs))
+
+        self.functions = parametrized_circuit_functions
+        if parametrized_circuit_functions_args is not None:
+            assert len(parametrized_circuit_functions_args) == len(
+                parametrized_circuit_functions
+            ), "Number of parametrized circuit functions and arguments must match"
+            self.parametrized_circuit_functions_args = (
+                parametrized_circuit_functions_args
+            )
+        else:
+            self.parametrized_circuit_functions_args = [
+                {} for _ in range(len(parametrized_circuit_functions))
+            ]
+        self.parameters = parameters
+
+    def run(self, dag: DAGCircuit):
+        """Run the custom transformation on the DAG."""
+        for i, target_instruction in enumerate(self.target_instructions):
+
+            op = target_instruction[0]
+            qargs = target_instruction[1]
+            cargs = target_instruction[2]
+            qc = QuantumCircuit()
+            if qargs:
+                if isinstance(qargs[0], int):
+                    qargs = tuple([dag.qubits[q] for q in qargs])
+                qc.add_bits(qargs)
+                if cargs:
+                    if isinstance(cargs[0], int):
+                        cargs = tuple([dag.clbits[c] for c in cargs])
+                    qc.add_bits(cargs)
+                    self.functions[i](
+                        qc,
+                        self.parameters[i],
+                        qargs,
+                        cargs,
+                        **self.parametrized_circuit_functions_args[i],
+                    )
+                else:
+                    self.functions[i](
+                        qc,
+                        self.parameters[i],
+                        qargs,
+                        **self.parametrized_circuit_functions_args[i],
+                    )
+            else:
+                if cargs:
+                    if isinstance(cargs[0], int):
+                        cargs = (dag.clbits[c] for c in cargs)
+                    qc.add_bits(cargs)
+                    self.functions[i](
+                        qc,
+                        self.parameters[i],
+                        cargs,
+                        **self.parametrized_circuit_functions_args[i],
+                    )
+                else:
+                    self.functions[i](
+                        qc,
+                        self.parameters[i],
+                        **self.parametrized_circuit_functions_args[i],
+                    )
+
+            instruction_nodes = dag.named_nodes(op.name)
+            for node in instruction_nodes:
+                dag.substitute_node_with_dag(
+                    node, circuit_to_dag(qc), wires=list(qargs) + list(cargs)
+                )
+        return dag
+
+
+# class FilterLocalContext(TransformationPass):
+#
+#     def __init__(self, coupling_map: CouplingMap, target_instructions: List[CircuitInstruction | Tuple[str,
+#             Optional[QuantumRegister | Sequence[Qubit | int]],
+#             Optional[ClassicalRegister | Sequence[Clbit | int]]]):
+#         if isinstance(target_instructions, CircuitInstruction):
+#             target_instructions = [target_instructions]
+#         elif isinstance(target_instructions, tuple):
+#             target_instructions = [target_instructions]
+#         elif not isinstance(target_instructions, List):
+#             raise ValueError("Invalid target instructions format")
+#
+#         self.target_instructions = []
+#
+#         for target_instruction in target_instructions:
+#             if isinstance(target_instruction, CircuitInstruction):
+#                 self.target_instructions.append((target_instruction.operation,
+#                                                  target_instruction.qubits,
+#                                                  target_instruction.clbits))
+#             else:
+#                 mapping = gate_map()
+#                 if not isinstance(target_instruction[0], str) or target_instruction[0] not in mapping:
+#                     raise ValueError("Provided instruction name is not a valid gate name")
+#                 op = mapping[target_instruction[0]]
+#                 qargs = target_instruction[1]
+#                 if isinstance(qargs, QuantumRegister):
+#                     qargs = (qargs[i] for i in range(len(qargs)))
+#                 elif qargs is None:
+#                     qargs = ()
+#                 if len(target_instruction) > 2:
+#                     cargs = target_instruction[2]
+#                     if isinstance(cargs, ClassicalRegister):
+#                         cargs = (cargs[i] for i in range(len(cargs)))
+#                 else:
+#                     cargs = ()
+#
+#                 self.target_instructions.append((op, qargs, cargs))
+#
+#             super().__init__()
+#             self.coupling_map = coupling_map
+#
+#     def run(self, dag: DAGCircuit):
+#         pass
 
 
 class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
@@ -116,10 +352,21 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             target_instruction_timings(self._circuit_context, self.target_instruction)
         )
 
+        # self._parameters = [[Parameter(f"a_{j}_{k}") for k in range(training_config.n_actions)]
+        #                     for j in range(self.tgt_instruction_counts)]
         self._parameters = [
             ParameterVector(f"a_{j}", training_config.n_actions)
             for j in range(self.tgt_instruction_counts)
         ]
+        self.custom_instructions: List[Gate] = []
+        self.new_gates: List[Gate] = []
+        self._optimal_actions = [
+            np.zeros(training_config.n_actions)
+            for _ in range(self.tgt_instruction_counts)
+        ]
+        self.custom_circuit_context = self.circuit_context.copy_empty_like(
+            "custom_context"
+        )
         self._param_values = create_array(
             self.tgt_instruction_counts,
             training_config.batch_size,
@@ -197,7 +444,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             for i in range(self.tgt_instruction_counts)
         ]
         # Build sub-circuit contexts: each circuit goes until target gate and preserves nearest neighbor operations
-
+        operations_mapping = {op.name: op for op in self.backend.operations}
         for i in range(self.tgt_instruction_counts):  # Loop over target gates
             counts = 0
             for start_time, instruction in zip(
@@ -252,6 +499,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                             instruction.operation,
                             [mapping[q] for q in instruction.qubits],
                         )
+                        self.custom_circuit_context.append(instruction)
                     else:  # Add custom instruction in place of target gate
                         try:
                             self.parametrized_circuit_func(
@@ -260,6 +508,17 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                                 tgt_register,
                                 **self._func_args,
                             )
+                            self.parametrized_circuit_func(
+                                self.custom_circuit_context,
+                                self.parameters[counts],
+                                self.circ_tgt_register,
+                                **self._func_args,
+                            )
+                            for op in self.backend.operations:
+                                if op.name not in operations_mapping:
+                                    # If new custom instruction was added, store it and update operations mapping
+                                    self.custom_instructions.append(op)
+                                    operations_mapping[op.name] = op
                         except TypeError:
                             raise TypeError("Failed to call parametrized_circuit_func")
                         counts += 1
@@ -365,7 +624,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             # Using Negative Log Error as the Reward
             if np.mean(reward) > self._max_return:
                 self._max_return = np.mean(reward)
-                self._optimal_action = self.mean_action
+                self._optimal_actions[self.trunc_index] = self.mean_action
             self.reward_history.append(reward)
             assert (
                 len(reward) == self.batch_size
@@ -505,6 +764,26 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
     def training_steps_per_gate(self) -> int:
         return self._training_steps_per_gate
 
+    @property
+    def optimal_action(self):
+        """
+        Return optimal action for current gate instance
+        """
+        return self._optimal_actions[self.trunc_index]
+
+    def optimal_actions(self, indices: Optional[int | List[int]] = None):
+        """
+        Return optimal actions for selected circuit truncation index.
+        If no indices are provided, return list of all optimal actions.
+
+        """
+        if isinstance(indices, int):
+            return self._optimal_actions[indices]
+        elif isinstance(indices, List):
+            return [self._optimal_actions[index] for index in indices]
+        else:
+            return self._optimal_actions
+
     @training_steps_per_gate.setter
     def training_steps_per_gate(self, nb_of_steps: int):
         try:
@@ -619,3 +898,130 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 self.backend_info.coupling_map,
                 self.physical_target_qubits + self.physical_neighbor_qubits,
             )
+
+    def update_gate_calibration(self, gate_names: Optional[List[str]] = None):
+        """
+        Update gate calibrations with optimal actions
+        """
+        if self.abstraction_level == "pulse":
+            if gate_names is not None and len(gate_names) != len(
+                self.custom_instructions
+            ):
+                raise ValueError(
+                    "Number of gate names does not match number of custom instructions"
+                )
+            else:
+                gate_names = [
+                    f"{gate.name}_{i}_opt"
+                    for i, gate in enumerate(self.custom_instructions)
+                ]
+
+            context_params = self.custom_circuit_context.parameters
+            value_dicts = [{} for _ in range(self.tgt_instruction_counts)]
+            for i, custom_circ in enumerate(self.circuits):
+                for param in custom_circ.parameters:
+                    if (
+                        isinstance(param, ParameterVectorElement)
+                        and param.vector in self.parameters
+                    ):
+                        vector_index = self.parameters.index(param.vector)
+                        param_index = param.index
+                        value_dicts[i][param] = self.optimal_actions(vector_index)[
+                            param_index
+                        ]
+
+                    elif param.name.startswith("a_"):
+                        vector_index = int(param.name.split("_")[1])
+                        param_index = int(param.name.split("_")[2])
+                        value_dicts[i][param] = self.optimal_actions(vector_index)[
+                            param_index
+                        ]
+
+            # context_qc = self.custom_circuit_context.assign_parameters(
+            #     value_dicts[-1], inplace=False)
+            contextual_schedules = schedule(self.circuits, self.backend)
+
+            gate_qc = [
+                QuantumCircuit(self.circ_tgt_register)
+                for _ in range(self.tgt_instruction_counts)
+            ]
+            schedules, durations = [], []
+            for i, gate in enumerate(self.custom_instructions):
+                baseline_circ = self.baseline_circuits[i]
+                custom_circ = self.circuits[i].assign_parameters(
+                    value_dicts[i], inplace=False
+                )
+
+                gate_qc[i].append(gate, self.circ_tgt_register)
+                gate_qc[i].assign_parameters(self.optimal_actions(i), inplace=True)
+
+                def _define(self2):
+                    qc = QuantumCircuit(len(self.physical_target_qubits))
+                    # Sort the qubits to ensure the gate is applied on the correct qubits ordering
+                    sorted_indices = sorted(self.physical_target_qubits)
+                    index_map = {value: i for i, value in enumerate(sorted_indices)}
+                    new_indices = [
+                        index_map[value] for value in self.physical_target_qubits
+                    ]
+                    qc.append(self.target.gate, new_indices)
+                    self2._definition = qc
+
+                def array(self2, dtype=None):
+                    return self.target.gate.to_matrix()
+
+                def new_init(self2):
+                    Gate.__init__(self2, gate_names[i], self.target.gate.num_qubits, [])
+
+                new_gate_methods = {
+                    "_define": _define,
+                    "__array__": array,
+                    "__init__": new_init,
+                }
+                new_gate_cls = type(
+                    f"{gate.name.capitalize()}_{i}", (Gate,), new_gate_methods
+                )
+                new_gate = new_gate_cls()
+                self.new_gates.append(new_gate)
+                cal_sched = schedule(gate_qc[i], self.backend)
+                duration = cal_sched.duration
+                schedules.append(cal_sched)
+                durations.append(duration)
+                contextual_schedules[i].assign_parameters(value_dicts[i], inplace=True)
+                if isinstance(self.backend, DynamicsBackend):
+                    sim_result = simulate_pulse_schedule(
+                        self.backend,
+                        contextual_schedules[i],
+                        target_unitary=Operator(self.baseline_circuits[i]),
+                        target_state=Statevector(self.baseline_circuits[i]),
+                    )
+                    error = 1.0 - sim_result["gate_fidelity"]["raw"]
+
+                else:
+                    exp = ProcessTomography(
+                        custom_circ,
+                        self.backend,
+                        self.involved_qubits_list[i],
+                        target=Operator(baseline_circ),
+                    )
+                    exp_data = exp.run(shots=10000).block_for_results()
+                    process_matrix = exp_data.analysis_results("state").value
+                    process_fid = exp_data.analysis_results("process_fidelity").value
+                    dim, _ = process_matrix.dim
+                    avg_gate_fid = (dim * process_fid + 1) / (dim + 1)
+                    error = 1.0 - avg_gate_fid
+
+                instruction_prop = InstructionProperties(duration, error, cal_sched)
+
+                self.backend.target.add_instruction(
+                    new_gate, {tuple(self.physical_target_qubits): instruction_prop}
+                )
+
+    @property
+    def involved_qubits_list(self):
+        """
+        Returns a list of lists of physical qubits involved in each circuit truncation
+        """
+        involved_qubits = []
+        for target in self._target:
+            involved_qubits.extend(list(target.layout.get_physical_bits().keys()))
+        return involved_qubits

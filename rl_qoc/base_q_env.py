@@ -4,7 +4,7 @@ quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
-Last updated: 05/09/2024
+Last updated: 19/09/2024
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ from qiskit.circuit import (
     Gate,
     ParameterVector,
     CircuitInstruction,
+    Parameter,
 )
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
@@ -93,6 +94,7 @@ from .helper_functions import (
     rotate_unitary,
     projected_state,
     qubit_projection,
+    rotate_frame,
 )
 from .qconfig import (
     QiskitConfig,
@@ -1669,6 +1671,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 results = simulate_pulse_level(pub, self.backend, y0)
                 for result in results:
                     yf = result.y[-1]
+                    tf = result.t[-1]
+                    rotate_frame(yf, tf, self.backend)
                     output_data.append(yf)
 
             # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
@@ -1716,42 +1720,7 @@ class BaseQuantumEnvironment(ABC, Env):
             for solver_result in results:
                 yf = solver_result.y[-1]
                 tf = solver_result.t[-1]
-                backend = self.backend
-                # Take state out of frame, put in dressed basis, and normalize
-                if isinstance(yf, Statevector):
-                    yf = np.array(
-                        backend.options.solver.model.rotating_frame.state_out_of_frame(
-                            t=tf, y=yf
-                        )
-                    )
-                    yf = backend._dressed_states_adjoint @ yf
-                    yf = Statevector(yf, dims=backend.options.subsystem_dims)
-
-                    if backend.options.normalize_states:
-                        yf = yf / np.linalg.norm(yf.data)
-                elif isinstance(yf, DensityMatrix):
-                    yf = np.array(
-                        backend.options.solver.model.rotating_frame.operator_out_of_frame(
-                            t=tf, operator=yf
-                        )
-                    )
-                    yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
-                    yf = DensityMatrix(yf, dims=backend.options.subsystem_dims)
-
-                    if backend.options.normalize_states:
-                        yf = yf / np.diag(yf.data).sum()
-                elif isinstance(yf, Operator):
-                    yf = np.array(
-                        backend.options.solver.model.rotating_frame.operator_out_of_frame(
-                            t=tf, operator=yf
-                        )
-                    )
-                    yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
-                    yf = Operator(
-                        yf,
-                        input_dims=backend.options.subsystem_dims,
-                        output_dims=backend.options.subsystem_dims,
-                    )
+                yf = rotate_frame(yf, tf, self.backend)
 
                 output_data.append(yf)
 
@@ -2092,9 +2061,11 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     @abstractmethod
-    def parameters(self) -> List[ParameterVector] | ParameterVector:
+    def parameters(
+        self,
+    ) -> List[ParameterVector | List[Parameter]] | ParameterVector | List[Parameter]:
         """
-        Return the Qiskit ParameterVector defining the actions applied on the environment
+        Return the Qiskit Parameter(s) instance(s) defining the abstract actions applied on the environment
         """
         raise NotImplementedError("Parameters not implemented")
 
