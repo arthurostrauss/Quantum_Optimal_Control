@@ -1,9 +1,14 @@
 import functools
+from typing import List, Dict
+
 import qm.qua as qua
 import sympy as sp
 import symengine as se
 from functools import partial
+
+from qm.qua import fixed, declare, assign
 from qualang_tools.video_mode.videomode import ParameterValue
+from sympy import Symbol
 
 sympy_to_qua_dict = {
     sp.Float: qua.fixed,
@@ -37,46 +42,61 @@ def match_expr(expr: sp.Function):
 
 
 def sympy_to_qua(
-    sympy_expr: sp.Basic, parameter_val: ParameterValue
+    sympy_expr: sp.Basic, parameter_vals: Dict[str, ParameterValue]
 ) -> qua.QuaVariableType:
     """
     Convert a Sympy expression to a QuaVariableType
 
     Args:
-        sympy_expr: Sympy expression to convert
-        parameter_val: ParameterValue instance
-            (contains the name and QUA variable for the parameter)
-
+        sympy_expr: Sympy expression to convert (could contain multiple Parameters)
+        parameter_vals: Dictionary of parameter values (contain name and QUA variable)
     Returns:
         QuaVariableType: The equivalent QUA variable transformed from the sympy expression
     """
     # Convert sympy_expr that could be from symengine to actual sympy
+    if any([isinstance(param.type, fixed) for param in parameter_vals.values()]):
+        new_val = declare(fixed)
+    else:
+        new_val = declare(int)
+
+    sympy_to_qua_dict = {}
+    for symbol in sympy_expr.free_symbols:
+        assert (
+            symbol.name in parameter_vals
+        ), f"Parameter {symbol.name} not found in parameter_vals"
+        sympy_to_qua_dict[symbol] = parameter_vals[symbol.name].var
+
     if isinstance(sympy_expr, se.Basic):
         sympy_expr = sp.sympify(str(sympy_expr))
     if isinstance(sympy_expr, sp.Symbol):
-        return parameter_val.var
-    if isinstance(sympy_expr, sp.Number):
-        return sympy_expr.evalf()
-    if isinstance(sympy_expr, sp.Mul):
+        result = sympy_to_qua_dict[sympy_expr]
+
+    elif isinstance(sympy_expr, sp.Number):
+        result = sympy_expr.evalf()
+
+    elif isinstance(sympy_expr, sp.Mul):
         # handle multiplication for arbitrary number of terms
-        return functools.reduce(
+        result = functools.reduce(
             lambda x, y: x * y,
-            [sympy_to_qua(term, parameter_val) for term in sympy_expr.args],
+            [sympy_to_qua(term, parameter_vals) for term in sympy_expr.args],
         )
-    if isinstance(sympy_expr, sp.Add):
+
+    elif isinstance(sympy_expr, sp.Add):
         # handle addition for arbitrary number of terms
-        return functools.reduce(
+        result = functools.reduce(
             lambda x, y: x + y,
-            [sympy_to_qua(term, parameter_val) for term in sympy_expr.args],
+            [sympy_to_qua(term, parameter_vals) for term in sympy_expr.args],
         )
-    if isinstance(sympy_expr, sp.Pow):
-        return sympy_to_qua_dict[type(sympy_expr)](
-            sympy_to_qua(sympy_expr.args[0], parameter_val),
-            sympy_to_qua(sympy_expr.args[1], parameter_val),
+    elif isinstance(sympy_expr, sp.Pow):
+        result = sympy_to_qua_dict[type(sympy_expr)](
+            sympy_to_qua(sympy_expr.args[0], parameter_vals),
+            sympy_to_qua(sympy_expr.args[1], parameter_vals),
         )
-    if isinstance(sympy_expr, sp.Function):
+    elif isinstance(sympy_expr, sp.Function):
         qua_func = match_expr(sympy_expr)
         if qua_func:
-            return qua_func(sympy_to_qua(sympy_expr.args[0], parameter_val))
-
-    raise ValueError(f"Unsupported sympy expression: {sympy_expr}")
+            result = qua_func(sympy_to_qua(sympy_expr.args[0], parameter_vals))
+    else:
+        raise ValueError(f"Unsupported sympy expression: {sympy_expr}")
+    assign(new_val, result)
+    return new_val

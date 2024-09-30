@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
 from typing import Iterable, List, Sequence, Dict, Union, Tuple, Optional, Callable
-
 from quam.components import Channel as QuAMChannel
 from quam.components.pulses import Pulse as QuAMPulse
 from quam import quam_dataclass
 
-from qiskit.circuit import ParameterExpression, QuantumCircuit, Parameter
+from qiskit.circuit import ParameterExpression, QuantumCircuit
 from qiskit.providers import BackendV2 as Backend, QubitProperties
 from qiskit.pulse import (
     ScheduleBlock,
@@ -32,7 +32,8 @@ from qiskit.pulse.transforms import block_to_schedule
 from qiskit.pulse.channels import Channel as QiskitChannel
 from qiskit.pulse.library import SymbolicPulse
 from qiskit.pulse.library.waveform import Waveform
-from qm.qua import *
+from qm.qua import amp as qua_amp, reset_phase, QuaVariableType, assign, switch_, case_
+from qm.qua import Math, declare, fixed, declare_stream
 from qm import QuantumMachinesManager, Program
 from qualang_tools.addons.variables import assign_variables_to_element
 from quam_components import QuAM
@@ -46,6 +47,7 @@ from oqc import (
     QubitsMapping,
 )
 
+# TODO: Add duration to the list of real-time parameters (need ScheduleBlock to QUA compiler)
 _real_time_parameters = {
     "amp",
     "angle",
@@ -54,19 +56,34 @@ _real_time_parameters = {
 _ref_amp = 0.1
 _ref_phase = 0.0
 
-_pulse_to_qua_instructions = {
-    ShiftPhase: lambda phase, channel: channel.frame_rotation(phase),
-    ShiftFrequency: lambda freq, channel: channel.update_frequency(
-        freq + channel.intermediate_frequency
-    ),
-    SetFrequency: lambda freq, channel: channel.update_frequency(freq),
-    SetPhase: lambda phase, channel: (
-        reset_phase(channel.name),
-        channel.frame_rotation(phase),
-    ),
-    Delay: lambda duration, channel: channel.wait(duration),
+_qiskit_to_qua_instructions: Dict[Instruction, Dict[str, Callable | List[str]]] = {
+    ShiftPhase: {
+        "macro": lambda channel, phase: channel.frame_rotation(phase),
+        "params": ["phase"],
+    },
+    ShiftFrequency: {
+        "macro": lambda channel, freq: channel.update_frequency(
+            freq + channel.intermediate_frequency
+        ),
+        "params": ["frequency"],
+    },
+    SetFrequency: {
+        "macro": lambda channel, freq: channel.update_frequency(freq),
+        "params": ["frequency"],
+    },
+    SetPhase: {
+        "macro": lambda channel, phase: (
+            reset_phase(channel.name),
+            channel.frame_rotation(phase),
+        ),
+        "params": ["phase"],
+    },
+    Delay: {
+        "macro": lambda channel, duration: channel.wait(duration),
+        "params": ["duration"],
+    },
 }
-_pulse_attributes = {
+_instruction_attributes = {
     ShiftPhase: "phase",
     ShiftFrequency: "frequency",
     SetFrequency: "frequency",
@@ -78,29 +95,75 @@ _pulse_attributes = {
 def _handle_parameterized_instruction(
     instruction: Instruction,
     param_table: ParameterTable,
-    params,
+    param_mapping: Dict[str, QuaVariableType],
     quam_channel: QuAMChannel,
     action: Callable,
 ):
+    """
+    Handle the conversion of a parameterized instruction to QUA
+    """
+    value_dict = {}
+    involved_parameter_values = {}
     for param in instruction.parameters:
         if param.name not in param_table:
             raise ValueError(f"Parameter {param.name} is not in the parameter table")
-        if param.name not in params:
+        if param.name not in param_mapping:
             raise ValueError(
                 f"Parameter {param.name} is not in the provided parameters"
             )
-        assign(param_table[param.name], params[param.name])
+        assign(param_table[param.name], param_mapping[param.name])
+        involved_parameter_values[param.name] = param_table.table[param.name]
 
-    action(
-        *[
-            sympy_to_qua(param.sympify(), param_table[param.name])
-            for param in instruction.parameters
-        ],
-        quam_channel,
-    )
+    if instruction in _qiskit_to_qua_instructions:
+        for attribute in _qiskit_to_qua_instructions[type(instruction)]["params"]:
+            value_dict[attribute] = sympy_to_qua(
+                getattr(instruction, attribute).sympify(), involved_parameter_values
+            )
+
+    elif isinstance(instruction, Play):
+        pulse = instruction.pulse
+
+        if isinstance(pulse, Waveform) and isinstance(
+            pulse.duration, ParameterExpression
+        ):
+            duration = pulse.duration
+
+            value_dict["duration"] = sympy_to_qua(
+                duration.sympify(),
+                involved_parameter_values,
+            )
+            action(quam_channel, **value_dict)
+        elif isinstance(pulse, SymbolicPulse):
+            for pulse_param_name, pulse_param in pulse.parameters.items():
+                if pulse_param_name in _real_time_parameters and isinstance(
+                    pulse_param, ParameterExpression
+                ):
+                    value_dict[pulse_param_name] = sympy_to_qua(
+                        pulse_param.sympify(),
+                        involved_parameter_values,
+                    )
+        else:
+            raise ValueError(f"Pulse {pulse} is not supported on the QUA backend")
+
+    action(quam_channel, **value_dict)
 
 
-# TODO: Add duration to the list of real-time parameters (need ScheduleBlock to QUA compiler)
+def register_pulse_features(pulse: SymbolicPulse):
+    """
+    Register the features of a SymbolicPulse to be used in the QUA compiler
+    """
+    stored_parameter_expressions = {}
+    for param_name, param_value in pulse.parameters.items():
+        for feature_name in ["amp", "angle"]:
+            if param_name == feature_name and isinstance(
+                param_value, ParameterExpression
+            ):
+                stored_parameter_expressions[feature_name] = lambda val: sympy_to_qua(
+                    param_value.sympify(), val
+                )
+    return stored_parameter_expressions
+
+
 class FluxChannel(QiskitChannel):
     prefix = "f"
 
@@ -109,7 +172,13 @@ class FluxChannel(QiskitChannel):
 class QuAMQiskitPulse(QuAMPulse):
     def __init__(self, pulse: SymbolicPulse | Waveform):
         self.pulse: SymbolicPulse | Waveform = pulse
+        self._stored_parameter_expressions = {
+            "amp": None,
+            "angle": None,
+            "frequency": None,
+        }
 
+        self._stored_parameter_expressions = register_pulse_features(pulse)
         super().__init__(
             length=self.pulse.duration if not self.pulse.is_parameterized() else 0,
             id=pulse.name,
@@ -133,15 +202,17 @@ class QuAMQiskitPulse(QuAMPulse):
             ):  # Assign reference values to the parameters
                 sched = Schedule(Play(self.pulse, DriveChannel(0)))
                 for param_name, param_value in self.pulse.parameters.items():
-                    if param_name == "amp" and isinstance(
-                        param_value, ParameterExpression
+                    assignment_real_time_params = {}
+                    for feature_name, feature_value in zip(
+                        ["amp", "angle"], [_ref_amp, _ref_phase]
                     ):
-                        sched = sched.assign_parameters({param_name: _ref_amp})
-                    elif param_name == "angle" and isinstance(
-                        param_value, ParameterExpression
-                    ):
-                        sched = sched.assign_parameters({param_name: _ref_phase})
-                    elif param_name == "duration":
+                        if param_name == feature_name and isinstance(
+                            param_value, ParameterExpression
+                        ):
+                            assignment_real_time_params[param_name] = feature_value
+                    sched = sched.assign_parameters(assignment_real_time_params)
+
+                    if param_name == "duration":
                         raise NotImplementedError(
                             "Duration parameter cannot be parametrized"
                         )
@@ -161,9 +232,11 @@ class QuAMQiskitPulse(QuAMPulse):
         Check if the pulse is parametrized with compile-time parameters
         """
         return any(
-            isinstance(self.pulse.parameters[param], ParameterExpression)
-            and param not in _real_time_parameters
-            for param in self.pulse.parameters
+            [
+                isinstance(self.pulse.parameters[param], ParameterExpression)
+                and param not in _real_time_parameters
+                for param in self.pulse.parameters
+            ]
         )
 
     def is_real_time_parametrized(self):
@@ -208,31 +281,73 @@ class QMProvider:
         pass
 
 
+def frame_rotation_matrix(angle, amp=1.0):
+    return [
+        amp * Math.cos(angle),
+        -amp * Math.sin(angle),
+        amp * Math.sin(angle),
+        amp * Math.cos(angle),
+    ]
+
+
 def _instruction_to_qua(
     instruction: Instruction,
     quam_channel: QuAMChannel,
-    params: Optional[Dict] = None,
+    param_mapping: Optional[Dict] = None,
     param_table: Optional[ParameterTable] = None,
 ):
     """
     Convert a Qiskit Pulse instruction to a QUA instruction
 
     Args:
-        instruction: The Qiskit Pulse instruction to convert
-        quam_channel: The QuAM channel on which to apply the instruction
-        params: The parameters to use for the conversion of parametrized instructions
-        param_table: The parameter table to use for the conversion
+        instruction: Qiskit Pulse instruction to convert
+        quam_channel: QuAM channel on which to apply the instruction
+        param_mapping:  Parameters to use for the conversion of parametrized instructions
+        param_table:  Parameter table to use for the conversion (contains the reference QUA variables for parameters)
     """
     if instruction.is_parameterized():
-        assert params is not None, "Parameters must be provided"
+        assert param_mapping is not None, "Parameters must be provided"
         assert param_table is not None, "Parameter table must be provided"
 
         if isinstance(instruction, Play):
-            # TODO: Add support for Play instructions with Waveform pulses
-            action = None
-            pass
-        elif type(instruction) in _pulse_to_qua_instructions:
-            action = _pulse_to_qua_instructions[type(instruction)]
+            pulse = instruction.pulse
+            if not pulse.name in quam_channel.operations:
+                raise ValueError(
+                    f"Pulse {pulse.name} is not in the operations of the QuAM channel"
+                )
+
+            if isinstance(pulse, Waveform):
+
+                def action(quam_channel, duration=None):
+                    quam_channel.play(pulse.name, duration=duration)
+
+            elif isinstance(pulse, SymbolicPulse):
+
+                def action(
+                    quam_channel: QuAMChannel, amp=None, angle=None, duration=None
+                ):
+                    new_ref = (
+                        1.0 / _ref_amp
+                    )  # Recover the reference amplitude from the reference value of 0.1
+                    if amp is not None and angle is not None:
+                        amp_matrix = frame_rotation_matrix(angle, amp * new_ref)
+                    elif amp is not None:
+                        amp_matrix = [new_ref * amp]
+                    elif angle is not None:
+                        amp_matrix = frame_rotation_matrix(angle)
+                    else:
+                        amp_matrix = None
+                    quam_channel.play(
+                        pulse.name,
+                        amplitude_scale=qua_amp(*amp_matrix) if amp_matrix else None,
+                        duration=duration,
+                    )
+
+            else:
+                raise ValueError(f"Pulse {pulse} is not supported on the QUA backend")
+        elif type(instruction) in _qiskit_to_qua_instructions:
+            action = _qiskit_to_qua_instructions[type(instruction)]["macro"]
+
         elif isinstance(instruction, Acquire):
             # TODO: Add support for Acquire instructions
             raise NotImplementedError("Acquire instructions are not supported yet")
@@ -242,19 +357,25 @@ def _instruction_to_qua(
             )
 
         _handle_parameterized_instruction(
-            instruction, param_table, params, quam_channel, action
+            instruction, param_table, param_mapping, quam_channel, action
         )
 
     else:
+        values = {}
         if isinstance(instruction, Play):
-            # TODO: Add support for Play instructions with Waveform pulses
-            action = None
-            values = None
-        elif type(instruction) in _pulse_to_qua_instructions:
-            action = _pulse_to_qua_instructions[type(instruction)]
-            values = getattr(instruction, _pulse_attributes[type(instruction)])
-            if not isinstance(values, Sequence):
-                values = [values]
+            pulse = instruction.pulse
+            if not pulse.name in quam_channel.operations:
+                raise ValueError(
+                    f"Pulse {pulse.name} is not in the operations of the QuAM channel"
+                )
+
+            action = lambda quam_channel: quam_channel.play(pulse.name)
+
+        elif type(instruction) in _qiskit_to_qua_instructions:
+            action = _qiskit_to_qua_instructions[type(instruction)]["macro"]
+            for attribute in _qiskit_to_qua_instructions[type(instruction)]["params"]:
+                values[attribute] = getattr(instruction, attribute)
+
         elif isinstance(instruction, Acquire):
             # TODO: Add support for Acquire instructions
             raise NotImplementedError("Acquire instructions are not supported yet")
@@ -262,7 +383,7 @@ def _instruction_to_qua(
             raise ValueError(
                 f"instruction {instruction} not supported on the QUA backend"
             )
-        action(*values, quam_channel)
+        action(quam_channel, **values) if values else action(quam_channel)
 
 
 class QMBackend(Backend, ABC):
@@ -376,13 +497,16 @@ class QMBackend(Backend, ABC):
 
     def schedule_to_qua_macro(
         self, sched: Schedule, param_table: Optional[ParameterTable] = None
-    ):
+    ) -> Callable:
         """
         Convert a Qiskit Pulse Schedule to a QUA macro
 
         Args:
             sched: The Qiskit Pulse Schedule to convert
             param_table: The parameter table to use for the conversion of parametrized pulses to QUA variables
+
+        Returns:
+            The QUA macro corresponding to the Qiskit Pulse Schedule
         """
         if sched.is_parameterized():
             for param in sched.parameters:
@@ -395,10 +519,13 @@ class QMBackend(Backend, ABC):
             *params,
         ):  # Define the QUA macro with parameters
 
-            param_mapping = {
-                param_name: arg
-                for param_name, arg in zip(param_table.table.keys(), params)
-            }
+            # Relate passed positional arguments to parameters in ParameterTable
+            parameter_names = inspect.signature(qua_macro).parameters.keys()
+            assert all(
+                [param in param_table for param in parameter_names]
+            ), "All parameters in the QUA macro must be in the parameter table"
+            param_mapping = {param: arg for param, arg in zip(parameter_names, params)}
+
             time_tracker = {channel: 0 for channel in sched.channels}
             for time, instruction in sched.instructions:
 
@@ -419,9 +546,11 @@ class QMBackend(Backend, ABC):
                     }
                     parameter_name = list(qiskit_channel.parameters)[0].name
                     with switch_(
-                        param_mapping[parameter_name]
+                        param_mapping[
+                            parameter_name
+                        ]  # QUA variable corresponding to the parameter
                     ):  # Switch based on the parameter value
-                        for i in range(len(channel_dict)):
+                        for i in channel_dict.keys():
                             with case_(i):
                                 quam_channel = channel_dict[i]
                                 if time_tracker[qiskit_channel] < time:
@@ -462,14 +591,8 @@ class QMBackend(Backend, ABC):
                         raise ValueError(
                             f"Calibration schedule for {gate_name} is not a Schedule"
                         )
-                    parametrized_channels_count = 0
-                    for channel in schedule.channels:
-                        if channel.is_parameterized():
-                            parametrized_channels_count += 1
-                    if parametrized_channels_count == 0:
-                        parametrized_channels_count = None
 
-                    # Update QuAM with additional pulses
+                    # Update QuAM with additional custom pulses
                     for idx, (time, instruction) in enumerate(
                         schedule.filter(instruction_types=[Play]).instructions
                     ):
@@ -479,8 +602,12 @@ class QMBackend(Backend, ABC):
                             raise ValueError(
                                 "Only SymbolicPulse and Waveform pulses are supported"
                             )
+
                         pulse_name = pulse.name
-                        if pulse_name in self.get_quam_channel(channel).operations:
+                        if (
+                            not channel.is_parameterized()
+                            and pulse_name in self.get_quam_channel(channel).operations
+                        ):
                             pulse_name += str(pulse.id)
                             pulse.name = pulse_name
 
@@ -490,24 +617,27 @@ class QMBackend(Backend, ABC):
                                 "Compile-time parametrized pulses are not supported in this execution"
                                 "mode."
                             )
-                        if quam_pulse.is_real_time_parametrized():
-                            for param in _real_time_parameters:
-                                if isinstance(
-                                    pulse.parameters[param], ParameterExpression
-                                ):
-                                    pass
-                                    # TODO: Add the real-time parameters to the QuAM pulse
 
-                        self.get_quam_channel(channel).operations[pulse.name] = (
-                            QuAMQiskitPulse(pulse)
-                        )
+                        if (
+                            channel.is_parameterized()
+                        ):  # Add pulse to each channel of same type
+                            for chan in filter(
+                                lambda x: isinstance(x, type(channel)),
+                                self._pulse_to_quam_channels.keys(),
+                            ):
+                                self.get_quam_channel(chan).operations[pulse.name] = (
+                                    QuAMQiskitPulse(pulse)
+                                )
+                        else:
+                            self.get_quam_channel(channel).operations[pulse.name] = (
+                                QuAMQiskitPulse(pulse)
+                            )
 
                     self._operation_mapping_QUA[
                         OperationIdentifier(
                             gate_name,
                             len(parameters),
                             qubits,
-                            parametrized_channels_count,
                         )
                     ] = self.schedule_to_qua_macro(schedule, param_table)
         hardware_config = HardwareConfig(
@@ -522,7 +652,7 @@ class QMBackend(Backend, ABC):
             if not line.strip().startswith(("barrier",))
         )
         result = compiler.compile(open_qasm_code)
-        return result.result_program
+        return result
 
     def qua_prog_from_qc(self, qc: QuantumCircuit | Schedule | ScheduleBlock | Program):
         """
@@ -543,6 +673,7 @@ class QMBackend(Backend, ABC):
                 schedule = qc
                 if isinstance(qc, ScheduleBlock):
                     if not qc.is_schedulable():
+                        # TODO: Build ScheduleBlock to QUA compiler
                         raise ValueError(
                             "ScheduleBlock is not schedulable (contains unschedulable instructions)"
                         )
@@ -624,43 +755,3 @@ def qua_declaration(n_qubits, readout_elements):
     for i in range(n_qubits):
         assign_variables_to_element(readout_elements[i], I[i], Q[i])
     return I, I_st, Q, Q_st
-
-
-def get_el_from_channel(channel: QiskitChannel):
-    return ""
-
-
-def get_pulse_from_instruction(
-    pulse_instance: Waveform | SymbolicPulse,
-    channel: QiskitChannel,
-    channel_mapping: dict = None,
-    parameter_table: ParameterTable = None,
-    pulse_lib: dict = None,
-):
-    param_statement = {"pulse": pulse_lib[pulse_instance.name]}
-
-    for param_name, param_value in pulse_instance.parameters.items():
-        if param_name == "amp" and isinstance(param_value, ParameterExpression):
-            amp_ = parameter_table[param_value]
-            angle = pulse_instance.parameters.get("angle", None)
-            if isinstance(angle, ParameterExpression):
-                angle = parameter_table[angle]
-            elif angle == 0:
-                angle = None
-
-            matrix_elements = (
-                [
-                    amp_ * Math.cos(angle),
-                    -amp_ * Math.sin(angle),
-                    amp_ * Math.sin(angle),
-                    amp_ * Math.cos(angle),
-                ]
-                if angle is not None
-                else [amp_]
-            )
-            param_statement["pulse"] *= amp(*matrix_elements)
-
-        elif param_name == "duration" and isinstance(param_value, ParameterExpression):
-            param_statement["duration"] = parameter_table[param_value]
-
-    return param_statement
