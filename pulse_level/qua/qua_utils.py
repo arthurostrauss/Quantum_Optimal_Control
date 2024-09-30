@@ -95,7 +95,7 @@ def rand_gauss_moller_box(z1, z2, mean, std, rand):
     return z1, z2
 
 
-def prepare_input_state(pauli_prep_indices, qubits: List[Transmon]):
+def prepare_input_state_pauli6(pauli_prep_indices, qubits: List[Transmon]):
     for i in range(len(qubits)):
         qubit = qubits[i]
         with switch_(pauli_prep_indices[i], unsafe=True):

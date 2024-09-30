@@ -183,13 +183,13 @@ class CustomGateReplacementPass(TransformationPass):
                 op = mapping[target_instruction[0]]
                 qargs = target_instruction[1]
                 if isinstance(qargs, QuantumRegister):
-                    qargs = (qargs[i] for i in range(len(qargs)))
+                    qargs = tuple([qargs[i] for i in range(len(qargs))])
                 elif qargs is None:
                     qargs = ()
                 if len(target_instruction) > 2:
                     cargs = target_instruction[2]
                     if isinstance(cargs, ClassicalRegister):
-                        cargs = (cargs[i] for i in range(len(cargs)))
+                        cargs = tuple([cargs[i] for i in range(len(cargs))])
                 else:
                     cargs = ()
 
@@ -265,49 +265,245 @@ class CustomGateReplacementPass(TransformationPass):
         return dag
 
 
-# class FilterLocalContext(TransformationPass):
-#
-#     def __init__(self, coupling_map: CouplingMap, target_instructions: List[CircuitInstruction | Tuple[str,
-#             Optional[QuantumRegister | Sequence[Qubit | int]],
-#             Optional[ClassicalRegister | Sequence[Clbit | int]]]):
-#         if isinstance(target_instructions, CircuitInstruction):
-#             target_instructions = [target_instructions]
-#         elif isinstance(target_instructions, tuple):
-#             target_instructions = [target_instructions]
-#         elif not isinstance(target_instructions, List):
-#             raise ValueError("Invalid target instructions format")
-#
-#         self.target_instructions = []
-#
-#         for target_instruction in target_instructions:
-#             if isinstance(target_instruction, CircuitInstruction):
-#                 self.target_instructions.append((target_instruction.operation,
-#                                                  target_instruction.qubits,
-#                                                  target_instruction.clbits))
-#             else:
-#                 mapping = gate_map()
-#                 if not isinstance(target_instruction[0], str) or target_instruction[0] not in mapping:
-#                     raise ValueError("Provided instruction name is not a valid gate name")
-#                 op = mapping[target_instruction[0]]
-#                 qargs = target_instruction[1]
-#                 if isinstance(qargs, QuantumRegister):
-#                     qargs = (qargs[i] for i in range(len(qargs)))
-#                 elif qargs is None:
-#                     qargs = ()
-#                 if len(target_instruction) > 2:
-#                     cargs = target_instruction[2]
-#                     if isinstance(cargs, ClassicalRegister):
-#                         cargs = (cargs[i] for i in range(len(cargs)))
-#                 else:
-#                     cargs = ()
-#
-#                 self.target_instructions.append((op, qargs, cargs))
-#
-#             super().__init__()
-#             self.coupling_map = coupling_map
-#
-#     def run(self, dag: DAGCircuit):
-#         pass
+class FilterLocalContext(TransformationPass):
+
+    def __init__(
+        self,
+        coupling_map: CouplingMap,
+        target_instructions: List[
+            CircuitInstruction
+            | Tuple[
+                str,
+                Optional[QuantumRegister | Sequence[Qubit | int]],
+                Optional[ClassicalRegister | Sequence[Clbit | int]],
+            ]
+        ],
+        occurence_numbers: List[int] = None,
+    ):
+        """
+        Filter the local context of the circuit by removing all operations that are not involving the target qubits or
+        their nearest neighbors. Additionally, the user can specify the number of occurences of the target instructions
+        in the circuit context. If not specified, the pass will look for all occurences of the target instructions.
+
+        Args:
+            coupling_map: The coupling map of the backend
+            target_instructions: The target instructions to be calibrated in the circuit context
+            occurence_numbers: The number of occurences of each target instruction to keep in the circuit context
+        """
+
+        if isinstance(target_instructions, CircuitInstruction):
+            target_instructions = [target_instructions]
+        elif isinstance(target_instructions, tuple):
+            target_instructions = [target_instructions]
+        elif not isinstance(target_instructions, List):
+            raise ValueError("Invalid target instructions format")
+
+        self.target_instructions = []
+
+        for target_instruction in target_instructions:
+            if isinstance(target_instruction, CircuitInstruction):
+                self.target_instructions.append(
+                    (
+                        target_instruction.operation,
+                        target_instruction.qubits,
+                        target_instruction.clbits,
+                    )
+                )
+            else:
+                mapping = gate_map()
+                if (
+                    not isinstance(target_instruction[0], str)
+                    or target_instruction[0] not in mapping
+                ):
+                    raise ValueError(
+                        "Provided instruction name is not a valid gate name"
+                    )
+                op = mapping[target_instruction[0]]
+                qargs = target_instruction[1]
+                if isinstance(qargs, QuantumRegister):
+                    qargs = (qargs[i] for i in range(len(qargs)))
+                elif qargs is None:
+                    qargs = ()
+                if len(target_instruction) > 2:
+                    cargs = target_instruction[2]
+                    if isinstance(cargs, ClassicalRegister):
+                        cargs = (cargs[i] for i in range(len(cargs)))
+                else:
+                    cargs = ()
+
+                self.target_instructions.append((op, qargs, cargs))
+
+        if occurence_numbers is not None:
+            if isinstance(occurence_numbers, int):
+                occurence_numbers = [occurence_numbers]
+            if len(occurence_numbers) != len(self.target_instructions):
+                raise ValueError(
+                    "Number of occurence numbers must match number of target instructions"
+                )
+            self.occurrence_numbers = occurence_numbers
+
+        else:
+            self.occurrence_numbers = [-1 for _ in range(len(self.target_instructions))]
+        super().__init__()
+        self.coupling_map = coupling_map
+
+    def run(self, dag: DAGCircuit):
+        """
+        Run the filtering of local context on the DAG. This step consists in removing all operations that are not
+        applied neither on the target qubits nor their nearest neighbors. It also checks the number of occurrences
+        of the provided set of instructions and truncate the circuit context accordingly to end up with the desired
+        number of occurrences and local context (the rest of the operations are filtered out).
+        """
+        qargs, cargs = self.get_tgt_args(dag)
+        involved_qubits = qargs
+        involved_clbits = cargs
+
+        target_nodes = dag.named_nodes(*[op[0].name for op in self.target_instructions])
+        target_nodes = list(
+            filter(
+                lambda node: any(
+                    [
+                        node.qargs == tgt_instruction[1]
+                        and node.cargs == tgt_instruction[2]
+                        for tgt_instruction in self.target_instructions
+                    ]
+                ),
+                target_nodes,
+            )
+        )
+        if not target_nodes:
+            raise ValueError("Target instructions not found in circuit context")
+        isolated_tgt_nodes = list(set(target_nodes))
+        node_instruction_mapping = {
+            node: target_instruction
+            for node, target_instruction in zip(
+                isolated_tgt_nodes, self.target_instructions
+            )
+        }
+        count_occurrences = [0 for _ in range(len(isolated_tgt_nodes))]
+        for node in target_nodes:
+            count_occurrences[isolated_tgt_nodes.index(node)] += 1
+
+        current_counts = [0 for _ in range(len(self.target_instructions))]
+        keeping_nodes = {node: True for node in dag.op_nodes()}
+        for node in dag.op_nodes():
+
+            if (
+                node in isolated_tgt_nodes
+                and current_counts[isolated_tgt_nodes.index(node)]
+                < self.occurrence_numbers[isolated_tgt_nodes.index(node)]
+            ):
+                current_counts[isolated_tgt_nodes.index(node)] += 1
+                keeping_nodes[node] = True
+
+            else:
+                for q in node.qargs:
+                    if q in involved_qubits:
+                        keeping_nodes[node] = True
+                        involved_qubits.extend(
+                            [q for q in node.qargs if q not in qargs]
+                        )
+                        involved_clbits.extend(
+                            [c for c in node.cargs if c not in cargs]
+                        )
+                        break
+                for c in node.cargs:
+                    if c in involved_clbits:
+                        keeping_nodes[node] = True
+                        involved_qubits.extend(
+                            [q for q in node.qargs if q not in qargs]
+                        )
+                        involved_clbits.extend(
+                            [c for c in node.cargs if c not in cargs]
+                        )
+                        break
+                else:
+                    keeping_nodes[node] = False
+            for q in node.qargs:
+                if q in qargs:
+                    involved_qubits.extend([q for q in node.qargs if q not in qargs])
+                    break
+            for c in node.cargs:
+                if c in cargs:
+                    involved_clbits.extend([c for c in node.cargs if c not in cargs])
+                    break
+
+        def filter_function(node):
+            for q in node.qargs:
+                if q in involved_qubits and (
+                    any(
+                        [
+                            node in dag.ancestors(target_node)
+                            for target_node in target_nodes
+                        ]
+                    )
+                    or node in target_nodes
+                ):
+                    return True
+            for c in node.cargs:
+                if c in involved_clbits and (
+                    any(
+                        [
+                            node in dag.ancestors(target_node)
+                            for target_node in target_nodes
+                        ]
+                    )
+                    or node in target_nodes
+                ):
+                    return True
+            return False
+
+        filter_op = FilterOpNodes(filter_function)
+        dag = filter_op.run(dag)
+        dag.remove_qubits(*dag.idle_wires())
+        return dag
+
+    def get_tgt_args(self, dag):
+        qargs = []
+        cargs = []
+        current_qargs = ()
+        current_cargs = ()
+        for i, target_instruction in enumerate(self.target_instructions):
+            inst_qargs = target_instruction[1]
+            inst_cargs = target_instruction[2]
+            if isinstance(inst_qargs, QuantumRegister):
+                assert inst_qargs in dag.qregs, "Quantum register not found in DAG"
+                current_qargs = tuple([q for q in inst_qargs])
+                qargs.extend(current_qargs)
+            elif isinstance(inst_qargs, Sequence):
+                if isinstance(inst_qargs[0], int):
+                    assert all(
+                        [q < len(dag.qubits) for q in inst_qargs]
+                    ), "Qubit index out of range"
+                    current_qargs = tuple([dag.qubits[q] for q in inst_qargs])
+                    qargs.extend(current_qargs)
+                else:  # Qubit instances
+                    for q in inst_qargs:
+                        assert q in dag.qubits, "Qubit not found in DAG"
+                    current_qargs = tuple(inst_qargs)
+                    qargs.extend(inst_qargs)
+            if isinstance(inst_cargs, ClassicalRegister):
+                assert inst_cargs in dag.cregs, "Classical register not found in DAG"
+                current_cargs = tuple([c for c in inst_cargs])
+                cargs.extend(current_cargs)
+            elif isinstance(inst_cargs, Sequence):
+                if isinstance(inst_cargs[0], int):
+                    assert all(
+                        [c < len(dag.clbits) for c in inst_cargs]
+                    ), "Classical bit index out of range"
+                    current_cargs = tuple([dag.clbits[c] for c in inst_cargs])
+                    cargs.extend(current_cargs)
+                else:  # Clbit instances
+                    for c in inst_cargs:
+                        assert c in dag.clbits, "Classical bit not found in DAG"
+                    current_cargs = tuple(inst_cargs)
+                    cargs.extend(current_cargs)
+            self.target_instructions[i] = (
+                target_instruction[0],
+                current_qargs,
+                current_cargs,
+            )
+        return list(set(qargs)), list(set(cargs))
 
 
 class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):

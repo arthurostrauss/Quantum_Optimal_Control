@@ -14,32 +14,61 @@ from qua_backend import QMBackend
 from qua_utils import *
 
 
-class QUAEnvironment(QuantumEnvironment):
+class QUAEnvironment(ContextAwareQuantumEnvironment):
 
     @property
     def backend(self) -> QMBackend:
         return self.backend
 
-    def __init__(self, training_config: QEnvConfig):
-        super().__init__(training_config)
+    def __init__(self, training_config: QEnvConfig, circuit_context: QuantumCircuit):
+        super().__init__(training_config, circuit_context)
         if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
             self.backend, QMBackend
         ):
             raise ValueError("The backend should be a QMBackend object")
-        self.parameter_table = ParameterTable(
-            {param.name: 0.0 for param in self.parameters}
-        )
-        self.progs = [self.rl_qoc_qua_prog(qc) for qc in self.circuits]
+        self.parameter_tables = [
+            ParameterTable({param.name: 0.0 for param in circuit.parameters})
+            for circuit in self.circuits
+        ]
+
         self.job = self.start_program(self.circuits[0])
 
-    def rl_qoc_qua_prog(self, qc: QuantumCircuit):
+    def rl_qoc_qua_prog(self):
         """
         Generate a QUA program tailor-made for the RL based calibration project
         """
         # TODO: Set IO2 and IO1 to be the number of input states and the number of observables respectively
         trunc_index = self._inside_trunc_tracker
-        n_actions = self.action_space.shape[-1]
-        real_time_parameters = self.parameter_table
+        n_actions = self.n_actions
+        real_time_parameters = self.parameter_tables[trunc_index]
+        input_stream_template = (0, int, "input_stream")
+        counter_template = (0, int)
+        indices_template = ([0 for _ in range(self.n_qubits)], int, "input_stream")
+        program_params = ParameterTable(
+            {
+                "max_input_state": input_stream_template,
+                "max_observable": input_stream_template,
+                "input_state_indices": indices_template,
+                "observables_indices": indices_template,
+                "pauli_shots": input_stream_template,
+                "batchsize": counter_template,
+                "n_shots": counter_template,
+                "n_reps": counter_template,
+                "input_state_count": counter_template,
+                "observable_count": counter_template,
+                "mean_action": (
+                    [0.0 for _ in range(self.n_actions)],
+                    fixed,
+                    "input_stream",
+                ),
+                "std_action": (
+                    [0.0 for _ in range(self.n_actions)],
+                    fixed,
+                    "input_stream",
+                ),
+            }
+        )
+
         qubits = [
             list(self.backend.machine.qubits.values())[i]
             for i in self.layout[trunc_index]
@@ -47,33 +76,24 @@ class QUAEnvironment(QuantumEnvironment):
         dim = 2**self.n_qubits
 
         with program() as rl_qoc:
-            # Declare necessary variables
-            batchsize, n_shots, n_reps = declare(int), declare(int), declare(int)
+            # Declare necessary variables (all are counters variables to loop over the corresponding hyperparameters)
+            program_params.declare_variables()
+            batchsize = program_params["batchsize"]
+            n_shots = program_params["n_shots"]
+            n_reps = program_params["n_reps"]  # Number of repetitions of the circuit
+            input_state_count = program_params["input_state_count"]
+            observable_count = program_params["observable_count"]
+            max_input_state = program_params["max_input_state"]
+            max_observable = program_params["max_observable"]
+            input_state_indices = program_params["input_state_indices"]
+            observables_indices = program_params["observables_indices"]
+            pauli_shots = program_params["pauli_shots"]
+            mean_action = program_params["mean_action"]
+            std_action = program_params["std_action"]
+
             counts = declare(int, value=[0] * dim)
             state_int = declare(int, value=0)
-            input_state_count, observable_count = declare(int, value=0), declare(
-                int, value=0
-            )
-            max_input_state, max_observable = declare_input_stream(
-                int, name="max_input_state"
-            ), declare_input_stream(int, name="max_observable")
-            input_state_indices = declare_input_stream(
-                int, name="input_state_indices", size=self.n_qubits
-            )
-            observables_indices = declare_input_stream(
-                int, name="observables_indices", size=self.n_qubits
-            )
-            pauli_shots = declare_input_stream(
-                int, name="pauli_shots"
-            )  # Number of shots for each observable
-            mean_action = declare_input_stream(
-                fixed, name="mean_action", size=n_actions
-            )
-            std_action = declare_input_stream(fixed, name="std_action", size=n_actions)
-            # param_vars is a Python list of QUA fixed variables
-            param_vars = (
-                real_time_parameters.declare_variables()
-            )  # TODO: Pause is currently happening here
+
             batch_r = Random()
             batch_r.set_seed(self.seed)
             action_stream = declare_stream()
@@ -87,22 +107,29 @@ class QUAEnvironment(QuantumEnvironment):
                 advance_input_stream(max_observable)
 
                 with for_(batchsize, 0, batchsize < self.batch_size, batchsize + 1):
-                    variables = self.sample_actions(
-                        mean_action, std_action, batch_r, action_stream
-                    )
+                    # Sample actions from multivariate Gaussian distribution (Muller-Box method)
+                    self.sample_actions(mean_action, std_action, batch_r, action_stream)
+
                     with while_(input_state_count < max_input_state):
-                        advance_input_stream(
-                            input_state_indices
-                        )  # Load info about the input states to prepare
+                        assign(input_state_count, input_state_count + 1)
+                        # Load info about input states to prepare
+                        advance_input_stream(input_state_indices)
                         with while_(observable_count < max_observable):
+                            assign(observable_count, observable_count + 1)
                             advance_input_stream(observables_indices)
                             advance_input_stream(pauli_shots)
                             with for_(n_shots, 0, n_shots < pauli_shots, n_shots + 1):
                                 # Prepare the input states
-                                prepare_input_state(input_state_indices, qubits)
+                                prepare_input_state_pauli6(input_state_indices, qubits)
                                 # Run the circuit
                                 with for_(n_reps, 0, n_reps < self.n_reps, n_reps + 1):
-                                    pass
+                                    if len(self.circuits) > 1:
+                                        with switch_(trunc_index):
+                                            for i in range(len(self.circuits)):
+                                                with case_(i):
+                                                    self.circuits[i].run()
+                                    else:
+                                        self.circuits[0].run()
 
                                 # Measure the observables
                                 state_int = measure_observable(
@@ -119,13 +146,14 @@ class QUAEnvironment(QuantumEnvironment):
                                 save(counts[i], counts_st[i])
                                 assign(counts[i], 0)
 
-                            assign(observable_count, observable_count + 1)
                         assign(observable_count, 0)
-                        assign(input_state_count, input_state_count + 1)
+
                     assign(input_state_count, 0)
 
             with stream_processing():
-                action_stream.buffer(self.batch_size).save_all("actions")
+                action_stream.buffer((self.batch_size, self.n_actions)).save_all(
+                    "actions"
+                )
                 for i in range(dim):
                     counts_st[i].buffer(self.batch_size).save(binary(i, self.n_qubits))
 
@@ -162,22 +190,20 @@ class QUAEnvironment(QuantumEnvironment):
         Returns:
 
         """
-        n_actions = len(self.parameter_table[self.trunc_index])
+        n_actions = self.n_actions
         z1, z2 = declare(fixed, size=n_actions), declare(fixed, size=n_actions)
 
-        for i, parameter in enumerate(
-            self.parameter_table[self.trunc_index].table.values()
-        ):
+        for i, parameter in enumerate(self.parameter_table.table.values()):
             z1[i], z2[i] = rand_gauss_moller_box(
                 z1[i], z2[i], mean_action[i], std_action[i], batch_r
             )
             assign(parameter.var, z1[i])
-
+            save(parameter.var, action_stream)
             clip_qua_var(
                 parameter.var, self.action_space.low[i], self.action_space.high[i]
             )
-            save(parameter.var, action_stream)
-        return self.parameter_table[self.trunc_index].variables
+
+        return self.parameter_table.variables
 
     def close(self) -> None:
         """
@@ -186,3 +212,7 @@ class QUAEnvironment(QuantumEnvironment):
 
         """
         self.job.halt()
+
+    @property
+    def parameter_table(self):
+        return self.parameter_tables[self.trunc_index]
