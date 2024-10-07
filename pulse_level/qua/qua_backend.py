@@ -651,7 +651,10 @@ class QMBackend(Backend, ABC):
             for line in open_qasm_code.splitlines()
             if not line.strip().startswith(("barrier",))
         )
-        result = compiler.compile(open_qasm_code)
+        result = compiler.compile(
+            open_qasm_code,
+            inputs={param.name: param.var for param in param_table.table},
+        )
         return result
 
     def qua_prog_from_qc(self, qc: QuantumCircuit | Schedule | ScheduleBlock | Program):
@@ -688,12 +691,6 @@ class QMBackend(Backend, ABC):
                 return self.schedule_to_qua_macro(schedule, parameter_table)
             else:
                 raise ValueError(f"Unsupported input {qc}")
-
-    def qiskit_to_qua_play(self, quam_channel, instruction, params, param_counter):
-        """
-        Convert a Qiskit Play instruction to a QUA Play instruction
-        """
-        return param_counter
 
 
 class FluxTunableTransmonBackend(QMBackend):

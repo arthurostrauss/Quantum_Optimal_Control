@@ -27,13 +27,18 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         ):
             raise ValueError("The backend should be a QMBackend object")
         self.parameter_tables = [
-            ParameterTable({param.name: 0.0 for param in circuit.parameters})
-            for circuit in self.circuits
+            ParameterTable(
+                {
+                    param.name: [0.0 for _ in range(self.n_actions)]
+                    for param in parameters
+                }
+            )
+            for parameters in self.parameters
         ]
 
         self.job = self.start_program(self.circuits[0])
 
-    def rl_qoc_qua_prog(self):
+    def rl_qoc_training_qua_prog(self):
         """
         Generate a QUA program tailor-made for the RL based calibration project
         """
@@ -56,16 +61,6 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
                 "n_reps": counter_template,
                 "input_state_count": counter_template,
                 "observable_count": counter_template,
-                "mean_action": (
-                    [0.0 for _ in range(self.n_actions)],
-                    fixed,
-                    "input_stream",
-                ),
-                "std_action": (
-                    [0.0 for _ in range(self.n_actions)],
-                    fixed,
-                    "input_stream",
-                ),
             }
         )
 
@@ -75,9 +70,11 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         ]
         dim = 2**self.n_qubits
 
-        with program() as rl_qoc:
+        with program() as rl_qoc_training_prog:
             # Declare necessary variables (all are counters variables to loop over the corresponding hyperparameters)
-            program_params.declare_variables()
+            program_params.declare_variables(pause_program=False)
+            for param_table in self.parameter_tables:
+                param_table.declare_variables(pause_program=False)
             batchsize = program_params["batchsize"]
             n_shots = program_params["n_shots"]
             n_reps = program_params["n_reps"]  # Number of repetitions of the circuit
@@ -88,8 +85,16 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
             input_state_indices = program_params["input_state_indices"]
             observables_indices = program_params["observables_indices"]
             pauli_shots = program_params["pauli_shots"]
-            mean_action = program_params["mean_action"]
-            std_action = program_params["std_action"]
+            mean_actions = [
+                declare_input_stream(
+                    fixed, size=self.n_actions, name=f"mean_action_{j}"
+                )
+                for j in range(len(self.circuits))
+            ]
+            std_actions = [
+                declare_input_stream(fixed, size=self.n_actions, name=f"std_action_{j}")
+                for j in range(len(self.circuits))
+            ]
 
             counts = declare(int, value=[0] * dim)
             state_int = declare(int, value=0)
@@ -101,14 +106,19 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
             # Infinite loop to run the training
 
             with infinite_loop_():
-                advance_input_stream(mean_action)
-                advance_input_stream(std_action)
                 advance_input_stream(max_input_state)
                 advance_input_stream(max_observable)
-
+                for i in range(trunc_index + 1):
+                    advance_input_stream(mean_actions[i])
+                    advance_input_stream(std_actions[i])
                 with for_(batchsize, 0, batchsize < self.batch_size, batchsize + 1):
                     # Sample actions from multivariate Gaussian distribution (Muller-Box method)
-                    self.sample_actions(mean_action, std_action, batch_r, action_stream)
+                    for i in range(trunc_index + 1):
+                        param_table = self.parameter_tables[i]
+                        z1, z2 = self.sample_actions(
+                            mean_actions[i], std_actions[i], batch_r, action_stream
+                        )
+                        param_table.assign_parameters({self.parameters[i].name: z1})
 
                     with while_(input_state_count < max_input_state):
                         assign(input_state_count, input_state_count + 1)
@@ -127,8 +137,23 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
                                         with switch_(trunc_index):
                                             for i in range(len(self.circuits)):
                                                 with case_(i):
+                                                    current_table = (
+                                                        self.parameter_tables[0]
+                                                    )
+                                                    for table in self.parameter_tables[
+                                                        1:i
+                                                    ]:
+                                                        current_table = (
+                                                            current_table.add_table(
+                                                                table
+                                                            )
+                                                        )
+                                                    # TODO: Enable Result correctly with OQ3
+                                                    result = self.backend.quantum_circuit_to_qua(
+                                                        self.circuits[i], current_table
+                                                    )
                                                     self.circuits[i].run()
-                                    else:
+                                    else:  # TODO: Enable Result correctly with OQ3
                                         self.circuits[0].run()
 
                                 # Measure the observables
@@ -157,7 +182,7 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
                 for i in range(dim):
                     counts_st[i].buffer(self.batch_size).save(binary(i, self.n_qubits))
 
-        return rl_qoc
+        return rl_qoc_training_prog
 
     def perform_action(self, actions: np.array):
         """
@@ -172,7 +197,7 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         """
         Start the QUA program
         """
-        prog = self.rl_qoc_qua_prog(qc)
+        prog = self.rl_qoc_training_qua_prog(qc)
         job = self.backend.qm.execute(prog)
         self.job = job
         return job
@@ -188,22 +213,28 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
             action_stream: Stream object to save the actions (for returning them to agent)
 
         Returns:
+            z1, z2: The sampled (clipped) actions
 
         """
-        n_actions = self.n_actions
-        z1, z2 = declare(fixed, size=n_actions), declare(fixed, size=n_actions)
+        z1, z2 = declare(fixed, size=self.n_actions), declare(
+            fixed, size=self.n_actions
+        )
 
-        for i, parameter in enumerate(self.parameter_table.table.values()):
+        for i in range(self.n_actions):
             z1[i], z2[i] = rand_gauss_moller_box(
                 z1[i], z2[i], mean_action[i], std_action[i], batch_r
             )
-            assign(parameter.var, z1[i])
-            save(parameter.var, action_stream)
-            clip_qua_var(
-                parameter.var, self.action_space.low[i], self.action_space.high[i]
-            )
+            save(z1[i], action_stream)
+            save(z2[i], action_stream)
+            clip_qua_var(z1[i], self.action_space.low[i], self.action_space.high[i])
+            clip_qua_var(z2[i], self.action_space.low[i], self.action_space.high[i])
+            # assign(parameter.var, z1[i])
+            # save(parameter.var, action_stream)
+            # clip_qua_var(
+            #     parameter.var, self.action_space.low[i], self.action_space.high[i]
+            # )
 
-        return self.parameter_table.variables
+        return z1, z2
 
     def close(self) -> None:
         """
