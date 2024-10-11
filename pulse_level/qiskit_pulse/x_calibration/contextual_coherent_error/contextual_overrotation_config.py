@@ -5,6 +5,7 @@ This file contains the configuration for the contextual overrotation calibration
 Author: Arthur Strauss
 Date: 2024-09-19
 """
+
 from __future__ import annotations
 import warnings
 from typing import Optional, Dict, List
@@ -175,16 +176,19 @@ def apply_parametrized_circuit(
     parametrized_gate_name = f"{gate.name if gate is not None else 'G'}_cal"
 
     param_vec_name = params.name
+    qc_name = qc.name
     if param_vec_name[-1].isdigit():
         parametrized_gate_name += param_vec_name[-1]
+    elif qc_name[-1].isdigit():
+        parametrized_gate_name += qc_name[-1]
 
     # Create a custom gate with the same name as the original gate
     # Create new set of parameters that are valid Python identifiers (no brackets from the ParameterVector)
-    params2 = [Parameter(to_python_identifier(p.name)) for p in params]
+    generic_params = [Parameter(to_python_identifier(p.name)) for p in params]
     parametrized_gate = Gate(
         parametrized_gate_name,
         len(physical_qubits),
-        params=params2,
+        params=generic_params,
     )
 
     # Create custom schedule with original parameters
@@ -198,106 +202,17 @@ def apply_parametrized_circuit(
     qc.append(parametrized_gate, tgt_register)
     qc.add_calibration(
         parametrized_gate_name, physical_qubits, parametrized_schedule, params.params
-    )
+    )  # Specify gate name instead of gate instance to deal with the correct parameter set
 
     # Add the custom calibration to the backend for enabling transpilation with the custom gate
     if parametrized_gate_name not in backend.operation_names:
-        target: Target = backend.target
         properties = InstructionProperties(
             duration=parametrized_schedule.duration * backend.dt,
-            # calibration=parametrized_schedule.assign_parameters(
-            #     {params: params.params}, inplace=False
-            # ),
             calibration=parametrized_schedule.assign_parameters(
-                {params: params2}, inplace=False
+                {params: generic_params}, inplace=False
             ),
         )
-        target.add_instruction(parametrized_gate, {tuple(physical_qubits): properties})
-
-
-def get_backend(
-        real_backend: Optional[bool] = None,
-        backend_name: Optional[str] = None,
-        use_dynamics: Optional[bool] = None,
-        physical_qubits: Optional[list] = None,
-        channel: Optional[str] = None,
-        instance: Optional[str] = None,
-        solver_options: Optional[Dict] = None,
-        calibration_files: str = None,
-) -> Optional[BackendV1 | BackendV2]:
-    """
-    Define backend on which the calibration is performed.
-    This function uses data from the yaml file to define the backend.
-    If provided parameters on the backend are null, then the user should provide a custom backend instance.
-    :param real_backend: If True, then calibration is performed on real quantum hardware, otherwise on simulator
-    :param backend_name: Name of the backend to be used, if None, then least busy backend is used
-    :param use_dynamics: If True, then DynamicsBackend is used, otherwise standard backend is used
-    :param physical_qubits: Physical qubits indices to be used for the calibration
-    :param channel: Qiskit Runtime Channel  (for real backend)
-    :param instance: Qiskit Runtime Instance (for real backend)
-    :param solver_options: Options for the DynamicsBackend solver
-    :param calibration_files: Path to the calibration files (for DynamicsBackend)
-    :return: Backend instance
-    """
-
-    # Backend initialization through YAML file. If all fields are None, then the user should provide a custom backend
-    backend = select_backend(
-        real_backend,
-        channel,
-        instance,
-        backend_name,
-        use_dynamics,
-        physical_qubits,
-        solver_options,
-        calibration_files,
-    )
-
-    if backend is None:
-        # Propose here your custom backend, for Dynamics we take for instance the configuration from dynamics_config.py
-        from pulse_level.qiskit_pulse.dynamics_backends import (
-            fixed_frequency_transmon_backend,
-            single_qubit_backend,
-            surface_code_plaquette,
-        )
-
-        print("Custom backend used")
-        # TODO: Add here your custom backend
-        dt = 2.2222e-10
-        dims = [2]
-        freqs = [4.86e9]
-        anharmonicities = [-0.33e9]
-        rabi_freqs = [0.22e9]
-        solver_options = convert_solver_options(solver_options, dt=dt)
-        backend = fixed_frequency_transmon_backend(
-            dims, freqs, anharmonicities, rabi_freqs, solver_options=solver_options
-        )
-        γ = 0.1  # Overrotation factor
-        # backend = single_qubit_backend(5, 0.1, 1 / 4.5)[1]
-        # backend = surface_code_plaquette()[0]
-        cals, exps = perform_standard_calibrations(backend, calibration_files)
-
-        # Add a calibration for RX gate (through amplitude modulation)
-        x_cal = backend.target.get_calibration("x", (0,))
-        x_pulse: pulse.Drag = x_cal.instructions[0][1].pulse
-        new_parameters = x_pulse.parameters.copy()
-
-        pi_amp = x_pulse.amp  # Amplitude for pi pulse
-        θ = Parameter("θ")
-        rx_amp = (pi_amp / np.pi) * θ  # Amplitude for the RX gate
-
-        overrotation_amp = γ * rx_amp
-        rx_amp += overrotation_amp
-        new_parameters["amp"] = rx_amp
-
-        with pulse.build(backend, name="rx_sched") as rx_sched:
-            pulse.play(pulse.Drag(**new_parameters), pulse.DriveChannel(0))
-
-        instruction_prop = InstructionProperties(duration=rx_sched.duration * backend.dt, calibration=rx_sched)
-        backend.target.add_instruction(RXGate(θ), {(0,): instruction_prop})
-
-    if backend is None:
-        warnings.warn("No backend was provided, State vector simulation will be used")
-    return backend
+        backend.target.add_instruction(parametrized_gate, {tuple(physical_qubits): properties})
 
 
 def get_circuit_context(phi: float | Parameter) -> QuantumCircuit:

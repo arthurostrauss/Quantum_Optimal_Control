@@ -1,5 +1,5 @@
 import functools
-from typing import List, Dict
+from typing import Dict
 
 import qm.qua as qua
 import sympy as sp
@@ -8,7 +8,6 @@ from functools import partial
 
 from qm.qua import fixed, declare, assign
 from qualang_tools.video_mode.videomode import ParameterValue
-from sympy import Symbol
 
 sympy_to_qua_dict = {
     sp.Float: qua.fixed,
@@ -42,7 +41,7 @@ def match_expr(expr: sp.Function):
 
 
 def sympy_to_qua(
-    sympy_expr: sp.Basic, parameter_vals: Dict[str, ParameterValue]
+        sympy_expr: sp.Basic, parameter_vals: Dict[str, ParameterValue]
 ) -> qua.QuaVariableType:
     """
     Convert a Sympy expression to a QuaVariableType
@@ -62,7 +61,7 @@ def sympy_to_qua(
     sympy_to_qua_dict = {}
     for symbol in sympy_expr.free_symbols:
         assert (
-            symbol.name in parameter_vals
+                symbol.name in parameter_vals
         ), f"Parameter {symbol.name} not found in parameter_vals"
         sympy_to_qua_dict[symbol] = parameter_vals[symbol.name].var
 
