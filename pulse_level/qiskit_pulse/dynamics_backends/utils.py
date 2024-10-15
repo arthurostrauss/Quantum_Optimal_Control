@@ -7,7 +7,7 @@ from qiskit.quantum_info import Operator
 
 def create_quantum_operators(
     dims: List[int],
-) -> Tuple[List[Operator], List[Operator], List[Operator], List[Operator]]:
+) -> Tuple[List[Operator], List[Operator], List[Operator]]:
     """
     Creates quantum operators \(a\), \(a^\dagger\), \(N\), and the identity matrix for each subsystem
     specified by its dimension in `dims`.
@@ -16,31 +16,36 @@ def create_quantum_operators(
     a = [Operator(np.diag(np.sqrt(np.arange(1, dim)), 1)) for dim in dims]
     adag = [Operator(np.diag(np.sqrt(np.arange(1, dim)), -1)) for dim in dims]
     N = [Operator(np.diag(np.arange(dim))) for dim in dims]
-    ident = [Operator(np.eye(dim, dtype=complex)) for dim in dims]
-    return a, adag, N, ident
+
+    return a, adag, N
 
 
-def expand_operators(
-    operators: List[Operator], dims: List[int], ident: List[Operator]
-) -> List[Operator]:
-    """Expands quantum operators across multiple qubits based on dimensions."""
+def expand_operators(operators: List[Operator], dims: List[int]) -> List[Operator]:
+    """Expands quantum operators across multiple subsystems based on dimensions."""
     expanded_ops = operators.copy()
-    n_qubits = len(dims)
-    for i in range(n_qubits):
-        for j in range(n_qubits):
+    n_systems = len(dims)
+    for i in range(n_systems):
+        for j in range(n_systems):
+            identity = Operator(
+                np.eye(dims[j], dtype=complex),
+                input_dims=(dims[j],),
+                output_dims=(dims[j],),
+            )
             if j > i:
-                expanded_ops[i] = expanded_ops[i].expand(ident[j])
+                expanded_ops[i] = expanded_ops[i].expand(identity)
             elif j < i:
-                expanded_ops[i] = expanded_ops[i].tensor(ident[j])
+                expanded_ops[i] = expanded_ops[i].tensor(identity)
+
     return expanded_ops
 
 
-def get_full_identity(dims: List[int], ident: List[Operator]) -> Operator:
+def get_full_identity(dims: List[int]) -> Operator:
     """Generates the full identity operator for the given dimensions of subsystems."""
-    full_ident = ident[0]
-    for i in range(1, len(dims)):
-        full_ident = full_ident.tensor(ident[i])
-    return full_ident
+    return Operator(
+        np.eye(np.prod(dims), dtype=complex),
+        input_dims=tuple(dims),
+        output_dims=tuple(dims),
+    )
 
 
 def construct_static_hamiltonian(
@@ -48,9 +53,9 @@ def construct_static_hamiltonian(
     freqs: List[float],
     anharmonicities: List[float],
     N_ops: List[Operator],
-    full_ident: Operator,
 ) -> Operator:
     """Constructs the static part of the Hamiltonian."""
+    full_ident = get_full_identity(dims)
     static_ham = Operator(
         np.zeros((np.prod(dims), np.prod(dims)), dtype=complex),
         input_dims=tuple(dims),
@@ -116,11 +121,28 @@ def get_pulse_spillover_noise(
     adag_ops: List[Operator],
     drive_ops: List[Operator],
 ) -> List[Operator]:
-    keys = list(pulse_spillover_rates.keys())
     """
-    This function describes the noise effect of pulse-spillover for qubit-pairs specified in noise_couplings. This noise only occurs when a pulse (intended for qubit i) leaks
+    This function describes the noise effect of pulse-spillover for qubit-pairs specified in noise_couplings.
+    This noise only occurs when a pulse (intended for qubit i) leaks
     into another qubit j. So, it only affects the drive operators of a qubit.
+
+    Parameters:
+    - pulse_spillover_rates (Dict): A dictionary where each key is a tuple of two integers
+      representing qubit indices, and each value is a float representing the spillover strength
+      between these qubits.
+    - drive_ops_errorfree (List): A list of drive operators for the qubits without any noise.
+    - n_qubits (int): The number of qubits in the system.
+    - rabi_freqs (List): A list of Rabi frequencies for the qubits.
+    - a_ops (List): A list of annihilation operators for the qubits.
+    - adag_ops (List): A list of creation operators for the qubits.
+    - drive_ops (List): A list of drive operators for the qubits.
+
+    Returns:
+    - List: A list of drive operators for the qubits with pulse-spillover noise.
+
     """
+    keys = list(pulse_spillover_rates.keys())
+
     neighbours = get_pulse_spillover_noise_neighbours(pulse_spillover_rates)
     for i, j in keys:
         if (j, i) not in pulse_spillover_rates:

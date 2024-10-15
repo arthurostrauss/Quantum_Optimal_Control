@@ -2,7 +2,6 @@ from typing import List, Tuple, Dict, Optional
 import copy
 import jax
 from qiskit_dynamics import DynamicsBackend, Solver
-from rl_qoc.custom_jax_sim import JaxSolver
 import numpy as np
 from pulse_level.qiskit_pulse.dynamics_backends.utils import (
     create_quantum_operators,
@@ -18,7 +17,7 @@ jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
 
 
-def custom_backend(
+def fixed_frequency_transmon_backend(
     dims: List[int],
     freqs: List[float],
     anharmonicities: List[float],
@@ -44,19 +43,15 @@ def custom_backend(
     ), "The number of subsystems, frequencies, and anharmonicities must be equal."
     n_qubits = len(dims)
     # Create operators
-    a, adag, N, ident = create_quantum_operators(dims)
+    a, adag, N = create_quantum_operators(dims)
 
     # Expand operators across qudits
-    N_ops = expand_operators(N, dims, ident)
-    a_ops = expand_operators(a, dims, ident)
-    adag_ops = expand_operators(adag, dims, ident)
-
-    full_ident = get_full_identity(dims, ident)
+    N_ops = expand_operators(N, dims)
+    a_ops = expand_operators(a, dims)
+    adag_ops = expand_operators(adag, dims)
 
     # Construct the static part of the Hamiltonian
-    static_ham = construct_static_hamiltonian(
-        dims, freqs, anharmonicities, N_ops, full_ident
-    )
+    static_ham = construct_static_hamiltonian(dims, freqs, anharmonicities, N_ops)
 
     drive_ops = [
         2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_qubits)
@@ -95,16 +90,6 @@ def custom_backend(
 
     dt = 2.2222e-10
 
-    jax_solver = JaxSolver(
-        static_hamiltonian=static_ham,
-        hamiltonian_operators=drive_ops + ecr_ops,
-        rotating_frame=static_ham,
-        hamiltonian_channels=list(channels.keys()),
-        channel_carrier_freqs=channels,
-        dt=dt,
-        array_library="jax",
-    )
-
     solver = Solver(
         static_hamiltonian=static_ham,
         hamiltonian_operators=drive_ops + ecr_ops,
@@ -122,17 +107,10 @@ def custom_backend(
             "hmax": dt,
         }
 
-    jax_backend = DynamicsBackend(
-        solver=jax_solver,
-        subsystem_dims=dims,  # for computing measurement data
-        solver_options=solver_options,  # to be used every time run is called
-        control_channel_map=control_channel_map,
-    )
-
     dynamics_backend = DynamicsBackend(
         solver=solver,
         subsystem_dims=dims,  # for computing measurement data
         solver_options=solver_options,  # to be used every time run is called
         control_channel_map=control_channel_map,
     )
-    return jax_backend, dynamics_backend
+    return dynamics_backend

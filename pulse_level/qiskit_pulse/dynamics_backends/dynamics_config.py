@@ -1,9 +1,6 @@
-from typing import List, Tuple, Dict, Optional
-from qiskit.quantum_info import Operator
+from qiskit.quantum_info import Statevector
 import jax
 from qiskit_dynamics import DynamicsBackend, Solver
-from rl_qoc.custom_jax_sim import JaxSolver
-import numpy as np
 from .utils import *
 
 jax.config.update("jax_enable_x64", True)
@@ -11,48 +8,45 @@ jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
 
 
-def custom_backend(
+def fixed_frequency_transmon_backend(
     dims: List[int],
     freqs: List[float],
     anharmonicities: List[float],
     rabi_freqs: List[float],
     couplings: Optional[Dict[Tuple[int, int], float]] = None,
     solver_options: Optional[Dict] = None,
-):
+) -> DynamicsBackend:
     """
-    Custom backend for the dynamics simulation.
+    Custom Transmon backend for the dynamics simulation.
 
     Args:
         dims: The dimensions of the subsystems.
         freqs: The frequencies of the subsystems.
         anharmonicities: The anharmonicities of the subsystems.
-        couplings: The coupling constants between the subsystems.
         rabi_freqs: The Rabi frequencies of the subsystems.
+        couplings: The coupling constants between the subsystems.
+        solver_options: The options for the solver.
 
     """
     assert (
         len(dims) == len(freqs) == len(anharmonicities) == len(rabi_freqs)
     ), "The number of subsystems, frequencies, and anharmonicities must be equal."
-    n_qubits = len(dims)
+    n_systems = len(dims)
     # Create operators
-    a, adag, N, ident = create_quantum_operators(dims)
+    a, adag, N = create_quantum_operators(dims)
 
     # Expand operators across qudits
-    N_ops = expand_operators(N, dims, ident)
-    a_ops = expand_operators(a, dims, ident)
-    adag_ops = expand_operators(adag, dims, ident)
-
-    full_ident = get_full_identity(dims, ident)
+    N_ops = expand_operators(N, dims)
+    a_ops = expand_operators(a, dims)
+    adag_ops = expand_operators(adag, dims)
 
     # Construct the static part of the Hamiltonian
-    static_ham = construct_static_hamiltonian(
-        dims, freqs, anharmonicities, N_ops, full_ident
-    )
+    static_ham = construct_static_hamiltonian(dims, freqs, anharmonicities, N_ops)
 
     drive_ops = [
-        2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_qubits)
+        2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_systems)
     ]
-    channels = {f"d{i}": freqs[i] for i in range(n_qubits)}
+    channels = {f"d{i}": freqs[i] for i in range(n_systems)}
     ecr_ops = []
     num_controls = 0
     control_channel_map = None
@@ -73,16 +67,6 @@ def custom_backend(
 
     dt = 2.2222e-10
 
-    jax_solver = JaxSolver(
-        static_hamiltonian=static_ham,
-        hamiltonian_operators=drive_ops + ecr_ops,
-        rotating_frame=static_ham,
-        hamiltonian_channels=list(channels.keys()),
-        channel_carrier_freqs=channels,
-        dt=dt,
-        array_library="jax",
-    )
-
     solver = Solver(
         static_hamiltonian=static_ham,
         hamiltonian_operators=drive_ops + ecr_ops,
@@ -95,25 +79,19 @@ def custom_backend(
     if solver_options is None:
         solver_options = {
             "method": "jax_odeint",
-            "atol": 1e-5,
-            "rtol": 1e-7,
+            "atol": 1e-6,
+            "rtol": 1e-8,
             "hmax": dt,
         }
-
-    jax_backend = DynamicsBackend(
-        solver=jax_solver,
-        subsystem_dims=dims,  # for computing measurement data
-        solver_options=solver_options,  # to be used every time run is called
-        control_channel_map=control_channel_map,
-    )
 
     dynamics_backend = DynamicsBackend(
         solver=solver,
         subsystem_dims=dims,  # for computing measurement data
         solver_options=solver_options,  # to be used every time run is called
         control_channel_map=control_channel_map,
+        initial_state=Statevector.from_int(0, dims),
     )
-    return jax_backend, dynamics_backend
+    return dynamics_backend
 
 
 def single_qubit_backend(w, r, dt, solver_options=None):
@@ -138,17 +116,6 @@ def single_qubit_backend(w, r, dt, solver_options=None):
         array_library="jax",
     )
 
-    jax_solver = JaxSolver(
-        static_hamiltonian=drift,
-        hamiltonian_operators=operators,
-        rotating_frame=drift,
-        rwa_cutoff_freq=2 * 5.0,
-        hamiltonian_channels=["d0"],
-        channel_carrier_freqs={"d0": w},
-        dt=dt,
-        array_library="jax",
-    )
-
     if solver_options is None:
         solver_options = {
             "method": "jax_odeint",
@@ -156,11 +123,6 @@ def single_qubit_backend(w, r, dt, solver_options=None):
             "rtol": 1e-7,
             "hmax": dt,
         }
-    jax_backend = DynamicsBackend(
-        solver=jax_solver,
-        subsystem_dims=[2],
-        solver_options=solver_options,
-    )
 
     dynamics_backend = DynamicsBackend(
         solver=solver,
@@ -168,7 +130,7 @@ def single_qubit_backend(w, r, dt, solver_options=None):
         solver_options=solver_options,
     )
 
-    return jax_backend, dynamics_backend
+    return dynamics_backend
 
 
 def surface_code_plaquette():
@@ -176,7 +138,7 @@ def surface_code_plaquette():
     Custom backend for the dynamics simulation of a surface code plaquette.
     """
     # Define the parameters
-    return custom_backend(
+    return fixed_frequency_transmon_backend(
         [2] * 5,
         freqs=[4.8e9, 4.9e9, 5.0e9, 5.1e9, 5.2e9],
         anharmonicities=[-0.33e9] * 5,
