@@ -31,6 +31,20 @@ def custom_schedule(
     physical_qubits: List[int],
     params: ParameterVector,
 ) -> pulse.ScheduleBlock:
+    with pulse.build(backend, name="custom_sched") as custom_sched:
+        pulse.play(
+            pulse.Waveform([params[0], params[1], params[2], ..., [params[n]]]),
+            pulse.DriveChannel(physical_qubits[0]),
+        )
+
+    return custom_sched
+
+
+def custom_schedule(
+    backend: BackendV1 | BackendV2,
+    physical_qubits: List[int],
+    params: ParameterVector,
+) -> pulse.ScheduleBlock:
     """
     Define parametrization of the pulse schedule characterizing the target gate.
     This function can be customized at will, however one shall recall to make sure that number of actions match the
