@@ -117,7 +117,7 @@ class CustomGateReplacementPass(TransformationPass):
         target_instructions: List[
             CircuitInstruction
             | Tuple[
-                str,
+                str | Instruction,
                 Optional[QuantumRegister | Sequence[Qubit | int]],
                 Optional[ClassicalRegister | Sequence[Clbit | int]],
             ]
@@ -126,11 +126,18 @@ class CustomGateReplacementPass(TransformationPass):
         parameters: List[ParameterVector | List[Parameter]],
         parametrized_circuit_functions_args: List[Dict[str, Any]] = None,
     ):
+        """
+        Custom transformation pass to replace target instructions in the DAG with custom parametrized circuits
+
+        Args:
+            target_instructions: The target instructions to be replaced in the DAG
+            parametrized_circuit_functions: The parametrized circuit functions to replace the target instructions
+            parameters: The parameters to be used in the parametrized circuits
+            parametrized_circuit_functions_args: The arguments to be passed to the parametrized circuit functions
+        """
         super().__init__()
 
-        if isinstance(target_instructions, CircuitInstruction):
-            target_instructions = [target_instructions]
-        elif isinstance(target_instructions, tuple):
+        if isinstance(target_instructions, (CircuitInstruction, Tuple)):
             target_instructions = [target_instructions]
         elif not isinstance(target_instructions, List):
             raise ValueError("Invalid target instructions format")
@@ -172,15 +179,21 @@ class CustomGateReplacementPass(TransformationPass):
                     )
                 )
             else:
-                mapping = gate_map()
-                if (
-                    not isinstance(target_instruction[0], str)
-                    or target_instruction[0] not in mapping
-                ):
-                    raise ValueError(
-                        "Provided instruction name is not a valid gate name"
-                    )
-                op = mapping[target_instruction[0]]
+
+                if isinstance(target_instruction[0], str):
+                    try:
+                        mapping = gate_map()
+                        op = mapping[target_instruction[0]]
+                    except KeyError:
+                        raise ValueError(
+                            "Provided instruction name not part of standard instruction set"
+                        )
+
+                else:
+                    op = target_instruction[0]
+                    if not isinstance(op, Instruction):
+                        raise ValueError("Invalid instruction format")
+
                 qargs = target_instruction[1]
                 if isinstance(qargs, QuantumRegister):
                     qargs = tuple([qargs[i] for i in range(len(qargs))])
@@ -212,10 +225,7 @@ class CustomGateReplacementPass(TransformationPass):
     def run(self, dag: DAGCircuit):
         """Run the custom transformation on the DAG."""
         for i, target_instruction in enumerate(self.target_instructions):
-
-            op = target_instruction[0]
-            qargs = target_instruction[1]
-            cargs = target_instruction[2]
+            op, qargs, cargs = target_instruction
             qc = QuantumCircuit()
             if qargs:
                 if isinstance(qargs[0], int):
@@ -278,7 +288,7 @@ class FilterLocalContext(TransformationPass):
                 Optional[ClassicalRegister | Sequence[Clbit | int]],
             ]
         ],
-        occurence_numbers: List[int] = None,
+        occurrence_numbers: List[int] = None,
     ):
         """
         Filter the local context of the circuit by removing all operations that are not involving the target qubits or
@@ -288,7 +298,7 @@ class FilterLocalContext(TransformationPass):
         Args:
             coupling_map: The coupling map of the backend
             target_instructions: The target instructions to be calibrated in the circuit context
-            occurence_numbers: The number of occurences of each target instruction to keep in the circuit context
+            occurrence_numbers: The number of occurences of each target instruction to keep in the circuit context
         """
 
         if isinstance(target_instructions, CircuitInstruction):
@@ -333,14 +343,14 @@ class FilterLocalContext(TransformationPass):
 
                 self.target_instructions.append((op, qargs, cargs))
 
-        if occurence_numbers is not None:
-            if isinstance(occurence_numbers, int):
-                occurence_numbers = [occurence_numbers]
-            if len(occurence_numbers) != len(self.target_instructions):
+        if occurrence_numbers is not None:
+            if isinstance(occurrence_numbers, int):
+                occurrence_numbers = [occurrence_numbers]
+            if len(occurrence_numbers) != len(self.target_instructions):
                 raise ValueError(
                     "Number of occurence numbers must match number of target instructions"
                 )
-            self.occurrence_numbers = occurence_numbers
+            self.occurrence_numbers = occurrence_numbers
 
         else:
             self.occurrence_numbers = [-1 for _ in range(len(self.target_instructions))]
@@ -1112,7 +1122,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     for i, gate in enumerate(self.custom_instructions)
                 ]
 
-            context_params = self.custom_circuit_context.parameters
             value_dicts = [{} for _ in range(self.tgt_instruction_counts)]
             for i, custom_circ in enumerate(self.circuits):
                 for param in custom_circ.parameters:

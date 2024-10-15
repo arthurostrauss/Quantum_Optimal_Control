@@ -23,7 +23,7 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
     def __init__(self, training_config: QEnvConfig, circuit_context: QuantumCircuit):
         super().__init__(training_config, circuit_context)
         if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
-                self.backend, QMBackend
+            self.backend, QMBackend
         ):
             raise ValueError("The backend should be a QMBackend object")
         self.parameter_tables = [
@@ -68,7 +68,7 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
             list(self.backend.machine.qubits.values())[i]
             for i in self.layout[trunc_index]
         ]
-        dim = 2 ** self.n_qubits
+        dim = 2**self.n_qubits
 
         with program() as rl_qoc_training_prog:
             # Declare necessary variables (all are counters variables to loop over the corresponding hyperparameters)
@@ -141,8 +141,8 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
                                                         self.parameter_tables[0]
                                                     )
                                                     for table in self.parameter_tables[
-                                                                 1:i
-                                                                 ]:
+                                                        1:i
+                                                    ]:
                                                         current_table = (
                                                             current_table.add_table(
                                                                 table

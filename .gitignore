@@ -128,3 +128,11 @@ dmypy.json
 .idea/
 
 contextual_gate_calibration/runs/
+
+pulse_level/qiskit_pulse/ecr_calibration/CustomDynamicsBackend.json
+
+pulse_level/qiskit_pulse/CustomDynamicsBackend.json
+
+gate_level/spillover_noise_use_case/runs/
+
+gate_level/spillover_noise_use_case/use_case_x_gate/runs/

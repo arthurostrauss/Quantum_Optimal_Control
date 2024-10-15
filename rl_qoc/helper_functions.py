@@ -1049,16 +1049,16 @@ def handle_session(
     """
     if (
         isinstance(estimator, RuntimeEstimatorV2)
-        and estimator.session.status() == "Closed"
+        and estimator.mode.status() == "Closed"
     ):
-        old_session = estimator.session
+        old_session = estimator.mode
         counter += 1
         print(f"New Session opened (#{counter})")
         session, options = (
             Session(old_session.service, backend),
             estimator.options,
         )
-        estimator = type(estimator)(session=session, options=asdict(options))
+        estimator = type(estimator)(mode=session, options=options)
 
     elif isinstance(estimator, DynamicsBackendEstimator):
         if not isinstance(backend, DynamicsBackend) or not isinstance(
@@ -1080,7 +1080,7 @@ def handle_session(
             0, dims=tuple(filter(lambda x: x > 1, subsystem_dims))
         )
         initial_rotations = [
-            Operator.from_label("I") for i in range(new_circ.num_qubits)
+            Operator.from_label("I") for _ in range(new_circ.num_qubits)
         ]
         qubit_counter, qubit_list = 0, []
         for instruction in new_circ.data:
@@ -1716,7 +1716,7 @@ def get_lower_keys_dict(dictionary: Dict[str, Any]):
 
 def get_q_env_config(
     config_file_path: str,
-    get_backend_func: Callable[[Any], BackendV2],
+    get_backend_func: Callable[[Any], Optional[BackendV2]],
     parametrized_circ_func: Callable[
         [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
     ],
