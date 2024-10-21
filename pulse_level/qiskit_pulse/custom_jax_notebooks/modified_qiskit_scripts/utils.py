@@ -56,7 +56,9 @@ def format_parameter_value(
     """
     if isinstance(operand, ParameterExpression):
         try:
-            if isinstance(jnp.array(0), core.Tracer):
+            if isinstance(jnp.array(0), core.Tracer) or isinstance(
+                operand._symbol_expr, core.Tracer
+            ):
                 return operand._symbol_expr
             operand = operand.numeric()
         except TypeError:

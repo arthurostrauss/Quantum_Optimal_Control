@@ -39,9 +39,9 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
 def custom_schedule(
-        backend: BackendV1 | BackendV2,
-        physical_qubits: List[int],
-        params: ParameterVector,
+    backend: BackendV1 | BackendV2,
+    physical_qubits: List[int],
+    params: ParameterVector,
 ) -> pulse.ScheduleBlock:
     """
     Define parametrization of the pulse schedule characterizing the target gate.
@@ -113,7 +113,7 @@ def custom_schedule(
     basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
     if isinstance(
-            backend, BackendV1
+        backend, BackendV1
     ):  # Convert to BackendV2 if needed (to access Target)
         backend = BackendV2Converter(backend)
 
@@ -127,7 +127,7 @@ def custom_schedule(
 
 
 def validate_pulse_kwargs(
-        **kwargs,
+    **kwargs,
 ) -> tuple[Optional[Gate], list[int], BackendV1 | BackendV2]:
     """
     Validate the kwargs passed to the parametrized circuit function for pulse level calibration
@@ -160,7 +160,7 @@ def validate_pulse_kwargs(
 
 
 def apply_parametrized_circuit(
-        qc: QuantumCircuit, params: ParameterVector, tgt_register: QuantumRegister, **kwargs
+    qc: QuantumCircuit, params: ParameterVector, tgt_register: QuantumRegister, **kwargs
 ) -> None:
     """
     Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
@@ -212,7 +212,9 @@ def apply_parametrized_circuit(
                 {params: generic_params}, inplace=False
             ),
         )
-        backend.target.add_instruction(parametrized_gate, {tuple(physical_qubits): properties})
+        backend.target.add_instruction(
+            parametrized_gate, {tuple(physical_qubits): properties}
+        )
 
 
 def get_circuit_context(phi: float | Parameter) -> QuantumCircuit:

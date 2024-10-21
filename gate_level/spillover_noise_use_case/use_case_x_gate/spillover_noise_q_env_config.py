@@ -127,9 +127,10 @@ def get_backend(
 
 
 # Custom spillover noise model
-phi = np.pi / 2  # rotation angle
-gamma = 0.3  # spillover rate for the CRX gate
-custom_rx_gate_label = "rx_custom"
+phi = np.pi  # rotation angle
+phi_in_degree = int(phi * 180 / np.pi)
+gamma = 0.0  # spillover rate for the CRX gate
+custom_rx_gate_label = "x" + str(phi_in_degree)
 
 
 def get_circuit_context(

@@ -163,10 +163,7 @@ def initialize_agent_config(agent_config, batchsize):
             f"The current minibatch size of {minibatch_size} does not evenly divide the batchsize of {batchsize}"
         )
 
-    run_name = agent_config["RUN_NAME"]
-    writer = SummaryWriter(f"runs/{run_name}")
-
-    return hidden_units, activation_functions, include_critic, minibatch_size, writer
+    return hidden_units, activation_functions, include_critic, minibatch_size
 
 
 def initialize_rl_params(agent_config):
@@ -429,8 +426,11 @@ def take_step(
     dones[step] = next_done
 
     # print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
-    writer.add_scalar("charts/episodic_return", np.mean(reward.numpy()), global_step)
-    writer.add_scalar("charts/episodic_length", num_steps, global_step)
+    if writer is not None:
+        writer.add_scalar(
+            "charts/episodic_return", np.mean(reward.numpy()), global_step
+        )
+        writer.add_scalar("charts/episodic_length", num_steps, global_step)
 
     return next_obs, next_done, mean_action, std_action
 
@@ -743,11 +743,23 @@ class CustomPPO:
         env: BaseQuantumEnvironment | Wrapper,
         chkpt_dir: Optional[str] = "tmp/ppo",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+        save_data: Optional[bool] = False,
     ):
         self.agent_config = agent_config
         self.env = env
         self.chkpt_dir = chkpt_dir
         self.chkpt_dir_critic = chkpt_dir_critic
+
+        self._training_config = TrainingConfig(
+            TotalUpdates(agent_config["NUM_UPDATES"])
+        )
+        self._train_function_settings = TrainFunctionSettings(save_data=save_data)
+        if save_data:
+            run_name = agent_config["RUN_NAME"]
+            writer = SummaryWriter(f"runs/{run_name}")
+        else:
+            writer = None
+        self.writer = writer
         """
         Factory function that creates a training function for the Proximal Policy Optimization (PPO) algorithm.
 
@@ -771,13 +783,9 @@ class CustomPPO:
         ) = initialize_environment(env)
 
         # Initialize agent configuration
-        (
-            hidden_units,
-            activation_functions,
-            include_critic,
-            self.minibatch_size,
-            self.writer,
-        ) = initialize_agent_config(self.agent_config, self.batchsize)
+        (hidden_units, activation_functions, include_critic, self.minibatch_size) = (
+            initialize_agent_config(self.agent_config, self.batchsize)
+        )
 
         # Initialize RL parameters
         (
@@ -834,8 +842,8 @@ class CustomPPO:
 
     def train(
         self,
-        training_config: TrainingConfig,
-        train_function_settings: TrainFunctionSettings,
+        training_config: Optional[TrainingConfig] = None,
+        train_function_settings: Optional[TrainFunctionSettings] = None,
     ):
         """
         Trains the model using Proximal Policy Optimization (PPO) algorithm.
@@ -849,8 +857,10 @@ class CustomPPO:
         Returns:
             Dict: A dictionary containing the training results, including average reward and fidelity history.
         """
-        self.training_config = training_config
-        self.train_function_settings = train_function_settings
+        if training_config is not None:
+            self._training_config = training_config
+        if train_function_settings is not None:
+            self._train_function_settings = train_function_settings
 
         try:
             fidelity_info = {
@@ -1167,6 +1177,14 @@ class CustomPPO:
         return self._training_results
 
     @property
+    def training_config(self):
+        return self._training_config
+
+    @property
+    def train_function_settings(self):
+        return self._train_function_settings
+
+    @property
     def target_fidelities(self):
         return self.training_config.target_fidelities
 
@@ -1251,4 +1269,4 @@ class CustomPPO:
 
     @property
     def save_data(self):
-        return self.train_function_settings.save_data
+        return self.writer is not None

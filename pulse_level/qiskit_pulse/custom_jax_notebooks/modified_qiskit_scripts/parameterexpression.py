@@ -120,6 +120,8 @@ class ParameterExpression:
             self._raise_if_passed_unknown_parameters(parameter_values.keys())
 
         jax_tracer = isinstance(jnp.array(0), core.Tracer)
+        for value in parameter_values.values():
+            jax_tracer = jax_tracer or isinstance(value, core.Tracer)
         if not jax_tracer:
             self._raise_if_passed_nan(parameter_values)
 
