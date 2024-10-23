@@ -60,7 +60,7 @@ from qiskit_ibm_runtime import EstimatorV2
 from .helper_functions import (
     get_instruction_timings,
     retrieve_neighbor_qubits,
-    simulate_pulse_schedule,
+    simulate_pulse_input,
 )
 from .qconfig import QEnvConfig
 from .base_q_env import (
@@ -1193,11 +1193,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 durations.append(duration)
                 contextual_schedules[i].assign_parameters(value_dicts[i], inplace=True)
                 if isinstance(self.backend, DynamicsBackend):
-                    sim_result = simulate_pulse_schedule(
+                    sim_result = simulate_pulse_input(
                         self.backend,
                         contextual_schedules[i],
-                        target_unitary=Operator(self.baseline_circuits[i]),
-                        target_state=Statevector(self.baseline_circuits[i]),
+                        target=Operator(self.baseline_circuits[i]),
                     )
                     error = 1.0 - sim_result["gate_fidelity"]["raw"]
 

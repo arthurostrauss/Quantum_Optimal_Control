@@ -1,6 +1,6 @@
 RUN_NAME: "test" # Name of the run
 OPTIMIZER: "adam" # Optimizer for the policy network
-NUM_UPDATES: 1 # Number of policy updates
+NUM_UPDATES: 200 # Number of policy updates
 N_EPOCHS: 8 # Number of epochs for each policy update
 MINIBATCH_SIZE: 16 # Number of samples per mini-batch
 LR: 0.0005 # Learning rate

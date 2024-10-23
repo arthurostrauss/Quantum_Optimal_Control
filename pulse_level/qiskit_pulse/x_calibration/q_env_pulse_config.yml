@@ -52,11 +52,11 @@ TARGET: # Target Gate configuration
 
 ENV: # Environment configuration
   EXECUTION:
-    SAMPLING_PAULIS: 10 # Number of Pauli strings to sample
+    SAMPLING_PAULIS: 30 # Number of Pauli strings to sample
     N_SHOTS: 1 # Number of shots for each Pauli
     N_REPS: 1 # Number of repetitions for the fidelity benchmarking
     C_FACTOR: 1. # Cost factor for the reward function
-    BATCH_SIZE: 64 # Number of actions to evaluate per policy iteration
+    BATCH_SIZE: 32 # Number of actions to evaluate per policy iteration
     SEED: 100
   ACTION_SPACE:
     #    LOW: [ -1., -3.14, -1., -3.14 ]

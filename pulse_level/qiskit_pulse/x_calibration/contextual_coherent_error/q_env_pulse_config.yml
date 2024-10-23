@@ -52,7 +52,7 @@ TARGET: # Target Gate configuration
 
 ENV: # Environment configuration
   EXECUTION:
-    SAMPLING_PAULIS: 10 # Number of Pauli strings to sample
+    SAMPLING_PAULIS: 50 # Number of Pauli strings to sample
     N_SHOTS: 1 # Number of shots for each Pauli
     N_REPS: 1 # Number of repetitions for the fidelity benchmarking
     C_FACTOR: 1. # Cost factor for the reward function

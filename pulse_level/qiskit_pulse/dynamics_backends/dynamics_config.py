@@ -15,6 +15,7 @@ def fixed_frequency_transmon_backend(
     rabi_freqs: List[float],
     couplings: Optional[Dict[Tuple[int, int], float]] = None,
     solver_options: Optional[Dict] = None,
+    **backend_options,
 ) -> DynamicsBackend:
     """
     Custom Transmon backend for the dynamics simulation.
@@ -90,11 +91,12 @@ def fixed_frequency_transmon_backend(
         solver_options=solver_options,  # to be used every time run is called
         control_channel_map=control_channel_map,
         initial_state=Statevector.from_int(0, dims),
+        **backend_options,
     )
     return dynamics_backend
 
 
-def single_qubit_backend(w, r, dt, solver_options=None):
+def single_qubit_backend(w, r, dt, solver_options=None, **backend_options):
     """
     Custom single qubit backend for the dynamics simulation.
     """
@@ -128,12 +130,13 @@ def single_qubit_backend(w, r, dt, solver_options=None):
         solver=solver,
         subsystem_dims=[2],
         solver_options=solver_options,
+        **backend_options,
     )
 
     return dynamics_backend
 
 
-def surface_code_plaquette():
+def surface_code_plaquette(**backend_options):
     """
     Custom backend for the dynamics simulation of a surface code plaquette.
     """
@@ -144,4 +147,5 @@ def surface_code_plaquette():
         anharmonicities=[-0.33e9] * 5,
         rabi_freqs=[0.1e6] * 5,
         couplings={(0, 1): 0.1e6, (0, 2): 0.1e6, (0, 3): 0.1e6, (0, 4): 0.1e6},
+        **backend_options,
     )

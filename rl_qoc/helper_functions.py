@@ -4,7 +4,7 @@ import os
 import sys
 import pickle
 import gzip
-from dataclasses import asdict
+import warnings
 
 from qiskit import pulse, schedule, transpile, QuantumRegister
 from qiskit.circuit import (
@@ -29,6 +29,9 @@ from qiskit.primitives import (
     BackendSamplerV2,
     BackendEstimatorV2,
 )
+from qiskit.qobj import QobjExperimentHeader
+from qiskit.qobj.common import QobjHeader
+from qiskit.qobj.utils import MeasLevel, MeasReturnType
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.quantum_info import (
     Operator,
@@ -38,6 +41,8 @@ from qiskit.quantum_info import (
     state_fidelity,
     SuperOp,
 )
+from qiskit.result.models import ExperimentResult, ExperimentResultData
+from qiskit.result import Result
 from qiskit.transpiler import (
     CouplingMap,
     InstructionProperties,
@@ -50,6 +55,12 @@ from qiskit.providers import (
     BackendV2,
     Options as AerOptions,
     QiskitBackendNotFoundError,
+)
+from qiskit_dynamics.backend.backend_utils import (
+    _get_memory_slot_probabilities,
+    _sample_probability_dict,
+    _get_counts_from_samples,
+    _get_iq_data,
 )
 from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
 from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackendV2, FakeBackend
@@ -94,6 +105,7 @@ import numpy as np
 
 from gymnasium.spaces import Box
 import optuna
+from scipy.integrate._ivp.ivp import OdeResult
 
 from scipy.optimize import minimize, OptimizeResult
 
@@ -145,6 +157,9 @@ Sampler_type = Union[
     StatevectorSampler,
 ]
 Backend_type = Union[BackendV1, BackendV2]
+QuantumTarget = Union[Statevector, Operator, DensityMatrix]
+QuantumInput = Union[QuantumCircuit, pulse.Schedule, pulse.ScheduleBlock]
+PulseInput = Union[pulse.Schedule, pulse.ScheduleBlock]
 
 reward_configs = {
     "channel": ChannelConfig,
@@ -470,12 +485,13 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
         if isinstance(backend, BackendV1)
         else backend.operation_names
     )
-    if "cx" in basis_gates:
-        basis_gate = "cx"
-    elif "ecr" in basis_gates:
+    if "ecr" in basis_gates:
         basis_gate = "ecr"
+    elif "cx" in basis_gates:
+        basis_gate = "cx"
     else:
         raise ValueError("No identifiable two-qubit gate found, must be 'cx' or 'ecr'")
+
     if isinstance(backend, BackendV1):
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
@@ -587,9 +603,21 @@ def get_pulse_params(
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
         instruction_schedule_map = backend.target.instruction_schedule_map()
-    basis_gate_inst = instruction_schedule_map.get(gate_name, physical_qubit)
+    basis_gate_inst: PulseInput = instruction_schedule_map.get(
+        gate_name, physical_qubit
+    )
     basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
-    ref_pulse = basis_gate_inst.instructions[0][1].pulse
+
+    play_instructions = basis_gate_inst.filter(instruction_types=[pulse.Play])
+    if len(play_instructions) == 0:
+        raise ValueError(f"No Play instructions found for {gate_name} gate")
+    if len(play_instructions) > 1:
+        warnings.warn(
+            f"Multiple Play instructions found for {gate_name} gate, using the first one"
+        )
+
+    ref_pulse = play_instructions.instructions[0][1].pulse
+
     default_params = {
         ("amp", physical_qubit, gate_name): ref_pulse.amp,
         ("σ", physical_qubit, gate_name): ref_pulse.sigma,
@@ -711,60 +739,198 @@ def new_params_sq_gate(
     return new_params
 
 
-def simulate_pulse_schedule(
-    solver_instance: DynamicsBackend | Solver | JaxSolver,
-    sched: pulse.Schedule | pulse.ScheduleBlock,
-    solver_options: Optional[Dict] = None,
-    target_unitary: Optional[Operator] = None,
-    initial_state: Optional[Statevector | DensityMatrix] = None,
-    target_state: Optional[Statevector | DensityMatrix] = None,
+def custom_experiment_result_function(
+    experiment_name: str,
+    solver_result: OdeResult,
+    measurement_subsystems: List[int],
+    memory_slot_indices: List[int],
+    num_memory_slots: Union[None, int],
+    backend: DynamicsBackend,
+    seed: Optional[int] = None,
+    metadata: Optional[Dict] = None,
+) -> ExperimentResult:
+    """Default routine for generating ExperimentResult object.
+
+    To generate the results for a given experiment, this method takes the following steps:
+
+    * The final state is transformed out of the rotating frame and into the lab frame using
+      ``backend.options.solver``.
+    * If ``backend.options.normalize_states==True``, the final state is normalized.
+    * Measurement results are computed, in the dressed basis, based on both the measurement-related
+      options in ``backend.options`` and the measurement specification extracted from the specific
+      experiment.
+
+    Args:
+        experiment_name: Name of experiment.
+        solver_result: Result object from :class:`Solver.solve`.
+        measurement_subsystems: Labels of subsystems in the model being measured.
+        memory_slot_indices: Indices of memory slots to store the results in for each subsystem.
+        num_memory_slots: Total number of memory slots in the returned output. If ``None``,
+            ``max(memory_slot_indices)`` will be used.
+        backend: The backend instance that ran the simulation. Various options and properties
+            are utilized.
+        seed: Seed for any random number generation involved (e.g. when computing outcome samples).
+        metadata: Metadata to add to the header of the
+            :class:`~qiskit.result.models.ExperimentResult` object.
+
+    Returns:
+        :class:`~qiskit.result.models.ExperimentResult` object containing results.
+
+    Raises:
+        QiskitError: If a specified option is unsupported.
+    """
+
+    yf = solver_result.y[-1]
+    tf = solver_result.t[-1]
+
+    # Take state out of frame, put in dressed basis, and normalize
+    yf = rotate_frame(yf, tf, backend)
+
+    if backend.options.meas_level == MeasLevel.CLASSIFIED:
+        memory_slot_probabilities = _get_memory_slot_probabilities(
+            probability_dict=yf.probabilities_dict(qargs=measurement_subsystems),
+            memory_slot_indices=memory_slot_indices,
+            num_memory_slots=num_memory_slots,
+            max_outcome_value=backend.options.max_outcome_level,
+        )
+
+        # sample
+        memory_samples = _sample_probability_dict(
+            memory_slot_probabilities,
+            shots=backend.options.shots,
+            normalize_probabilities=backend.options.normalize_states,
+            seed=seed,
+        )
+        counts = _get_counts_from_samples(memory_samples)
+
+        # construct results object
+        exp_data = ExperimentResultData(
+            counts=counts,
+            memory=memory_samples if backend.options.memory else None,
+            statevector=projected_state(
+                yf,
+                backend.options.subsystem_dims,
+                normalize=backend.options.normalize_states,
+            ),
+            raw_statevector=yf,
+        )
+
+        return ExperimentResult(
+            shots=backend.options.shots,
+            success=True,
+            data=exp_data,
+            meas_level=MeasLevel.CLASSIFIED,
+            seed=seed,
+            header=QobjExperimentHeader(name=experiment_name, metadata=metadata),
+        )
+    elif backend.options.meas_level == MeasLevel.KERNELED:
+        iq_centers = backend.options.iq_centers
+        if iq_centers is None:
+            # Default iq_centers
+            iq_centers = []
+            for sub_dim in backend.options.subsystem_dims:
+                theta = 2 * np.pi / sub_dim
+                iq_centers.append(
+                    [
+                        (np.cos(idx * theta), np.sin(idx * theta))
+                        for idx in range(sub_dim)
+                    ]
+                )
+
+        # generate IQ
+        measurement_data = _get_iq_data(
+            yf,
+            measurement_subsystems=measurement_subsystems,
+            iq_centers=iq_centers,
+            iq_width=backend.options.iq_width,
+            shots=backend.options.shots,
+            memory_slot_indices=memory_slot_indices,
+            num_memory_slots=num_memory_slots,
+            seed=seed,
+        )
+
+        if backend.options.meas_return == MeasReturnType.AVERAGE:
+            measurement_data = np.average(measurement_data, axis=0)
+
+        # construct results object
+        exp_data = ExperimentResultData(
+            memory=measurement_data,
+            statevector=projected_state(
+                yf,
+                backend.options.subsystem_dims,
+                normalize=backend.options.normalize_states,
+            ),
+        )
+        return ExperimentResult(
+            shots=backend.options.shots,
+            success=True,
+            data=exp_data,
+            meas_level=MeasLevel.KERNELED,
+            seed=seed,
+            header=QobjHeader(name=experiment_name, metadata=metadata),
+        )
+
+    else:
+        raise QiskitError(f"meas_level=={backend.options.meas_level} not implemented.")
+
+
+def simulate_pulse_input(
+    backend: DynamicsBackend,
+    qc_input: QuantumInput | List[QuantumInput],
+    target: Optional[List[QuantumTarget] | QuantumTarget | Tuple[QuantumTarget]] = None,
+    initial_state: Optional[QuantumState] = None,
     normalize: bool = True,
 ) -> Dict[str, Union[Operator, Statevector, float]]:
     """
-    Simulate pulse schedule on provided backend
+    Function extending the functionality of the DynamicsBackend to simulate pulse input (backend.solve)
+    by computing unitary simulation and state/gate fidelity calculation for the provided input.
 
-    :param solver_instance: DynamicsBackend or Solver instance
-    :param sched: Pulse schedule to simulate
-    :param solver_options: Optional solver options
-    :param target_unitary: Optional target unitary for gate fidelity calculation
+    :param backend: DynamicsBackend or Solver instance
+    :param qc_input: (List of) Quantum Circuit(s) or Pulse Schedule(s) input to be simulated
+    :param target: Optional target unitary/state (or list thereof) for gate/state fidelity calculation (if input
+        is QuantumCircuit, target gate and state are automatically inferred).
     :param initial_state: Optional initial state for state fidelity calculation  (if None and target_state is not None,
     then initial state is assumed to be |0..0>)
-    :param target_state: Optional target state for state fidelity calculation
     :param normalize: Normalize the projected statevector or not
     :return: Dictionary containing simulated unitary, statevector, projected unitary, projected statevector, gate fidelity, state fidelity
     """
+    solver: Solver = backend.options.solver
+    subsystem_dims = list(filter(lambda x: x > 1, backend.options.subsystem_dims))
+    if not isinstance(qc_input, list):
+        qc_input = [qc_input]
+    if not all(isinstance(qc, QuantumInput) for qc in qc_input):
+        raise TypeError("Input must be a Quantum Circuit or Pulse Schedule")
+    qc_input = [
+        qc.remove_final_measurements(False) if isinstance(qc, QuantumCircuit) else qc
+        for qc in qc_input
+    ]
 
-    if isinstance(solver_instance, DynamicsBackend):
-        solver = solver_instance.options.solver
-        solver_options = solver_instance.options.solver_options
-        dt = solver_instance.dt
-        subsystem_dims = list(
-            filter(lambda x: x > 1, solver_instance.options.subsystem_dims)
-        )
-    elif isinstance(solver_instance, (Solver, JaxSolver)):
-        solver = solver_instance
-        dt = solver._dt
-        subsystem_dims = solver.model.dim
-    else:
-        raise TypeError(
-            "Solver instance must be defined. Backend is not DynamicsBackend or Solver instance"
-        )
-
-    results = solver.solve(
-        t_span=[0, sched.duration * dt],
+    results = backend.solve(
         y0=np.eye(solver.model.dim),
-        signals=sched,
-        **solver_options,
+        solve_input=qc_input,
     )
 
-    output_unitary = np.array(results.y[-1])
+    output_unitaries = [np.array(result.y[-1]) for result in results]
 
-    output_op = Operator(
-        output_unitary,
-        input_dims=tuple(subsystem_dims),
-        output_dims=tuple(subsystem_dims),
-    )
-    projected_unitary = qubit_projection(output_unitary, subsystem_dims)
+    output_ops = [
+        Operator(
+            output_unitary,
+            input_dims=tuple(subsystem_dims),
+            output_dims=tuple(subsystem_dims),
+        )
+        for output_unitary in output_unitaries
+    ]
+
+    # Rotate the frame of the output unitaries to lab frame
+    output_ops = [
+        rotate_frame(output_op, result.t[-1], backend)
+        for output_op, result in zip(output_ops, results)
+    ]
+
+    projected_unitaries = [
+        qubit_projection(output_unitary, subsystem_dims)
+        for output_unitary in output_unitaries
+    ]
 
     initial_state = (
         DensityMatrix.from_int(0, subsystem_dims)
@@ -772,45 +938,185 @@ def simulate_pulse_schedule(
         else initial_state
     )
 
-    final_state = initial_state.evolve(output_op)
-    projected_statevec = projected_state(final_state, subsystem_dims, normalize)
+    final_states = [initial_state.evolve(output_op) for output_op in output_ops]
+    projected_statevectors = [
+        projected_state(final_state, subsystem_dims, normalize)
+        for final_state in final_states
+    ]
     rotated_state = None
 
-    final_results = {
-        "unitary": output_op,
-        "state": final_state,
-        "projected_unitary": projected_unitary,
-        "projected_state": projected_statevec,
-    }
-    if target_unitary is not None:
-        optimal_rots = get_optimal_z_rotation(
-            projected_unitary, target_unitary, len(subsystem_dims)
-        )
-        rotated_unitary = rotate_unitary(optimal_rots.x, projected_unitary)
+    if len(final_states) > 1:
+        final_results = {
+            "unitary": output_ops,
+            "state": final_states,
+            "projected_unitary": projected_unitaries,
+            "projected_state": projected_statevectors,
+        }
+    else:
+        final_results = {
+            "unitary": output_ops[0],
+            "state": final_states[0],
+            "projected_unitary": projected_unitaries[0],
+            "projected_state": projected_statevectors[0],
+        }
+
+    target_unitaries = []
+    target_states = []
+    rotated_states = None
+    if target is not None:
+        if isinstance(target, List):
+            if len(target) != len(qc_input):
+                raise ValueError(
+                    "Number of target states/gates does not match the number of input circuits"
+                )
+            for target_op in target:
+                if isinstance(target_op, Tuple):
+                    for op in target_op:
+                        if isinstance(op, Operator):
+                            target_unitaries.append(op)
+                        elif isinstance(op, QuantumState):
+                            target_states.append(op)
+                        else:
+                            raise TypeError(
+                                "Target must be either Operator or Statevector"
+                            )
+                elif isinstance(target_op, Operator):
+                    target_unitaries.append(target_op)
+                elif isinstance(target_op, QuantumState):
+                    target_states.append(target_op)
+                else:
+                    raise TypeError("Target must be either Operator or Statevector")
+        else:
+            if isinstance(target, Tuple):
+                for op in target:
+                    if isinstance(op, Operator):
+                        target_unitaries.extend([op] * len(qc_input))
+                    elif isinstance(op, QuantumState):
+                        target_states.extend([op] * len(qc_input))
+                    else:
+                        raise TypeError("Target must be either Operator or Statevector")
+            elif isinstance(target, Operator):
+                target_unitaries.extend([target] * len(qc_input))
+            elif isinstance(target, QuantumState):
+                target_states.extend([target] * len(qc_input))
+            else:
+                raise TypeError(
+                    "Target must be either Operator or Statevector or a Tuple of them"
+                )
+    else:
+        for qc in qc_input:
+            if isinstance(qc, QuantumCircuit):
+                target_unitaries.append(Operator(qc.remove_final_measurements(False)))
+                target_states.append(Statevector(qc.remove_final_measurements(False)))
+            else:
+                target_unitaries.append(None)
+                target_states.append(None)
+
+    if target_unitaries:
+        optimal_rots = [
+            (
+                get_optimal_z_rotation(
+                    projected_unitary, target_unitary, len(subsystem_dims)
+                )
+                if target_unitary is not None
+                else None
+            )
+            for projected_unitary, target_unitary in zip(
+                projected_unitaries, target_unitaries
+            )
+        ]
+        rotated_unitaries = [
+            (
+                rotate_unitary(optimal_rot.x, projected_unitary)
+                if optimal_rot is not None
+                else None
+            )
+            for optimal_rot, projected_unitary in zip(optimal_rots, projected_unitaries)
+        ]
         try:
-            rotated_state = initial_state.evolve(rotated_unitary)
+            rotated_states = [
+                (
+                    initial_state.evolve(rotated_unitary)
+                    if rotated_unitary is not None
+                    else None
+                )
+                for rotated_unitary in rotated_unitaries
+            ]
         except QiskitError:
             pass
 
-        gate_fid = average_gate_fidelity(projected_unitary, target_unitary)
-        optimal_gate_fid = average_gate_fidelity(rotated_unitary, target_unitary)
+        gate_fids = [
+            (
+                average_gate_fidelity(projected_unitary, target_unitary)
+                if target_unitary is not None
+                else None
+            )
+            for projected_unitary, target_unitary in zip(
+                projected_unitaries, target_unitaries
+            )
+        ]
+        optimal_gate_fids = [
+            (
+                average_gate_fidelity(rotated_unitary, target_unitary)
+                if rotated_unitary is not None
+                else None
+            )
+            for rotated_unitary, target_unitary in zip(
+                rotated_unitaries, target_unitaries
+            )
+        ]
+
         final_results["gate_fidelity"] = {
-            "raw": gate_fid,
-            "optimal": optimal_gate_fid,
-            "rotations": optimal_rots.x,
-            "rotated_unitary": rotated_unitary,
+            "raw": gate_fids if len(gate_fids) > 1 else gate_fids[0],
+            "optimal": (
+                optimal_gate_fids
+                if len(optimal_gate_fids) > 1
+                else optimal_gate_fids[0]
+            ),
+            "rotations": (
+                [optimal_rot.x for optimal_rot in optimal_rots]
+                if len(optimal_rots) > 1
+                else optimal_rots[0].x
+            ),
+            "rotated_unitary": (
+                rotated_unitaries
+                if len(rotated_unitaries) > 1
+                else rotated_unitaries[0]
+            ),
         }
 
-    if target_state is not None:
-        state_fid1 = state_fidelity(projected_statevec, target_state, validate=False)
-        state_fid2 = None
-        if rotated_state is not None:
-            state_fid2 = state_fidelity(rotated_state, target_state, validate=False)
+    if target_states:
+        state_fid1 = [
+            (
+                state_fidelity(projected_statevec, target_state, validate=False)
+                if target_state is not None
+                else None
+            )
+            for projected_statevec, target_state in zip(
+                projected_statevectors, target_states
+            )
+        ]
+        state_fid2 = []
+        if rotated_states is not None:
+            for rotated_state, target_state in zip(rotated_states, target_states):
+                if rotated_state is not None and target_state is not None:
+                    state_fid2.append(
+                        state_fidelity(rotated_state, target_state, validate=False)
+                    )
+                else:
+                    state_fid2.append(None)
+
         final_results["state_fidelity"] = {
-            "raw": state_fid1,
-            "optimal": state_fid2,
-            "rotated_state": rotated_state,
+            "raw": state_fid1 if len(state_fid1) > 1 else state_fid1[0],
         }
+        if state_fid2:
+            final_results["state_fidelity"]["optimal"] = (
+                state_fid2 if len(state_fid2) > 1 else state_fid2[0]
+            )
+        if rotated_states:
+            final_results["state_fidelity"]["rotated_states"] = (
+                rotated_states if len(rotated_states) > 1 else rotated_states[0]
+            )
     return final_results
 
 
@@ -843,36 +1149,20 @@ def density_matrix_to_statevector(density_matrix: DensityMatrix):
         raise ValueError("The density matrix does not represent a pure state.")
 
 
-def run_jobs(session: Session, circuits: List[QuantumCircuit], **run_options):
-    """
-    Run batch of Quantum Circuits on provided backend
-
-    Args:
-        session: Runtime session
-        circuits: List of Quantum Circuits
-        run_options: Optional run options
-    """
-    jobs = []
-    runtime_inputs = {"circuits": circuits, "skip_transpilation": True, **run_options}
-    jobs.append(session.run("circuit_runner", inputs=runtime_inputs))
-
-    return jobs
-
-
 def fidelity_from_tomography(
     qc_input: List[QuantumCircuit] | QuantumCircuit,
     backend: Optional[Backend],
-    target: Operator | QuantumState,
     physical_qubits: Optional[Sequence[int]],
+    target: Optional[QuantumTarget | List[QuantumTarget]] = None,
     analysis: Union[BaseAnalysis, None, str] = "default",
     sampler: RuntimeSamplerV2 = None,
-    shots: int = 8192,
+    **run_options,
 ):
     """
     Extract average state or gate fidelity from batch of Quantum Circuit for target state or gate
 
     Args:
-        qc_input: Quantum Circuit input to benchmark
+        qc_input: Quantum Circuit input to benchmark (Note that we handle removing final measurements if any)
         backend: Backend instance
         physical_qubits: Physical qubits on which state or process tomography is to be performed
         analysis: Analysis instance
@@ -882,52 +1172,51 @@ def fidelity_from_tomography(
         avg_fidelity: Average state or gate fidelity (over the batch of Quantum Circuits)
     """
     if isinstance(qc_input, QuantumCircuit):
-        qc_input = [qc_input]
-    if isinstance(target, Operator):
-        tomo = ProcessTomography
-        fidelity = "process_fidelity"
-    elif isinstance(target, QuantumState):
-        tomo = StateTomography
-        fidelity = "state_fidelity"
+        qc_input = [qc_input.remove_final_measurements(False)]
     else:
-        raise TypeError("Target must be either Operator or QuantumState")
-
-    process_tomo = BatchExperiment(
-        [
-            tomo(
-                qc,
-                physical_qubits=physical_qubits,
-                analysis=analysis,
-                target=target,
+        qc_input = [qc.remove_final_measurements(False) for qc in qc_input]
+    if isinstance(target, QuantumTarget):
+        target = [target] * len(qc_input)
+    elif target is not None:
+        if len(target) != len(qc_input):
+            raise ValueError(
+                "Number of target states/gates does not match the number of input circuits"
             )
-            for qc in qc_input
-        ],
-        backend=backend,
-        flatten_results=True,
-    )
-
-    if isinstance(backend, RuntimeBackend):
-        circuits = process_tomo._transpiled_circuits()
-        jobs = sampler.run([(circ,) for circ in circuits])
-        exp_data = process_tomo._initialize_experiment_data()
-        exp_data.add_data()
-        results = process_tomo.analysis.run(exp_data).block_for_results()
     else:
-        results = process_tomo.run(shots=shots).block_for_results()
+        target = [Statevector(qc) for qc in qc_input]
 
-    if len(qc_input) == 1:
-        process_results = [results.analysis_results(fidelity).value]
-    else:
-        process_results = [
-            results.analysis_results(fidelity)[i].value for i in range(len(qc_input))
-        ]
-    if isinstance(target, Operator) and target.is_unitary():
-        dim, _ = target.dim
-        avg_gate_fids = [(dim * f_pro + 1) / (dim + 1) for f_pro in process_results]
+    exps = []
+    fids = []
+    for qc, tgt in zip(qc_input, target):
+        if isinstance(tgt, Operator):
+            exps.append(
+                ProcessTomography(
+                    qc, physical_qubits=physical_qubits, analysis=analysis, target=tgt
+                )
+            )
+            fids.append("process_fidelity")
+        elif isinstance(tgt, QuantumState):
+            exps.append(
+                StateTomography(
+                    qc, physical_qubits=physical_qubits, analysis=analysis, target=tgt
+                )
+            )
+            fids.append("state_fidelity")
+        else:
+            raise TypeError("Target must be either Operator or QuantumState")
+    batch_exp = BatchExperiment(exps, backend=backend, flatten_results=False)
 
-        return avg_gate_fids if len(avg_gate_fids) > 1 else avg_gate_fids[0]
-    else:  # target is QuantumState
-        return process_results
+    exp_data = batch_exp.run(**run_options).block_for_results()
+    results = []
+    for fid, tgt, child_data in zip(fids, target, exp_data.child_data()):
+        result = child_data.analysis_results(fid).value
+        if fid == "process_fidelity" and tgt.is_unitary():
+            # Convert to average gate fidelity metric
+            dim, _ = tgt.dim
+            result = dim * result / (dim + 1)
+        results.append(result)
+
+    return results if len(results) > 1 else results[0]
 
 
 def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
@@ -1173,6 +1462,10 @@ def select_backend(
                 backend, calibration_files=calibration_files
             )
 
+    if backend is None:
+        warnings.warn(
+            "No backend selected. Training will be performed on Statevector simulator"
+        )
     return backend
 
 
@@ -1716,32 +2009,38 @@ def get_lower_keys_dict(dictionary: Dict[str, Any]):
 
 def get_q_env_config(
     config_file_path: str,
-    get_backend_func: Callable[[Any], Optional[BackendV2]],
     parametrized_circ_func: Callable[
         [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
     ],
-    **parametrized_circ_args,
+    backend: Optional[Backend_type | Callable[[Any], Backend_type]] = None,
+    **backend_callable_args,
 ):
     """
-    Get Qiskit Quantum Environment configuration
+    Get Qiskit Quantum Environment configuration from yaml file
 
     Args:
         config_file_path: Configuration file path
-        get_backend_func: Function to get backend (should be defined in your Python config)
-        parametrized_circ_func: Function to get parametrized circuit (should be defined in your Python config)
-        parametrized_circ_args: Additional arguments for parametrized circuit function
+        parametrized_circ_func: Function to applying parametrized gate (should be defined in your Python config)
+        backend: Optional custom backend instance
+            (if None, backend will be selected based on configuration set in yaml file)
+
+        parametrized_circ_args: Additional arguments for backend if it was passed as a callable
+
     """
     params, backend_params, runtime_options = load_q_env_from_yaml_file(
         config_file_path
     )
-    backend = get_backend_func(**backend_params)
+    if isinstance(backend, Callable):
+        backend = backend(**backend_callable_args)
+    elif backend is None:
+        backend = select_backend(**backend_params)
+
     backend_config = QiskitConfig(
         parametrized_circ_func,
         backend,
         estimator_options=(
             runtime_options if isinstance(backend, RuntimeBackend) else None
         ),
-        parametrized_circuit_kwargs=parametrized_circ_args,
     )
     q_env_config = QEnvConfig(backend_config=backend_config, **params)
     return q_env_config

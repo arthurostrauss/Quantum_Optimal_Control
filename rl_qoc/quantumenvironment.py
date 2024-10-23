@@ -21,11 +21,9 @@ from qiskit.circuit import (
     QuantumCircuit,
     ParameterVector,
 )
-from qiskit.quantum_info import average_gate_fidelity
 
 # Qiskit Quantum Information, for fidelity benchmarking
-from qiskit.quantum_info.operators import Operator
-from qiskit.quantum_info.states import DensityMatrix, Statevector
+from qiskit.quantum_info import DensityMatrix, Statevector, Operator
 from qiskit.transpiler import InstructionProperties
 from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.library import ProcessTomography
@@ -37,7 +35,7 @@ from .base_q_env import (
 )
 from .helper_functions import (
     fidelity_from_tomography,
-    simulate_pulse_schedule,
+    simulate_pulse_input,
     get_optimal_z_rotation,
 )
 from .qconfig import QEnvConfig
@@ -279,11 +277,10 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             schedule_ = schedule(qc, self.backend)
             duration = schedule_.duration
             if isinstance(self.backend, DynamicsBackend):
-                sim_data = simulate_pulse_schedule(
+                sim_data = simulate_pulse_input(
                     self.backend,
                     schedule_,
-                    target_unitary=Operator(self.target.gate),
-                    target_state=Statevector.from_int(0, dims=[2] * self.n_qubits),
+                    target=Operator(self.target.gate),
                 )
                 error = 1.0 - sim_data["gate_fidelity"]["optimal"]
                 optimal_rots = sim_data["gate_fidelity"]["rotations"]
