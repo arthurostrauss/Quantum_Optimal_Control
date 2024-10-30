@@ -6,7 +6,7 @@ import pickle
 import gzip
 import warnings
 
-from qiskit import pulse, schedule, transpile, QuantumRegister
+from qiskit import pulse, QuantumRegister
 from qiskit.circuit import (
     QuantumCircuit,
     Gate,
@@ -39,10 +39,8 @@ from qiskit.quantum_info import (
     DensityMatrix,
     average_gate_fidelity,
     state_fidelity,
-    SuperOp,
 )
 from qiskit.result.models import ExperimentResult, ExperimentResultData
-from qiskit.result import Result
 from qiskit.transpiler import (
     CouplingMap,
     InstructionProperties,
@@ -126,11 +124,6 @@ from .qconfig import (
     ORBITConfig,
     FidelityConfig,
 )
-from .custom_jax_sim import (
-    JaxSolver,
-    DynamicsBackendEstimator,
-    PauliToQuditOperator,
-)
 
 import logging
 
@@ -146,7 +139,6 @@ Estimator_type = Union[
     Estimator,
     BackendEstimator,
     BackendEstimatorV2,
-    DynamicsBackendEstimator,
     StatevectorEstimator,
 ]
 Sampler_type = Union[
@@ -1155,7 +1147,6 @@ def fidelity_from_tomography(
     physical_qubits: Optional[Sequence[int]],
     target: Optional[QuantumTarget | List[QuantumTarget]] = None,
     analysis: Union[BaseAnalysis, None, str] = "default",
-    sampler: RuntimeSamplerV2 = None,
     **run_options,
 ):
     """
@@ -1258,7 +1249,11 @@ def retrieve_primitives(
     """
     if isinstance(backend, DynamicsBackend):
         assert isinstance(config, QiskitConfig), "Configuration must be a QiskitConfig"
-        estimator = PulseEstimatorV2(backend=backend, options=estimator_options)
+        dummy_param = Parameter("dummy")
+        if hasattr(dummy_param, "jax_compat"):
+            estimator = PulseEstimatorV2(backend=backend, options=estimator_options)
+        else:
+            estimator = BackendEstimatorV2(backend=backend, options=estimator_options)
         sampler = BackendSamplerV2(backend=backend)
 
         if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
@@ -1349,44 +1344,6 @@ def handle_session(
         )
         estimator = type(estimator)(mode=session, options=options)
 
-    elif isinstance(estimator, DynamicsBackendEstimator):
-        if not isinstance(backend, DynamicsBackend) or not isinstance(
-            backend.options.solver, JaxSolver
-        ):
-            raise TypeError(
-                "DynamicsBackendEstimator can only be used with DynamicsBackend and JaxSolver"
-            )
-        # Update callable within the jit compiled function
-        if counter != backend.options.solver.circuit_macro_counter:
-            backend.options.solver.circuit_macro_counter = counter
-            backend.options.solver.circuit_macro = lambda: schedule(qc, backend)
-
-        # Update initial state of DynamicsBackend with input state circuit
-        # The initial state is adapted to match the dimensions of the HamiltonianModel
-        new_circ = transpile(input_state_circ, backend)
-        subsystem_dims = backend.options.subsystem_dims
-        initial_state = Statevector.from_int(
-            0, dims=tuple(filter(lambda x: x > 1, subsystem_dims))
-        )
-        initial_rotations = [
-            Operator.from_label("I") for _ in range(new_circ.num_qubits)
-        ]
-        qubit_counter, qubit_list = 0, []
-        for instruction in new_circ.data:
-            assert (
-                len(instruction.qubits) == 1
-            ), "Input state circuit must be in a tensor product form"
-            if instruction.qubits[0] not in qubit_list:
-                qubit_list.append(instruction.qubits[0])
-                qubit_counter += 1
-            initial_rotations[qubit_counter - 1] = initial_rotations[
-                qubit_counter - 1
-            ].compose(Operator(instruction.operation))
-
-        operation = PauliToQuditOperator(initial_rotations, subsystem_dims)
-        initial_state = initial_state.evolve(operation)
-        backend.set_options(initial_state=initial_state)
-
     return estimator
 
 
@@ -1452,11 +1409,10 @@ def select_backend(
             assert isinstance(
                 backend, BackendV1
             ), "DynamicsBackend can only be used with BackendV1 instances"
-            backend = custom_dynamics_from_backend(
+            backend = DynamicsBackend.from_backend(
                 backend,
                 subsystem_list=list(physical_qubits),
                 solver_options=solver_options,
-                jax_solver=False,
             )
             _, _ = perform_standard_calibrations(
                 backend, calibration_files=calibration_files
@@ -1499,175 +1455,6 @@ def has_noise_model(backend: AerBackend):
         return False
     else:
         return True
-
-
-def custom_dynamics_from_backend(
-    backend: BackendV1,
-    subsystem_list: Optional[List[int]] = None,
-    rotating_frame: Optional[Union[ArrayLike, RotatingFrame, str]] = "auto",
-    array_library: Optional[str] = "jax",
-    vectorized: Optional[bool] = None,
-    rwa_cutoff_freq: Optional[float] = None,
-    static_dissipators: Optional[ArrayLike] = None,
-    dissipator_operators: Optional[ArrayLike] = None,
-    dissipator_channels: Optional[List[str]] = None,
-    jax_solver: Optional[bool] = True,
-    **options,
-) -> DynamicsBackend:
-    """
-    Method to retrieve custom DynamicsBackend instance from IBMBackend instance
-    added with potential dissipation operators, inspired from DynamicsBackend.from_backend() method.
-    Contrary to the original method, the Solver instance can be created with the custom JaxSolver
-    tailormade for fast simulation with the Estimator primitive.
-
-    :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
-    :param subsystem_list: The list of qubits in the backend to include in the model.
-    :param rwa_cutoff_freq: Rotating wave approximation argument for the internal :class:`.Solver`
-    :param array_library: Array library to use for storing operators of underlying model. See the
-        :ref:`model evaluation section of the Models API documentation <model evaluation>`
-        for a more detailed description of this argument.
-    :param vectorized: If including dissipator terms, whether or not to construct the
-        :class:`.LindbladModel` in vectorized form. See the
-        :ref:`model evaluation section of the Models API documentation <model evaluation>`
-        for a more detailed description of this argument.
-    :param rotating_frame: Rotating frame argument for the internal :class:`.Solver`. Defaults to
-            ``"auto"``, allowing this method to pick a rotating frame.
-    :param backend: IBMBackend instance from which Hamiltonian parameters are extracted
-    :param static_dissipators: static_dissipators: Constant dissipation operators.
-    :param dissipator_operators: Dissipation operators with time-dependent coefficients.
-    :param dissipator_channels: List of channel names in pulse schedules corresponding to dissipator operators.
-    :param jax_solver: Boolean indicating if the custom JaxSolver should be used
-    :return: Solver instance carrying Hamiltonian information extracted from the IBMBackend instance
-    """
-    # get available target, config, and defaults objects
-    backend_target = getattr(backend, "target", None)
-
-    if not hasattr(backend, "configuration"):
-        raise QiskitError(
-            "DynamicsBackend.from_backend requires that the backend argument has a "
-            "configuration method."
-        )
-    backend_config = backend.configuration()
-
-    backend_defaults = None
-    if hasattr(backend, "defaults"):
-        backend_defaults = backend.defaults()
-
-    # get and parse Hamiltonian string dictionary
-    if backend_target is not None:
-        backend_num_qubits = backend_target.num_qubits
-    else:
-        backend_num_qubits = backend_config.n_qubits
-
-    if subsystem_list is not None:
-        subsystem_list = sorted(subsystem_list)
-        if subsystem_list[-1] >= backend_num_qubits:
-            raise QiskitError(
-                f"subsystem_list contained {subsystem_list[-1]}, which is out of bounds for "
-                f"backend with {backend_num_qubits} qubits."
-            )
-    else:
-        subsystem_list = list(range(backend_num_qubits))
-
-    if backend_config.hamiltonian is None:
-        raise QiskitError(
-            "DynamicsBackend.from_backend requires that backend.configuration() has a "
-            "hamiltonian."
-        )
-
-    (
-        static_hamiltonian,
-        hamiltonian_operators,
-        hamiltonian_channels,
-        subsystem_dims_dict,
-    ) = parse_backend_hamiltonian_dict(backend_config.hamiltonian, subsystem_list)
-    subsystem_dims = [
-        subsystem_dims_dict.get(idx, 1) for idx in range(backend_num_qubits)
-    ]
-
-    # construct model frequencies dictionary from backend
-    channel_freqs = _get_backend_channel_freqs(
-        backend_target=backend_target,
-        backend_config=backend_config,
-        backend_defaults=backend_defaults,
-        channels=hamiltonian_channels,
-    )
-
-    # Add control_channel_map from backend (only if not specified before by user)
-    if "control_channel_map" not in options:
-        if hasattr(backend, "control_channels"):
-            control_channel_map_backend = {
-                qubits: backend.control_channels[qubits][0].index
-                for qubits in backend.control_channels
-            }
-
-        elif hasattr(backend.configuration(), "control_channels"):
-            control_channel_map_backend = {
-                qubits: backend.configuration().control_channels[qubits][0].index
-                for qubits in backend.configuration().control_channels
-            }
-
-        else:
-            control_channel_map_backend = {}
-
-        # Reduce control_channel_map based on which channels are in the model
-        if bool(control_channel_map_backend):
-            control_channel_map = {}
-            for label, idx in control_channel_map_backend.items():
-                if f"u{idx}" in hamiltonian_channels:
-                    control_channel_map[label] = idx
-            options["control_channel_map"] = control_channel_map
-
-    # build the solver
-    if rotating_frame == "auto":
-        if array_library is not None and "sparse" in array_library:
-            rotating_frame = np.diag(static_hamiltonian)
-        else:
-            rotating_frame = static_hamiltonian
-
-    # get time step size
-    if backend_target is not None and backend_target.dt is not None:
-        dt = backend_target.dt
-    else:
-        # config is guaranteed to have a dt
-        dt = backend_config.dt
-    if jax_solver:
-        solver = JaxSolver(
-            static_hamiltonian=static_hamiltonian,
-            hamiltonian_operators=hamiltonian_operators,
-            hamiltonian_channels=hamiltonian_channels,
-            channel_carrier_freqs=channel_freqs,
-            dt=dt,
-            rotating_frame=rotating_frame,
-            array_library=array_library,
-            vectorized=vectorized,
-            rwa_cutoff_freq=rwa_cutoff_freq,
-            static_dissipators=static_dissipators,
-            dissipator_operators=dissipator_operators,
-            dissipator_channels=dissipator_channels,
-        )
-    else:
-        solver = Solver(
-            static_hamiltonian=static_hamiltonian,
-            hamiltonian_operators=hamiltonian_operators,
-            hamiltonian_channels=hamiltonian_channels,
-            channel_carrier_freqs=channel_freqs,
-            dt=dt,
-            rotating_frame=rotating_frame,
-            array_library=array_library,
-            vectorized=vectorized,
-            rwa_cutoff_freq=rwa_cutoff_freq,
-            static_dissipators=static_dissipators,
-            dissipator_operators=dissipator_operators,
-            dissipator_channels=dissipator_channels,
-        )
-
-    return DynamicsBackend(
-        solver=solver,
-        target=Target(dt=dt),
-        subsystem_dims=subsystem_dims,
-        **options,
-    )
 
 
 def rotate_frame(yf: Any, tf: Any, backend: DynamicsBackend):
@@ -2024,7 +1811,7 @@ def get_q_env_config(
         backend: Optional custom backend instance
             (if None, backend will be selected based on configuration set in yaml file)
 
-        parametrized_circ_args: Additional arguments for backend if it was passed as a callable
+        backend_callable_args: Additional arguments for backend if it was passed as a callable
 
     """
     params, backend_params, runtime_options = load_q_env_from_yaml_file(
