@@ -44,7 +44,6 @@ from qiskit.result.models import ExperimentResult, ExperimentResultData
 from qiskit.transpiler import (
     CouplingMap,
     InstructionProperties,
-    Target,
 )
 
 from qiskit.providers import (
@@ -73,14 +72,7 @@ from qiskit_ibm_runtime import (
     QiskitRuntimeService,
 )
 
-from qiskit_dynamics import Solver, RotatingFrame, ArrayLike
-from qiskit_dynamics.backend.backend_string_parser.hamiltonian_string_parser import (
-    parse_backend_hamiltonian_dict,
-)
-from qiskit_dynamics.backend.dynamics_backend import (
-    _get_backend_channel_freqs,
-    DynamicsBackend,
-)
+from qiskit_dynamics import Solver, DynamicsBackend
 
 from qiskit_experiments.calibration_management import Calibrations
 from qiskit_experiments.framework import BatchExperiment, BaseAnalysis

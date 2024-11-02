@@ -725,6 +725,9 @@ class QMBackend(Backend, ABC):
         """
         if qc.parameters:
             if param_table is not None:
+                validate_parameters(
+                    [param.name for param in qc.parameters], param_table
+                )
                 if "parameter_table" not in qc.metadata:
                     qc.metadata["parameter_table"] = param_table
                 else:

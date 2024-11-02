@@ -14,6 +14,7 @@ def fixed_frequency_transmon_backend(
     anharmonicities: List[float],
     rabi_freqs: List[float],
     couplings: Optional[Dict[Tuple[int, int], float]] = None,
+    dt: float = 2.222e-10,
     solver_options: Optional[Dict] = None,
     **backend_options,
 ) -> DynamicsBackend:
@@ -26,6 +27,7 @@ def fixed_frequency_transmon_backend(
         anharmonicities: The anharmonicities of the subsystems.
         rabi_freqs: The Rabi frequencies of the subsystems.
         couplings: The coupling constants between the subsystems.
+        dt: Time step for Backend (also fixes step of Solver simulation by default)
         solver_options: The options for the solver.
 
     """
@@ -65,8 +67,6 @@ def fixed_frequency_transmon_backend(
                 num_controls,
             )
         )
-
-    dt = 2.2222e-10
 
     solver = Solver(
         static_hamiltonian=static_ham,
