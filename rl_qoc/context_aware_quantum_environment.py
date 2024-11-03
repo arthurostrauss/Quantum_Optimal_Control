@@ -24,7 +24,7 @@ from typing import (
 
 import numpy as np
 from gymnasium.spaces import Box
-from qiskit import schedule, pulse, ClassicalRegister
+from qiskit import schedule, ClassicalRegister
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -45,7 +45,7 @@ from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.converters import circuit_to_dag
 from qiskit.providers import BackendV2
-from qiskit.quantum_info import Operator, Statevector
+from qiskit.quantum_info import Operator
 from qiskit.transpiler import (
     Layout,
     InstructionProperties,
@@ -533,10 +533,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         circuits, where each gate instance is replaced by a custom gate defined by the Callable parametrized_circuit_func.
 
         Args:
-            training_config:
-            circuit_context:
-            training_steps_per_gate:
-            intermediate_rewards:
+            training_config: The configuration of the training environment
+            circuit_context: The circuit context containing the target gate to be calibrated
+            training_steps_per_gate: The number of training steps per gate instance
+            intermediate_rewards: Whether to provide intermediate rewards during the training
         """
         self._training_steps_per_gate = training_steps_per_gate
         self._intermediate_rewards = intermediate_rewards

@@ -36,6 +36,7 @@ from qiskit.circuit import (
     CircuitInstruction,
     Parameter,
 )
+from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import (
@@ -65,6 +66,7 @@ from qiskit.transpiler import (
     Layout,
     CouplingMap,
     InstructionDurations,
+    PassManager,
 )
 from qiskit.providers import BackendV2
 
@@ -95,14 +97,16 @@ from .helper_functions import (
     projected_state,
     qubit_projection,
     rotate_frame,
+    density_matrix_to_statevector,
+    causal_cone_circuit,
 )
 from .qconfig import (
-    QiskitConfig,
     QEnvConfig,
     CAFEConfig,
     ChannelConfig,
     ORBITConfig,
     XEBConfig,
+    QiskitRuntimeConfig,
 )
 
 
@@ -224,21 +228,30 @@ class StateTarget(BaseTarget):
         circuit: Optional[QuantumCircuit] = None,
         physical_qubits: Optional[List[int]] = None,
     ):
-        if isinstance(state, DensityMatrix) and state.purity() != 1:
-            raise ValueError("Density matrix should be pure")
+        """
+        Initialize the state target for the quantum environment
+        :param state: State to be calibrated (either DensityMatrix or Statevector)
+        :param circuit: Circuit generating the target state (optional)
+        :param physical_qubits: Physical qubits forming the target state
+        """
+
         if isinstance(state, DensityMatrix):
-            state = Statevector(state)
-        if state is None and circuit is None:
-            raise ValueError("No target provided")
-        if state is not None and circuit is not None:
-            assert (
-                Statevector(circuit) == state
-            ), "Provided circuit does not generate the provided state"
-        self.dm = DensityMatrix(circuit) if state is None else DensityMatrix(state)
-        self.circuit = circuit if isinstance(circuit, QuantumCircuit) else None
+            if state.purity() != 1:
+                raise ValueError("Density matrix should be pure")
+            self.dm = state
+        elif isinstance(state, Statevector):
+            self.dm = DensityMatrix(state)
+
+        elif state is None:
+            if circuit is None:
+                raise ValueError("Either state or circuit should be provided")
+            self.dm = DensityMatrix(circuit)
+            self.circuit = circuit if isinstance(circuit, QuantumCircuit) else None
         if self.circuit is None:
             qc = QuantumCircuit(self.dm.num_qubits)
-            qc.initialize(state)
+            if not isinstance(state, Statevector):
+                state = density_matrix_to_statevector(state)
+            qc.prepare_state(state)
             self.circuit = qc
 
         self.Chi = _calculate_chi_target(self.dm)
@@ -279,7 +292,7 @@ class InputState(StateTarget):
         """
         Initialize the input state for the quantum environment
         :param input_circuit: Quantum circuit representing the input state
-        :param target_op: Gate to be calibrated
+        :param target_op: Gate to be calibrated (or circuit context)
         :param tgt_register: Quantum register for the target gate
         :param n_reps: Number of repetitions of the target gate
         """
@@ -363,10 +376,10 @@ class GateTarget(BaseTarget):
 
     def __init__(
         self,
-        gate: Gate,
+        gate: Gate | str,
         physical_qubits: Optional[List[int]] = None,
         n_reps: int = 1,
-        target_op: Optional[Gate | QuantumCircuit] = None,
+        circuit_context: Optional[QuantumCircuit] = None,
         tgt_register: Optional[QuantumRegister] = None,
         layout: Optional[Layout] = None,
         input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4",
@@ -376,31 +389,50 @@ class GateTarget(BaseTarget):
         :param gate: Gate to be calibrated
         :param physical_qubits: Physical qubits forming the target gate
         :param n_reps: Number of repetitions of the target gate / circuit
-        :param target_op: Element to be repeated in the calibration (default is the gate to be calibrated)
+        :param circuit_context: circuit to be used for context-aware calibration (default is the gate to be calibrated)
         :param tgt_register: Specify target QuantumRegister if already declared
         :param layout: Specify layout if already declared
-        :param input_states_choice: Type of input states to be used for the calibration
+        :param input_states_choice: Type of input states to be used for
+            the calibration (relevant only for state and CAFE rewards)
         """
+        if isinstance(gate, str):
+            try:
+                gate = gate_map()[gate]
+            except KeyError as e:
+                raise ValueError(f"Gate {gate} not recognized") from e
         self.gate = gate
-        if target_op is not None:
-            if not isinstance(target_op, (QuantumCircuit, Gate)):
-                raise ValueError("target_op should be either Gate or QuantumCircuit")
-            if isinstance(target_op, Gate):
-                target_circuit = QuantumCircuit(target_op.num_qubits)
-                target_circuit.append(target_op, range(target_op.num_qubits))
-                target_op = target_circuit
-        else:
-            target_op = QuantumCircuit(gate.num_qubits)
-            target_op.append(gate, list(range(gate.num_qubits)))
-        self._target_op: QuantumCircuit = target_op
         self._n_reps = n_reps
-        n_qubits = self._target_op.num_qubits
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits,
             "gate",
             tgt_register,
             layout,
         )
+
+        if circuit_context is not None:
+            if not isinstance(circuit_context, (QuantumCircuit, Gate)):
+                raise ValueError("target_op should be either Gate or QuantumCircuit")
+            if isinstance(circuit_context, Gate):  # Convert gate to circuit
+                target_circuit = QuantumCircuit(circuit_context.num_qubits)
+                target_circuit.append(
+                    circuit_context, range(circuit_context.num_qubits)
+                )
+                circuit_context = target_circuit
+        else:  # If no context is provided, use the gate itself
+            circuit_context = QuantumCircuit(gate.num_qubits)
+            circuit_context.append(gate, list(range(gate.num_qubits)))
+        self._circuit_context: QuantumCircuit = circuit_context
+
+        # Filter the context to get the causal cone of the target gate
+        filtered_context, filtered_qubits = causal_cone_circuit(
+            self._circuit_context, self.physical_qubits
+        )
+        filtered_qubits_indices = [
+            filtered_context.find_bit(q) for q in filtered_qubits
+        ]
+        n_qubits = self._circuit_context.num_qubits
+        n_qubits_context = filtered_context.num_qubits
+
         if input_states_choice == "pauli4":
             input_circuits = [
                 PauliPreparationBasis().circuit(s)
@@ -412,7 +444,7 @@ class GateTarget(BaseTarget):
                 for s in product(range(6), repeat=n_qubits)
             ]
         elif input_states_choice == "2-design":  # 2-design
-
+            # TODO: Update this part with Lukas latest code
             d = 2**n_qubits
             unitaries = [random_unitary(d) for _ in range(4**n_qubits)]
             circuits = [QuantumCircuit(n_qubits) for _ in range(4**n_qubits)]
@@ -427,14 +459,14 @@ class GateTarget(BaseTarget):
         self.input_states = [
             InputState(
                 input_circuit=circ,
-                target_op=self._target_op,
+                target_op=self._circuit_context,
                 tgt_register=self.tgt_register,
                 n_reps=n_reps,
             )
             for circ in input_circuits
         ]
         if n_qubits <= 3:
-            self.Chi = _calculate_chi_target(Operator(self._target_op).power(n_reps))
+            self.Chi = _calculate_chi_target(self.target_operator.power(n_reps))
         else:
             self.Chi = None
 
@@ -457,7 +489,9 @@ class GateTarget(BaseTarget):
                 raise ValueError("Input could not be converted to channel") from e
         if not isinstance(channel, (Operator, QuantumChannel)):
             raise ValueError("Input should be an Operator object")
-        return average_gate_fidelity(channel, Operator(self._target_op).power(n_reps))
+        return average_gate_fidelity(
+            channel, Operator(self._circuit_context).power(n_reps)
+        )
 
     def state_fidelity(
         self, state: QuantumState, n_reps: int = 1, validate: bool = True
@@ -476,7 +510,7 @@ class GateTarget(BaseTarget):
             )
         return state_fidelity(
             state,
-            Statevector(self._target_op.power(n_reps, True, True)),
+            Statevector(self._circuit_context.power(n_reps, True, True)),
             validate=validate,
         )
 
@@ -520,28 +554,31 @@ class GateTarget(BaseTarget):
         """
         Get the target unitary operator
         """
-        return Operator(self._target_op)
+        return Operator(self._circuit_context)
 
     @property
     def target_circuit(self):
         """
-        Get the target circuit
+        Get the target circuit (with context)
         """
-        return self._target_op
+        return self._circuit_context
 
     @target_circuit.setter
     def target_circuit(self, target_op: QuantumCircuit):
         """
         Set the target circuit
         """
-        self._target_op = target_op
+        self._circuit_context = target_op
         self.input_states = [
             InputState(input_state.circuit, target_op, self.tgt_register, self.n_reps)
             for input_state in self.input_states
         ]
         if target_op.num_qubits <= 3:
             self.Chi = np.round(
-                _calculate_chi_target(Operator(self._target_op).power(self.n_reps)), 5
+                _calculate_chi_target(
+                    Operator(self._circuit_context).power(self.n_reps)
+                ),
+                5,
             )
         else:
             self.Chi = None
@@ -554,7 +591,7 @@ class GateTarget(BaseTarget):
         gate_qc = QuantumCircuit(self.gate.num_qubits)
         gate_qc.append(self.gate, list(range(self.gate.num_qubits)))
 
-        return Operator(self._target_op) != Operator(gate_qc)
+        return Operator(self._circuit_context) != Operator(gate_qc)
 
     @property
     def n_reps(self) -> int:
@@ -564,7 +601,7 @@ class GateTarget(BaseTarget):
     def n_reps(self, n_reps: int):
         assert n_reps > 0, "Number of repetitions should be positive"
         self._n_reps = n_reps
-        self.Chi = _calculate_chi_target(Operator(self._target_op).power(n_reps))
+        self.Chi = _calculate_chi_target(Operator(self._circuit_context).power(n_reps))
         for input_state in self.input_states:
             input_state.n_reps = n_reps
 
@@ -584,11 +621,20 @@ class QiskitBackendInfo:
         self,
         backend: Optional[BackendV2] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
+        custom_pass_manager: Optional[PassManager] = None,
         n_qubits: int = 0,
     ):
+        """
+        Initialize the backend information
+        :param backend: Backend object for the quantum environment
+        :param custom_instruction_durations: Custom instruction durations for the backend
+        :param custom_pass_manager: Custom pass manager for the backend
+        :param n_qubits: Number of qubits for the quantum environment
+        """
         if backend is not None and backend.coupling_map is None:
             raise QiskitError("Backend does not have a coupling map")
         self.backend = backend
+        self.pass_manager = custom_pass_manager
         self._instruction_durations = custom_instruction_durations
         self._n_qubits = backend.num_qubits if backend is not None else n_qubits
 
@@ -614,6 +660,9 @@ class QiskitBackendInfo:
                 circuit = [circ.remove_final_measurements(inplace=False) for circ in qc]
         else:
             circuit = qc
+
+        if self.pass_manager is not None:
+            circuit = self.pass_manager.run(circuit)
         return transpile(
             circuit,
             backend=self.backend,
@@ -723,43 +772,13 @@ class BaseQuantumEnvironment(ABC, Env):
         self._func_args = training_config.parametrized_circuit_kwargs
         self.backend = training_config.backend
         self.backend_info = QiskitBackendInfo(
-            self.backend, training_config.backend_config.instruction_durations_dict
+            self.backend,
+            training_config.backend_config.instruction_durations_dict,
+            custom_pass_manager=training_config.backend_config.pass_manager,
         )
         self._physical_target_qubits = training_config.target.get(
             "physical_qubits", None
         )
-
-        # gate = training_config.target.get("gate", None)
-        # gate_name_base = gate.name if gate is not None else "G"
-        # gate_name_base += "_cal"
-        # self.custom_gates = []
-        # for param_vec in self.parameters:
-        #     if not isinstance(param_vec, ParameterVector):
-        #         self.custom_gates.append(
-        #             Gate(
-        #                 gate_name_base + str(0),
-        #                 len(self.physical_target_qubits),
-        #                 params=self.parameters.params,
-        #             )
-        #         )
-        #         break
-        #     else:
-        #         self.custom_gates.append(
-        #             Gate(
-        #                 gate_name_base + param_vec.name[-1],
-        #                 len(self.physical_target_qubits),
-        #                 params=param_vec.params,
-        #             )
-        #         )
-        # if self.backend is not None:
-        #     for custom_gate in self.custom_gates:
-        #         if custom_gate.name not in self.backend.operation_names:
-        #             self.backend.target.add_instruction(
-        #                 custom_gate,
-        #                 properties={
-        #                     tuple(self.physical_target_qubits): InstructionProperties()
-        #                 },
-        #             )
 
         self._physical_neighbor_qubits = retrieve_neighbor_qubits(
             self.backend_info.coupling_map, self.physical_target_qubits
@@ -768,7 +787,7 @@ class BaseQuantumEnvironment(ABC, Env):
             self.backend_info.coupling_map,
             self.physical_target_qubits + self.physical_neighbor_qubits,
         )
-        if isinstance(training_config.backend_config, QiskitConfig):
+        if isinstance(training_config.backend_config, QiskitRuntimeConfig):
             estimator_options = training_config.backend_config.estimator_options
         else:
             estimator_options = None
@@ -907,40 +926,35 @@ class BaseQuantumEnvironment(ABC, Env):
             f"Sending {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job..."
         )
         start = time.time()
-        if isinstance(self.estimator, BaseEstimatorV1):
-            # TODO: Remove V1 support (once pulse support for V2 is added)
-            reward_table = self.run_v1_primitive(qc, params)
-        else:  # EstimatorV2
-            job = self.primitive.run(pubs=self._pubs)
-            pub_results = job.result()
-            print("Time for running", time.time() - start)
 
-            if self.config.dfe:
-                reward_table = np.sum(
-                    [pub_result.data.evs for pub_result in pub_results], axis=0
-                ) / len(self._observables)
+        job = self.primitive.run(pubs=self._pubs)
+        pub_results = job.result()
+        print("Time for running", time.time() - start)
+
+        if self.config.dfe:
+            reward_table = np.sum(
+                [pub_result.data.evs for pub_result in pub_results], axis=0
+            ) / len(self._observables)
+        else:
+            pub_counts = [
+                [pub_result.data.meas.get_counts(i) for i in range(self.batch_size)]
+                for pub_result in pub_results
+            ]
+            if self.config.reward_method == "xeb":
+                # TODO: Implement XEB reward computation using Sampler
+                reward_table = np.zeros(self.batch_size)
+                raise NotImplementedError("XEB reward computation not implemented yet")
             else:
-                pub_counts = [
-                    [pub_result.data.meas.get_counts(i) for i in range(self.batch_size)]
-                    for pub_result in pub_results
-                ]
-                if self.config.reward_method == "xeb":
-                    # TODO: Implement XEB reward computation using Sampler
-                    reward_table = np.zeros(self.batch_size)
-                    raise NotImplementedError(
-                        "XEB reward computation not implemented yet"
+                survival_probability = [
+                    np.array(
+                        [
+                            count.get("0" * qc.num_qubits, 0) / self.n_shots
+                            for count in counts
+                        ]
                     )
-                else:
-                    survival_probability = [
-                        np.array(
-                            [
-                                count.get("0" * qc.num_qubits, 0) / self.n_shots
-                                for count in counts
-                            ]
-                        )
-                        for counts in pub_counts
-                    ]
-                    reward_table = np.mean(survival_probability, axis=0)
+                    for counts in pub_counts
+                ]
+                reward_table = np.mean(survival_probability, axis=0)
 
         print(
             f"Finished {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job"
@@ -968,12 +982,11 @@ class BaseQuantumEnvironment(ABC, Env):
             self.estimator.options.update(job_tags=[f"rl_qoc_step{self._step_tracker}"])
 
         target_state = None
-        if isinstance(self.target, GateTarget):
-            if self.config.reward_method == "state":
-                input_states = self.target.input_states
-                self._index_input_state = np.random.randint(len(input_states))
-                self._input_state = input_states[self._index_input_state]
-                target_state = self._input_state.target_state  # (Gate |input>=|target>)
+        if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
+            input_states = self.target.input_states
+            self._index_input_state = np.random.randint(len(input_states))
+            self._input_state = input_states[self._index_input_state]
+            target_state = self._input_state.target_state  # (Gate |input>=|target>)
 
         else:  # State preparation task
             target_state = self.target
@@ -2075,6 +2088,13 @@ class BaseQuantumEnvironment(ABC, Env):
         Return the qubits involved in the calibration task
         """
         return list(self.layout.get_physical_bits().keys())
+
+    @property
+    def pass_manager(self) -> Optional[PassManager]:
+        """
+        Return the custom pass manager for transpilation (if specified)
+        """
+        return self.backend_info.pass_manager
 
     @property
     def observables(self) -> SparsePauliOp:

@@ -49,7 +49,7 @@ def apply_parametrized_circuit(
 
 
 def get_circuit_context(
-    backend: Optional[BackendV2], initial_layout: Optional[List[int]] = None
+    backend: Optional[BackendV2] = None, initial_layout: Optional[List[int]] = None
 ):
     """
     Define the context of the circuit to be used in the training
@@ -59,7 +59,7 @@ def get_circuit_context(
     """
     from qiskit.transpiler import CouplingMap, Layout
 
-    coupling_map = CouplingMap.from_full(default_num_qubits)
+    coupling_map = CouplingMap.from_full(2)
     tgt_reg = QuantumRegister(2, name="tgt")
     # nn_reg = QuantumRegister(3, name="nn")
     layout = Layout(

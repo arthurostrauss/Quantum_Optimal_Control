@@ -17,7 +17,7 @@ from qiskit.circuit import (
     QuantumRegister,
     Gate,
 )
-from qiskit.transpiler import InstructionDurations
+from qiskit.transpiler import InstructionDurations, PassManager
 from qiskit_dynamics import Solver
 
 
@@ -30,29 +30,8 @@ class BackendConfig(ABC):
         parametrized_circuit: Function applying parametrized transformation to a quantum circuit (Qiskit or QUA)
         backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
         parametrized_circuit_kwargs: Additional arguments to feed the parametrized_circuit function
-
-    """
-
-    parametrized_circuit: Callable
-    backend: Optional[BackendV2]
-    parametrized_circuit_kwargs: Dict = field(default_factory=dict)
-    instruction_durations_dict: Optional[InstructionDurations] = None
-
-
-@dataclass
-class QiskitConfig(BackendConfig):
-    """
-    Qiskit configuration elements.
-
-    Args:
-        parametrized_circuit: Function applying parametrized transformation to a QuantumCircuit instance
-        estimator_options: Options to feed the Estimator primitive
-        solver: Relevant only if dealing with pulse simulation (typically with DynamicsBackend), gives away solver used
-        to run simulations for computing exact fidelity benchmark
-        channel_freq: Relevant only if dealing with pulse simulation, Dictionary containing information mapping
-        the channels and the qubit frequencies
-        calibration_files: load existing gate calibrations from json file for DynamicsBackend
-        baseline gate calibrations for running algorithm
+        pass_manager: Pass manager to transpile the circuit
+        instruction_durations_dict: Dictionary containing the durations of the instructions in the circuit
 
     """
 
@@ -65,11 +44,42 @@ class QiskitConfig(BackendConfig):
         ],
         None,
     ]
-    estimator_options: Optional[Options] = None
-    solver: Optional[Solver] = None
-    channel_freq: Optional[Dict] = field(default_factory=dict)
+    backend: Optional[BackendV2] = None
+    parametrized_circuit_kwargs: Dict = field(default_factory=dict)
+    pass_manager: Optional[PassManager] = None
+    instruction_durations_dict: Optional[InstructionDurations] = None
+
+
+@dataclass
+class DynamicsConfig(BackendConfig):
+    """
+    Qiskit Dynamics configuration elements.
+
+    Args:
+        estimator_options: Options to feed the Estimator primitive
+        solver: Relevant only if dealing with pulse simulation (typically with DynamicsBackend), gives away solver used
+        to run simulations for computing exact fidelity benchmark
+        channel_freq: Relevant only if dealing with pulse simulation, Dictionary containing information mapping
+        the channels and the qubit frequencies
+        calibration_files: load existing gate calibrations from json file for DynamicsBackend
+        baseline gate calibrations for running algorithm
+
+    """
+
     calibration_files: Optional[str] = None
     do_calibrations: bool = True
+
+
+@dataclass
+class QiskitRuntimeConfig(BackendConfig):
+    """
+    Qiskit Runtime configuration elements.
+
+    Args:
+        options: Options to feed the Qiskit Runtime job
+    """
+
+    estimator_options: Optional[Options] = None
 
 
 # @dataclass

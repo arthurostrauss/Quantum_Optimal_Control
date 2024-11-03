@@ -1,11 +1,13 @@
 from .agent import Agent, ActorNetwork, CriticNetwork
 from .base_q_env import BaseQuantumEnvironment, GateTarget, StateTarget
 from .qconfig import (
-    QiskitConfig,
+    BackendConfig,
     QEnvConfig,
     ExecutionConfig,
     RewardConfig,
     BenchmarkConfig,
+    QiskitRuntimeConfig,
+    DynamicsConfig,
 )
 from .quantumenvironment import QuantumEnvironment
 from .context_aware_quantum_environment import (

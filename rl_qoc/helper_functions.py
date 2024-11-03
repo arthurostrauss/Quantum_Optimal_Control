@@ -14,8 +14,11 @@ from qiskit.circuit import (
     CircuitInstruction,
     ParameterVector,
     Delay,
+    Qubit,
 )
 from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map, RZGate
+from qiskit.converters import circuit_to_dag, dag_to_circuit
+from qiskit.dagcircuit import DAGCircuit
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import (
     BackendEstimator,
@@ -88,7 +91,7 @@ from qiskit_experiments.calibration_management.basis_gate_library import (
 )
 
 from itertools import chain
-from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any
+from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any, Set
 import yaml
 
 import numpy as np
@@ -108,7 +111,8 @@ from .qconfig import (
     ExecutionConfig,
     BenchmarkConfig,
     StateConfig,
-    QiskitConfig,
+    QiskitRuntimeConfig,
+    DynamicsConfig,
     QEnvConfig,
     CAFEConfig,
     ChannelConfig,
@@ -1133,6 +1137,25 @@ def density_matrix_to_statevector(density_matrix: DensityMatrix):
         raise ValueError("The density matrix does not represent a pure state.")
 
 
+def causal_cone_circuit(
+    circuit: QuantumCircuit, qubits: Sequence[int | Qubit] | QuantumRegister
+) -> Tuple[QuantumCircuit, List[Qubit]]:
+    """
+    Get the causal cone circuit of the specified qubits as well as the qubits involved in the causal cone
+    """
+    dag = circuit_to_dag(circuit)
+    if isinstance(qubits, List) and all(isinstance(q, int) for q in qubits):
+        qubits = [dag.qubits[q] for q in qubits]
+    involved_qubits = [dag.quantum_causal_cone(q) for q in qubits]
+    involved_qubits = list(set([q for sublist in involved_qubits for q in sublist]))
+    filtered_dag = DAGCircuit()
+    filtered_dag.add_qubits(involved_qubits)
+    for node in dag.topological_op_nodes():
+        if any(q in involved_qubits for q in node.qargs):
+            filtered_dag.apply_operation_back(node.op, node.qargs)
+    return dag_to_circuit(filtered_dag, False), involved_qubits
+
+
 def fidelity_from_tomography(
     qc_input: List[QuantumCircuit] | QuantumCircuit,
     backend: Optional[Backend],
@@ -1240,7 +1263,9 @@ def retrieve_primitives(
         circuit: QuantumCircuit instance implementing the custom gate (for DynamicsBackend)
     """
     if isinstance(backend, DynamicsBackend):
-        assert isinstance(config, QiskitConfig), "Configuration must be a QiskitConfig"
+        assert isinstance(
+            config, DynamicsConfig
+        ), "Configuration must be a DynamicsConfig"
         dummy_param = Parameter("dummy")
         if hasattr(dummy_param, "jax_compat"):
             estimator = PulseEstimatorV2(backend=backend, options=estimator_options)
@@ -1268,7 +1293,7 @@ def retrieve_primitives(
             mode=Session(backend=backend),
             options=estimator_options,
         )
-        sampler = RuntimeSamplerV2(mode=estimator.session)
+        sampler = RuntimeSamplerV2(mode=estimator.mode)
 
     # elif isinstance(backend, QMBackend):
     #     estimator = QMEstimator(backend=backend, options=estimator_options)
@@ -1814,7 +1839,7 @@ def get_q_env_config(
     elif backend is None:
         backend = select_backend(**backend_params)
 
-    backend_config = QiskitConfig(
+    backend_config = QiskitRuntimeConfig(
         parametrized_circ_func,
         backend,
         estimator_options=(
