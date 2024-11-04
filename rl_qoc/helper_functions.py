@@ -47,6 +47,8 @@ from qiskit.result.models import ExperimentResult, ExperimentResultData
 from qiskit.transpiler import (
     CouplingMap,
     InstructionProperties,
+    PassManager,
+    InstructionDurations,
 )
 
 from qiskit.providers import (
@@ -1762,7 +1764,7 @@ def load_q_env_from_yaml_file(file_path: str):
                 "Target gate or state must be specified in the configuration"
             )
 
-    backend_config = config["BACKEND"]
+    backend_config = config.get("BACKEND", {})
     dynamics_config = backend_config.get(
         "DYNAMICS",
         {
@@ -1817,13 +1819,15 @@ def get_q_env_config(
         [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
     ],
     backend: Optional[Backend_type | Callable[[Any], Backend_type]] = None,
+    pass_manager: Optional[PassManager] = None,
+    instruction_durations: Optional[InstructionDurations] = None,
     **backend_callable_args,
 ):
     """
     Get Qiskit Quantum Environment configuration from yaml file
 
     Args:
-        config_file_path: Configuration file path
+        config_file_path: Configuration file path (yaml, should contain at least ENV and TARGET section)
         parametrized_circ_func: Function to applying parametrized gate (should be defined in your Python config)
         backend: Optional custom backend instance
             (if None, backend will be selected based on configuration set in yaml file)
@@ -1842,6 +1846,8 @@ def get_q_env_config(
     backend_config = QiskitRuntimeConfig(
         parametrized_circ_func,
         backend,
+        pass_manager=pass_manager,
+        instruction_durations=instruction_durations,
         estimator_options=(
             runtime_options if isinstance(backend, RuntimeBackend) else None
         ),

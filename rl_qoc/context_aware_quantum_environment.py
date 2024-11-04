@@ -1095,7 +1095,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if backend is not None:
             self.backend = backend
             self.backend_info = QiskitBackendInfo(
-                backend, self.config.backend_config.instruction_durations_dict
+                backend, self.config.backend_config.instruction_durations
             )
             self._physical_neighbor_qubits = retrieve_neighbor_qubits(
                 self.backend_info.coupling_map, self.physical_target_qubits

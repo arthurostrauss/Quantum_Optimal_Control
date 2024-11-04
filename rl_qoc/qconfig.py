@@ -31,7 +31,7 @@ class BackendConfig(ABC):
         backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
         parametrized_circuit_kwargs: Additional arguments to feed the parametrized_circuit function
         pass_manager: Pass manager to transpile the circuit
-        instruction_durations_dict: Dictionary containing the durations of the instructions in the circuit
+        instruction_durations: Dictionary containing the durations of the instructions in the circuit
 
     """
 
@@ -47,7 +47,7 @@ class BackendConfig(ABC):
     backend: Optional[BackendV2] = None
     parametrized_circuit_kwargs: Dict = field(default_factory=dict)
     pass_manager: Optional[PassManager] = None
-    instruction_durations_dict: Optional[InstructionDurations] = None
+    instruction_durations: Optional[InstructionDurations] = None
 
 
 @dataclass
@@ -383,8 +383,8 @@ class QEnvConfig:
 
     @property
     def instruction_durations_dict(self):
-        return self.backend_config.instruction_durations_dict
+        return self.backend_config.instruction_durations
 
     @instruction_durations_dict.setter
     def instruction_durations_dict(self, value: InstructionDurations):
-        self.backend_config.instruction_durations_dict = value
+        self.backend_config.instruction_durations = value

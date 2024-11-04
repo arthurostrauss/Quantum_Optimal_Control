@@ -4,7 +4,7 @@ quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
-Last updated: 19/09/2024
+Last updated: 03/11/2024
 """
 
 from __future__ import annotations
@@ -40,10 +40,8 @@ from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import (
-    BaseEstimatorV1,
     BaseEstimatorV2,
     BaseSamplerV2,
-    BaseSamplerV1,
 )
 
 from qiskit.quantum_info import random_unitary, partial_trace
@@ -428,8 +426,9 @@ class GateTarget(BaseTarget):
             self._circuit_context, self.physical_qubits
         )
         filtered_qubits_indices = [
-            filtered_context.find_bit(q) for q in filtered_qubits
+            filtered_context.find_bit(q).index for q in filtered_qubits
         ]
+        self.quantum_causal_cone = filtered_qubits_indices
         n_qubits = self._circuit_context.num_qubits
         n_qubits_context = filtered_context.num_qubits
 
@@ -773,7 +772,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.backend = training_config.backend
         self.backend_info = QiskitBackendInfo(
             self.backend,
-            training_config.backend_config.instruction_durations_dict,
+            training_config.backend_config.instruction_durations,
             custom_pass_manager=training_config.backend_config.pass_manager,
         )
         self._physical_target_qubits = training_config.target.get(
@@ -988,7 +987,7 @@ class BaseQuantumEnvironment(ABC, Env):
             self._input_state = input_states[self._index_input_state]
             target_state = self._input_state.target_state  # (Gate |input>=|target>)
 
-        else:  # State preparation task
+        elif isinstance(self.target, StateTarget):  # State preparation task
             target_state = self.target
 
         if target_state is not None:
@@ -1836,19 +1835,19 @@ class BaseQuantumEnvironment(ABC, Env):
         return self._training_config
 
     @property
-    def estimator(self) -> BaseEstimatorV1 | BaseEstimatorV2:
+    def estimator(self) -> BaseEstimatorV2:
         return self._estimator
 
     @estimator.setter
-    def estimator(self, estimator: BaseEstimatorV1 | BaseEstimatorV2):
+    def estimator(self, estimator: BaseEstimatorV2):
         self._estimator = estimator
 
     @property
-    def sampler(self) -> BaseSamplerV1 | BaseSamplerV2:
+    def sampler(self) -> BaseSamplerV2:
         return self._sampler
 
     @sampler.setter
-    def sampler(self, sampler: BaseSamplerV1 | BaseSamplerV2):
+    def sampler(self, sampler: BaseSamplerV2):
         self._sampler = sampler
 
     @property
