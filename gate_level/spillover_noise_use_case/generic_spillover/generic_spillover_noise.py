@@ -311,28 +311,36 @@ def create_spillover_noise_model_from_circuit(
             phi = rotation_angles[main_qubit_index]  # Rotation angle of original gate
 
             # Construct the noise operator based  on the gate type
-            noise_ops = [None] * num_qubits
+            noise_ops = []
+            noise_qubits = [main_qubit_index]
             for j in range(num_qubits):
                 if spillover_rate_matrix[main_qubit_index, j] != 0.0:
                     noise_rotation_op = Operator(
                         gate_type(spillover_rate_matrix[main_qubit_index, j] * phi)
                     )
-                    noise_ops[j] = noise_rotation_op
+                    noise_ops.append(noise_rotation_op)
+                    if j != main_qubit_index:
+                        noise_qubits.append(j)
+                elif (
+                    j == main_qubit_index
+                ):  # No noise for the main qubit but has to be included in the noise operator
+                    # This is because the noise operator has to be binded to the instruction containing the main qubit and
+                    # noisy qubits
+                    noise_ops.append(Operator.from_label("I"))
+                else:
+                    noise_ops.append(None)
 
-            filtered_noise_qubits = [
-                q for q in range(num_qubits) if noise_ops[q] is not None
-            ]
-            filtered_noise_ops = [op for op in noise_ops if op is not None]
-            if filtered_noise_ops:
-                noise_op = Operator.from_label("I" * len(filtered_noise_ops))
-                for j, op in enumerate(filtered_noise_ops):
-                    noise_op = noise_op.compose(op, qargs=[j])
+            # Construct the noise operator associated to main qubit (which spillovers the rest)
+            noise_op = noise_ops[main_qubit_index]
+            for j, op in enumerate(noise_ops):
+                if op is not None and j != main_qubit_index:
+                    noise_op = noise_op.expand(op)
 
-                noise_model.add_quantum_error(
-                    noise.coherent_unitary_error(noise_op),
-                    [gate.label],
-                    filtered_noise_qubits,
-                )
+            noise_model.add_quantum_error(
+                noise.coherent_unitary_error(noise_op),
+                [gate],
+                noise_qubits,
+            )
 
     return noise_model
 
