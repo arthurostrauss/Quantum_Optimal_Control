@@ -548,8 +548,15 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             ],
             name="tgt",
         )
+        target_gate = training_config.target["gate"]
+        if isinstance(target_gate, str):
+            try:
+                target_gate = gate_map()[target_gate.lower()]
+            except KeyError:
+                raise ValueError("Invalid target gate name")
+
         self.target_instruction = CircuitInstruction(
-            training_config.target["gate"], (qubit for qubit in self.circ_tgt_register)
+            target_gate, (qubit for qubit in self.circ_tgt_register)
         )
         if self.tgt_instruction_counts == 0:
             raise ValueError("Target gate not found in circuit context")
@@ -650,7 +657,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             for i in range(self.tgt_instruction_counts)
         ]
         # Build sub-circuit contexts: each circuit goes until target gate and preserves nearest neighbor operations
-        operations_mapping = {op.name: op for op in self.backend.operations}
+        operations_mapping = {
+            op.name: op for op in self.backend.operations if hasattr(op, "name")
+        }
         for i in range(self.tgt_instruction_counts):  # Loop over target gates
             counts = 0
             for start_time, instruction in zip(
@@ -721,7 +730,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                                 **self._func_args,
                             )
                             for op in self.backend.operations:
-                                if op.name not in operations_mapping:
+                                if (
+                                    hasattr(op, "name")
+                                    and op.name not in operations_mapping
+                                ):
                                     # If new custom instruction was added, store it and update operations mapping
                                     self.custom_instructions.append(op)
                                     operations_mapping[op.name] = op

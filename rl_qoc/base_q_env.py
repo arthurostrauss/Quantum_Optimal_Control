@@ -421,17 +421,21 @@ class GateTarget(BaseTarget):
             circuit_context.append(gate, list(range(gate.num_qubits)))
         self._circuit_context: QuantumCircuit = circuit_context
 
-        # Filter the context to get the causal cone of the target gate
-        filtered_context, filtered_qubits = causal_cone_circuit(
-            self._circuit_context, self.physical_qubits
-        )
-        filtered_qubits_indices = [
-            filtered_context.find_bit(q).index for q in filtered_qubits
-        ]
-        self.quantum_causal_cone = filtered_qubits_indices
-        n_qubits = self._circuit_context.num_qubits
-        n_qubits_context = filtered_context.num_qubits
+        if self.has_context:
+            # Filter the context to get the causal cone of the target gate
+            # TODO: Handle this
+            filtered_context, filtered_qubits = causal_cone_circuit(
+                self._circuit_context,
+                [self._circuit_context.qubits[i] for i in self.physical_qubits],
+            )
+            filtered_qubits_indices = [
+                filtered_context.find_bit(q).index for q in filtered_qubits
+            ]
+            self.quantum_causal_cone = filtered_qubits_indices
 
+            n_qubits_context = filtered_context.num_qubits
+
+        n_qubits = self._circuit_context.num_qubits
         if input_states_choice == "pauli4":
             input_circuits = [
                 PauliPreparationBasis().circuit(s)

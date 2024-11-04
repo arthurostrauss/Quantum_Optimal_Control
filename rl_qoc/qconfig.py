@@ -248,7 +248,7 @@ class QEnvConfig:
         device (torch.device): Device on which the simulation is run
     """
 
-    target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit]
+    target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit | str]
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig

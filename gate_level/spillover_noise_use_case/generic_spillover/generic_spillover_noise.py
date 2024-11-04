@@ -18,7 +18,7 @@ from qiskit.circuit.library import (
     UnitaryGate,
 )
 from qiskit_aer import AerSimulator
-from functools import wraps
+from qiskit_aer.backends.backendconfiguration import AerBackendConfiguration
 
 
 def numpy_to_hashable(matrix):
@@ -288,7 +288,7 @@ def create_spillover_noise_model_from_circuit(
     Returns:
     - NoiseModel object containing the spillover noise model for the given circuit
     """
-    noise_model = noise.NoiseModel()
+    noise_model = noise.NoiseModel(["unitary", "rzx", "cx", "u", "h", "x", "s", "z"])
     num_qubits = qc.num_qubits
     assert (
         num_qubits == spillover_rate_matrix.shape[0] == spillover_rate_matrix.shape[1]
@@ -374,7 +374,9 @@ def noisy_backend(
     noise_model = create_spillover_noise_model_from_circuit(
         qc, rotation_angles, spillover_rate_matrix
     )
-
-    backend = AerSimulator(noise_model=noise_model, coupling_map=coupling_map)
+    backend_configuration = AerSimulator._DEFAULT_CONFIGURATION
+    backend_configuration["coupling_map"] = list(coupling_map.get_edges())
+    backend_configuration = AerBackendConfiguration(**backend_configuration)
+    backend = AerSimulator(noise_model=noise_model, configuration=backend_configuration)
 
     return backend
