@@ -107,6 +107,8 @@ from scipy.optimize import minimize, OptimizeResult
 import keyword
 import re
 
+from pulse_level.qibo.qibo_env import QiboEstimatorV2
+from .transpiler_passes import CustomGateReplacementPass
 from .custom_jax_sim.pulse_estimator_v2 import PulseEstimatorV2
 from .qconfig import (
     BackendConfig,
@@ -1309,8 +1311,10 @@ def retrieve_primitives(
 
 def substitute_target_gate(
     circuit: QuantumCircuit,
-    target_gate: Gate,
-    custom_gate: Gate,
+    target_gate: Gate | str,
+    custom_gate: Gate | str,
+    qubits: Optional[Sequence[int]] = None,
+    parameters: ParameterVector | List[Parameter] | List[float] = None,
 ):
     """
     Substitute target gate in Quantum Circuit with a parametrized version of the gate.
@@ -1320,15 +1324,29 @@ def substitute_target_gate(
         circuit: Quantum Circuit instance
         target_gate: Target gate to be substituted
         custom_gate: Custom gate to be substituted with
+        qubits: Physical qubits on which the gate is to be applied (if None, all qubits of input circuit are considered)
     """
-    ref_label = target_gate.label
-    qc = circuit.copy_empty_like()
-    for instruction in circuit.data:
-        if instruction.operation.label != ref_label:
-            qc.append(instruction)
-        else:
-            qc.append(custom_gate, instruction.qubits)
-    return qc
+
+    if isinstance(custom_gate, str):
+        try:
+            custom_gate2 = gate_map()[custom_gate]
+        except KeyError:
+            raise ValueError(f"Custom gate {custom_gate} not found in gate map")
+        if custom_gate2.params and parameters is not None:
+            assert len(custom_gate2.params) == len(parameters), (
+                f"Number of parameters ({len(parameters)}) does not match number of parameters "
+                f"required by the custom gate ({len(custom_gate2.params)})"
+            )
+
+    pass_manager = PassManager(
+        [
+            CustomGateReplacementPass(
+                (target_gate, qubits), custom_gate, parameters=parameters
+            )
+        ]
+    )
+
+    return pass_manager.run(circuit)
 
 
 def handle_session(

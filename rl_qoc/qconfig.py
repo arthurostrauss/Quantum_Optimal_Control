@@ -100,6 +100,22 @@ class QiskitRuntimeConfig(BackendConfig):
 
 
 @dataclass
+class QiboConfig(BackendConfig):
+    """
+    Qibo configuration elements.
+
+    Args:
+        backend: Qibo backend
+        options: Options to feed the Qibo platform
+    """
+
+    backend: Any
+    qubit_pair: Tuple[int, int] = (0, 1)
+    platform: str = "qibolab"
+    options: Optional[Dict] = None
+
+
+@dataclass
 class BenchmarkConfig:
     """
     Configuration for benchmarking the policy through fidelity estimation
