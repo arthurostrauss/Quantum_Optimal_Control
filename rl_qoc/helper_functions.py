@@ -107,9 +107,9 @@ from scipy.optimize import minimize, OptimizeResult
 import keyword
 import re
 
-from pulse_level.qibo.qibo_env import QiboEstimatorV2
+from .qibo import QiboEstimatorV2
 from .transpiler_passes import CustomGateReplacementPass
-from .custom_jax_sim.pulse_estimator_v2 import PulseEstimatorV2
+from .custom_jax_sim import PulseEstimatorV2
 from .qconfig import (
     BackendConfig,
     ExecutionConfig,
@@ -123,6 +123,7 @@ from .qconfig import (
     XEBConfig,
     ORBITConfig,
     FidelityConfig,
+    QiboConfig,
 )
 
 import logging
@@ -140,6 +141,7 @@ Estimator_type = Union[
     BackendEstimator,
     BackendEstimatorV2,
     StatevectorEstimator,
+    QiboEstimatorV2,
 ]
 Sampler_type = Union[
     RuntimeSamplerV2,
@@ -1280,6 +1282,11 @@ def retrieve_primitives(
         if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
             calibration_files = config.calibration_files
             _, _ = perform_standard_calibrations(backend, calibration_files)
+    elif isinstance(backend, str) and isinstance(config, QiboConfig):
+        estimator = QiboEstimatorV2(
+            platform=config.platform, options={"qubit_pair": config.qubit_pair}
+        )
+        sampler = StatevectorSampler()  # Dummy sampler
     elif isinstance(backend, (FakeBackend, FakeBackendV2, AerBackend)):
         from qiskit_aer.primitives import (
             EstimatorV2 as AerEstimatorV2,
