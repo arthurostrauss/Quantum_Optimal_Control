@@ -6,8 +6,8 @@ from typing import Callable, Union, Optional
 import time
 from datetime import datetime
 import optuna
-from ..env.base_q_env import BaseQuantumEnvironment, GateTarget, StateTarget
-from ..env import QuantumEnvironment, ContextAwareQuantumEnvironment
+from ..environment.base_q_env import BaseQuantumEnvironment, GateTarget, StateTarget
+from ..environment import QuantumEnvironment, ContextAwareQuantumEnvironment
 from rl_qoc.helpers.helper_functions import (
     load_from_yaml_file,
     create_hpo_agent_config,

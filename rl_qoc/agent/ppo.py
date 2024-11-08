@@ -14,8 +14,8 @@ from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 from torch.distributions import Normal
-from rl_qoc.agent import ActorNetwork, CriticNetwork, Agent
-from rl_qoc.env.base_q_env import BaseQuantumEnvironment
+from .agent import ActorNetwork, CriticNetwork, Agent
+from ..environment.base_q_env import BaseQuantumEnvironment
 from .ppo_config import (
     HardwareRuntime,
     TotalUpdates,
