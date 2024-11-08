@@ -17,14 +17,11 @@ from typing import (
     TypeVar,
     SupportsFloat,
     Union,
-    Tuple,
-    Sequence,
-    Callable,
 )
 
 import numpy as np
 from gymnasium.spaces import Box
-from qiskit import schedule, ClassicalRegister
+from qiskit import schedule
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -33,31 +30,22 @@ from qiskit.circuit import (
     ParameterVector,
     CircuitInstruction,
     Gate,
-    Instruction,
-    Qubit,
-    Clbit,
-    Parameter,
 )
 from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping as gate_map,
 )
 from qiskit.circuit.parametervector import ParameterVectorElement
-from qiskit.dagcircuit import DAGCircuit
-from qiskit.converters import circuit_to_dag
 from qiskit.providers import BackendV2
 from qiskit.quantum_info import Operator
 from qiskit.transpiler import (
     Layout,
     InstructionProperties,
-    TransformationPass,
-    CouplingMap,
 )
-from qiskit.transpiler.passes import FilterOpNodes
 from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.library import ProcessTomography
 from qiskit_ibm_runtime import EstimatorV2
 
-from .helper_functions import (
+from ..helpers import (
     get_instruction_timings,
     retrieve_neighbor_qubits,
     simulate_pulse_input,

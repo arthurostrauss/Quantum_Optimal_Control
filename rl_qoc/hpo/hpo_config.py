@@ -3,9 +3,9 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from rl_qoc.base_q_env import BaseQuantumEnvironment
-from rl_qoc.context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from rl_qoc.quantumenvironment import QuantumEnvironment
+from ..env.base_q_env import BaseQuantumEnvironment
+from ..env.context_aware_quantum_environment import ContextAwareQuantumEnvironment
+from ..env.quantumenvironment import QuantumEnvironment
 
 QUANTUM_ENVIRONMENT = Union[
     BaseQuantumEnvironment,

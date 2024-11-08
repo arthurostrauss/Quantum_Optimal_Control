@@ -16,8 +16,8 @@ from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 from torch.distributions import Normal
-from rl_qoc.agent import ActorNetwork, CriticNetwork, Agent
-from quantumenvironment import QuantumEnvironment
+from ..agent import ActorNetwork, CriticNetwork, Agent
+from ..environment import QuantumEnvironment
 
 import sys
 import logging
@@ -75,7 +75,7 @@ class Custom_QUA_PPO:
         self,
         agent_config: Dict,
         env: QuantumEnvironment | Wrapper,
-        chkpt_dir: Optional[str] = "tmp/ppo",
+        chkpt_dir: Optional[str] = "tmp/agent",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
     ):
         """
@@ -451,7 +451,7 @@ class Custom_QUA_PPO:
 def make_train_ppo(
     agent_config: Dict,
     env: QuantumEnvironment,
-    chkpt_dir: Optional[str] = "tmp/ppo",
+    chkpt_dir: Optional[str] = "tmp/agent",
     chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
 ):
     """

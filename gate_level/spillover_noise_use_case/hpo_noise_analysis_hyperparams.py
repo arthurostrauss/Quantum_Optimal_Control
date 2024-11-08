@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from itertools import product
 from fractions import Fraction
 from typing import Union, List, Optional
 
@@ -14,7 +13,7 @@ if module_path not in sys.path:
     sys.path.append(module_path)
 
 # Assuming helper_functions.py is correctly placed and contains the necessary functions
-from rl_qoc.helper_functions import load_from_pickle
+from rl_qoc.helpers.helper_functions import load_from_pickle
 
 import logging
 

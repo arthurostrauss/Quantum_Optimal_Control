@@ -13,7 +13,7 @@ from qiskit.quantum_info import Operator
 from qiskit.circuit.library import RXGate, IGate
 import qiskit_aer.noise as noise
 from qiskit_aer import AerSimulator
-from qiskit.quantum_info.operators.measures import average_gate_fidelity, state_fidelity
+from qiskit.quantum_info.operators.measures import average_gate_fidelity
 from qiskit_experiments.library.tomography.basis import PauliPreparationBasis
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +21,7 @@ module_path = os.path.dirname(os.path.dirname(current_dir))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-from rl_qoc.helper_functions import save_to_pickle
+from rl_qoc.helpers.helper_functions import save_to_pickle
 import logging
 
 logging.basicConfig(

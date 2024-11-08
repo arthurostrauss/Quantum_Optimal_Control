@@ -81,9 +81,9 @@ from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
 )
 
-from .custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
+from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
 
-from .helper_functions import (
+from ..helpers.helper_functions import (
     retrieve_primitives,
     handle_session,
     retrieve_neighbor_qubits,

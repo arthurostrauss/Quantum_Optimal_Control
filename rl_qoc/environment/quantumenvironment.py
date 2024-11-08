@@ -33,7 +33,7 @@ from .base_q_env import (
     GateTarget,
     StateTarget,
 )
-from .helper_functions import (
+from ..helpers import (
     fidelity_from_tomography,
     simulate_pulse_input,
     get_optimal_z_rotation,

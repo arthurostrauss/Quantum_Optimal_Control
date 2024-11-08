@@ -2,26 +2,22 @@ import sys
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-from typing import Callable, Tuple, Union, Optional, Dict, List
-import numpy as np
-import math
+from typing import Callable, Union, Optional
 import time
 from datetime import datetime
-import pickle
 import optuna
-from rl_qoc.base_q_env import BaseQuantumEnvironment, GateTarget, StateTarget
-from rl_qoc.quantumenvironment import QuantumEnvironment
-from rl_qoc.context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from rl_qoc.helper_functions import (
+from ..env.base_q_env import BaseQuantumEnvironment, GateTarget, StateTarget
+from ..env import QuantumEnvironment, ContextAwareQuantumEnvironment
+from rl_qoc.helpers.helper_functions import (
     load_from_yaml_file,
     create_hpo_agent_config,
     save_to_pickle,
 )
 
-from rl_qoc.ppo import CustomPPO
-from rl_qoc.ppo_config import TrainingConfig, TrainFunctionSettings
+from rl_qoc.agent import CustomPPO
+from rl_qoc.agent.ppo_config import TrainingConfig, TrainFunctionSettings
 
-from rl_qoc.hpo_config import HPOConfig
+from rl_qoc.hpo.hpo_config import HPOConfig
 
 import logging
 

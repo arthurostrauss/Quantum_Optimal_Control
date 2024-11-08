@@ -4,7 +4,7 @@ import warnings
 from typing import Optional, Dict
 import os
 import numpy as np
-from rl_qoc.helper_functions import (
+from rl_qoc.helpers.helper_functions import (
     load_q_env_from_yaml_file,
     select_backend,
 )
@@ -96,7 +96,7 @@ def get_backend(
         # TODO: Add here your custom backend
         # For now use FakeJakartaV2 as a safe working custom backend
         # backend = FakeProvider().get_backend("fake_jakarta")
-        from qiskit_ibm_runtime.fake_provider import FakeTorontoV2
+        pass
 
         # backend = FakeTorontoV2()
     if backend is None:

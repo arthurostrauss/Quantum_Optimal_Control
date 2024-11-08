@@ -7,7 +7,7 @@ from qiskit_experiments.calibration_management import (
     FixedFrequencyTransmon,
     EchoedCrossResonance,
 )
-from rl_qoc.helper_functions import (
+from rl_qoc.helpers.helper_functions import (
     load_q_env_from_yaml_file,
     select_backend,
     new_params_ecr,

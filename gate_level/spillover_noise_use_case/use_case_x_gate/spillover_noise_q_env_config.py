@@ -3,19 +3,18 @@ from typing import Optional, Dict, List
 import warnings
 import os
 import numpy as np
-from rl_qoc.helper_functions import (
+from rl_qoc.helpers.helper_functions import (
     generate_default_instruction_durations_dict,
     select_backend,
     get_q_env_config,
 )
-from qiskit import QuantumCircuit, QuantumRegister, transpile
+from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit import ParameterVector
 from qiskit.providers import BackendV2
 import qiskit_aer.noise as noise
 from qiskit_aer import AerSimulator
 from qiskit.quantum_info import Operator
 from qiskit.circuit.library import RXGate
-from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.transpiler import InstructionDurations
 from qiskit.transpiler import CouplingMap
 
@@ -101,7 +100,7 @@ def get_backend(
         coherent_rx_noise = noise.coherent_unitary_error(rx_phi_gamma_op)
         noise_model.add_quantum_error(coherent_rx_noise, [custom_rx_gate_label], [0])
 
-        from qiskit_aer.noise import ReadoutError, reset_error
+        from qiskit_aer.noise import ReadoutError
 
         p0given1 = 0.0138  # IBM Sherbrooke
         p1given0 = 0.0116  # IBM Sherbrooke

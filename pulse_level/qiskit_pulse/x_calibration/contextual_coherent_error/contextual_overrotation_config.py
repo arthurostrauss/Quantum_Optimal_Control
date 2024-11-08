@@ -7,26 +7,20 @@ Date: 2024-09-19
 """
 
 from __future__ import annotations
-import warnings
-from typing import Optional, Dict, List
+from typing import Optional, List
 import os
 
-import numpy as np
-from qiskit.circuit.library import RXGate
-from qiskit.transpiler import Target, InstructionProperties
+from qiskit.transpiler import InstructionProperties
 from qiskit_experiments.calibration_management import (
     FixedFrequencyTransmon,
     EchoedCrossResonance,
 )
-from rl_qoc.helper_functions import (
+from rl_qoc.helpers.helper_functions import (
     to_python_identifier,
-    perform_standard_calibrations,
-    select_backend,
     new_params_ecr,
     new_params_sq_gate,
-    convert_solver_options,
 )
-from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
+from qiskit import pulse, QuantumCircuit, QuantumRegister
 from qiskit.circuit import ParameterVector, Gate, Parameter
 from qiskit.providers import BackendV1, BackendV2, BackendV2Converter
 from qiskit_experiments.calibration_management import Calibrations

@@ -27,7 +27,7 @@ from qibo.backends import set_backend
 
 from qibo import Circuit as QiboCircuit
 
-from utils import (
+from .utils import (
     new_cz_rule,
     execute_action,
     dummy_transpiler,

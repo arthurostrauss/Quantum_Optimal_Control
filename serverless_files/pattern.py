@@ -1,4 +1,4 @@
-from rl_qoc.helper_functions import load_from_yaml_file
+from rl_qoc.helpers.helper_functions import load_from_yaml_file
 from rl_qoc.quantumenvironment import QuantumEnvironment
 from rl_qoc.context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from gymnasium.wrappers import RescaleAction, ClipAction

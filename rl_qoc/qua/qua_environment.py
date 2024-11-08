@@ -1,15 +1,8 @@
-from typing import Optional
-
-import numpy as np
-from qiskit.circuit import ParameterVector, QuantumCircuit
 from qm.jobs.running_qm_job import RunningQmJob
 
-from rl_qoc.base_q_env import BaseQuantumEnvironment, BaseTarget
-from rl_qoc import ContextAwareQuantumEnvironment, QuantumEnvironment
-from rl_qoc.qconfig import QEnvConfig, QuaConfig
-from qiskit import QuantumCircuit, schedule as build_schedule
-from qualang_tools.video_mode import ParameterTable
-from qm.qua import *
+from ..environment import ContextAwareQuantumEnvironment
+from ..environment.qconfig import QEnvConfig
+from qiskit import QuantumCircuit
 from qua_backend import QMBackend
 from qua_utils import *
 
@@ -22,10 +15,10 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
 
     def __init__(self, training_config: QEnvConfig, circuit_context: QuantumCircuit):
         super().__init__(training_config, circuit_context)
-        if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
-            self.backend, QMBackend
-        ):
-            raise ValueError("The backend should be a QMBackend object")
+        # if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
+        #     self.backend, QMBackend
+        # ):
+        #     raise ValueError("The backend should be a QMBackend object")
         self.parameter_tables = [
             ParameterTable(
                 {

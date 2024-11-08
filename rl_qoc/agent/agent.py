@@ -13,7 +13,7 @@ class ActorNetwork(nn.Module):
         n_actions: int,
         hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
         include_critic=True,
-        chkpt_dir: str = "tmp/ppo",
+        chkpt_dir: str = "tmp/agent",
     ):
         super(ActorNetwork, self).__init__()
 

@@ -107,10 +107,9 @@ from scipy.optimize import minimize, OptimizeResult
 import keyword
 import re
 
-from .qibo import QiboEstimatorV2
 from .transpiler_passes import CustomGateReplacementPass
-from .custom_jax_sim import PulseEstimatorV2
-from .qconfig import (
+from ..custom_jax_sim import PulseEstimatorV2
+from ..environment.qconfig import (
     BackendConfig,
     ExecutionConfig,
     BenchmarkConfig,
@@ -141,7 +140,6 @@ Estimator_type = Union[
     BackendEstimator,
     BackendEstimatorV2,
     StatevectorEstimator,
-    QiboEstimatorV2,
 ]
 Sampler_type = Union[
     RuntimeSamplerV2,
@@ -1283,6 +1281,8 @@ def retrieve_primitives(
             calibration_files = config.calibration_files
             _, _ = perform_standard_calibrations(backend, calibration_files)
     elif isinstance(backend, str) and isinstance(config, QiboConfig):
+        from ..qibo import QiboEstimatorV2
+
         estimator = QiboEstimatorV2(
             platform=config.platform, options={"qubit_pair": config.qubit_pair}
         )
@@ -1868,15 +1868,24 @@ def get_q_env_config(
     elif backend is None:
         backend = select_backend(**backend_params)
 
-    backend_config = QiskitRuntimeConfig(
-        parametrized_circ_func,
-        backend,
-        pass_manager=pass_manager,
-        instruction_durations=instruction_durations,
-        estimator_options=(
-            runtime_options if isinstance(backend, RuntimeBackend) else None
-        ),
-    )
+    if isinstance(backend, DynamicsBackend):
+        backend_config = DynamicsConfig(
+            parametrized_circ_func,
+            backend,
+            pass_manager=pass_manager,
+            instruction_durations=instruction_durations,
+        )
+    else:
+        backend_config = QiskitRuntimeConfig(
+            parametrized_circ_func,
+            backend,
+            pass_manager=pass_manager,
+            instruction_durations=instruction_durations,
+            estimator_options=(
+                runtime_options if isinstance(backend, RuntimeBackend) else None
+            ),
+        )
+
     q_env_config = QEnvConfig(backend_config=backend_config, **params)
     return q_env_config
 

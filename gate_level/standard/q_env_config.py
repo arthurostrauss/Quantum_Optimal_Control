@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, List
 import numpy as np
 
-from rl_qoc.helper_functions import (
+from rl_qoc.helpers.helper_functions import (
     generate_default_instruction_durations_dict,
 )
 from qiskit import QuantumCircuit, QuantumRegister, transpile

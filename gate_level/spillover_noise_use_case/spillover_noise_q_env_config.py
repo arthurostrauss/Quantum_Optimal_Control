@@ -3,7 +3,7 @@ from typing import Optional, List
 import warnings
 import os
 import numpy as np
-from rl_qoc.helper_functions import (
+from rl_qoc.helpers.helper_functions import (
     generate_default_instruction_durations_dict,
     get_q_env_config,
 )
