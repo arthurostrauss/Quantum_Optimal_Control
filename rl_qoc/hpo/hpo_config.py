@@ -4,7 +4,9 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 from ..environment.base_q_env import BaseQuantumEnvironment
-from ..environment.context_aware_quantum_environment import ContextAwareQuantumEnvironment
+from ..environment.context_aware_quantum_environment import (
+    ContextAwareQuantumEnvironment,
+)
 from ..environment.quantumenvironment import QuantumEnvironment
 
 QUANTUM_ENVIRONMENT = Union[

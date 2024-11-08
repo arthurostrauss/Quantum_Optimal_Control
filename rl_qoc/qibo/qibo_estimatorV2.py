@@ -1,7 +1,7 @@
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Iterable
+from typing import List, Iterable, Tuple
 
 from qiskit import QuantumCircuit, QiskitError, QuantumRegister, ClassicalRegister
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -20,6 +20,7 @@ from qiskit.primitives import (
     DataBin,
 )
 from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
+from qiskit.result import Counts
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import Optimize1qGatesDecomposition
 from qiskit.qasm3 import dumps as qasm3_dumps
@@ -56,7 +57,9 @@ def qibo_execute(
     ]
 
     set_backend("qibolab", platform=platform)
-    hardware_qubit_pair = (1, 2)  # TODO: Figure out how to retrieve it
+    hardware_qubit_pair = run_options.get(
+        "qubits", (0, 1)
+    )  # TODO: Figure out how to retrieve it
 
     # for parameter_value in parameter_values:
     param_shape = parameter_values[0].shape
@@ -123,7 +126,7 @@ def _run_circuits(
 class QiboOptions(Options):
     """Options for the Qibo backend."""
 
-    qubits: List[int] = None
+    qubits: Tuple[int] = (0, 1)
 
 
 class QiboEstimatorV2(BaseEstimatorV2):
@@ -234,6 +237,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
         counts, metadata = _run_circuits(
             flat_circuits,
             self._platform,
+            qubits=self.options.qubits,
             shots=shots,
             seed_simulator=self._options.seed_simulator,
         )
@@ -319,113 +323,109 @@ class QiboEstimatorV2(BaseEstimatorV2):
             },
         )
 
-        def _calc_expval_map(
-            self,
-            counts: list[Counts],
-            metadata: dict,
-        ) -> dict[tuple[tuple[int, ...], str], tuple[float, float]]:
-            """Computes the map of expectation values.
+    def _calc_expval_map(
+        self,
+        counts: list[Counts],
+        metadata: dict,
+    ) -> dict[tuple[tuple[int, ...], str], tuple[float, float]]:
+        """Computes the map of expectation values.
 
-            Args:
-                counts: The counts data.
-                metadata: The metadata.
+        Args:
+            counts: The counts data.
+            metadata: The metadata.
 
-            Returns:
-                The map of expectation values takes a pair of an index of the bindings array and
-                a pauli string as a key and returns the expectation value of the pauli string
-                with the the pub's circuit bound against the parameter value set in the index of
-                the bindings array.
-            """
-            expval_map: dict[tuple[tuple[int, ...], str], tuple[float, float]] = {}
-            for count, meta in zip(counts, metadata):
-                orig_paulis = meta["orig_paulis"]
-                meas_paulis = meta["meas_paulis"]
-                param_index = meta["param_index"]
-                expvals, variances = _pauli_expval_with_variance(count, meas_paulis)
-                for pauli, expval, variance in zip(orig_paulis, expvals, variances):
-                    expval_map[param_index, pauli.to_label()] = (expval, variance)
-            return expval_map
+        Returns:
+            The map of expectation values takes a pair of an index of the bindings array and
+            a pauli string as a key and returns the expectation value of the pauli string
+            with the the pub's circuit bound against the parameter value set in the index of
+            the bindings array.
+        """
+        expval_map: dict[tuple[tuple[int, ...], str], tuple[float, float]] = {}
+        for count, meta in zip(counts, metadata):
+            orig_paulis = meta["orig_paulis"]
+            meas_paulis = meta["meas_paulis"]
+            param_index = meta["param_index"]
+            expvals, variances = _pauli_expval_with_variance(count, meas_paulis)
+            for pauli, expval, variance in zip(orig_paulis, expvals, variances):
+                expval_map[param_index, pauli.to_label()] = (expval, variance)
+        return expval_map
 
-        def _create_measurement_circuits(
-            self,
-            circuit: QuantumCircuit,
-            observable: PauliList,
-            param_index: tuple[int, ...],
-        ) -> list[QuantumCircuit]:
-            """Generate a list of circuits sufficient to estimate each of the given Paulis.
+    def _create_measurement_circuits(
+        self,
+        circuit: QuantumCircuit,
+        observable: PauliList,
+        param_index: tuple[int, ...],
+    ) -> list[QuantumCircuit]:
+        """Generate a list of circuits sufficient to estimate each of the given Paulis.
 
-            Paulis are divided into qubitwise-commuting subsets to reduce the total circuit count.
-            Metadata is attached to circuits in order to remember what each one measures, and
-            where it belongs in the output.
+        Paulis are divided into qubitwise-commuting subsets to reduce the total circuit count.
+        Metadata is attached to circuits in order to remember what each one measures, and
+        where it belongs in the output.
 
-            Args:
-                circuit: The circuit of interest.
-                observable: Which Pauli terms we would like to observe.
-                param_index: Where to put the data we estimate (only passed to metadata).
+        Args:
+            circuit: The circuit of interest.
+            observable: Which Pauli terms we would like to observe.
+            param_index: Where to put the data we estimate (only passed to metadata).
 
-            Returns:
-                A list of circuits sufficient to estimate each of the given Paulis.
-            """
-            meas_circuits: list[QuantumCircuit] = []
-            if self._options.abelian_grouping:
-                for obs in observable.group_commuting(qubit_wise=True):
-                    basis = Pauli(
-                        (np.logical_or.reduce(obs.z), np.logical_or.reduce(obs.x))
+        Returns:
+            A list of circuits sufficient to estimate each of the given Paulis.
+        """
+        meas_circuits: list[QuantumCircuit] = []
+        if self._options.abelian_grouping:
+            for obs in observable.group_commuting(qubit_wise=True):
+                basis = Pauli(
+                    (np.logical_or.reduce(obs.z), np.logical_or.reduce(obs.x))
+                )
+                meas_circuit, indices = _measurement_circuit(circuit.num_qubits, basis)
+                paulis = PauliList.from_symplectic(
+                    obs.z[:, indices],
+                    obs.x[:, indices],
+                    obs.phase,
+                )
+                meas_circuit.metadata = {
+                    "orig_paulis": obs,
+                    "meas_paulis": paulis,
+                    "param_index": param_index,
+                }
+                meas_circuits.append(meas_circuit)
+        else:
+            for basis in observable:
+                meas_circuit, indices = _measurement_circuit(circuit.num_qubits, basis)
+                obs = PauliList(basis)
+                paulis = PauliList.from_symplectic(
+                    obs.z[:, indices],
+                    obs.x[:, indices],
+                    obs.phase,
+                )
+                meas_circuit.metadata = {
+                    "orig_paulis": obs,
+                    "meas_paulis": paulis,
+                    "param_index": param_index,
+                }
+                meas_circuits.append(meas_circuit)
+
+        # unroll basis gates
+        meas_circuits = self._passmanager.run(meas_circuits)
+
+        # combine measurement circuits
+        preprocessed_circuits = []
+        for meas_circuit in meas_circuits:
+            circuit_copy = circuit.copy()
+            # meas_circuit is supposed to have a classical register whose name is different from
+            # those of the transpiled_circuit
+            clbits = meas_circuit.cregs[0]
+            for creg in circuit_copy.cregs:
+                if clbits.name == creg.name:
+                    raise QiskitError(
+                        "Classical register for measurements conflict with those of the input "
+                        f"circuit: {clbits}. "
+                        "Recommended to avoid register names starting with '__'."
                     )
-                    meas_circuit, indices = _measurement_circuit(
-                        circuit.num_qubits, basis
-                    )
-                    paulis = PauliList.from_symplectic(
-                        obs.z[:, indices],
-                        obs.x[:, indices],
-                        obs.phase,
-                    )
-                    meas_circuit.metadata = {
-                        "orig_paulis": obs,
-                        "meas_paulis": paulis,
-                        "param_index": param_index,
-                    }
-                    meas_circuits.append(meas_circuit)
-            else:
-                for basis in observable:
-                    meas_circuit, indices = _measurement_circuit(
-                        circuit.num_qubits, basis
-                    )
-                    obs = PauliList(basis)
-                    paulis = PauliList.from_symplectic(
-                        obs.z[:, indices],
-                        obs.x[:, indices],
-                        obs.phase,
-                    )
-                    meas_circuit.metadata = {
-                        "orig_paulis": obs,
-                        "meas_paulis": paulis,
-                        "param_index": param_index,
-                    }
-                    meas_circuits.append(meas_circuit)
-
-            # unroll basis gates
-            meas_circuits = self._passmanager.run(meas_circuits)
-
-            # combine measurement circuits
-            preprocessed_circuits = []
-            for meas_circuit in meas_circuits:
-                circuit_copy = circuit.copy()
-                # meas_circuit is supposed to have a classical register whose name is different from
-                # those of the transpiled_circuit
-                clbits = meas_circuit.cregs[0]
-                for creg in circuit_copy.cregs:
-                    if clbits.name == creg.name:
-                        raise QiskitError(
-                            "Classical register for measurements conflict with those of the input "
-                            f"circuit: {clbits}. "
-                            "Recommended to avoid register names starting with '__'."
-                        )
-                circuit_copy.add_register(clbits)
-                circuit_copy.compose(meas_circuit, clbits=clbits, inplace=True)
-                circuit_copy.metadata = meas_circuit.metadata
-                preprocessed_circuits.append(circuit_copy)
-            return preprocessed_circuits
+            circuit_copy.add_register(clbits)
+            circuit_copy.compose(meas_circuit, clbits=clbits, inplace=True)
+            circuit_copy.metadata = meas_circuit.metadata
+            preprocessed_circuits.append(circuit_copy)
+        return preprocessed_circuits
 
     @property
     def options(self):

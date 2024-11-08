@@ -110,7 +110,8 @@ class QiboConfig(BackendConfig):
     backend: Any
     qubit_pair: Tuple[int, int] = (0, 1)
     platform: str = "qibolab"
-    options: Optional[Dict] = None
+    coupling_map: List[Tuple[int, int]] = field(default_factory=lambda: [(0, 1)])
+    n_qubits: int = 2
 
 
 @dataclass
