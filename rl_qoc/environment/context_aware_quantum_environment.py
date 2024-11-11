@@ -185,7 +185,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         if self.backend_info.coupling_map.size() == 0 and self.backend is None:
             # Build a fully connected coupling map if no backend is provided
-            self.backend_info.num_qubits = self._circuit_context.num_qubits
+            self.backend_info.num_qubits = self.circuit_context.num_qubits
             self._physical_neighbor_qubits = retrieve_neighbor_qubits(
                 self.backend_info.coupling_map, self.physical_target_qubits
             )
@@ -208,10 +208,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         ]
 
         circ_nn_qubits = [
-            self._circuit_context.qubits[i] for i in self.physical_neighbor_qubits
+            self.circuit_context.qubits[i] for i in self.physical_neighbor_qubits
         ]  # Nearest neighbors
         circ_anc_qubits = [
-            self._circuit_context.qubits[i] for i in self.physical_next_neighbor_qubits
+            self.circuit_context.qubits[i] for i in self.physical_next_neighbor_qubits
         ]  # Next neighbors
 
         nn_register = QuantumRegister(

@@ -548,10 +548,16 @@ class GateTarget(BaseTarget):
 
     @property
     def causal_cone_circuit(self):
+        """
+        Get the circuit forming the causal cone of the target gate
+        """
         return self._causal_cone_circuit
 
     @property
     def causal_cone_size(self):
+        """
+        Get the size of the causal cone of the target gate
+        """
         return self._causal_cone_size
 
     def __repr__(self):

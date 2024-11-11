@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
-from qiskit import transpile, QiskitError, QuantumCircuit
+from typing import List, Optional, Tuple, Union
+from qiskit import transpile, QiskitError
 from qiskit.circuit import QuantumCircuit
 from qiskit.transpiler import PassManager, InstructionDurations, Layout, CouplingMap
 from qiskit.providers import BackendV2
@@ -42,10 +42,6 @@ class BackendInfo(ABC):
     @num_qubits.setter
     def num_qubits(self, n_qubits: int):
         assert n_qubits > 0, "Number of qubits should be positive"
-        if self.backend is not None:
-            raise ValueError(
-                "Number of qubits should not be set if backend is provided"
-            )
         self._n_qubits = n_qubits
 
 
@@ -79,7 +75,7 @@ class QiskitBackendInfo(BackendInfo):
 
     def custom_transpile(
         self,
-        qc: QuantumCircuit | List[QuantumCircuit],
+        qc: Union[QuantumCircuit, List[QuantumCircuit]],
         initial_layout: Optional[Layout] = None,
         scheduling: bool = True,
         optimization_level: int = 0,
@@ -166,7 +162,7 @@ class QiboBackendInfo(BackendInfo):
     """
 
     def __init__(
-        self, n_qubits: int = 0, coupling_map: Optional[List[List[int]]] = None
+        self, n_qubits: int = 0, coupling_map: Optional[List[Tuple[int, int]]] = None
     ):
         """
         Initialize the backend information
@@ -198,7 +194,7 @@ class QiboBackendInfo(BackendInfo):
         )
 
     def custom_transpile(
-        self, qc: QuantumCircuit | List[QuantumCircuit], *args, **kwargs
+        self, qc: Union[QuantumCircuit, List[QuantumCircuit]], *args, **kwargs
     ):
 
         return transpile(

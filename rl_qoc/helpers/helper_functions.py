@@ -93,7 +93,7 @@ from qiskit_experiments.calibration_management.basis_gate_library import (
 )
 
 from itertools import chain
-from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any, Set
+from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any
 import yaml
 
 import numpy as np
@@ -148,7 +148,7 @@ Sampler_type = Union[
     BackendSamplerV2,
     StatevectorSampler,
 ]
-Backend_type = Union[BackendV1, BackendV2]
+Backend_type = Optional[Union[BackendV1, BackendV2]]
 QuantumTarget = Union[Statevector, Operator, DensityMatrix]
 QuantumInput = Union[QuantumCircuit, pulse.Schedule, pulse.ScheduleBlock]
 PulseInput = Union[pulse.Schedule, pulse.ScheduleBlock]
@@ -1361,8 +1361,6 @@ def handle_session(
     estimator: BaseEstimatorV1 | BaseEstimatorV2,
     backend: Backend_type,
     counter: Optional[int] = None,
-    qc: Optional[QuantumCircuit] = None,
-    input_state_circ: Optional[QuantumCircuit] = None,
 ):
     """
     Handle session reopening for RuntimeEstimator or load necessary data for custom DynamicsBackendEstimator

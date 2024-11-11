@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import math
 import time
-import warnings
 from abc import ABC, abstractmethod
 
 # For compatibility for options formatting between Estimators.
@@ -32,7 +31,6 @@ from qiskit.circuit import (
     ParameterVector,
     Parameter,
 )
-from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import (
@@ -40,7 +38,7 @@ from qiskit.primitives import (
     BaseSamplerV2,
 )
 
-from qiskit.quantum_info import random_unitary, partial_trace
+from qiskit.quantum_info import partial_trace
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.states import DensityMatrix, Statevector
@@ -72,7 +70,7 @@ from qiskit_ibm_runtime import (
 )
 
 from .backend_info import QiskitBackendInfo, QiboBackendInfo
-from .target import GateTarget, StateTarget, InputState
+from .target import GateTarget, StateTarget
 from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
 
 from ..helpers.helper_functions import (
@@ -199,18 +197,9 @@ class BaseQuantumEnvironment(ABC, Env):
         self.qc_history = []
         self._pubs, self._ideal_pubs = [], []
         self._observables, self._pauli_shots = None, None
-        self._index_input_state = 0
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-        if isinstance(self.target, GateTarget):
-            self._input_state = self.target.input_states[self._index_input_state]
-        else:
-            self._input_state = InputState(
-                QuantumCircuit(self.target.n_qubits),
-                self.target.circuit,
-                self.target.tgt_register,
-            )
         self.process_fidelity_history = []
         self.avg_fidelity_history = []
         self.circuit_fidelity_history = []
@@ -294,9 +283,7 @@ class BaseQuantumEnvironment(ABC, Env):
             if isinstance(self.estimator, RuntimeEstimatorV2)
             else trunc_index
         )
-        self.estimator = handle_session(
-            self.estimator, self.backend, counts, qc, self._input_state.circuit
-        )
+        self.estimator = handle_session(self.estimator, self.backend, counts)
         print(
             f"Sending {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job..."
         )
@@ -355,21 +342,6 @@ class BaseQuantumEnvironment(ABC, Env):
 
         if isinstance(self.estimator, RuntimeEstimatorV2):
             self.estimator.options.update(job_tags=[f"rl_qoc_step{self._step_tracker}"])
-
-        target_state = None
-        if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
-            input_states = self.target.input_states
-            self._index_input_state = np.random.randint(len(input_states))
-            self._input_state = input_states[self._index_input_state]
-            target_state = self._input_state.target_state  # (Gate |input>=|target>)
-
-        elif isinstance(self.target, StateTarget):  # State preparation task
-            target_state = self.target
-
-        if target_state is not None:
-            self._observables, self._pauli_shots = self.retrieve_observables(
-                target_state, self.circuits[self.trunc_index]
-            )
 
         return self._get_obs(), self._get_info()
 
@@ -440,17 +412,25 @@ class BaseQuantumEnvironment(ABC, Env):
 
     def state_reward_pubs(self, qc: QuantumCircuit, params):
         """
-        Retrieve observables and input state to sample for the DFE protocol for a target state
+        Compute the PUBs for the state reward method
         """
 
         prep_circuit = qc.copy()
-        if isinstance(self.target, GateTarget):
-            # Append input state prep circuit to the custom circuit with front composition
-            prep_circuit = qc.compose(
-                self._input_state.circuit, inplace=False, front=True
-            )
+        target_state = self.target
+        if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
+            # State reward: sample a random input state for target gate
+            input_state = np.random.choice(self.target.input_states)
+            # Prepend input state to custom circuit with front composition
+            prep_circuit = qc.compose(input_state.circuit, inplace=False, front=True)
             for _ in range(self.n_reps - 1):  # Repeat circuit for noise amplification
                 prep_circuit.compose(qc, inplace=True)
+
+            # Modify target state to match input state and target gate
+            target_state = input_state.target_state  # (Gate |input>=|target>)
+
+        self._observables, self._pauli_shots = self.retrieve_observables(
+            target_state, self.circuits[self.trunc_index]
+        )
 
         prep_circuit = self.backend_info.custom_transpile(
             prep_circuit,
@@ -660,7 +640,7 @@ class BaseQuantumEnvironment(ABC, Env):
         #     return_counts=True,
         # )
         # for sample, shot in zip(samples, shots):
-        for sample in range(len(self.target.input_states)):
+        for input_state in self.target.input_states:
             run_qc = QuantumCircuit.copy_empty_like(
                 circuit, name="cafe_circ"
             )  # Circuit with custom target gate
@@ -670,7 +650,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
             for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
                 # Bind input states to the circuits
-                qc.compose(self.target.input_states[sample].circuit, inplace=True)
+                qc.compose(input_state.circuit, inplace=True)
                 qc.barrier()
                 for _ in range(
                     self.n_reps
@@ -705,9 +685,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 # Add the inverse unitary + measurement to the circuit
                 transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
                 pubs_.append((transpiled_circuit, params, self.n_shots))
-                # pubs_.append((transpiled_circuit, params, self.n_shots * shot))
             total_shots += self.batch_size * self.n_shots
-            # total_shots += self.batch_size * self.n_shots * shot
 
         return pubs, total_shots
 
@@ -1341,11 +1319,6 @@ class BaseQuantumEnvironment(ABC, Env):
                     "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "arg max circuit fidelity": np.argmax(self.fidelity_history),
                     "optimal action": self.optimal_action,
-                    "input_state": (
-                        self.target.input_states[self._index_input_state].circuit.name
-                        if isinstance(self.target, GateTarget)
-                        else None
-                    ),
                 }
             else:
                 info = {
@@ -1354,22 +1327,12 @@ class BaseQuantumEnvironment(ABC, Env):
                     "max return": np.max(np.mean(self.reward_history, axis=1)),
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "optimal action": self.optimal_action,
-                    "input_state": (
-                        self.target.input_states[self._index_input_state].circuit.name
-                        if isinstance(self.target, GateTarget)
-                        else None
-                    ),
                 }
         else:
             info = {
                 "reset_stage": self._inside_trunc_tracker == 0,
                 "step": step,
                 "gate_index": self._inside_trunc_tracker,
-                "input_state": (
-                    self.target.input_states[self._index_input_state].circuit.name
-                    if isinstance(self.target, GateTarget)
-                    else None
-                ),
                 "truncation_index": self.trunc_index,
             }
         return info
@@ -1539,27 +1502,3 @@ class BaseQuantumEnvironment(ABC, Env):
                 ),
             }
         )
-
-    def run_v1_primitive(self, qc: QuantumCircuit, params: np.array):
-        """
-        Run the primitive for the EstimatorV1 case (relevant only for DynamicsBackendEstimator call)
-        """
-        if self.config.reward_method == "channel":
-            raise NotImplementedError(
-                "Channel estimator not implemented for EstimatorV1"
-            )
-
-        job = self.estimator.run(
-            circuits=[qc] * self.batch_size,
-            observables=[self._observables.apply_layout(qc.layout)] * self.batch_size,
-            parameter_values=params,
-            shots=int(np.max(self._pauli_shots) * self.n_shots),
-        )
-        self._total_shots.append(
-            int(np.max(self._pauli_shots) * self.n_shots)
-            * self.batch_size
-            * len(self._observables.group_commuting(qubit_wise=True))
-        )
-        reward_table = job.result().values / self._observables.size
-
-        return reward_table

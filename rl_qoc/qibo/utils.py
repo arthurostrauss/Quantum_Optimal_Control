@@ -54,7 +54,7 @@ def new_rx_rule(
 ):
     """RX rule returning a custom flux pulse defined by `pulse_params`."""
     qubit = list(platform.qubits)[gate.target_qubits[0]]
-    theta = gate.parameters[0]
+    theta = gate.parameters[0]  # float value by default
     sequence = PulseSequence()
     pulse = platform.create_RX90_pulse(qubit, start=0, relative_phase=theta)
     pulse.amplitude = pulse_params[0]
@@ -73,15 +73,15 @@ def resolve_gate_rule(gate_rule: str | Tuple[str, Callable]):
             raise ValueError("Invalid gate identifier for gate rule")
         if isinstance(gate_rule[0], str):
             for gate_name, gate in zip(
-                ["x", "rx", "cz"], [gates.X, gates.RX, gates.CZ]
+                ["x", "rx", "cz"], [gates.GPI2, gates.GPI2, gates.CZ]
             ):
                 if gate_rule[0] == gate_name:
-                    return (gate, gate_rule[1])
+                    return gate, gate_rule[1]
     elif isinstance(gate_rule, str):
         if gate_rule == "cz":
-            return (gates.CZ, new_cz_rule)
+            return gates.CZ, new_cz_rule
         elif gate_rule == "rx" or gate_rule == "sx" or gate_rule == "x":
-            return (gates.RX, new_rx_rule)
+            return gates.RX, new_rx_rule
     else:
         raise ValueError(f"Unknown gate rule: {gate_rule}")
 
