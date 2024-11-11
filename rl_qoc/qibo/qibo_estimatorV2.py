@@ -1,7 +1,7 @@
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Iterable, Tuple
+from typing import List, Iterable, Tuple, Callable
 
 from qiskit import QuantumCircuit, QiskitError, QuantumRegister, ClassicalRegister
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -28,12 +28,15 @@ from qibo.backends import set_backend
 
 from qibo import Circuit as QiboCircuit
 
-from .utils import (
-    new_cz_rule,
-    execute_action,
-    dummy_transpiler,
-    execute_transpiled_circuits,
-)
+from .utils import execute_action, resolve_gate_rule
+
+
+@dataclass
+class QiboOptions(Options):
+    """Options for the Qibo backend."""
+
+    qubits: Tuple[int] = (0, 1)
+    gate_rule: str | Tuple[str, Callable] = "rx"
 
 
 def qibo_execute(
@@ -86,6 +89,7 @@ def qibo_execute(
                 hardware_qubit_pair,
                 param_set,
                 run_options["shots"],
+                resolve_gate_rule(run_options.get("gate_rule", "rx")),
             )
         )
 
@@ -122,13 +126,6 @@ def _run_circuits(
     return counts, metadata
 
 
-@dataclass
-class QiboOptions(Options):
-    """Options for the Qibo backend."""
-
-    qubits: Tuple[int] = (0, 1)
-
-
 class QiboEstimatorV2(BaseEstimatorV2):
     """
     Estimator for a Qibo platform.
@@ -137,7 +134,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
     def __init__(self, platform, options=None):
 
         self._platform = platform
-        self._options = QiboOptions(**options) if options else Options()
+        self._options = QiboOptions(**options) if options else QiboOptions()
         opt1q = Optimize1qGatesDecomposition(
             basis=["h", "x", "y", "z", "t", "s", "sdg", "tdg"]
         )
@@ -240,6 +237,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
             qubits=self.options.qubits,
             shots=shots,
             seed_simulator=self._options.seed_simulator,
+            gate_rule=self.options.gate_rule,
         )
 
         results = []

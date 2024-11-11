@@ -1,13 +1,15 @@
-from typing import Optional
+from typing import Optional, Callable, Tuple
 
 import numpy as np
-from qibo import gates, Circuit, set_backend
+from qibo import gates, Circuit
+from qibo.gates import Gate
 from qibo.transpiler import Passes
 from qibo.transpiler.unroller import Unroller, NativeGates
 from qibolab.platform import Platform
+from qibolab import QibolabBackend
 from qibolab.pulses import FluxPulse, PulseSequence
 from qibolab.qubits import QubitId
-from qibo.backends import GlobalBackend, Backend
+from qibo.backends import Backend
 
 AMP_MAX_LIM = 0.5
 TIME_MAX_LIM = 20_000
@@ -17,25 +19,25 @@ def checks(pulse_params: dict):
     """Check that the pulse parameters respect the instruments bounds"""
     if np.abs(pulse_params[0]) > AMP_MAX_LIM:
         raise ValueError("Amplitude value too high")
-    if pulse_params[1] > TIME_MAX_LIM:
-        raise ValueError("Time value too high")
+    # if pulse_params[1] > TIME_MAX_LIM:
+    #     raise ValueError("Time value too high")
 
 
 def new_cz_rule(
     gate: gates.Gate,
     platform: Platform,
     pulse_params: list,
-    qubit_pair: tuple[QubitId],
+    targets: tuple[QubitId],
 ):
     """CZ rule returning a custom flux pulse defined by `pulse_params`."""
-    old_cz_flux = platform.pairs[qubit_pair].native_gates.CZ.pulses[0]
+    old_cz_flux = platform.pairs[targets].native_gates.CZ.pulses[0]
     pulse_sequence = PulseSequence()
     pulse_sequence.add(
         FluxPulse(
             start=0,
             amplitude=pulse_params[0],
             duration=pulse_params[1],
-            shape="Rectangular",
+            shape="Rectangular()",
             qubit=old_cz_flux.qubit.name,
         )
     )
@@ -43,39 +45,77 @@ def new_cz_rule(
     return pulse_sequence, virtual_z_phases
 
 
+def new_rx_rule(
+    gate: gates.Gate,
+    platform: Platform,
+    pulse_params: list,
+    targets: QubitId,
+    parameters=None,
+):
+    """RX rule returning a custom flux pulse defined by `pulse_params`."""
+    qubit = list(platform.qubits)[gate.target_qubits[0]]
+    theta = gate.parameters[0]
+    sequence = PulseSequence()
+    pulse = platform.create_RX90_pulse(qubit, start=0, relative_phase=theta)
+    pulse.amplitude = pulse_params[0]
+    sequence.add(pulse)
+    virtual_z_phases = {}
+    return sequence, virtual_z_phases
+
+
+def resolve_gate_rule(gate_rule: str | Tuple[str, Callable]):
+    if isinstance(gate_rule, Tuple):
+        if len(gate_rule) != 2:
+            raise ValueError("Invalid gate rule tuple")
+        if not callable(gate_rule[1]):
+            raise ValueError("Invalid callable in gate rule tuple")
+        if not isinstance(gate_rule[0], (Gate, str)):
+            raise ValueError("Invalid gate identifier for gate rule")
+        if isinstance(gate_rule[0], str):
+            for gate_name, gate in zip(
+                ["x", "rx", "cz"], [gates.X, gates.RX, gates.CZ]
+            ):
+                if gate_rule[0] == gate_name:
+                    return (gate, gate_rule[1])
+    elif isinstance(gate_rule, str):
+        if gate_rule == "cz":
+            return (gates.CZ, new_cz_rule)
+        elif gate_rule == "rx" or gate_rule == "sx" or gate_rule == "x":
+            return (gates.RX, new_rx_rule)
+    else:
+        raise ValueError(f"Unknown gate rule: {gate_rule}")
+
+
 def execute_action(
     platform: str,
     circuits: list[Circuit],
-    hardware_qubit_pair: tuple[QubitId],
+    hardware_targets: tuple[QubitId],
     pulse_params: list,
     nshots: int,
+    gate_rule: tuple[Gate, Callable] = (gates.GPI2, new_rx_rule),
 ):
-    """Adds a Controlled-Z (CZ) gate to `circuits` and execute them on the `platform`.
+    """Execute `circuits` on the `platform` according to the rule specified by `gate_rule`.
 
-    The CZ gate is applied to the qubits in the quantum hardware specified
-    by `hardware_qubit_pair`, where one qubit acts as the control and the
-    other as the target.
+    The `circuits` are executed on the qubits in the quantum hardware specified
+    by `hardware_targets`.
 
-    The parameters of the CZ gate's flux pulse, such as amplitude and
-    duration, are defined, with this order, by the values provided in `pulse_params`.
+    The parameters of the gate are provided in `pulse_params`.
 
-    The function returns a list of shots according to `nshots`.
+    The function returns a list of frequencies according to `nshots`.
 
     """
-    checks(pulse_params)
-    set_backend("qibolab", platform=platform)
-    backend = GlobalBackend()
+    backend = QibolabBackend(platform=platform)
 
     # Transpile circuits
     transpiler = dummy_transpiler(backend)
-    qubit_map = hardware_qubit_pair
+    qubit_map = hardware_targets
 
     # Change CZ pulse parameters
     compiler = backend.compiler
-    cz_rule = lambda gate, platform: new_cz_rule(
-        gate, platform, pulse_params, hardware_qubit_pair
+    rule = lambda gate, platform: gate_rule[1](
+        gate, platform, pulse_params, hardware_targets
     )
-    compiler.register(gates.CZ)(cz_rule)
+    compiler.register(gate_rule[0])(rule)
     _, results = execute_transpiled_circuits(
         circuits,
         [qubit_map] * len(circuits),
