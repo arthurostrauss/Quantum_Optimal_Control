@@ -212,9 +212,10 @@ def get_instruction_timings(circuit: QuantumCircuit):
     start_times = []
 
     # Loop over each instruction in the circuit
-    for inst, qubits, _ in circuit.data:
+    for instruction in circuit.data:
+        qubits = instruction.qubits
+        qubit_indices = [circuit.find_bit(qubit).index for qubit in qubits]
         # Find the maximum time among the qubits involved in the instruction
-        qubit_indices = [circuit.qubits.index(qubit) for qubit in qubits]
         start_time = max(qubit_timings[i] for i in qubit_indices)
 
         # Add the start time to the list of start times
@@ -1142,11 +1143,17 @@ def density_matrix_to_statevector(density_matrix: DensityMatrix):
 
 
 def causal_cone_circuit(
-    circuit: QuantumCircuit, qubits: Sequence[int | Qubit] | QuantumRegister
+    circuit: QuantumCircuit,
+    qubits: Sequence[int | Qubit] | QuantumRegister,
 ) -> Tuple[QuantumCircuit, List[Qubit]]:
     """
     Get the causal cone circuit of the specified qubits as well as the qubits involved in the causal cone
+    
+    Args:
+        circuit: Quantum Circuit
+        qubits: Qubits of interest
     """
+    
     dag = circuit_to_dag(circuit)
     if isinstance(qubits, List) and all(isinstance(q, int) for q in qubits):
         qubits = [dag.qubits[q] for q in qubits]

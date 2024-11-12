@@ -247,14 +247,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         for i in range(self.tgt_instruction_counts):  # Loop over target gates
             counts = 0
             for start_time, instruction in zip(
-                self._op_start_times, self._circuit_context.data
+                self._op_start_times, self.circuit_context.data
             ):  # Loop over instructions in circuit context
 
                 # Check if instruction involves target or nearest neighbor qubits
                 involves_target_qubits = any(
                     [
                         qubit in reg
-                        for reg in [self.circ_tgt_register, circ_nn_qubits]
+                        for reg in [self.circ_tgt_register, circ_nn_qubits, circ_anc_qubits]
                         for qubit in instruction.qubits
                     ]
                 )

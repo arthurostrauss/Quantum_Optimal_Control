@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Tuple, Optional, Callable, Dict, Any, Sequence
+from typing import List, Tuple, Optional, Callable, Dict, Any, Sequence, Union
+
 from qiskit.circuit import *
 from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping as gate_map,
@@ -10,6 +11,46 @@ from qiskit.transpiler.passes import FilterOpNodes
 from qiskit.transpiler import TransformationPass
 from qiskit.transpiler import CouplingMap
 from qiskit.converters import circuit_to_dag
+
+from qiskit.transpiler import AnalysisPass
+from qiskit.dagcircuit import DAGOpNode
+from collections import defaultdict
+
+
+class MomentAnalysisPass(AnalysisPass):
+    """Analysis pass to group operations into moments, storing results in the PropertySet."""
+
+    def run(self, dag):
+        moments = defaultdict(list)
+        moment_index = 0
+
+        # Use the layers method to get sequentially executable groups
+        for layer in dag.layers():
+            for node in layer['graph'].op_nodes():
+                if isinstance(node, DAGOpNode):
+                    moments[moment_index].append(node)
+            moment_index += 1
+
+        # Store the moments in the PropertySet
+        self.property_set['moments'] = moments
+        
+
+def format_input(input, input_type):
+    """
+    Format the input to the required type
+
+    Args:
+        input: The input to be formatted
+        input_type: The required type of the input
+
+    Returns:
+        The formatted input
+    """
+    if isinstance(input, List):
+        assert all([isinstance(i, input_type) for i in input]), "Invalid input format"
+    else:
+        input = [input]
+    return input
 
 
 class CustomGateReplacementPass(TransformationPass):
@@ -38,41 +79,28 @@ class CustomGateReplacementPass(TransformationPass):
         """
         super().__init__()
 
-        if isinstance(
-            target_instructions, (CircuitInstruction, Tuple, str, Instruction)
-        ):
-            target_instructions = [target_instructions]
-        elif not isinstance(target_instructions, List):
-            raise ValueError("Invalid target instructions format")
-
-        if isinstance(new_elements, (Callable, QuantumCircuit, Gate, str)):
-            new_elements = [new_elements]
-        elif not isinstance(new_elements, List):
-            raise ValueError("Invalid parametrized circuit functions format")
-        if isinstance(parameters, ParameterVector) or (
-            isinstance(parameters, List)
-            and isinstance(parameters[0], Parameter | float | int)
-        ):
-            parameters = [parameters]
-        elif parameters is not None and not isinstance(parameters, List):
-            raise ValueError(
-                "Invalid parameters format, must be a list of ParameterVectors or Parameters lists"
-            )
-        else:
-            parameters = [None]
-        if parametrized_circuit_functions_args is not None and not isinstance(
-            parametrized_circuit_functions_args, List
-        ):
-            if isinstance(parametrized_circuit_functions_args, dict):
-                parametrized_circuit_functions_args = [
-                    parametrized_circuit_functions_args
-                ]
-            else:
-                raise ValueError(
-                    "Invalid parametrized circuit functions arguments format"
-                )
+        target_instructions = format_input(
+            target_instructions, Union[CircuitInstruction, Tuple, str, Instruction]
+        )
+        new_elements = format_input(
+            new_elements, Union[Callable, Gate, QuantumCircuit, str]
+        )
+        parameters = format_input(
+            parameters,
+            Optional[Union[ParameterVector, List[Union[Parameter, float, int]]]],
+        )
+        parametrized_circuit_functions_args = format_input(
+            parametrized_circuit_functions_args, Dict[str, Any]
+        )
+        if all([param is None for param in parameters]):
+            parameters = [None] * len(target_instructions)
+        if all([args is None for args in parametrized_circuit_functions_args]):
+            parametrized_circuit_functions_args = [{}] * len(target_instructions)
         assert (
-            len(target_instructions) == len(new_elements) == len(parameters)
+            len(target_instructions)
+            == len(new_elements)
+            == len(parameters)
+            == len(parametrized_circuit_functions_args)
         ), "Number of target instructions, parametrized circuit functions, and parameters must match"
         self.target_instructions = []
 
@@ -88,16 +116,15 @@ class CustomGateReplacementPass(TransformationPass):
             else:
                 if isinstance(target_instruction[0], str):
                     try:
-                        mapping = gate_map()
-                        op = mapping[target_instruction[0]]
+                        op = gate_map()[target_instruction[0]]
                     except KeyError:
                         raise ValueError(
                             "Provided instruction name not part of standard instruction set"
                         )
-                else:
+                elif isinstance(op, Instruction):
                     op = target_instruction[0]
-                    if not isinstance(op, Instruction):
-                        raise ValueError("Invalid instruction format")
+                else:
+                    raise ValueError("Invalid instruction format")
 
                 qargs = target_instruction[1]
                 if isinstance(qargs, QuantumRegister):
@@ -115,8 +142,6 @@ class CustomGateReplacementPass(TransformationPass):
 
         self.functions = new_elements
         for i, function in enumerate(self.functions):
-            if not isinstance(function, (Callable, QuantumCircuit, Gate, str)):
-                raise ValueError("Invalid parametrized circuit function format")
             if isinstance(function, str):
                 try:
                     self.functions[i] = gate_map()[function]
@@ -125,17 +150,6 @@ class CustomGateReplacementPass(TransformationPass):
                         "Provided instruction name not part of standard instruction set"
                     )
 
-        if parametrized_circuit_functions_args is not None:
-            assert len(parametrized_circuit_functions_args) == len(
-                new_elements
-            ), "Number of parametrized circuit functions and arguments must match"
-            self.parametrized_circuit_functions_args = (
-                parametrized_circuit_functions_args
-            )
-        else:
-            self.parametrized_circuit_functions_args = [
-                {} for _ in range(len(new_elements))
-            ]
         self.parameters = parameters
 
     def run(self, dag: DAGCircuit):
