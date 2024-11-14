@@ -8,7 +8,7 @@ from typing import Iterable, List, Sequence, Dict, Union, Tuple, Optional, Calla
 from qualang_tools.video_mode.videomode import ParameterValue
 from quam.components import Channel as QuAMChannel
 from quam.components.pulses import Pulse as QuAMPulse
-from quam import quam_dataclass
+from quam import quam_dataclass, QuamBase as QuAM
 
 from qiskit.circuit import ParameterExpression, QuantumCircuit
 from qiskit.providers import BackendV2 as Backend, QubitProperties
@@ -40,9 +40,8 @@ from qm.qua import amp as qua_amp, reset_phase, QuaVariableType, assign, switch_
 from qm.qua import Math, declare, fixed, declare_stream
 from qm import QuantumMachinesManager, Program
 from qualang_tools.addons.variables import assign_variables_to_element
-from quam_components import QuAM
 from qualang_tools.video_mode import ParameterTable
-from sympy_to_qua import sympy_to_qua
+from .sympy_to_qua import sympy_to_qua
 from oqc import (
     Compiler,
     HardwareConfig,
@@ -442,8 +441,8 @@ class QMBackend(Backend, ABC):
     def target(self):
         return self._target
 
-    @abstractmethod
     @property
+    @abstractmethod
     def qubit_mapping(self) -> QubitsMapping:
         """
         Build the qubit to quantum elements mapping for the backend.
@@ -734,7 +733,7 @@ class QMBackend(Backend, ABC):
                     assert (
                         qc.metadata["parameter_table"] == param_table
                     ), "Parameter table provided is different from the one in the QuantumCircuit metadata"
-            if param_table is None:
+            else:
                 param_table = qc.metadata.get("parameter_table", None)
 
         open_qasm_code = qasm3_dumps(qc, includes=(), basis_gates=self._oq3_basis_gates)

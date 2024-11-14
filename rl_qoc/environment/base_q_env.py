@@ -69,7 +69,7 @@ from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
 )
 
-from .backend_info import QiskitBackendInfo, QiboBackendInfo
+from .backend_info import QiskitBackendInfo, QiboBackendInfo, BackendInfo
 from .target import GateTarget, StateTarget
 from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
 
@@ -93,7 +93,6 @@ from .qconfig import (
     ORBITConfig,
     XEBConfig,
     QiskitRuntimeConfig,
-    QiboConfig,
 )
 
 
@@ -135,15 +134,13 @@ class BaseQuantumEnvironment(ABC, Env):
         self._func_args = training_config.parametrized_circuit_kwargs
         self.backend = training_config.backend
         if isinstance(self.backend, BackendV2) or self.backend is None:
-            self.backend_info = QiskitBackendInfo(
+            self._backend_info = QiskitBackendInfo(
                 self.backend,
                 training_config.backend_config.instruction_durations,
-                custom_pass_manager=training_config.backend_config.pass_manager,
+                pass_manager=training_config.backend_config.pass_manager,
             )
-        elif isinstance(self.backend, str) and isinstance(
-            training_config.backend_config, QiboConfig
-        ):
-            self.backend_info = QiboBackendInfo(
+        elif training_config.backend_config.config_type == "qibo":
+            self._backend_info = QiboBackendInfo(
                 training_config.backend_config.n_qubits,
                 training_config.backend_config.coupling_map,
             )
@@ -165,16 +162,11 @@ class BaseQuantumEnvironment(ABC, Env):
         else:
             estimator_options = None
 
-        self._target, self.circuits, self.baseline_circuits = (
-            self.define_target_and_circuits()
-        )
-        self.abstraction_level = "pulse" if self.circuits[0].calibrations else "circuit"
         self._estimator, self._sampler = retrieve_primitives(
-            self.backend,
-            self.config.backend_config,
-            estimator_options,
-            self.circuits[0],
+            self.backend, self.config.backend_config, estimator_options
         )
+
+        self._target, self.circuits, self.baseline_circuits = None, None, None
 
         # self.fidelity_checker = ComputeUncompute(self._sampler)
 
@@ -192,14 +184,11 @@ class BaseQuantumEnvironment(ABC, Env):
         self._episode_ended = False
         self._episode_tracker = 0
         self.action_history = []
-        self.density_matrix_history = []
         self.reward_history = []
-        self.qc_history = []
         self._pubs, self._ideal_pubs = [], []
         self._observables, self._pauli_shots = None, None
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
-
         self.process_fidelity_history = []
         self.avg_fidelity_history = []
         self.circuit_fidelity_history = []
@@ -214,6 +203,11 @@ class BaseQuantumEnvironment(ABC, Env):
         List[QuantumCircuit],
         List[QuantumCircuit],
     ]:
+        """
+        Define the target gate or state and the circuits to be executed on the quantum system.
+        This method should be implemented by the user and called at construction of the environment.
+        It can typically be called after the initialization of this base class.
+        """
         raise NotImplementedError("Define target method not implemented")
 
     @abstractmethod
@@ -1246,6 +1240,13 @@ class BaseQuantumEnvironment(ABC, Env):
     def step_tracker(self):
         return self._step_tracker
 
+    @property
+    def abstraction_level(self):
+        """
+        Return the abstraction level of the environment (can be 'circuit' or 'pulse')
+        """
+        return "pulse" if self.circuits[0].calibrations else "circuit"
+
     @step_tracker.setter
     def step_tracker(self, step: int):
         assert step >= 0, "step must be positive integer"
@@ -1266,7 +1267,6 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         self._step_tracker = 0
         self._episode_tracker = 0
-        self.qc_history.clear()
         self.action_history.clear()
         self.reward_history.clear()
         self._total_shots.clear()
@@ -1274,7 +1274,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self.avg_fidelity_history.clear()
         self.process_fidelity_history.clear()
         self.circuit_fidelity_history.clear()
-        self.density_matrix_history.clear()
 
     @property
     def benchmark_cycle(self) -> int:
@@ -1428,6 +1427,13 @@ class BaseQuantumEnvironment(ABC, Env):
         return list(self.layout.get_physical_bits().keys())
 
     @property
+    def backend_info(self) -> BackendInfo:
+        """
+        Return the backend information object
+        """
+        return self._backend_info
+
+    @property
     def pass_manager(self) -> Optional[PassManager]:
         """
         Return the custom pass manager for transpilation (if specified)
@@ -1436,6 +1442,10 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def observables(self) -> SparsePauliOp:
+        """
+        Return set of observables sampled for current epoch of training (relevant only for
+        direct fidelity estimation methods, e.g. 'channel' or 'state')
+        """
         return self._observables
 
     @property

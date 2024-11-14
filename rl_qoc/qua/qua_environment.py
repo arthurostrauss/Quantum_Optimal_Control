@@ -5,7 +5,8 @@ from ..environment.qconfig import QEnvConfig
 from qiskit import QuantumCircuit
 from qua_backend import QMBackend
 from qua_utils import *
-
+from ..helpers.transpiler_passes import QuaParameterTablePass
+from .qua_config import QuaConfig
 
 class QUAEnvironment(ContextAwareQuantumEnvironment):
 
@@ -14,20 +15,13 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         return self.backend
 
     def __init__(self, training_config: QEnvConfig, circuit_context: QuantumCircuit):
+
+        training_config.pass_manager.append(QuaParameterTablePass())
         super().__init__(training_config, circuit_context)
-        # if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
-        #     self.backend, QMBackend
-        # ):
-        #     raise ValueError("The backend should be a QMBackend object")
-        self.parameter_tables = [
-            ParameterTable(
-                {
-                    param.name: [0.0 for _ in range(self.n_actions)]
-                    for param in parameters
-                }
-            )
-            for parameters in self.parameters
-        ]
+        if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
+            self.backend, QMBackend
+        ):
+            raise ValueError("The backend should be a QMBackend object")
 
         self.job = self.start_program(self.circuits[0])
 
@@ -36,7 +30,7 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         Generate a QUA program tailor-made for the RL based calibration project
         """
         # TODO: Set IO2 and IO1 to be the number of input states and the number of observables respectively
-        trunc_index = self._inside_trunc_tracker
+        trunc_index = self.trunc_index
         n_actions = self.n_actions
         real_time_parameters = self.parameter_tables[trunc_index]
         input_stream_template = (0, int, "input_stream")
@@ -240,4 +234,19 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
 
     @property
     def parameter_table(self):
+        """
+        Get the parameter table of the current truncation index
+        """
         return self.parameter_tables[self.trunc_index]
+
+    @property
+    def parameter_tables(self):
+        """
+        Get the parameter tables
+        """
+        property_set = self.pass_manager.property_set
+        if "parameter_table" not in property_set:
+            raise KeyError(
+                "Parameter table not found in the property set, run the PassManager on circuits first"
+            )
+        return property_set["parameter_table"]

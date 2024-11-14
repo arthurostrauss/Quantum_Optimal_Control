@@ -49,6 +49,7 @@ from ..helpers import (
     get_instruction_timings,
     retrieve_neighbor_qubits,
     simulate_pulse_input,
+    get_gate,
 )
 from .qconfig import QEnvConfig
 from .base_q_env import (
@@ -107,6 +108,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         circuit_context: QuantumCircuit,
         training_steps_per_gate: Union[List[int], int] = 1500,
         intermediate_rewards: bool = False,
+        **context_kwargs,
     ):
         """
         Class for wrapping a quantum environment enabling the calibration of a gate in a context-aware manner, that
@@ -120,60 +122,20 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             circuit_context: The circuit context containing the target gate to be calibrated
             training_steps_per_gate: The number of training steps per gate instance
             intermediate_rewards: Whether to provide intermediate rewards during the training
+            context_kwargs: Additional keyword arguments to be passed to the context-aware environment (e.g.
+            backend containing circuit dependent noise model)
         """
-        self._training_steps_per_gate = training_steps_per_gate
-        self._intermediate_rewards = intermediate_rewards
-        self._circuit_context = circuit_context
-        self._unbound_circuit_context = circuit_context.copy()
-        self.circ_tgt_register = QuantumRegister(
-            bits=[
-                self._circuit_context.qubits[i] for i in training_config.physical_qubits
-            ],
-            name="tgt",
-        )
-        target_gate = training_config.target["gate"]
-        if isinstance(target_gate, str):
-            try:
-                target_gate = gate_map()[target_gate.lower()]
-            except KeyError:
-                raise ValueError("Invalid target gate name")
-
-        self.target_instruction = CircuitInstruction(
-            target_gate, (qubit for qubit in self.circ_tgt_register)
-        )
-        if self.tgt_instruction_counts == 0:
-            raise ValueError("Target gate not found in circuit context")
-        # Store time and instruction indices where target gate is played in circuit
-        self._op_start_times, self._target_instruction_timings = (
-            target_instruction_timings(self._circuit_context, self.target_instruction)
-        )
-
-        # self._parameters = [[Parameter(f"a_{j}_{k}") for k in range(training_config.n_actions)]
-        #                     for j in range(self.tgt_instruction_counts)]
-        self._parameters = [
-            ParameterVector(f"a_{j}", training_config.n_actions)
-            for j in range(self.tgt_instruction_counts)
-        ]
-        self.custom_instructions: List[Gate] = []
-        self.new_gates: List[Gate] = []
-        self._optimal_actions = [
-            np.zeros(training_config.n_actions)
-            for _ in range(self.tgt_instruction_counts)
-        ]
-        self.custom_circuit_context = self.circuit_context.copy_empty_like(
-            "custom_context"
-        )
-        self._param_values = create_array(
-            self.tgt_instruction_counts,
-            training_config.batch_size,
-            training_config.action_space.shape[-1],
-        )
 
         super().__init__(training_config)
+        self._training_steps_per_gate = training_steps_per_gate
+        self._intermediate_rewards = intermediate_rewards
+        self.custom_instructions: List[Gate] = []
+        self.new_gates: List[Gate] = []
 
         self.observation_space = Box(
             low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
         )
+        self.set_unbound_circuit_context(circuit_context, **context_kwargs)
 
     def define_target_and_circuits(self):
         """
@@ -254,7 +216,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 involves_target_qubits = any(
                     [
                         qubit in reg
-                        for reg in [self.circ_tgt_register, circ_nn_qubits, circ_anc_qubits]
+                        for reg in [
+                            self.circ_tgt_register,
+                            circ_nn_qubits,
+                            circ_anc_qubits,
+                        ]
                         for qubit in instruction.qubits
                     ]
                 )
@@ -618,9 +584,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         """
         self._unbound_circuit_context = new_context
-        self.set_circuit_context(new_context.copy(), **kwargs)
-        if self._circuit_context.parameters:
-            raise ValueError("Unbound circuit context still contains parameters")
+        if not new_context.parameters:
+            self.set_circuit_context(new_context.copy(), **kwargs)
 
     @property
     def circuit_context(self) -> QuantumCircuit:
@@ -640,6 +605,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         if new_context is not None:  # Update circuit context from scratch
             self._circuit_context = new_context
+            self.custom_circuit_context = self.circuit_context.copy_empty_like(
+                "custom_context"
+            )
             # Define target register and nearest neighbor register for truncated circuits
             self.circ_tgt_register = QuantumRegister(
                 bits=[
@@ -650,14 +618,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
             # Adjust target register to match it with circuit context
             self.target_instruction = CircuitInstruction(
-                self.target.gate, (qubit for qubit in self.circ_tgt_register)
+                get_gate(self.config.target["gate"]),
+                (qubit for qubit in self.circ_tgt_register),
             )
-            if self.tgt_instruction_counts == 0:
+            tgt_instruction_counts = self.tgt_instruction_counts
+            if tgt_instruction_counts == 0:
                 raise ValueError("Target gate not found in circuit context")
 
             self._parameters = [
                 ParameterVector(f"a_{j}", self.n_actions)
-                for j in range(self.tgt_instruction_counts)
+                for j in range(tgt_instruction_counts)
             ]
 
             self._op_start_times, self._target_instruction_timings = (
@@ -666,15 +636,15 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 )
             )
 
-            self._target, self.circuits, self.baseline_circuits = (
-                self.define_target_and_circuits()
-            )
-
             self._param_values = create_array(
-                self.tgt_instruction_counts,
+                tgt_instruction_counts,
                 self.batch_size,
                 self.action_space.shape[-1],
             )
+
+            self._optimal_actions = [
+                np.zeros(self.config.n_actions) for _ in range(tgt_instruction_counts)
+            ]
 
         else:
             for param in kwargs:
@@ -684,11 +654,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     )
                 else:
                     raise ValueError(f"Parameter {param} not found in circuit context")
-            self._target, self.circuits, self.baseline_circuits = (
-                self.define_target_and_circuits()
-            )
 
-        if backend is not None:
+        self._target, self.circuits, self.baseline_circuits = (
+            self.define_target_and_circuits()
+        )
+
+        if backend is not None:  # Update backend and backend info if provided
             self.backend = backend
             self.backend_info = QiskitBackendInfo(
                 backend, self.config.backend_config.instruction_durations

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, List, Any, Literal, Tuple
 
-# from quam.components.channels import Channel as QuamChannel
 import torch
 from gymnasium.spaces import Box
 
@@ -44,8 +43,13 @@ class BackendConfig(ABC):
     ]
     backend: Optional[BackendV2] = None
     parametrized_circuit_kwargs: Dict = field(default_factory=dict)
-    pass_manager: Optional[PassManager] = None
+    pass_manager: PassManager = PassManager()
     instruction_durations: Optional[InstructionDurations] = None
+
+    @property
+    @abstractmethod
+    def config_type(self):
+        return "backend"
 
 
 @dataclass
@@ -67,6 +71,10 @@ class DynamicsConfig(BackendConfig):
     calibration_files: Optional[str] = None
     do_calibrations: bool = True
 
+    @property
+    def config_type(self):
+        return "dynamics"
+
 
 @dataclass
 class QiskitRuntimeConfig(BackendConfig):
@@ -79,44 +87,9 @@ class QiskitRuntimeConfig(BackendConfig):
 
     estimator_options: Optional[Options] = None
 
-
-# @dataclass
-# class QuaConfig(BackendConfig):
-#     """
-#     QUA Configuration
-#
-#     Args:
-#         parametrized_circuit: Function applying parametrized transformation to a QUA program
-#         backend: Quantum Machine backend
-#         hardware_config: Hardware configuration
-#         channel_mapping: Dictionary mapping channels to quantum elements
-#     """
-#
-#     channel_mapping: Dict[pulse.channels.Channel, QuamChannel] = (
-#         None  # channel to quantum element mapping (e.g. DriveChannel(0) -> 'd0')
-#     )
-
-
-@dataclass
-class QiboConfig(BackendConfig):
-    """
-    Qibo configuration elements.
-
-    Args:
-        backend: Qibo backend
-        qubit_pair: Qubit pair to be used for the Qibo platform
-        platform: Qibo platform to be used
-        coupling_map: Coupling map for the Qibo platform
-        n_qubits: Number of qubits for the Qibo platform
-        options: Options to feed the Qibo platform
-    """
-
-    backend: Any
-    qubit_pair: Tuple[int | str, int | str] = (0, 1)
-    platform: str = "qibolab"
-    coupling_map: List[Tuple[int, int]] = field(default_factory=lambda: [(0, 1)])
-    n_qubits: int = 2
-    gate_rule: Tuple[str, Callable] | str = "cz"
+    @property
+    def config_type(self):
+        return "runtime"
 
 
 @dataclass
@@ -408,3 +381,11 @@ class QEnvConfig:
     @instruction_durations_dict.setter
     def instruction_durations_dict(self, value: InstructionDurations):
         self.backend_config.instruction_durations = value
+
+    @property
+    def pass_manager(self):
+        return self.backend_config.pass_manager
+
+    @pass_manager.setter
+    def pass_manager(self, value: PassManager):
+        self.backend_config.pass_manager = value

@@ -288,7 +288,9 @@ def create_spillover_noise_model_from_circuit(
     Returns:
     - NoiseModel object containing the spillover noise model for the given circuit
     """
-    noise_model = noise.NoiseModel(["unitary", "rzx", "cx", "u", "h", "x", "s", "z"])
+    noise_model = noise.NoiseModel(
+        ["unitary", "rzx", "cx", "u", "h", "x", "s", "z", "rx", "ry", "rz"]
+    )
     num_qubits = qc.num_qubits
     assert (
         num_qubits == spillover_rate_matrix.shape[0] == spillover_rate_matrix.shape[1]

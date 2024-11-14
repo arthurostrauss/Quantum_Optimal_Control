@@ -53,6 +53,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
         super().__init__(training_config)
 
+        self._target, self.circuits, self.baseline_circuits = (
+            self.define_target_and_circuits()
+        )
         # self.observation_space = Box(
         #     low=np.array([0, 0] + [-5] * (2 ** self.n_qubits) ** 2),
         #     high=np.array([1, 1] + [5] * (2 ** self.n_qubits) ** 2),

@@ -30,7 +30,7 @@ from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
 )
-from ..helpers import density_matrix_to_statevector, causal_cone_circuit
+from ..helpers import density_matrix_to_statevector, causal_cone_circuit, get_gate
 import warnings
 
 
@@ -319,11 +319,7 @@ class GateTarget(BaseTarget):
         :param input_states_choice: Type of input states to be used for
             the calibration (relevant only for state and CAFE rewards)
         """
-        if isinstance(gate, str):
-            try:
-                gate = gate_map()[gate]
-            except KeyError as e:
-                raise ValueError(f"Gate {gate} not recognized") from e
+        gate = get_gate(gate)
         self.gate = gate
         self._n_reps = n_reps
         super().__init__(

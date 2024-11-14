@@ -122,7 +122,6 @@ from ..environment.qconfig import (
     XEBConfig,
     ORBITConfig,
     FidelityConfig,
-    QiboConfig,
 )
 
 import logging
@@ -1148,12 +1147,12 @@ def causal_cone_circuit(
 ) -> Tuple[QuantumCircuit, List[Qubit]]:
     """
     Get the causal cone circuit of the specified qubits as well as the qubits involved in the causal cone
-    
+
     Args:
         circuit: Quantum Circuit
         qubits: Qubits of interest
     """
-    
+
     dag = circuit_to_dag(circuit)
     if isinstance(qubits, List) and all(isinstance(q, int) for q in qubits):
         qubits = [dag.qubits[q] for q in qubits]
@@ -1256,13 +1255,30 @@ def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
     return control_channel_map
 
 
+def get_gate(gate: Gate | str):
+    """
+    Get gate from gate_map
+    """
+    if isinstance(gate, str):
+        if gate.lower() == "cnot":
+            gate = "cx"
+        elif gate.lower() == "cphase":
+            gate = "cz"
+        elif gate.lower() == "x/2":
+            gate = "sx"
+        try:
+            gate = gate_map()[gate.lower()]
+        except KeyError:
+            raise ValueError("Invalid target gate name")
+    return gate
+
+
 def retrieve_primitives(
     backend: Backend_type,
     config: BackendConfig,
     estimator_options: Optional[
         Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
     ] = None,
-    circuit: Optional[QuantumCircuit] = None,
 ) -> Tuple[Estimator_type, Sampler_type]:
     """
     Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
@@ -1271,7 +1287,6 @@ def retrieve_primitives(
         backend: Backend instance
         config: Configuration dictionary
         estimator_options: Estimator options
-        circuit: QuantumCircuit instance implementing the custom gate (for DynamicsBackend)
     """
     if isinstance(backend, DynamicsBackend):
         assert isinstance(
@@ -1287,7 +1302,7 @@ def retrieve_primitives(
         if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
             calibration_files = config.calibration_files
             _, _ = perform_standard_calibrations(backend, calibration_files)
-    elif isinstance(backend, str) and isinstance(config, QiboConfig):
+    elif config.config_type == "qibo":
         from ..qibo import QiboEstimatorV2
 
         estimator = QiboEstimatorV2(
@@ -1314,7 +1329,7 @@ def retrieve_primitives(
         )
         sampler = RuntimeSamplerV2(mode=estimator.mode)
 
-    # elif isinstance(backend, QMBackend):
+    # elif config.config_type == 'qua':
     #     estimator = QMEstimator(backend=backend, options=estimator_options)
     #     sampler = QMSampler(backend=backend)
     else:

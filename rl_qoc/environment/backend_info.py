@@ -4,15 +4,23 @@ from qiskit import transpile, QiskitError
 from qiskit.circuit import QuantumCircuit
 from qiskit.transpiler import PassManager, InstructionDurations, Layout, CouplingMap
 from qiskit.providers import BackendV2
+from qibo.transpiler import Passes
 
 
 class BackendInfo(ABC):
 
-    def __init__(self, n_qubits: int = 0):
+    def __init__(self, n_qubits: int = 0, pass_manager=None):
+        """
+        Initialize the backend information
+
+        :param n_qubits: Number of qubits for the quantum environment
+        :param pass_manager: Pass manager for the quantum environment (default is None)
+        """
         self._n_qubits = n_qubits
+        self._pass_manager = pass_manager
 
     @abstractmethod
-    def custom_transpile(self, qc, *args, **kwargs):
+    def custom_transpile(self, qc_input, *args, **kwargs):
         pass
 
     @property
@@ -44,6 +52,10 @@ class BackendInfo(ABC):
         assert n_qubits > 0, "Number of qubits should be positive"
         self._n_qubits = n_qubits
 
+    @property
+    def pass_manager(self):
+        return self._pass_manager
+
 
 class QiskitBackendInfo(BackendInfo):
     """
@@ -54,28 +66,28 @@ class QiskitBackendInfo(BackendInfo):
         self,
         backend: Optional[BackendV2] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
-        custom_pass_manager: Optional[PassManager] = None,
+        pass_manager: Optional[PassManager] = PassManager(),
         n_qubits: int = 0,
     ):
         """
         Initialize the backend information
         :param backend: Backend object for the quantum environment
         :param custom_instruction_durations: Custom instruction durations for the backend
-        :param custom_pass_manager: Custom pass manager for the backend
+        :param pass_manager: Custom pass manager for the backend (applied on top and prior to Qiskit preset pass manager)
         :param n_qubits: Number of qubits for the quantum environment
         """
         super().__init__(
-            backend.num_qubits if isinstance(backend, BackendV2) else n_qubits
+            backend.num_qubits if isinstance(backend, BackendV2) else n_qubits,
+            pass_manager,
         )
         if isinstance(backend, BackendV2) and backend.coupling_map is None:
             raise QiskitError("Backend does not have a coupling map")
         self.backend = backend
-        self.pass_manager = custom_pass_manager
         self._instruction_durations = custom_instruction_durations
 
     def custom_transpile(
         self,
-        qc: Union[QuantumCircuit, List[QuantumCircuit]],
+        qc_input: Union[QuantumCircuit, List[QuantumCircuit]],
         initial_layout: Optional[Layout] = None,
         scheduling: bool = True,
         optimization_level: int = 0,
@@ -89,16 +101,16 @@ class QiskitBackendInfo(BackendInfo):
                 "Backend or instruction durations should be provided for scheduling"
             )
         if remove_final_measurements:
-            if isinstance(qc, QuantumCircuit):
-                circuit = qc.remove_final_measurements(inplace=False)
+            if isinstance(qc_input, QuantumCircuit):
+                circuit = qc_input.remove_final_measurements(inplace=False)
             else:
-                circuit = [circ.remove_final_measurements(inplace=False) for circ in qc]
+                circuit = [
+                    circ.remove_final_measurements(inplace=False) for circ in qc_input
+                ]
         else:
-            circuit = qc
+            circuit = qc_input
 
-        if self.pass_manager is not None:
-            circuit = self.pass_manager.run(circuit)
-        return transpile(
+        circuit = transpile(
             circuit,
             backend=self.backend if isinstance(self.backend, BackendV2) else None,
             scheduling_method=(
@@ -113,6 +125,8 @@ class QiskitBackendInfo(BackendInfo):
             initial_layout=initial_layout,
             dt=self.dt,
         )
+        circuit = self.pass_manager.run(circuit)
+        return circuit
 
     @property
     def coupling_map(self):
@@ -162,7 +176,10 @@ class QiboBackendInfo(BackendInfo):
     """
 
     def __init__(
-        self, n_qubits: int = 0, coupling_map: Optional[List[Tuple[int, int]]] = None
+        self,
+        n_qubits: int = 0,
+        coupling_map: Optional[List[Tuple[int, int]]] = None,
+        pass_manager: Optional[Passes] = None,
     ):
         """
         Initialize the backend information
@@ -170,7 +187,7 @@ class QiboBackendInfo(BackendInfo):
         :param coupling_map: Coupling map for the quantum environment
 
         """
-        super().__init__(n_qubits)
+        super().__init__(n_qubits, pass_manager)
         self._coupling_map = coupling_map
 
     @property
@@ -194,9 +211,9 @@ class QiboBackendInfo(BackendInfo):
         )
 
     def custom_transpile(
-        self, qc: Union[QuantumCircuit, List[QuantumCircuit]], *args, **kwargs
+        self, qc_input: Union[QuantumCircuit, List[QuantumCircuit]], *args, **kwargs
     ):
 
         return transpile(
-            qc, basis_gates=self.basis_gates, coupling_map=self.coupling_map
+            qc_input, basis_gates=self.basis_gates, coupling_map=self.coupling_map
         )

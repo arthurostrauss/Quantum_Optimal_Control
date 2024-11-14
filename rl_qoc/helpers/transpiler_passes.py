@@ -6,6 +6,7 @@ from qiskit.circuit import *
 from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping as gate_map,
 )
+from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.passes import FilterOpNodes
 from qiskit.transpiler import TransformationPass
@@ -16,24 +17,72 @@ from qiskit.transpiler import AnalysisPass
 from qiskit.dagcircuit import DAGOpNode
 from collections import defaultdict
 
+from qualang_tools.video_mode import ParameterTable
+
 
 class MomentAnalysisPass(AnalysisPass):
     """Analysis pass to group operations into moments, storing results in the PropertySet."""
 
+    def __init__(self):
+        super().__init__()
+        self.property_history = []
+
     def run(self, dag):
+        # Initialize dictionary to store moments for the current DAG
         moments = defaultdict(list)
         moment_index = 0
 
         # Use the layers method to get sequentially executable groups
         for layer in dag.layers():
-            for node in layer['graph'].op_nodes():
+            for node in layer["graph"].op_nodes():
                 if isinstance(node, DAGOpNode):
                     moments[moment_index].append(node)
             moment_index += 1
 
-        # Store the moments in the PropertySet
-        self.property_set['moments'] = moments
-        
+        self.property_history.append(moments)
+        self.property_set["moments"] = (
+            self.property_history
+            if len(self.property_history) > 1
+            else self.property_history[0]
+        )
+
+
+class QuaParameterTablePass(AnalysisPass):
+    """
+    This pass is used to generate a ParameterTable object from the parameters of a list of circuits and
+    adds it to the property set of the PassManager.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.parameter_tables = []
+
+    def run(self, circuit):
+        # Get the parameters from the circuit.
+        parameters = circuit.parameters
+        param_dict = {}
+        if parameters:
+
+            # If the circuit has parameters, convert them to a dictionary.
+            for parameter in parameters:
+                if (
+                    isinstance(parameter, ParameterVectorElement)
+                    and parameter.vector.name not in param_dict
+                ):
+                    param_dict[parameter.vector.name] = [
+                        0.0 for _ in range(len(parameter.vector))
+                    ]
+                elif isinstance(parameter, Parameter):
+                    param_dict[parameter.name] = 0.0
+
+            # Create a ParameterTable object.
+            param_table = ParameterTable(param_dict)
+            self.parameter_tables.append(param_table)
+            # Add the ParameterTable object to the property set
+            self.property_set["parameter_table"] = self.parameter_tables
+
+        return circuit
+
 
 def format_input(input, input_type):
     """
