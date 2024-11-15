@@ -6,7 +6,6 @@ from qiskit.circuit import *
 from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping as gate_map,
 )
-from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.passes import FilterOpNodes
 from qiskit.transpiler import TransformationPass
@@ -16,8 +15,6 @@ from qiskit.converters import circuit_to_dag
 from qiskit.transpiler import AnalysisPass
 from qiskit.dagcircuit import DAGOpNode
 from collections import defaultdict
-
-from qualang_tools.video_mode import ParameterTable
 
 
 class MomentAnalysisPass(AnalysisPass):

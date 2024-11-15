@@ -130,18 +130,13 @@ class ExecutionConfig:
 
 
 @dataclass
-class RewardConfig:
+class RewardConfig(ABC):
     """
     Configuration for how to compute the reward in the RL workflow
     """
 
-    reward_method: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
-
     def __post_init__(self):
-        if self.reward_method == "fidelity":
-            self.dfe = False
-
-        elif self.reward_method == "channel" or self.reward_method == "state":
+        if self.reward_method == "channel" or self.reward_method == "state":
             self.dfe = True
         else:
             self.dfe = False
@@ -149,6 +144,11 @@ class RewardConfig:
     @property
     def reward_args(self):
         return {}
+    
+    @property
+    @abstractmethod
+    def reward_method(self) -> str:
+        raise NotImplementedError
 
 
 @dataclass
@@ -157,7 +157,9 @@ class FidelityConfig(RewardConfig):
     Configuration for computing the reward based on fidelity estimation
     """
 
-    reward_method: Literal["fidelity"] = field(default="fidelity", init=False)
+    @property
+    def reward_method(self):
+        return "fidelity"
 
 
 @dataclass
@@ -166,7 +168,9 @@ class StateConfig(RewardConfig):
     Configuration for computing the reward based on state fidelity estimation
     """
 
-    reward_method: Literal["state"] = field(default="state", init=False)
+    @property
+    def reward_method(self):
+        return "state"
 
 
 @dataclass
@@ -175,12 +179,15 @@ class ChannelConfig(RewardConfig):
     Configuration for computing the reward based on channel fidelity estimation
     """
 
-    reward_method: Literal["channel"] = field(default="channel", init=False)
     num_eigenstates_per_pauli: int = 1
 
     @property
     def reward_args(self):
         return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli}
+    
+    @property
+    def reward_method(self):
+        return "channel"
 
 
 @dataclass
@@ -189,7 +196,9 @@ class XEBConfig(RewardConfig):
     Configuration for computing the reward based on cross-entropy benchmarking
     """
 
-    reward_method: Literal["xeb"] = field(default="xeb", init=False)
+    @property
+    def reward_method(self):
+        return "xeb"
 
 
 @dataclass
@@ -198,12 +207,15 @@ class CAFEConfig(RewardConfig):
     Configuration for computing the reward based on Context-Aware Fidelity Estimation (CAFE)
     """
 
-    reward_method: Literal["cafe"] = field(default="cafe", init=False)
     input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
 
     @property
     def reward_args(self):
         return {"input_states_choice": self.input_states_choice}
+    
+    @property
+    def reward_method(self):
+        return "cafe"
 
 
 @dataclass
@@ -212,8 +224,11 @@ class ORBITConfig(RewardConfig):
     Configuration for computing the reward based on ORBIT
     """
 
-    reward_method: Literal["orbit"] = field(default="orbit", init=False)
     use_interleaved: bool = False
+    
+    @property
+    def reward_method(self):
+        return "orbit"
 
 
 def default_reward_config():
@@ -350,20 +365,36 @@ class QEnvConfig:
     def reward_method(
         self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
     ):
-        self.reward_config.reward_method = value
+        if value == "fidelity":
+            self.reward_config = FidelityConfig()
+        elif value == "channel":
+            self.reward_config = ChannelConfig()
+        elif value == "state":
+            self.reward_config = StateConfig()
+        elif value == "xeb":
+            self.reward_config = XEBConfig()
+        elif value == "cafe":
+            self.reward_config = CAFEConfig()
+        elif value == "orbit":
+            self.reward_config = ORBITConfig()
+        else:
+            raise ValueError(f"Reward method {value} not recognized")
 
     @property
     def dfe(self):
         """
         Indicates if Direct Fidelity Estimation is used for the reward computation (true if reward_method is "channel"
         or "state" and false otherwise)
-        Returns:
+        Returns: Boolean indicating if DFE is used
 
         """
         return self.reward_config.dfe
 
     @property
     def n_actions(self):
+        """
+        Number of actions in the action space (number of parameters to tune in the parametrized circuit)
+        """
         return self.action_space.shape[-1]
 
     @property
