@@ -144,7 +144,7 @@ class RewardConfig(ABC):
     @property
     def reward_args(self):
         return {}
-    
+
     @property
     @abstractmethod
     def reward_method(self) -> str:
@@ -184,7 +184,7 @@ class ChannelConfig(RewardConfig):
     @property
     def reward_args(self):
         return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli}
-    
+
     @property
     def reward_method(self):
         return "channel"
@@ -212,7 +212,7 @@ class CAFEConfig(RewardConfig):
     @property
     def reward_args(self):
         return {"input_states_choice": self.input_states_choice}
-    
+
     @property
     def reward_method(self):
         return "cafe"
@@ -225,7 +225,7 @@ class ORBITConfig(RewardConfig):
     """
 
     use_interleaved: bool = False
-    
+
     @property
     def reward_method(self):
         return "orbit"

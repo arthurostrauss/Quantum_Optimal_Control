@@ -5,8 +5,9 @@ from ..environment.qconfig import QEnvConfig
 from qiskit import QuantumCircuit
 from qua_backend import QMBackend
 from qua_utils import *
-from ..helpers.transpiler_passes import QuaParameterTablePass
+from .transpiler_passes import QuaParameterTablePass
 from .qua_config import QuaConfig
+
 
 class QUAEnvironment(ContextAwareQuantumEnvironment):
 

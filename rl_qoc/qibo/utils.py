@@ -36,7 +36,7 @@ def new_cz_rule(
         FluxPulse(
             start=0,
             amplitude=pulse_params[0],
-            duration=pulse_params[1],
+            duration=int(pulse_params[1]),
             shape="Rectangular()",
             qubit=old_cz_flux.qubit.name,
         )
@@ -81,7 +81,7 @@ def resolve_gate_rule(gate_rule: str | Tuple[str, Callable]):
         if gate_rule == "cz":
             return gates.CZ, new_cz_rule
         elif gate_rule == "rx" or gate_rule == "sx" or gate_rule == "x":
-            return gates.RX, new_rx_rule
+            return gates.GPI2, new_rx_rule
     else:
         raise ValueError(f"Unknown gate rule: {gate_rule}")
 
