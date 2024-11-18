@@ -9,7 +9,9 @@ from qibo.transpiler import Passes
 
 class BackendInfo(ABC):
 
-    def __init__(self, n_qubits: int = 0, pass_manager=None):
+    def __init__(
+        self, n_qubits: int = 0, pass_manager=None, skip_transpilation: bool = False
+    ):
         """
         Initialize the backend information
 
@@ -18,6 +20,7 @@ class BackendInfo(ABC):
         """
         self._n_qubits = n_qubits
         self._pass_manager = pass_manager
+        self._skip_transpilation = skip_transpilation
 
     @abstractmethod
     def custom_transpile(self, qc_input, *args, **kwargs):
@@ -56,6 +59,10 @@ class BackendInfo(ABC):
     def pass_manager(self):
         return self._pass_manager
 
+    @property
+    def skip_transpilation(self):
+        return self._skip_transpilation
+
 
 class QiskitBackendInfo(BackendInfo):
     """
@@ -67,6 +74,7 @@ class QiskitBackendInfo(BackendInfo):
         backend: Optional[BackendV2] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
         pass_manager: Optional[PassManager] = PassManager(),
+        skip_transpilation: bool = False,
         n_qubits: int = 0,
     ):
         """
@@ -79,6 +87,7 @@ class QiskitBackendInfo(BackendInfo):
         super().__init__(
             backend.num_qubits if isinstance(backend, BackendV2) else n_qubits,
             pass_manager,
+            skip_transpilation,
         )
         if isinstance(backend, BackendV2) and backend.coupling_map is None:
             raise QiskitError("Backend does not have a coupling map")
@@ -110,22 +119,25 @@ class QiskitBackendInfo(BackendInfo):
         else:
             circuit = qc_input
 
-        circuit = transpile(
-            circuit,
-            backend=self.backend if isinstance(self.backend, BackendV2) else None,
-            scheduling_method=(
-                "asap"
-                if self.instruction_durations is not None and scheduling
-                else None
-            ),
-            basis_gates=self.basis_gates,
-            coupling_map=(self.coupling_map if self.coupling_map.size() != 0 else None),
-            instruction_durations=self.instruction_durations,
-            optimization_level=optimization_level,
-            initial_layout=initial_layout,
-            dt=self.dt,
-        )
-        circuit = self.pass_manager.run(circuit)
+        if not self.skip_transpilation:
+            circuit = transpile(
+                circuit,
+                backend=self.backend if isinstance(self.backend, BackendV2) else None,
+                scheduling_method=(
+                    "asap"
+                    if self.instruction_durations is not None and scheduling
+                    else None
+                ),
+                basis_gates=self.basis_gates,
+                coupling_map=(
+                    self.coupling_map if self.coupling_map.size() != 0 else None
+                ),
+                instruction_durations=self.instruction_durations,
+                optimization_level=optimization_level,
+                initial_layout=initial_layout,
+                dt=self.dt,
+            )
+            circuit = self.pass_manager.run(circuit)
         return circuit
 
     @property

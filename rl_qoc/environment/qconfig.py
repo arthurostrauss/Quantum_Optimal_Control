@@ -46,6 +46,7 @@ class BackendConfig(ABC):
     ]
     backend: Optional[BackendV2] = None
     parametrized_circuit_kwargs: Dict = field(default_factory=dict)
+    skip_transpilation: bool = False
     pass_manager: PassManager = PassManager()
     instruction_durations: Optional[InstructionDurations] = None
 

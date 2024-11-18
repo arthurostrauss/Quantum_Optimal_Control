@@ -169,19 +169,26 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             for _ in range(self.tgt_instruction_counts)
         ]
 
-        circ_nn_qubits = [
-            self.circuit_context.qubits[i] for i in self.physical_neighbor_qubits
-        ]  # Nearest neighbors
-        circ_anc_qubits = [
-            self.circuit_context.qubits[i] for i in self.physical_next_neighbor_qubits
-        ]  # Next neighbors
+        if self.circuit_context.num_qubits > len(self.physical_target_qubits):
+            circ_nn_qubits = [
+                self.circuit_context.qubits[i] for i in self.physical_neighbor_qubits
+            ]  # Nearest neighbors
+            circ_anc_qubits = [
+                self.circuit_context.qubits[i]
+                for i in self.physical_next_neighbor_qubits
+            ]  # Next neighbors
 
-        nn_register = QuantumRegister(
-            len(circ_nn_qubits), name="nn"
-        )  # Nearest neighbors (For new circuits)
-        anc_register = QuantumRegister(
-            len(circ_anc_qubits), name="anc"
-        )  # Next neighbors (For new circuits)
+            nn_register = QuantumRegister(
+                len(circ_nn_qubits), name="nn"
+            )  # Nearest neighbors (For new circuits)
+            anc_register = QuantumRegister(
+                len(circ_anc_qubits), name="anc"
+            )  # Next neighbors (For new circuits)
+        else:
+            circ_nn_qubits = []
+            circ_anc_qubits = []
+            nn_register = []
+            anc_register = []
 
         # Create mapping between circuit context qubits and custom circuit associated single qubit registers
         mapping = {

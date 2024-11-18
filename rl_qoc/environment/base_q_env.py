@@ -140,6 +140,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 self.backend,
                 training_config.backend_config.instruction_durations,
                 pass_manager=training_config.backend_config.pass_manager,
+                skip_transpilation=training_config.backend_config.skip_transpilation,
             )
         elif training_config.backend_config.config_type == "qibo":
             self._backend_info = QiboBackendInfo(
