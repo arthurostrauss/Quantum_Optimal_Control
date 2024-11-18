@@ -6,6 +6,9 @@ from typing import Callable, Dict, Optional, List, Any, Literal, Tuple
 
 import torch
 from gymnasium.spaces import Box
+from qiskit import QiskitError
+from qiskit.circuit.library import get_standard_gate_name_mapping
+from qiskit.quantum_info import DensityMatrix, Statevector
 
 from qiskit_ibm_runtime import Options
 from qiskit.providers import BackendV2
@@ -53,6 +56,24 @@ class BackendConfig(ABC):
 
 
 @dataclass
+class QiskitConfig(BackendConfig):
+    """
+    Qiskit configuration elements.
+
+    Args:
+        parametrized_circuit: Function applying parametrized transformation to a quantum circuit (Qiskit or QUA)
+        backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
+        parametrized_circuit_kwargs: Additional arguments to feed the parametrized_circuit function
+        pass_manager
+        instruction_durations: Dictionary containing the durations of the instructions in the circuit
+    """
+
+    @property
+    def config_type(self):
+        return "qiskit"
+
+
+@dataclass
 class DynamicsConfig(BackendConfig):
     """
     Qiskit Dynamics configuration elements.
@@ -90,6 +111,62 @@ class QiskitRuntimeConfig(BackendConfig):
     @property
     def config_type(self):
         return "runtime"
+
+
+@dataclass
+class TargetConfig:
+    """
+    Configuration for the target state or gate to prepare
+
+    Args:
+        gate: Target gate to prepare
+        physical_qubits: Physical qubits on which the target gate is applied
+    """
+
+    physical_qubits: List[int]
+
+
+@dataclass
+class GateTargetConfig(TargetConfig):
+    """
+    Configuration for the target gate to prepare
+
+    Args:
+        gate: Target gate to prepare
+        physical_qubits: Physical qubits on which the target gate is applied
+    """
+
+    gate: Gate | str
+
+    def __post_init__(self):
+        if isinstance(self.gate, str):
+            try:
+                self.gate = get_standard_gate_name_mapping()[self.gate]
+            except KeyError as e:
+                raise ValueError(f"Gate {self.gate} not recognized") from e
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+
+@dataclass
+class StateTargetConfig(TargetConfig):
+    """
+    Configuration for the target state to prepare
+
+    Args:
+        state: Target state to prepare
+        physical_qubits: Physical qubits on which the target state is prepared
+    """
+
+    state: QuantumCircuit | DensityMatrix | Statevector | str
+
+    def __post_init__(self):
+        if isinstance(self.state, str):
+            try:
+                self.state = Statevector.from_label(self.state)
+            except QiskitError as e:
+                raise ValueError(f"State {self.state} not recognized") from e
 
 
 @dataclass
@@ -256,7 +333,9 @@ class QEnvConfig:
         device (torch.device): Device on which the simulation is run
     """
 
-    target: Dict[str, List | Gate | QuantumRegister | QuantumCircuit | str]
+    target: (
+        Dict[str, List | Gate | QuantumRegister | QuantumCircuit | str] | TargetConfig
+    )
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig

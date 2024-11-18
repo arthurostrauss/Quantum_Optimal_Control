@@ -80,6 +80,8 @@ from ..helpers.helper_functions import (
     substitute_target_gate,
     get_hardware_runtime_single_circuit,
     has_noise_model,
+)
+from ..helpers.pulse_utils import (
     get_optimal_z_rotation,
     rotate_unitary,
     projected_state,
