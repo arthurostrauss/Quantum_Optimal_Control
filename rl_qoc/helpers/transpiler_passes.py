@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Tuple, Optional, Callable, Dict, Any, Sequence, Union
+from typing import List, Tuple, Optional, Callable, Dict, Any, Sequence, Union, get_args
 
 from qiskit.circuit import *
 from qiskit.circuit.library.standard_gates import (
@@ -55,11 +55,30 @@ def format_input(input, input_type):
     Returns:
         The formatted input
     """
-    if isinstance(input, List):
-        assert all([isinstance(i, input_type) for i in input]), "Invalid input format"
-    else:
+    if not isinstance(input, List):
         input = [input]
+    valid_types = get_args(input_type)
+    assert all([isinstance(i, valid_types) for i in input]), "Invalid input format"
     return input
+
+
+def _parse_instruction(instruction):
+    if isinstance(instruction, CircuitInstruction):
+        return (instruction.operation, instruction.qubits, instruction.clbits)
+    op = gate_map().get(instruction[0], instruction[0])
+    qargs = tuple(instruction[1]) if isinstance(instruction[1], QuantumRegister) else instruction[1]
+    if len(instruction) > 2:
+        cargs = tuple(instruction[2]) if isinstance(instruction[2], ClassicalRegister) else instruction[2]
+    else:
+        cargs = ()
+    return (op, qargs, cargs)
+
+
+def _parse_function(func):
+    try:
+        return gate_map()[func] if isinstance(func, str) else func
+    except KeyError:
+        raise ValueError("Provided instruction name not part of standard instruction set")
 
 
 class CustomGateReplacementPass(TransformationPass):
@@ -96,10 +115,11 @@ class CustomGateReplacementPass(TransformationPass):
         )
         parameters = format_input(
             parameters,
-            Optional[Union[ParameterVector, List[Union[Parameter, float, int]]]],
+            Optional[Union[ParameterVector, List]],
         )
+        
         parametrized_circuit_functions_args = format_input(
-            parametrized_circuit_functions_args, Dict[str, Any]
+            parametrized_circuit_functions_args, Optional[Dict]
         )
         if all([param is None for param in parameters]):
             parameters = [None] * len(target_instructions)
@@ -111,154 +131,51 @@ class CustomGateReplacementPass(TransformationPass):
             == len(parameters)
             == len(parametrized_circuit_functions_args)
         ), "Number of target instructions, parametrized circuit functions, and parameters must match"
-        self.target_instructions = []
-
-        for target_instruction in target_instructions:
-            if isinstance(target_instruction, CircuitInstruction):
-                self.target_instructions.append(
-                    (
-                        target_instruction.operation,
-                        target_instruction.qubits,
-                        target_instruction.clbits,
-                    )
-                )
-            else:
-                if isinstance(target_instruction[0], str):
-                    try:
-                        op = gate_map()[target_instruction[0]]
-                    except KeyError:
-                        raise ValueError(
-                            "Provided instruction name not part of standard instruction set"
-                        )
-                elif isinstance(op, Instruction):
-                    op = target_instruction[0]
-                else:
-                    raise ValueError("Invalid instruction format")
-
-                qargs = target_instruction[1]
-                if isinstance(qargs, QuantumRegister):
-                    qargs = tuple([qargs[i] for i in range(len(qargs))])
-                elif qargs is None:
-                    qargs = ()
-                if len(target_instruction) > 2:
-                    cargs = target_instruction[2]
-                    if isinstance(cargs, ClassicalRegister):
-                        cargs = tuple([cargs[i] for i in range(len(cargs))])
-                else:
-                    cargs = ()
-
-                self.target_instructions.append((op, qargs, cargs))
-
-        self.functions = new_elements
-        for i, function in enumerate(self.functions):
-            if isinstance(function, str):
-                try:
-                    self.functions[i] = gate_map()[function]
-                except KeyError:
-                    raise ValueError(
-                        "Provided instruction name not part of standard instruction set"
-                    )
-
+        self.target_instructions = [_parse_instruction(inst) for inst in target_instructions]
+        self.functions = [_parse_function(func) for func in new_elements]
         self.parameters = parameters
+        self.parametrized_circuit_functions_args = parametrized_circuit_functions_args
 
     def run(self, dag: DAGCircuit):
         """Run the custom transformation on the DAG."""
-        for i, target_instruction in enumerate(self.target_instructions):
-            op, qargs, cargs = target_instruction
+        for i, (op, qargs, cargs) in enumerate(self.target_instructions):
+           
             qc = QuantumCircuit()
-            if qargs:
-                if isinstance(qargs[0], int):
-                    qargs = tuple([dag.qubits[q] for q in qargs])
-                qc.add_bits(qargs)
-                if cargs:
-                    if isinstance(cargs[0], int):
-                        cargs = tuple([dag.clbits[c] for c in cargs])
-                    qc.add_bits(cargs)
-                    if isinstance(self.functions[i], QuantumCircuit):
-                        qc.compose(
-                            self.functions[i], qubits=qargs, clbits=cargs, inplace=True
-                        )
-                        if self.parameters[i] is not None:
-                            qc.assign_parameters(self.parameters[i], inplace=True)
-
-                    elif isinstance(self.functions[i], Gate):
-                        qc.append(self.functions[i], qargs, cargs)
-                        if self.parameters[i] is not None:
-                            qc.assign_parameters(self.parameters[i], inplace=True)
+            qargs = tuple(dag.qubits[q] if isinstance(q, int) else q for q in qargs)
+            cargs = tuple(dag.clbits[c] if isinstance(c, int) else c for c in cargs)
+            qc.add_bits(qargs+cargs)
+            
+            func = self.functions[i]
+            args = list(qargs) + list(cargs)
+            qargs = qargs if qargs else None
+            cargs = cargs if cargs else None
+            
+            if isinstance(func, QuantumCircuit):
+                qc.compose(func, qubits=qargs,
+                           clbits=cargs, inplace=True)
+                if self.parameters[i] is not None:
+                    qc.assign_parameters(self.parameters[i], inplace=True)
+            elif isinstance(func, Gate):
+                qc.append(func, qargs, cargs)
+            else: # Callable
+                if qargs:
+                    if cargs:
+                        func(qc, self.parameters[i], qargs, cargs,
+                             **self.parametrized_circuit_functions_args[i])
                     else:
-                        self.functions[i](
-                            qc,
-                            self.parameters[i],
-                            qargs,
-                            cargs,
-                            **self.parametrized_circuit_functions_args[i],
-                        )
+                        func(qc, self.parameters[i], qargs,
+                             **self.parametrized_circuit_functions_args[i])
+                elif cargs:
+                    func(qc, self.parameters[i], cargs,
+                         **self.parametrized_circuit_functions_args[i])
                 else:
-                    if isinstance(self.functions[i], QuantumCircuit):
-                        qc.compose(self.functions[i], qubits=qargs, inplace=True)
-                        if self.parameters[i] is not None:
-                            qc.assign_parameters(self.parameters[i], inplace=True)
-
-                    elif isinstance(self.functions[i], Gate):
-                        qc.append(self.functions[i], qargs)
-                        if self.parameters[i] is not None:
-                            qc.assign_parameters(self.parameters[i], inplace=True)
-                    else:
-                        self.functions[i](
-                            qc,
-                            self.parameters[i],
-                            qargs,
-                            **self.parametrized_circuit_functions_args[i],
-                        )
-            elif cargs:
-                if isinstance(cargs[0], int):
-                    cargs = (dag.clbits[c] for c in cargs)
-                qc.add_bits(cargs)
-                if isinstance(self.functions[i], QuantumCircuit):
-                    qc.compose(self.functions[i], clbits=cargs, inplace=True)
-                    if self.parameters[i] is not None:
-                        qc.assign_parameters(self.parameters[i], inplace=True)
-                elif isinstance(self.functions[i], Gate):
-                    qc.append(self.functions[i], cargs=cargs)
-                    if self.parameters[i] is not None:
-                        qc.assign_parameters(self.parameters[i], inplace=True)
-                else:
-                    self.functions[i](
-                        qc,
-                        self.parameters[i],
-                        cargs,
-                        **self.parametrized_circuit_functions_args[i],
-                    )
-            else:
-                if isinstance(self.functions[i], QuantumCircuit):
-                    if self.functions[i].qubits:
-                        qc.add_bits(self.functions[i].qubits)
-                    if self.functions[i].clbits:
-                        qc.add_bits(self.functions[i].clbits)
-                    qc.compose(self.functions[i], inplace=True)
-                    if self.parameters[i] is not None:
-                        qc.assign_parameters(self.parameters[i], inplace=True)
-                elif isinstance(self.functions[i], Gate):
-                    qc.add_register(QuantumRegister(self.functions[i].num_qubits))
-                    qc.append(self.functions[i], range(self.functions[i].num_qubits))
-                    if self.parameters[i] is not None:
-                        qc.assign_parameters(self.parameters[i], inplace=True)
-                else:
-                    self.functions[i](
-                        qc,
-                        self.parameters[i],
-                        **self.parametrized_circuit_functions_args[i],
-                    )
+                    func(qc, self.parameters[i],
+                         **self.parametrized_circuit_functions_args[i])
 
             instruction_nodes = dag.named_nodes(op.name)
             for node in instruction_nodes:
-                args = list(qargs) + list(cargs)
-                if len(args) == 0:
-                    dag.substitute_node_with_dag(node, circuit_to_dag(qc))
-                else:
-                    dag.substitute_node_with_dag(
-                        node, circuit_to_dag(qc), wires=list(qargs) + list(cargs)
-                    )
+                dag.substitute_node_with_dag(node, circuit_to_dag(qc), wires= args if args else None)
+            
         return dag
 
 
