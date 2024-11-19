@@ -440,8 +440,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             # Assess circuit fidelity with ComputeUncompute algo
             try:
                 print("Starting Direct Fidelity Estimation...")
+                input_state = np.random.choice(self.target.input_states)
                 observables, shots = self.retrieve_observables(
-                    self._input_state.target_state,
+                    input_state.target_state,
                     self.circuits[self.trunc_index],
                     self.config.benchmark_config.dfe_precision,
                 )
@@ -662,13 +663,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 else:
                     raise ValueError(f"Parameter {param} not found in circuit context")
 
-        self._target, self.circuits, self.baseline_circuits = (
-            self.define_target_and_circuits()
-        )
-
         if backend is not None:  # Update backend and backend info if provided
             self.backend = backend
-            self.backend_info = QiskitBackendInfo(
+            self._backend_info = QiskitBackendInfo(
                 backend, self.config.backend_config.instruction_durations
             )
             self._physical_neighbor_qubits = retrieve_neighbor_qubits(
@@ -679,9 +676,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 self.physical_target_qubits + self.physical_neighbor_qubits,
             )
 
+        self._target, self.circuits, self.baseline_circuits = (
+            self.define_target_and_circuits()
+        )
+
     def update_gate_calibration(self, gate_names: Optional[List[str]] = None):
         """
         Update gate calibrations with optimal actions
+
+        Args:
+            gate_names: Names of the custom gates to be created
         """
         if self.abstraction_level == "pulse":
             if gate_names is not None and len(gate_names) != len(

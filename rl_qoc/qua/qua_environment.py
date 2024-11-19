@@ -22,9 +22,8 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
             self.backend, QMBackend
         ):
             raise ValueError("The backend should be a QMBackend object")
-        
+
         self.circuits = [add_parameter_table_to_circuit(qc) for qc in self.circuits]
-    
 
     def rl_qoc_training_qua_prog(self):
         """
