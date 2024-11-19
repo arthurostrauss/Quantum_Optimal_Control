@@ -247,7 +247,7 @@ class BaseQuantumEnvironment(ABC, Env):
         :return: Reward table (reward for each action in the batch)
         """
 
-        trunc_index = self._inside_trunc_tracker
+        trunc_index = self.trunc_index
         qc = self.circuits[trunc_index].copy()
         params, batch_size = np.array(actions), actions.shape[0]
         if batch_size != self.batch_size:

@@ -1,6 +1,6 @@
 from qiskit.circuit.parameter import Parameter
 from qiskit.circuit.parametervector import ParameterVectorElement
-from qiskit.transpiler.basepasses import AnalysisPass
+from qiskit.transpiler.basepasses import AnalysisPass, TransformationPass
 from qualang_tools.video_mode import ParameterTable
 
 
@@ -14,9 +14,9 @@ class QuaParameterTablePass(AnalysisPass):
         super().__init__()
         self.parameter_tables = []
 
-    def run(self, circuit):
+    def run(self, dag):
         # Get the parameters from the circuit.
-        parameters = circuit.parameters
+        parameters = dag.parameters
         param_dict = {}
         if parameters:
 
@@ -38,4 +38,4 @@ class QuaParameterTablePass(AnalysisPass):
             # Add the ParameterTable object to the property set
             self.property_set["parameter_table"] = self.parameter_tables
 
-        return circuit
+        return dag

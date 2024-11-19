@@ -17,14 +17,14 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
 
     def __init__(self, training_config: QEnvConfig, circuit_context: QuantumCircuit):
 
-        training_config.pass_manager.append(QuaParameterTablePass())
         super().__init__(training_config, circuit_context)
         if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
             self.backend, QMBackend
         ):
             raise ValueError("The backend should be a QMBackend object")
-
-        self.job = self.start_program(self.circuits[0])
+        
+        self.circuits = [add_parameter_table_to_circuit(qc) for qc in self.circuits]
+    
 
     def rl_qoc_training_qua_prog(self):
         """
@@ -32,7 +32,6 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         """
         # TODO: Set IO2 and IO1 to be the number of input states and the number of observables respectively
         trunc_index = self.trunc_index
-        n_actions = self.n_actions
         real_time_parameters = self.parameter_tables[trunc_index]
         input_stream_template = (0, int, "input_stream")
         counter_template = (0, int)
@@ -245,9 +244,4 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         """
         Get the parameter tables
         """
-        property_set = self.pass_manager.property_set
-        if "parameter_table" not in property_set:
-            raise KeyError(
-                "Parameter table not found in the property set, run the PassManager on circuits first"
-            )
-        return property_set["parameter_table"]
+        return [qc.parameter_table for qc in self.circuits]

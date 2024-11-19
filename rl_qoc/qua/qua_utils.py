@@ -1,7 +1,9 @@
 import math
 from typing import List
 
-from qiskit.circuit import ParameterExpression
+from qiskit.circuit import ParameterExpression, QuantumCircuit
+from qiskit.circuit.parametervector import ParameterVectorElement, ParameterVector, Parameter
+    
 from qm.qua import *
 from qm.qua._expressions import QuaArrayType
 
@@ -11,6 +13,43 @@ from qiskit import pulse
 import numpy as np
 from quam.examples.superconducting_qubits import Transmon
 
+def validate_parameter_table(qc: QuantumCircuit):
+    """
+    Validate the parameter table of the circuit
+    """
+    if 'parameter_table' not in qc.metadata:
+        raise ValueError("No parameter table found in the circuit")
+    for parameter in qc.parameters:
+        if isinstance(parameter, ParameterVectorElement) and parameter.vector.name not in qc.metadata['parameter_table'].table:
+            if parameter.vector.name not in qc.metadata['parameter_table'].table:
+                raise ValueError(f"ParameterVector {parameter.vector.name} not found in the parameter table")
+            elif len(parameter.vector) != qc.metadata['parameter_table'].table[parameter.vector.name].length:
+                raise ValueError(f"ParameterVector {parameter.vector.name} has a different length than the one in the parameter table")
+        elif isinstance(parameter, Parameter):
+            if parameter.name not in qc.metadata['parameter_table'].table:
+                raise ValueError(f"Parameter {parameter.name} not found in the parameter table")
+            elif qc.metadata['parameter_table'].table[parameter.name].length != 0:
+                raise ValueError(f"Parameter {parameter.name} is not a scalar in the parameter table")
+
+def add_parameter_table_to_circuit(qc: QuantumCircuit):
+    """
+    Add a parameter table to the circuit
+    """
+
+    # Check first if no parameter table is already added
+    if 'parameter_table' in qc.metadata:
+        return qc
+    param_dict = {}
+    for parameter in qc.parameters:
+        if isinstance(parameter, ParameterVectorElement) and parameter.vector.name not in param_dict:
+            param_dict[parameter.vector.name] = [0.0 for _ in range(len(parameter.vector))]
+        elif isinstance(parameter, Parameter):
+            param_dict[parameter.name] = 0.0
+            
+    # Create a ParameterTable object.
+    param_table = ParameterTable(param_dict)
+    qc.metadata['parameter_table'] = param_table
+    return qc
 
 def clip_qua(param: ParameterValue, min_value, max_value):
     """
