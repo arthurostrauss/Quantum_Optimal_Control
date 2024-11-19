@@ -123,7 +123,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
-                    self._index_input_state / len(self.target.input_states),
+                    0.0,
                     0.0,
                 ]
                 + list(self._observable_to_observation())

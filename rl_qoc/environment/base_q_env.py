@@ -153,13 +153,6 @@ class BaseQuantumEnvironment(ABC, Env):
             "physical_qubits", None
         )
 
-        self._physical_neighbor_qubits = retrieve_neighbor_qubits(
-            self.backend_info.coupling_map, self.physical_target_qubits
-        )
-        self._physical_next_neighbor_qubits = retrieve_neighbor_qubits(
-            self.backend_info.coupling_map,
-            self.physical_target_qubits + self.physical_neighbor_qubits,
-        )
         if isinstance(training_config.backend_config, QiskitRuntimeConfig):
             estimator_options = training_config.backend_config.estimator_options
         else:
@@ -1217,11 +1210,16 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def physical_neighbor_qubits(self):
-        return self._physical_neighbor_qubits
+        return retrieve_neighbor_qubits(
+            self.backend_info.coupling_map, self.physical_target_qubits
+        )
 
     @property
     def physical_next_neighbor_qubits(self):
-        return self._physical_next_neighbor_qubits
+        return retrieve_neighbor_qubits(
+            self.backend_info.coupling_map,
+            self.physical_target_qubits + self.physical_neighbor_qubits,
+        )
 
     @property
     @abstractmethod

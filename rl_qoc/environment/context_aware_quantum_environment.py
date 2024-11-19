@@ -148,13 +148,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if self.backend_info.coupling_map.size() == 0 and self.backend is None:
             # Build a fully connected coupling map if no backend is provided
             self.backend_info.num_qubits = self.circuit_context.num_qubits
-            self._physical_neighbor_qubits = retrieve_neighbor_qubits(
-                self.backend_info.coupling_map, self.physical_target_qubits
-            )
-            self._physical_next_neighbor_qubits = retrieve_neighbor_qubits(
-                self.backend_info.coupling_map,
-                self.physical_target_qubits + self.physical_neighbor_qubits,
-            )
 
         # Build registers for all relevant qubits
         # Target qubits
@@ -418,7 +411,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
-                    self._index_input_state / len(self.target.input_states),
+                    0.,
                     self._target_instruction_timings[self._inside_trunc_tracker],
                 ]
                 + list(self._observable_to_observation())
@@ -666,14 +659,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if backend is not None:  # Update backend and backend info if provided
             self.backend = backend
             self._backend_info = QiskitBackendInfo(
-                backend, self.config.backend_config.instruction_durations
-            )
-            self._physical_neighbor_qubits = retrieve_neighbor_qubits(
-                self.backend_info.coupling_map, self.physical_target_qubits
-            )
-            self._physical_next_neighbor_qubits = retrieve_neighbor_qubits(
-                self.backend_info.coupling_map,
-                self.physical_target_qubits + self.physical_neighbor_qubits,
+                backend, self.config.backend_config.instruction_durations,
+                self.pass_manager, self.config.backend_config.skip_transpilation,
             )
 
         self._target, self.circuits, self.baseline_circuits = (
