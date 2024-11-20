@@ -343,24 +343,6 @@ class GateTarget(BaseTarget):
             circuit_context.append(gate, list(range(gate.num_qubits)))
         self._circuit_context: QuantumCircuit = circuit_context
 
-        if self.has_context:
-            # Filter the context to get the causal cone of the target gate
-            # TODO: Handle this
-            filtered_context, filtered_qubits = causal_cone_circuit(
-                self._circuit_context,
-                [self._circuit_context.qubits[i] for i in self.physical_qubits],
-            )
-            filtered_qubits_indices = [
-                filtered_context.find_bit(q).index for q in filtered_qubits
-            ]
-            self._causal_cone_qubits = filtered_qubits_indices
-            self._causal_cone_circuit = filtered_context
-            self._causal_cone_size = len(filtered_qubits_indices)
-        else:  # If no context is provided, the causal cone is the target qubits
-            self._causal_cone_qubits = self.physical_qubits
-            self._causal_cone_circuit = self._circuit_context
-            self._causal_cone_size = self.n_qubits
-
         n_qubits = self._circuit_context.num_qubits
         if input_states_choice == "pauli4":
             input_circuits = [
@@ -533,28 +515,7 @@ class GateTarget(BaseTarget):
         self.Chi = _calculate_chi_target(Operator(self._circuit_context).power(n_reps))
         for input_state in self.input_states:
             input_state.n_reps = n_reps
-
-    @property
-    def causal_cone_qubits(self):
-        """
-        Get the qubits forming the causal cone of the target gate
-        (i.e. the qubits that are logically entangled with the target qubits)
-        """
-        return self._causal_cone_qubits
-
-    @property
-    def causal_cone_circuit(self):
-        """
-        Get the circuit forming the causal cone of the target gate
-        """
-        return self._causal_cone_circuit
-
-    @property
-    def causal_cone_size(self):
-        """
-        Get the size of the causal cone of the target gate
-        """
-        return self._causal_cone_size
+            
 
     def __repr__(self):
         return (

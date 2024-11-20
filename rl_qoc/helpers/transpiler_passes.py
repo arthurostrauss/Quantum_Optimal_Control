@@ -159,47 +159,26 @@ class CustomGateReplacementPass(TransformationPass):
 
             func = self.functions[i]
             args = list(qargs) + list(cargs)
-            qargs = qargs if qargs else None
-            cargs = cargs if cargs else None
+            qargs2 = qargs if qargs else None
+            cargs2 = cargs if cargs else None
 
             if isinstance(func, QuantumCircuit):
-                qc.compose(func, qubits=qargs, clbits=cargs, inplace=True)
+                qc.compose(func, qubits=qargs2, clbits=cargs2, inplace=True)
                 if self.parameters[i] is not None:
                     qc.assign_parameters(self.parameters[i], inplace=True)
             elif isinstance(func, Gate):
-                qc.append(func, qargs, cargs)
+                qc.append(func, qargs2, cargs2)
             else:  # Callable
-                if qargs:
-                    if cargs:
-                        func(
-                            qc,
-                            self.parameters[i],
-                            qargs,
-                            cargs,
-                            **self.parametrized_circuit_functions_args[i],
-                        )
-                    else:
-                        func(
-                            qc,
-                            self.parameters[i],
-                            qargs,
-                            **self.parametrized_circuit_functions_args[i],
-                        )
-                elif cargs:
-                    func(
-                        qc,
-                        self.parameters[i],
-                        cargs,
-                        **self.parametrized_circuit_functions_args[i],
-                    )
-                else:
-                    func(
-                        qc,
-                        self.parameters[i],
-                        **self.parametrized_circuit_functions_args[i],
-                    )
-
+                func(
+                    qc,
+                    self.parameters[i],
+                    args,
+                    **self.parametrized_circuit_functions_args[i],
+                )
+                    
             instruction_nodes = dag.named_nodes(op.name)
+            instruction_nodes = list(filter(lambda node: node.qargs == qargs and node.cargs == cargs, 
+                                            instruction_nodes))
             for node in instruction_nodes:
                 dag.substitute_node_with_dag(
                     node, circuit_to_dag(qc), wires=args if args else None
