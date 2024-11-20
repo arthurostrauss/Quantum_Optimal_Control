@@ -175,10 +175,14 @@ class CustomGateReplacementPass(TransformationPass):
                     args,
                     **self.parametrized_circuit_functions_args[i],
                 )
-                    
+
             instruction_nodes = dag.named_nodes(op.name)
-            instruction_nodes = list(filter(lambda node: node.qargs == qargs and node.cargs == cargs, 
-                                            instruction_nodes))
+            instruction_nodes = list(
+                filter(
+                    lambda node: node.qargs == qargs and node.cargs == cargs,
+                    instruction_nodes,
+                )
+            )
             for node in instruction_nodes:
                 dag.substitute_node_with_dag(
                     node, circuit_to_dag(qc), wires=args if args else None

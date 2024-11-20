@@ -515,7 +515,6 @@ class GateTarget(BaseTarget):
         self.Chi = _calculate_chi_target(Operator(self._circuit_context).power(n_reps))
         for input_state in self.input_states:
             input_state.n_reps = n_reps
-            
 
     def __repr__(self):
         return (

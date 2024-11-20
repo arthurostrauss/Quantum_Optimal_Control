@@ -182,7 +182,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             operations_mapping = {
                 op.name: op for op in self.backend.operations if hasattr(op, "name")
             }
-        
+
         # Case 1: Each truncation is a different layer of the full circuit, with only one ref to target gate
         counts = 0
         for moment in moments.values():
@@ -200,17 +200,20 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 counts += 1
 
         baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
-        
-        custom_gate_pass = [CustomGateReplacementPass(
-            [self.target_instruction],
-            [self.parametrized_circuit_func],
-            [self.parameters[i]],
-            [self._func_args]
-        ) for i in range(tgt_instruction_counts)]
+
+        custom_gate_pass = [
+            CustomGateReplacementPass(
+                [self.target_instruction],
+                [self.parametrized_circuit_func],
+                [self.parameters[i]],
+                [self._func_args],
+            )
+            for i in range(tgt_instruction_counts)
+        ]
 
         pms = [PassManager(pass_) for pass_ in custom_gate_pass]
         custom_circuits = [pm.run(circ) for pm, circ in zip(pms, baseline_circuits)]
-        
+
         # Case 2: each truncation concatenates the previous ones:
         for i in range(tgt_instruction_counts, 0, -1):
             ref_dag = baseline_dags[0].copy_empty_like()
@@ -218,26 +221,29 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             for j in range(i):
                 ref_dag.compose(baseline_dags[j], inplace=True)
                 custom_circ.compose(custom_circuits[j], inplace=True)
-            baseline_dags[i-1] = ref_dag
-            custom_circuits[i-1] = custom_circ
-                
-        
+            baseline_dags[i - 1] = ref_dag
+            custom_circuits[i - 1] = custom_circ
+
         baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
-        
+
         causal_cone_qubits = []
         causal_cone_circuits = []
-        
+
         for dag in baseline_dags:
-            involved_qubits = [dag.quantum_causal_cone(q) for q in self.circ_tgt_register]
-            involved_qubits = list(set([q for sublist in involved_qubits for q in sublist]))
-            
+            involved_qubits = [
+                dag.quantum_causal_cone(q) for q in self.circ_tgt_register
+            ]
+            involved_qubits = list(
+                set([q for sublist in involved_qubits for q in sublist])
+            )
+
             filtered_dag = dag.copy_empty_like()
             for node in dag.topological_op_nodes():
                 if any(q in involved_qubits for q in node.qargs):
                     filtered_dag.apply_operation_back(node.op, node.qargs)
             causal_cone_qubits.append(involved_qubits)
             causal_cone_circuits.append(dag_to_circuit(filtered_dag, False))
-        
+
         input_states_choice = getattr(
             self.config.reward_config.reward_args, "input_states_choice", "pauli4"
         )
