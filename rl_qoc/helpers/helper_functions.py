@@ -967,20 +967,10 @@ def retrieve_neighbor_qubits(coupling_map: CouplingMap, target_qubits: List):
     Returns:
         neighbor_qubits: List of neighbor qubits indices for specified target qubits
     """
-
-    return list(
-        set(
-            filter(
-                lambda x: x not in target_qubits,
-                chain(
-                    *[
-                        list(coupling_map.neighbors(target_qubit))
-                        for target_qubit in target_qubits
-                    ]
-                ),
-            )
-        )
-    )
+    neighbors = set()
+    for target_qubit in target_qubits:
+        neighbors.update(coupling_map.neighbors(target_qubit))
+    return list(neighbors - set(target_qubits))
 
 
 def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):

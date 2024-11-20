@@ -51,7 +51,7 @@ from ..helpers import (
     simulate_pulse_input,
     get_gate,
 )
-from .qconfig import QEnvConfig
+from .qconfig import QEnvConfig, GateTargetConfig
 from .base_q_env import (
     GateTarget,
     BaseQuantumEnvironment,
@@ -143,7 +143,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         if self.circuit_context.parameters:
             raise ValueError("Circuit context still contains unassigned parameters")
-        assert "gate" in self.config.target, "Target should be a gate"
+        assert isinstance(
+            self.config.target, GateTargetConfig
+        ), "Target should be a gate"
 
         if self.backend_info.coupling_map.size() == 0 and self.backend is None:
             # Build a fully connected coupling map if no backend is provided
@@ -203,9 +205,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             for i in range(self.tgt_instruction_counts)
         ]
         # Build sub-circuit contexts: each circuit goes until target gate and preserves nearest neighbor operations
-        operations_mapping = {
-            op.name: op for op in self.backend.operations if hasattr(op, "name")
-        }
+        if isinstance(self.backend, BackendV2):
+            operations_mapping = {
+                op.name: op for op in self.backend.operations if hasattr(op, "name")
+            }
         for i in range(self.tgt_instruction_counts):  # Loop over target gates
             counts = 0
             for start_time, instruction in zip(
@@ -279,14 +282,15 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                                 self.circ_tgt_register,
                                 **self._func_args,
                             )
-                            for op in self.backend.operations:
-                                if (
-                                    hasattr(op, "name")
-                                    and op.name not in operations_mapping
-                                ):
-                                    # If new custom instruction was added, store it and update operations mapping
-                                    self.custom_instructions.append(op)
-                                    operations_mapping[op.name] = op
+                            if isinstance(self.backend, BackendV2):
+                                for op in self.backend.operations:
+                                    if (
+                                        hasattr(op, "name")
+                                        and op.name not in operations_mapping
+                                    ):
+                                        # If new custom instruction was added, store it and update operations mapping
+                                        self.custom_instructions.append(op)
+                                        operations_mapping[op.name] = op
                         except TypeError:
                             raise TypeError("Failed to call parametrized_circuit_func")
                         counts += 1
@@ -411,7 +415,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
-                    0.,
+                    0.0,
                     self._target_instruction_timings[self._inside_trunc_tracker],
                 ]
                 + list(self._observable_to_observation())
@@ -659,8 +663,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if backend is not None:  # Update backend and backend info if provided
             self.backend = backend
             self._backend_info = QiskitBackendInfo(
-                backend, self.config.backend_config.instruction_durations,
-                self.pass_manager, self.config.backend_config.skip_transpilation,
+                backend,
+                self.config.backend_config.instruction_durations,
+                self.pass_manager,
+                self.config.backend_config.skip_transpilation,
             )
 
         self._target, self.circuits, self.baseline_circuits = (

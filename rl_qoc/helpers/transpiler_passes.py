@@ -66,9 +66,17 @@ def _parse_instruction(instruction):
     if isinstance(instruction, CircuitInstruction):
         return (instruction.operation, instruction.qubits, instruction.clbits)
     op = gate_map().get(instruction[0], instruction[0])
-    qargs = tuple(instruction[1]) if isinstance(instruction[1], QuantumRegister) else instruction[1]
+    qargs = (
+        tuple(instruction[1])
+        if isinstance(instruction[1], QuantumRegister)
+        else instruction[1]
+    )
     if len(instruction) > 2:
-        cargs = tuple(instruction[2]) if isinstance(instruction[2], ClassicalRegister) else instruction[2]
+        cargs = (
+            tuple(instruction[2])
+            if isinstance(instruction[2], ClassicalRegister)
+            else instruction[2]
+        )
     else:
         cargs = ()
     return (op, qargs, cargs)
@@ -78,7 +86,9 @@ def _parse_function(func):
     try:
         return gate_map()[func] if isinstance(func, str) else func
     except KeyError:
-        raise ValueError("Provided instruction name not part of standard instruction set")
+        raise ValueError(
+            "Provided instruction name not part of standard instruction set"
+        )
 
 
 class CustomGateReplacementPass(TransformationPass):
@@ -117,7 +127,7 @@ class CustomGateReplacementPass(TransformationPass):
             parameters,
             Optional[Union[ParameterVector, List]],
         )
-        
+
         parametrized_circuit_functions_args = format_input(
             parametrized_circuit_functions_args, Optional[Dict]
         )
@@ -131,7 +141,9 @@ class CustomGateReplacementPass(TransformationPass):
             == len(parameters)
             == len(parametrized_circuit_functions_args)
         ), "Number of target instructions, parametrized circuit functions, and parameters must match"
-        self.target_instructions = [_parse_instruction(inst) for inst in target_instructions]
+        self.target_instructions = [
+            _parse_instruction(inst) for inst in target_instructions
+        ]
         self.functions = [_parse_function(func) for func in new_elements]
         self.parameters = parameters
         self.parametrized_circuit_functions_args = parametrized_circuit_functions_args
@@ -139,43 +151,60 @@ class CustomGateReplacementPass(TransformationPass):
     def run(self, dag: DAGCircuit):
         """Run the custom transformation on the DAG."""
         for i, (op, qargs, cargs) in enumerate(self.target_instructions):
-           
+
             qc = QuantumCircuit()
             qargs = tuple(dag.qubits[q] if isinstance(q, int) else q for q in qargs)
             cargs = tuple(dag.clbits[c] if isinstance(c, int) else c for c in cargs)
-            qc.add_bits(qargs+cargs)
-            
+            qc.add_bits(qargs + cargs)
+
             func = self.functions[i]
             args = list(qargs) + list(cargs)
             qargs = qargs if qargs else None
             cargs = cargs if cargs else None
-            
+
             if isinstance(func, QuantumCircuit):
-                qc.compose(func, qubits=qargs,
-                           clbits=cargs, inplace=True)
+                qc.compose(func, qubits=qargs, clbits=cargs, inplace=True)
                 if self.parameters[i] is not None:
                     qc.assign_parameters(self.parameters[i], inplace=True)
             elif isinstance(func, Gate):
                 qc.append(func, qargs, cargs)
-            else: # Callable
+            else:  # Callable
                 if qargs:
                     if cargs:
-                        func(qc, self.parameters[i], qargs, cargs,
-                             **self.parametrized_circuit_functions_args[i])
+                        func(
+                            qc,
+                            self.parameters[i],
+                            qargs,
+                            cargs,
+                            **self.parametrized_circuit_functions_args[i],
+                        )
                     else:
-                        func(qc, self.parameters[i], qargs,
-                             **self.parametrized_circuit_functions_args[i])
+                        func(
+                            qc,
+                            self.parameters[i],
+                            qargs,
+                            **self.parametrized_circuit_functions_args[i],
+                        )
                 elif cargs:
-                    func(qc, self.parameters[i], cargs,
-                         **self.parametrized_circuit_functions_args[i])
+                    func(
+                        qc,
+                        self.parameters[i],
+                        cargs,
+                        **self.parametrized_circuit_functions_args[i],
+                    )
                 else:
-                    func(qc, self.parameters[i],
-                         **self.parametrized_circuit_functions_args[i])
+                    func(
+                        qc,
+                        self.parameters[i],
+                        **self.parametrized_circuit_functions_args[i],
+                    )
 
             instruction_nodes = dag.named_nodes(op.name)
             for node in instruction_nodes:
-                dag.substitute_node_with_dag(node, circuit_to_dag(qc), wires= args if args else None)
-            
+                dag.substitute_node_with_dag(
+                    node, circuit_to_dag(qc), wires=args if args else None
+                )
+
         return dag
 
 

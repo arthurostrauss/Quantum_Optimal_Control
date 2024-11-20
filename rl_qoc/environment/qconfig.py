@@ -126,6 +126,18 @@ class TargetConfig:
 
     physical_qubits: List[int]
 
+    def __getitem__(self, key):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(f"Key {key} not found in " f" Target configuration")
+
+    def get(self, attribute_name, default_val=None):
+        try:
+            return getattr(self, attribute_name)
+        except AttributeError:
+            return default_val
+
 
 @dataclass
 class GateTargetConfig(TargetConfig):
@@ -141,13 +153,16 @@ class GateTargetConfig(TargetConfig):
 
     def __post_init__(self):
         if isinstance(self.gate, str):
+            if self.gate.lower() == "cnot":
+                self.gate = "cx"
+            elif self.gate.lower() == "cphase":
+                self.gate = "cz"
+            elif self.gate.lower() == "x/2":
+                self.gate = "sx"
             try:
-                self.gate = get_standard_gate_name_mapping()[self.gate]
+                self.gate = get_standard_gate_name_mapping()[self.gate.lower()]
             except KeyError as e:
                 raise ValueError(f"Gate {self.gate} not recognized") from e
-
-    def __getitem__(self, key):
-        return getattr(self, key)
 
 
 @dataclass
@@ -344,6 +359,13 @@ class QEnvConfig:
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     training_with_cal: bool = True
     device: Optional[torch.device] = None
+
+    def __post_init__(self):
+        if isinstance(self.target, Dict):
+            if "gate" in self.target:
+                self.target = GateTargetConfig(**self.target)
+            else:
+                self.target = StateTargetConfig(**self.target)
 
     @property
     def backend(self) -> Optional[BackendV2]:
