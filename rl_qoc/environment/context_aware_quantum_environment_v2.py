@@ -130,6 +130,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
 
         super().__init__(training_config)
+        self._optimal_actions = None
+        self._param_values = None
+        self.circ_tgt_register = None
+        self.target_instruction = None
+        self._circuit_context = None
         self._training_steps_per_gate = training_steps_per_gate
         self._intermediate_rewards = intermediate_rewards
         self.custom_instructions: List[Gate] = []
@@ -182,6 +187,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             operations_mapping = {
                 op.name: op for op in self.backend.operations if hasattr(op, "name")
             }
+        else:
+            operations_mapping = {}
 
         # Case 1: Each truncation is a different layer of the full circuit, with only one ref to target gate
         counts = 0
@@ -226,38 +233,27 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
 
-        causal_cone_qubits = []
-        causal_cone_circuits = []
-
-        for dag in baseline_dags:
-            involved_qubits = [
-                dag.quantum_causal_cone(q) for q in self.circ_tgt_register
-            ]
-            involved_qubits = list(
-                set([q for sublist in involved_qubits for q in sublist])
-            )
-
-            filtered_dag = dag.copy_empty_like()
-            for node in dag.topological_op_nodes():
-                if any(q in involved_qubits for q in node.qargs):
-                    filtered_dag.apply_operation_back(node.op, node.qargs)
-            causal_cone_qubits.append(involved_qubits)
-            causal_cone_circuits.append(dag_to_circuit(filtered_dag, False))
-
         input_states_choice = getattr(
             self.config.reward_config.reward_args, "input_states_choice", "pauli4"
         )
+        if isinstance(self.backend, BackendV2):
+            for op in self.backend.operations:
+                if hasattr(op, "name") and op.name not in operations_mapping:
+                    # If new custom instruction was added, store it and update operations mapping
+                    self.custom_instructions.append(op)
+                    operations_mapping[op.name] = op
+
         target = [
             GateTarget(
                 self.config.target.gate,
                 self.physical_target_qubits,
                 self.config.n_reps,
-                causal_circuit,
-                causal_circuit.qregs[0],
+                baseline_circuit,
+                self.circ_tgt_register,
                 layout,
                 input_states_choice=input_states_choice,
             )
-            for causal_circuit, layout in zip(causal_cone_circuits, layouts)
+            for baseline_circuit, layout in zip(baseline_circuits, layouts)
         ]
         return target, custom_circuits, baseline_circuits
 
@@ -584,12 +580,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 ParameterVector(f"a_{j}", self.n_actions)
                 for j in range(tgt_instruction_counts)
             ]
-
-            self._op_start_times, self._target_instruction_timings = (
-                target_instruction_timings(
-                    self._circuit_context, self.target_instruction
-                )
-            )
 
             self._param_values = create_array(
                 tgt_instruction_counts,

@@ -73,7 +73,7 @@ class QiskitBackendInfo(BackendInfo):
         self,
         backend: Optional[BackendV2] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
-        pass_manager: Optional[PassManager] = PassManager(),
+        pass_manager: PassManager = PassManager(),
         skip_transpilation: bool = False,
         n_qubits: int = 0,
     ):
@@ -159,7 +159,7 @@ class QiskitBackendInfo(BackendInfo):
         return (
             self.backend.operation_names
             if isinstance(self.backend, BackendV2)
-            else ["u", "rzx", "cx", "rz", "measure", "reset"]
+            else ["u", "rzx", "cx", "rz", "h", "s", "sdg", "x", "z", "measure", "reset"]
         )
 
     @property

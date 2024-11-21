@@ -92,14 +92,14 @@ from ..environment.qconfig import (
     BackendConfig,
     ExecutionConfig,
     BenchmarkConfig,
-    StateConfig,
+    StateRewardConfig,
     QiskitRuntimeConfig,
     DynamicsConfig,
     QEnvConfig,
-    CAFEConfig,
-    ChannelConfig,
-    XEBConfig,
-    ORBITConfig,
+    CAFERewardConfig,
+    ChannelRewardConfig,
+    XEBRewardConfig,
+    ORBITRewardConfig,
     FidelityConfig,
 )
 
@@ -132,11 +132,11 @@ QuantumInput = Union[QuantumCircuit, pulse.Schedule, pulse.ScheduleBlock]
 PulseInput = Union[pulse.Schedule, pulse.ScheduleBlock]
 
 reward_configs = {
-    "channel": ChannelConfig,
-    "xeb": XEBConfig,
-    "orbit": ORBITConfig,
-    "state": StateConfig,
-    "cafe": CAFEConfig,
+    "channel": ChannelRewardConfig,
+    "xeb": XEBRewardConfig,
+    "orbit": ORBITRewardConfig,
+    "state": StateRewardConfig,
+    "cafe": CAFERewardConfig,
     "fidelity": FidelityConfig,
 }
 
@@ -252,11 +252,13 @@ def causal_cone_circuit(
         qubits = [dag.qubits[q] for q in qubits]
     involved_qubits = [dag.quantum_causal_cone(q) for q in qubits]
     involved_qubits = list(set([q for sublist in involved_qubits for q in sublist]))
-    filtered_dag = DAGCircuit()
-    filtered_dag.add_qubits(involved_qubits)
+    filtered_dag = dag.copy_empty_like()
     for node in dag.topological_op_nodes():
         if any(q in involved_qubits for q in node.qargs):
             filtered_dag.apply_operation_back(node.op, node.qargs)
+    filtered_dag.remove_qubits(
+        *[q for q in filtered_dag.qubits if q not in involved_qubits]
+    )
     return dag_to_circuit(filtered_dag, False), involved_qubits
 
 
@@ -740,7 +742,7 @@ def get_q_env_config(
         [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
     ],
     backend: Optional[Backend_type | Callable[[Any], Backend_type]] = None,
-    pass_manager: Optional[PassManager] = None,
+    pass_manager: Optional[PassManager] = PassManager(),
     instruction_durations: Optional[InstructionDurations] = None,
     **backend_callable_args,
 ):

@@ -9,6 +9,8 @@ Last updated: 05/09/2024
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 # For compatibility for options formatting between Estimators.
 from typing import List, Any, SupportsFloat, Tuple, Optional
 import numpy as np
@@ -38,7 +40,7 @@ from ..helpers import (
     simulate_pulse_input,
     get_optimal_z_rotation,
 )
-from .qconfig import QEnvConfig
+from .qconfig import QEnvConfig, GateTargetConfig
 
 
 class QuantumEnvironment(BaseQuantumEnvironment):
@@ -95,10 +97,10 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         input_states_choice = getattr(
             self.config.reward_config.reward_args, "input_states_choice", "pauli4"
         )
-        if "gate" in self.config.target:
+        if isinstance(self.config.target, GateTargetConfig):
             target = GateTarget(
                 n_reps=self.config.n_reps,
-                **self.config.target,
+                **asdict(self.config.target),
                 input_states_choice=input_states_choice,
             )
         else:

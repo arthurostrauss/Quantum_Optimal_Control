@@ -256,7 +256,7 @@ class FidelityConfig(RewardConfig):
 
 
 @dataclass
-class StateConfig(RewardConfig):
+class StateRewardConfig(RewardConfig):
     """
     Configuration for computing the reward based on state fidelity estimation
     """
@@ -267,7 +267,7 @@ class StateConfig(RewardConfig):
 
 
 @dataclass
-class ChannelConfig(RewardConfig):
+class ChannelRewardConfig(RewardConfig):
     """
     Configuration for computing the reward based on channel fidelity estimation
     """
@@ -284,7 +284,7 @@ class ChannelConfig(RewardConfig):
 
 
 @dataclass
-class XEBConfig(RewardConfig):
+class XEBRewardConfig(RewardConfig):
     """
     Configuration for computing the reward based on cross-entropy benchmarking
     """
@@ -295,7 +295,7 @@ class XEBConfig(RewardConfig):
 
 
 @dataclass
-class CAFEConfig(RewardConfig):
+class CAFERewardConfig(RewardConfig):
     """
     Configuration for computing the reward based on Context-Aware Fidelity Estimation (CAFE)
     """
@@ -312,7 +312,7 @@ class CAFEConfig(RewardConfig):
 
 
 @dataclass
-class ORBITConfig(RewardConfig):
+class ORBITRewardConfig(RewardConfig):
     """
     Configuration for computing the reward based on ORBIT
     """
@@ -325,7 +325,7 @@ class ORBITConfig(RewardConfig):
 
 
 def default_reward_config():
-    return StateConfig()
+    return StateRewardConfig()
 
 
 def default_benchmark_config():
@@ -470,15 +470,15 @@ class QEnvConfig:
         if value == "fidelity":
             self.reward_config = FidelityConfig()
         elif value == "channel":
-            self.reward_config = ChannelConfig()
+            self.reward_config = ChannelRewardConfig()
         elif value == "state":
-            self.reward_config = StateConfig()
+            self.reward_config = StateRewardConfig()
         elif value == "xeb":
-            self.reward_config = XEBConfig()
+            self.reward_config = XEBRewardConfig()
         elif value == "cafe":
-            self.reward_config = CAFEConfig()
+            self.reward_config = CAFERewardConfig()
         elif value == "orbit":
-            self.reward_config = ORBITConfig()
+            self.reward_config = ORBITRewardConfig()
         else:
             raise ValueError(f"Reward method {value} not recognized")
 

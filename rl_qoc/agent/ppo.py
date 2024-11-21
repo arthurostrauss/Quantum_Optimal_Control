@@ -932,7 +932,8 @@ class CustomPPO:
                         break
 
             self.unwrapped_env.close()
-            self.writer.close()
+            if self.writer is not None:
+                self.writer.close()
 
             self.log_fidelity_info_summary(fidelity_info)
 
