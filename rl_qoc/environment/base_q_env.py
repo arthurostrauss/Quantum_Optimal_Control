@@ -1215,6 +1215,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 returned_fidelities = fidelities
             if update_env_history:
                 fid_array.append(np.mean(fidelities))
+            print("Fidelity stored", np.mean(returned_fidelities))
         return returned_fidelities
 
     def _handle_virtual_rotations(self, operations, fidelities, subsystem_dims, n_reps):
@@ -1307,6 +1308,7 @@ class BaseQuantumEnvironment(ABC, Env):
         return (
             self.avg_fidelity_history
             if self.target.target_type == "gate"
+            and self.target.target_circuit.num_qubits <= 3
             else self.circuit_fidelity_history
         )
 

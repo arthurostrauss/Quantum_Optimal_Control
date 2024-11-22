@@ -341,6 +341,16 @@ def default_benchmark_config():
     return BenchmarkConfig()
 
 
+reward_dict = {
+    "fidelity": FidelityConfig,
+    "channel": ChannelRewardConfig,
+    "state": StateRewardConfig,
+    "xeb": XEBRewardConfig,
+    "cafe": CAFERewardConfig,
+    "orbit": ORBITRewardConfig,
+}
+
+
 @dataclass
 class QEnvConfig:
     """
@@ -364,7 +374,9 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward_config: RewardConfig = field(default_factory=default_reward_config)
+    reward_config: (
+        RewardConfig | Literal["channel", "orbit", "state", "cafe", "xeb"]
+    ) = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     training_with_cal: bool = True
     device: Optional[torch.device] = None
@@ -375,6 +387,8 @@ class QEnvConfig:
                 self.target = GateTargetConfig(**self.target)
             else:
                 self.target = StateTargetConfig(**self.target)
+        if isinstance(self.reward_config, str):
+            self.reward_config = reward_dict[self.reward_config]()
 
     @property
     def backend(self) -> Optional[BackendV2]:

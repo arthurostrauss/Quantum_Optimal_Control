@@ -205,6 +205,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     switch_truncation = True
             if switch_truncation:
                 counts += 1
+            if counts == tgt_instruction_counts:
+                break
 
         baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
 
@@ -222,14 +224,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         custom_circuits = [pm.run(circ) for pm, circ in zip(pms, baseline_circuits)]
 
         # Case 2: each truncation concatenates the previous ones:
-        for i in range(tgt_instruction_counts, 0, -1):
-            ref_dag = baseline_dags[0].copy_empty_like()
-            custom_circ = custom_circuits[0].copy_empty_like()
-            for j in range(i):
-                ref_dag.compose(baseline_dags[j], inplace=True)
-                custom_circ.compose(custom_circuits[j], inplace=True)
-            baseline_dags[i - 1] = ref_dag
-            custom_circuits[i - 1] = custom_circ
+        # for i in range(tgt_instruction_counts, 0, -1):
+        #     ref_dag = baseline_dags[0].copy_empty_like()
+        #     custom_circ = custom_circuits[0].copy_empty_like()
+        #     for j in range(i):
+        #         ref_dag.compose(baseline_dags[j], inplace=True)
+        #         custom_circ.compose(custom_circuits[j], inplace=True)
+        #     baseline_dags[i - 1] = ref_dag
+        #     custom_circuits[i - 1] = custom_circ
 
         baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
 
@@ -430,16 +432,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             else:  # Pulse simulation
                 fids = self.simulate_pulse_circuit(qc, params)
             print("Avg gate fidelity:", self.avg_fidelity_history[-1])
-            print("Finished simulation benchmark")
+            print("Finished simulation benchmark \n")
             return fids
 
     @property
     def parameters(self) -> List[ParameterVector]:
         return self._parameters
-
-    @property
-    def fidelity_history(self):
-        return self.avg_fidelity_history
 
     @property
     def tgt_instruction_counts(self) -> int:

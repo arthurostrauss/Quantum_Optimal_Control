@@ -276,10 +276,15 @@ def plot_curves(env: BaseQuantumEnvironment):
     """
     fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
     plt.plot(np.mean(env.reward_history, axis=1), label="Reward")
+    if env.target.target_type == "gate" and env.target.target_circuit.num_qubits < 3:
+        fidelity_type = "Avg gate"
+    else:
+        fidelity_type = "State"
+
     plt.plot(
         fidelity_range,
         env.fidelity_history,
-        label=f"{env.target.target_type.capitalize()} Fidelity",
+        label=f"{fidelity_type} Fidelity",
     )
 
     plt.title("Reward History")
