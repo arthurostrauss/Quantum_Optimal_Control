@@ -18,6 +18,7 @@ from qiskit.circuit.library import (
     UnitaryGate,
 )
 from qiskit_aer import AerSimulator
+from qiskit_aer.backends.backend_utils import BASIS_GATES
 from qiskit_aer.backends.backendconfiguration import AerBackendConfiguration
 
 
@@ -213,21 +214,24 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
         Returns:
         - Transformed DAG circuit compatible with a Qiskit Aer built spillover noise model
         """
-        new_dag = DAGCircuit()
-        new_dag.add_qubits([dag.qubits[q] for q in self.target_subsystem])
-        for node in dag.op_nodes():
-            if node.name in ["rx", "ry", "rz"]:
-                if node.qargs[0] not in new_dag.qubits:
-                    continue
-                else:
-                    qubit = node.qargs[0]
-                    qubit_index = dag.find_bit(qubit).index
-                    angle = node.op.params[0]
-                    rotation_gate = type(node.op)(angle)
-                    if self.spillover_rate_matrix is not None:
-                        involved_qubits_indices = [qubit_index]
-                        for other_subsystem_qubit in new_dag.qubits:
-                            if other_subsystem_qubit != qubit:
+        new_dag = dag.copy_empty_like()
+        subsystem_qubits = [dag.qubits[q] for q in self.target_subsystem]
+        for layer in dag.layers():
+            for node in layer["graph"].op_nodes():
+                if node.name in ["rx", "ry", "rz"]:
+                    if node.qargs[0] not in subsystem_qubits:
+                        continue
+                    else:
+                        qubit = node.qargs[0]
+                        qubit_index = dag.find_bit(qubit).index
+                        angle = node.op.params[0]
+                        rotation_gate = type(node.op)(angle)
+                        if self.spillover_rate_matrix is not None:
+                            involved_qubits_indices = [qubit_index]
+                            other_qubits = [
+                                qubit_ for qubit_ in subsystem_qubits if qubit_ != qubit
+                            ]
+                            for other_subsystem_qubit in other_qubits:
                                 other_index = dag.find_bit(other_subsystem_qubit).index
                                 if (
                                     self.spillover_rate_matrix[qubit_index, other_index]
@@ -235,23 +239,27 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                                 ):
                                     involved_qubits_indices.append(other_index)
 
-                        involved_qubits = [
-                            dag.qubits[i] for i in involved_qubits_indices
-                        ]
+                            involved_qubits = [
+                                dag.qubits[i] for i in involved_qubits_indices
+                            ]
 
-                        gate_op = Operator.from_label("I" * len(involved_qubits))
-                        gate_op = gate_op.compose(
-                            Operator(rotation_gate),
-                            qargs=[involved_qubits_indices.index(qubit_index)],
-                        )
+                            gate_op = Operator.from_label("I" * len(involved_qubits))
+                            gate_op = gate_op.compose(
+                                Operator(rotation_gate),
+                                qargs=[0],
+                            )
 
-                        gate_label = f"{node.name}({angle:.2f}, {qubit_index})"
-                        new_dag.apply_operation_back(
-                            UnitaryGate(gate_op, label=gate_label),
-                            qargs=involved_qubits,
-                        )
-            elif all([q in new_dag.qubits for q in node.qargs]):
-                new_dag.apply_operation_back(node.op, qargs=node.qargs)
+                            gate_label = f"{node.name}({angle:.2f}, {qubit_index})"
+                            new_dag.apply_operation_back(
+                                UnitaryGate(gate_op, label=gate_label),
+                                qargs=involved_qubits,
+                            )
+                elif all([q in subsystem_qubits for q in node.qargs]):
+                    new_dag.apply_operation_back(node.op, qargs=node.qargs)
+
+            new_dag.remove_qubits(
+                *[q for q in new_dag.qubits if q not in subsystem_qubits]
+            )
         return new_dag
 
 
@@ -357,7 +365,6 @@ def noisy_backend(
     circuit_context: QuantumCircuit,
     spillover_rate_matrix: np.ndarray,
     target_subsystem: tuple,
-    coupling_map: Optional[CouplingMap] = None,
 ):
     """
     Generate a noisy backend object with spillover noise based on the given circuit and spillover rate matrix
@@ -397,9 +404,19 @@ def noisy_backend(
     noise_model = create_spillover_noise_model_from_circuit(
         qc, rotation_angles, rotation_axes, spillover_rate_matrix, target_subsystem
     )
-    backend_configuration = AerSimulator._DEFAULT_CONFIGURATION
-    backend_configuration["coupling_map"] = list(coupling_map.get_edges())
-    backend_configuration = AerBackendConfiguration(**backend_configuration)
-    backend = AerSimulator(noise_model=noise_model, configuration=backend_configuration)
+    config = AerBackendConfiguration(
+        "custom_spillover_impact_simulator",
+        "2",
+        2,
+        BASIS_GATES["automatic"],
+        [],
+        int(1e7),
+        [(0, 1), (1, 0)],
+        description="Custom simulator with spillover noise model",
+        custom_instructions=AerSimulator._CUSTOM_INSTR["automatic"],
+        simulator=True,
+    )
+
+    backend = AerSimulator(noise_model=noise_model, configuration=config)
 
     return backend
