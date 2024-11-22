@@ -51,23 +51,23 @@ TARGET: # Target Gate configuration
 
 ENV: # Environment configuration
   EXECUTION:
-    SAMPLING_PAULIS: 300 # Number of Pauli strings to sample (for ORBIT/XEB: number of random sequences, for CAFE: number of input states in Pauli6 basis)
-    N_SHOTS: 20 # Number of shots for each Pauli (for ORBIT/XEB/CAFE: number of shots for each random sequence)
-    N_REPS: 6 # Number of repetitions of layer circuit (Corresponds to fixed circuit depth for ORBIT/XEB)
+    SAMPLING_PAULIS: 50 # Number of Pauli strings to sample (for ORBIT/XEB: number of random sequences, not used for CAFE)
+    N_SHOTS: 50 # Number of shots for each Pauli (for ORBIT/XEB/CAFE: number of shots for each random sequence)
+    N_REPS: 1 # Number of repetitions of layer circuit (Corresponds to fixed circuit depth for ORBIT/XEB)
     C_FACTOR: 1. # Cost factor for the reward function
     BATCH_SIZE: 32 # Number of actions to evaluate per policy iteration
-    SEED: 102
+    SEED: 103
   ACTION_SPACE:
-    #    LOW: [ -3.14 , -3.14, -3.14, -3.14, -3.14, -3.14, -3.14 ]
-    #    HIGH: [ 3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14 ]
-    LOW: [ -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2 ]
-    HIGH: [ 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2 ]
+     LOW: [ -3.14 , -3.14, -3.14, -3.14, -3.14, -3.14, -3.14 ]
+     HIGH: [ 3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14 ]
+#    LOW: [ -0.2, -0.2, -0.2, -0.2, -0.2, -0.2, -0.2 ]
+#    HIGH: [ 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2 ]
   REWARD:
     REWARD_METHOD: "channel" # Choose between "fidelity", "state", "channel", "xeb", "cafe", "orbit"
   REWARD_PARAMS: # All unused parameters should be set to null (only assign values to parameters used by chosen reward method)
     USE_INTERLEAVED: null # Whether to use interleaved RB (target must be Clifford) for ORBIT reward
-    NUM_EIGENSTATES_PER_PAULI: 2 # Number of eigenstates per Pauli to consider for channel fidelity reward
-    INPUT_STATES_CHOICE: null # Choice of input states for CAFE reward
+    NUM_EIGENSTATES_PER_PAULI: null # Number of eigenstates per Pauli to consider for channel fidelity reward
+    INPUT_STATES_CHOICE: null # Choice of input states for CAFE or state reward ("pauli4", "2-design", "pauli6")
   BENCHMARKING:
     BENCHMARK_CYCLE: 1 # Number of steps between two fidelity benchmarks
     BENCHMARK_BATCH_SIZE: 1 # Number of actions to evaluate per fidelity benchmark

@@ -27,7 +27,7 @@ def apply_parametrized_circuit(
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
     my_qc = QuantumCircuit(q_reg, name=f"{gate.name if gate is not None else 'G'}_cal")
     optimal_params = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
-    # optimal_params = np.pi * np.zeros(len(params))
+    optimal_params = np.pi * np.zeros(len(params))
 
     # my_qc.rx(params[0], q_reg[0])
     my_qc.u(
@@ -71,7 +71,8 @@ def get_circuit_context(
     )
     # layout.add_register(nn_reg)
     circuit = QuantumCircuit(tgt_reg)
-    circuit.cx(0, 1)
+    circuit.h(tgt_reg[0])
+    circuit.cx(tgt_reg[0], tgt_reg[1])
 
     transpile_input = (
         {"backend": backend} if backend is not None else {"coupling_map": coupling_map}

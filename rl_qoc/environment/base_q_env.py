@@ -90,11 +90,12 @@ from ..helpers.pulse_utils import (
 )
 from .qconfig import (
     QEnvConfig,
-    CAFEConfig,
-    ChannelConfig,
-    ORBITConfig,
-    XEBConfig,
+    CAFERewardConfig,
+    ChannelRewardConfig,
+    ORBITRewardConfig,
+    XEBRewardConfig,
     QiskitRuntimeConfig,
+    StateRewardConfig,
 )
 
 
@@ -351,7 +352,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         # Direct fidelity estimation protocol  (https://doi.org/10.1103/PhysRevLett.106.230501)
         probabilities = target_state.Chi**2
-        full_basis = pauli_basis(qc.num_qubits)
+        full_basis = pauli_basis(target_state.n_qubits)
         if not np.isclose(np.sum(probabilities), 1, atol=1e-5):
             print("probabilities sum um to", np.sum(probabilities))
             print("probabilities normalized")
@@ -386,8 +387,9 @@ class BaseQuantumEnvironment(ABC, Env):
         observables = SparsePauliOp(
             full_basis[pauli_indices], reward_factor, copy=False
         )
-        shots_per_basis = []
 
+        shots_per_basis = []
+        # Group observables by qubit-wise commuting groups to reduce the number of PUBs
         for i, commuting_group in enumerate(
             observables.paulis.group_qubit_wise_commuting()
         ):
@@ -398,28 +400,61 @@ class BaseQuantumEnvironment(ABC, Env):
                 max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
             shots_per_basis.append(max_pauli_shots)
 
+        if (
+            isinstance(self.target, GateTarget)
+            and qc.num_qubits > self.target.causal_cone_size
+        ):  # If circuit has more qubits than causal cone, extend to full qubit space
+            other_qubit_indices = set(range(qc.num_qubits)) - set(
+                self.target.causal_cone_qubits_indices
+            )
+            observables = observables.apply_layout(None, qc.num_qubits)
+            observables = observables.apply_layout(
+                self.target.causal_cone_qubits_indices + list(other_qubit_indices)
+            )
+
         return observables, shots_per_basis
 
     def state_reward_pubs(self, qc: QuantumCircuit, params):
         """
         Compute the PUBs for the state reward method
         """
+        if not isinstance(self.config.reward_config, StateRewardConfig):
+            raise TypeError("StateConfig object required for state reward method")
 
-        prep_circuit = qc.copy()
+        prep_circuit = qc
         target_state = self.target
-        if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
+        if isinstance(self.target, GateTarget):
             # State reward: sample a random input state for target gate
             input_state = np.random.choice(self.target.input_states)
+
             # Prepend input state to custom circuit with front composition
-            prep_circuit = qc.compose(input_state.circuit, inplace=False, front=True)
+            prep_circuit = qc.compose(
+                input_state.circuit,
+                self.target.causal_cone_qubits,
+                front=True,
+            )
             for _ in range(self.n_reps - 1):  # Repeat circuit for noise amplification
                 prep_circuit.compose(qc, inplace=True)
+
+            if (
+                qc.num_qubits > self.target.causal_cone_size
+            ):  # Add random input state on all qubits (not part of reward calculation)
+                other_qubits_indices = set(range(qc.num_qubits)) - set(
+                    self.target.causal_cone_qubits_indices
+                )
+                other_qubits = [qc.qubits[i] for i in other_qubits_indices]
+                random_input_context = Pauli6PreparationBasis().circuit(
+                    np.random.randint(0, 6, len(other_qubits)).tolist()
+                )
+                prep_circuit.compose(
+                    random_input_context, other_qubits, inplace=True, front=True
+                )
 
             # Modify target state to match input state and target gate
             target_state = input_state.target_state  # (Gate |input>=|target>)
 
         self._observables, self._pauli_shots = self.retrieve_observables(
-            target_state, self.circuits[self.trunc_index]
+            target_state, qc
         )
 
         prep_circuit = self.backend_info.custom_transpile(
@@ -460,21 +495,25 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         if not isinstance(self.target, GateTarget):
             raise TypeError("Target type should be a gate")
-        if not isinstance(self.config.reward_config, ChannelConfig):
+        if not isinstance(self.config.reward_config, ChannelRewardConfig):
             raise TypeError("ChannelConfig object required for channel reward method")
-        if qc.num_qubits > 3:
+        if self.target.causal_cone_size > 3:
             raise ValueError("Channel reward method is only supported for 1-3 qubits")
 
         nb_states = self.config.reward_config.num_eigenstates_per_pauli
-        if nb_states >= 2**qc.num_qubits:
+        if (
+            nb_states >= 2**qc.num_qubits
+        ):  # TODO: Rethink this condition for causal cone
             raise ValueError(
                 f"Number of eigenstates per Pauli should be less than {2 ** qc.num_qubits}"
             )
-        d = 2**qc.num_qubits
+        n_qubits = self.target.causal_cone_size
+        d = 2**n_qubits
         probabilities = self.target.Chi**2 / (d**2)
-        non_zero_indices = np.nonzero(probabilities)[0]
+        non_zero_indices = np.nonzero(probabilities)[0]  # Filter out zero probabilities
         non_zero_probabilities = probabilities[non_zero_indices]
-        basis = pauli_basis(num_qubits=qc.num_qubits)
+
+        basis = pauli_basis(num_qubits=n_qubits)
 
         if dfe_precision is not None:
             eps, delta = dfe_precision
@@ -499,7 +538,19 @@ class BaseQuantumEnvironment(ABC, Env):
         pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
         reward_factor = [self.c_factor / (d * self.target.Chi[p]) for p in samples]
 
-        self._observables = SparsePauliOp(pauli_meas, reward_factor)
+        observables = SparsePauliOp(pauli_meas, reward_factor, ignore_pauli_phase=True)
+        if qc.num_qubits > self.target.causal_cone_size:
+            other_qubit_indices = set(range(qc.num_qubits)) - set(
+                self.target.causal_cone_qubits_indices
+            )
+            observables = observables.apply_layout(
+                None, qc.num_qubits
+            )  # Extend to full qubit space
+            # Apply layout to apply non-trivial observables on causal cone qubits
+            observables = observables.apply_layout(
+                self.target.causal_cone_qubits_indices + list(other_qubit_indices)
+            )
+        self._observables = observables
 
         if dfe_precision is not None:
             self._pauli_shots = np.ceil(
@@ -516,6 +567,10 @@ class BaseQuantumEnvironment(ABC, Env):
         )  # Track used input states to reduce number of PUBs
 
         for prep, obs, shots in zip(pauli_prep, self._observables, self._pauli_shots):
+
+            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis
+            # Below, we select at random a subset of pure input states to prepare for each prep
+            # If nb_states = 1, we prepare all pure input states for each prep (no random selection)
             max_input_states = d // nb_states
             selected_input_states = np.random.choice(
                 d, size=max_input_states, replace=False
@@ -529,8 +584,11 @@ class BaseQuantumEnvironment(ABC, Env):
                     continue
                 # Convert input state to Pauli6 basis: preparing pure eigenstates of Pauli_prep
                 inputs = np.unravel_index(input_state, (2,) * qc.num_qubits)
-                parity = (-1) ** np.sum(inputs)
+                parity = (-1) ** np.sum(
+                    inputs
+                )  # Parity of input state (weighting factor in Pauli prep decomposition)
                 for i, pauli_op in enumerate(reversed(prep.to_label())):
+                    # Build input state in Pauli6 basis from Pauli prep: look at each qubit individually
                     if pauli_op == "I" or pauli_op == "Z":
                         prep_indices.append(inputs[i])
                     elif pauli_op == "X":
@@ -546,12 +604,26 @@ class BaseQuantumEnvironment(ABC, Env):
                     # Prepare input state in Pauli6 basis (front composition)
                     prep_circuit = qc.compose(
                         Pauli6PreparationBasis().circuit(prep_indices),
+                        self.target.causal_cone_qubits,
                         front=True,
-                        inplace=False,
                     )
                     # Repeat circuit for noise amplification
                     for _ in range(self.n_reps - 1):
                         prep_circuit.compose(qc, inplace=True)
+
+                    if (
+                        qc.num_qubits > self.target.causal_cone_size
+                    ):  # Add random input state on other qubits (not part of reward calculation, just for enhanced calibration)
+                        other_qubits_indices = set(range(qc.num_qubits)) - set(
+                            self.target.causal_cone_qubits_indices
+                        )
+                        other_qubits = [qc.qubits[i] for i in other_qubits_indices]
+                        random_input_context = Pauli6PreparationBasis().circuit(
+                            np.random.randint(0, 6, len(other_qubits)).tolist()
+                        )
+                        prep_circuit.compose(
+                            random_input_context, other_qubits, inplace=True, front=True
+                        )
 
                     # Transpile the circuit again to decompose input state preparation
                     prep_circuit = self.backend_info.custom_transpile(
@@ -578,6 +650,7 @@ class BaseQuantumEnvironment(ABC, Env):
                     pub_ref_index: int = used_indices[
                         used_prep_indices.index(tuple(prep_indices))
                     ]
+
                     prep_circuit, ref_obs, ref_params, ref_precision = pubs[
                         pub_ref_index
                     ]
@@ -617,7 +690,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         assert isinstance(self.target, GateTarget), "Target type should be a gate"
         assert isinstance(
-            self.config.reward_config, CAFEConfig
+            self.config.reward_config, CAFERewardConfig
         ), "CAFEConfig object required for CAFE reward method"
 
         pubs = []
@@ -689,7 +762,7 @@ class BaseQuantumEnvironment(ABC, Env):
         # TODO: Complete XEB (will be relevant once pattern for parallel XEB is figured out)
         assert isinstance(self.target, GateTarget), "Target type should be a gate"
         assert isinstance(
-            self.config.reward_config, XEBConfig
+            self.config.reward_config, XEBRewardConfig
         ), "XEBConfig object required for XEB reward method"
         layout = self.layout
         circuit_ref = self.baseline_circuits[self.trunc_index]
@@ -719,7 +792,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         assert isinstance(self.target, GateTarget), "Target type should be a gate"
         assert isinstance(
-            self.config.reward_config, ORBITConfig
+            self.config.reward_config, ORBITRewardConfig
         ), "ORBITConfig object required for ORBIT reward method"
         layout = self.layout
         circuit_ref = self.baseline_circuits[self.trunc_index]
@@ -874,7 +947,7 @@ class BaseQuantumEnvironment(ABC, Env):
             n_custom_instructions = 1
         else:  # List of ParameterVectors
             parameters = self.parameters
-            n_custom_instructions = len(self.parameters)
+            n_custom_instructions = self.trunc_index + 1
 
         parameter_binds = [
             {
@@ -933,12 +1006,12 @@ class BaseQuantumEnvironment(ABC, Env):
         Convert the observable to an observation to be given to the agent
         """
         if self.config.reward_method == "state":
-            n_qubits = self.observables.num_qubits
-            d = 2**n_qubits
-            pauli_to_index = {pauli: i for i, pauli in enumerate(pauli_basis(n_qubits))}
-            array_obs = np.zeros(d**2)
-            for pauli in self.observables:
-                array_obs[pauli_to_index[pauli.paulis[0]]] = pauli.coeffs[0]
+            # n_qubits = self.observables.num_qubits
+            # d = 2**n_qubits
+            # pauli_to_index = {pauli: i for i, pauli in enumerate(pauli_basis(n_qubits))}
+            # array_obs = np.zeros(d**2)
+            # for pauli in self.observables:
+            #     array_obs[pauli_to_index[pauli.paulis[0]]] = pauli.coeffs[0]
 
             array_obs = []
             return array_obs
