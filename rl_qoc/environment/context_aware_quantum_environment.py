@@ -31,25 +31,28 @@ from qiskit.circuit import (
     CircuitInstruction,
     Gate,
 )
-from qiskit.circuit.library.standard_gates import (
-    get_standard_gate_name_mapping as gate_map,
-)
 from qiskit.circuit.parametervector import ParameterVectorElement
+from qiskit.converters import circuit_to_dag, dag_to_circuit
+from qiskit.dagcircuit import DAGOpNode, DAGCircuit
 from qiskit.providers import BackendV2
 from qiskit.quantum_info import Operator
 from qiskit.transpiler import (
     Layout,
     InstructionProperties,
+    PassManager,
 )
+
 from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.library import ProcessTomography
 from qiskit_ibm_runtime import EstimatorV2
 
 from ..helpers import (
     get_instruction_timings,
-    retrieve_neighbor_qubits,
+    remove_unused_wires,
     simulate_pulse_input,
     get_gate,
+    MomentAnalysisPass,
+    CustomGateReplacementPass,
 )
 from .qconfig import QEnvConfig, GateTargetConfig
 from .base_q_env import (
@@ -127,6 +130,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
 
         super().__init__(training_config)
+        self._optimal_actions = None
+        self._param_values = None
+        self.circ_tgt_register = None
+        self.target_instruction = None
+        self._circuit_context = None
         self._training_steps_per_gate = training_steps_per_gate
         self._intermediate_rewards = intermediate_rewards
         self.custom_instructions: List[Gate] = []
@@ -150,160 +158,98 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if self.backend_info.coupling_map.size() == 0 and self.backend is None:
             # Build a fully connected coupling map if no backend is provided
             self.backend_info.num_qubits = self.circuit_context.num_qubits
-
-        # Build registers for all relevant qubits
-        # Target qubits
-        tgt_register = QuantumRegister(len(self.physical_target_qubits), name="tgt")
+        tgt_instruction_counts = self.tgt_instruction_counts
+        moment_pass = MomentAnalysisPass()
+        pm = PassManager(moment_pass)
+        _ = pm.run(self.circuit_context)
+        moments = pm.property_set["moments"]
         layouts = [
-            Layout(
-                {
-                    tgt_register[i]: self.physical_target_qubits[i]
-                    for i in range(tgt_register.size)
-                }
+            Layout({qubit: q for q, qubit in enumerate(self.circuit_context.qubits)})
+            for _ in range(tgt_instruction_counts)
+        ]
+        context_dag = circuit_to_dag(self.circuit_context)
+        baseline_dags = [
+            context_dag.copy_empty_like() for _ in range(tgt_instruction_counts)
+        ]
+
+        target_op_nodes = context_dag.named_nodes(
+            self.target_instruction.operation.name
+        )
+        target_op_nodes: List[DAGOpNode] = list(
+            filter(
+                lambda node: node.qargs == self.target_instruction.qubits
+                and node.cargs == self.target_instruction.clbits,
+                target_op_nodes,
             )
-            for _ in range(self.tgt_instruction_counts)
-        ]
+        )
 
-        if self.circuit_context.num_qubits > len(self.physical_target_qubits):
-            circ_nn_qubits = [
-                self.circuit_context.qubits[i] for i in self.physical_neighbor_qubits
-            ]  # Nearest neighbors
-            circ_anc_qubits = [
-                self.circuit_context.qubits[i]
-                for i in self.physical_next_neighbor_qubits
-            ]  # Next neighbors
-
-            nn_register = QuantumRegister(
-                len(circ_nn_qubits), name="nn"
-            )  # Nearest neighbors (For new circuits)
-            anc_register = QuantumRegister(
-                len(circ_anc_qubits), name="anc"
-            )  # Next neighbors (For new circuits)
-        else:
-            circ_nn_qubits = []
-            circ_anc_qubits = []
-            nn_register = []
-            anc_register = []
-
-        # Create mapping between circuit context qubits and custom circuit associated single qubit registers
-        mapping = {
-            circ_reg[i]: new_reg[i]
-            for circ_reg, new_reg in zip(
-                [self.circ_tgt_register, circ_nn_qubits, circ_anc_qubits],
-                [tgt_register, nn_register, anc_register],
-            )
-            for i in range(len(circ_reg))
-        }
-
-        # Initialize custom and baseline circuits for each target gate (by default only contains target qubits)
-        custom_circuits = [
-            QuantumCircuit(tgt_register, name=f"c_circ" + str(i))
-            for i in range(self.tgt_instruction_counts)
-        ]
-        baseline_circuits = [
-            QuantumCircuit(tgt_register, name=f"b_circ" + str(i))
-            for i in range(self.tgt_instruction_counts)
-        ]
-        # Build sub-circuit contexts: each circuit goes until target gate and preserves nearest neighbor operations
         if isinstance(self.backend, BackendV2):
             operations_mapping = {
                 op.name: op for op in self.backend.operations if hasattr(op, "name")
             }
-        for i in range(self.tgt_instruction_counts):  # Loop over target gates
-            counts = 0
-            for start_time, instruction in zip(
-                self._op_start_times, self.circuit_context.data
-            ):  # Loop over instructions in circuit context
+        else:
+            operations_mapping = {}
 
-                # Check if instruction involves target or nearest neighbor qubits
-                involves_target_qubits = any(
-                    [
-                        qubit in reg
-                        for reg in [
-                            self.circ_tgt_register,
-                            circ_nn_qubits,
-                            circ_anc_qubits,
-                        ]
-                        for qubit in instruction.qubits
-                    ]
-                )
-                if involves_target_qubits:
-                    involved_qubits = [
-                        qubit
-                        for qubit in instruction.qubits
-                        if qubit not in self.circ_tgt_register
-                    ]
-                else:
-                    involved_qubits = []
+        # Case 1: Each truncation is a different layer of the full circuit, with only one ref to target gate
+        counts = 0
+        for moment in moments.values():
+            switch_truncation = False
+            for op in moment:
+                baseline_dags[counts].apply_operation_back(op.op, op.qargs, op.cargs)
+                bit_indices = {
+                    q: context_dag.find_bit(q).index for q in context_dag.qubits
+                }
+                if DAGOpNode.semantic_eq(
+                    target_op_nodes[0], op, bit_indices, bit_indices
+                ):
+                    switch_truncation = True
+            if switch_truncation:
+                counts += 1
 
-                # If instruction involves target or nn qubits and happens before target gate, add it to circuit
+        baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
 
-                if (
-                    counts <= i or start_time <= self._target_instruction_timings[i]
-                ) and involves_target_qubits:
-                    for qubit in involved_qubits:
-                        q_reg = nn_register if qubit in circ_nn_qubits else anc_register
-                        physical_qubits = (
-                            self.physical_neighbor_qubits
-                            if qubit in circ_nn_qubits
-                            else self.physical_next_neighbor_qubits
-                        )
-                        if (
-                            mapping[qubit] not in custom_circuits[i].qubits
-                        ):  # Add register if not already added
-                            baseline_circuits[i].add_bits([mapping[qubit]])
-                            custom_circuits[i].add_bits([mapping[qubit]])
+        custom_gate_pass = [
+            CustomGateReplacementPass(
+                [self.target_instruction],
+                [self.parametrized_circuit_func],
+                [self.parameters[i]],
+                [self._func_args],
+            )
+            for i in range(tgt_instruction_counts)
+        ]
 
-                            layouts[i].add(
-                                mapping[qubit],
-                                physical_qubits[q_reg.index(mapping[qubit])],
-                            )
+        pms = [PassManager(pass_) for pass_ in custom_gate_pass]
+        custom_circuits = [pm.run(circ) for pm, circ in zip(pms, baseline_circuits)]
 
-                    baseline_circuits[i].append(
-                        instruction.operation, [mapping[q] for q in instruction.qubits]
-                    )
-                    if instruction != self.target_instruction:
-                        custom_circuits[i].append(
-                            instruction.operation,
-                            [mapping[q] for q in instruction.qubits],
-                        )
-                        self.custom_circuit_context.append(instruction)
-                    else:  # Add custom instruction in place of target gate
-                        try:
-                            self.parametrized_circuit_func(
-                                custom_circuits[i],
-                                self.parameters[counts],
-                                tgt_register,
-                                **self._func_args,
-                            )
-                            self.parametrized_circuit_func(
-                                self.custom_circuit_context,
-                                self.parameters[counts],
-                                self.circ_tgt_register,
-                                **self._func_args,
-                            )
-                            if isinstance(self.backend, BackendV2):
-                                for op in self.backend.operations:
-                                    if (
-                                        hasattr(op, "name")
-                                        and op.name not in operations_mapping
-                                    ):
-                                        # If new custom instruction was added, store it and update operations mapping
-                                        self.custom_instructions.append(op)
-                                        operations_mapping[op.name] = op
-                        except TypeError:
-                            raise TypeError("Failed to call parametrized_circuit_func")
-                        counts += 1
+        # Case 2: each truncation concatenates the previous ones:
+        for i in range(tgt_instruction_counts, 0, -1):
+            ref_dag = baseline_dags[0].copy_empty_like()
+            custom_circ = custom_circuits[0].copy_empty_like()
+            for j in range(i):
+                ref_dag.compose(baseline_dags[j], inplace=True)
+                custom_circ.compose(custom_circuits[j], inplace=True)
+            baseline_dags[i - 1] = ref_dag
+            custom_circuits[i - 1] = custom_circ
+
+        baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
+
         input_states_choice = getattr(
             self.config.reward_config.reward_args, "input_states_choice", "pauli4"
         )
+        if isinstance(self.backend, BackendV2):
+            for op in self.backend.operations:
+                if hasattr(op, "name") and op.name not in operations_mapping:
+                    # If new custom instruction was added, store it and update operations mapping
+                    self.custom_instructions.append(op)
+                    operations_mapping[op.name] = op
+
         target = [
             GateTarget(
-                self.config.target["gate"],
+                self.config.target.gate,
                 self.physical_target_qubits,
                 self.config.n_reps,
                 baseline_circuit,
-                tgt_register,
+                self.circ_tgt_register,
                 layout,
                 input_states_choice=input_states_choice,
             )
@@ -416,14 +362,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             return np.array(
                 [
                     0.0,
-                    self._target_instruction_timings[self._inside_trunc_tracker],
+                    self.trunc_index,
                 ]
                 + list(self._observable_to_observation())
             )
         else:
-            return np.array(
-                [0, self._target_instruction_timings[self._inside_trunc_tracker]]
-            )
+            return np.array([0, self.trunc_index])
 
     def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
         """
@@ -634,12 +578,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 ParameterVector(f"a_{j}", self.n_actions)
                 for j in range(tgt_instruction_counts)
             ]
-
-            self._op_start_times, self._target_instruction_timings = (
-                target_instruction_timings(
-                    self._circuit_context, self.target_instruction
-                )
-            )
 
             self._param_values = create_array(
                 tgt_instruction_counts,

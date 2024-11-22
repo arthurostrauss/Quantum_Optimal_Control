@@ -329,21 +329,35 @@ class GateTarget(BaseTarget):
             layout,
         )
 
-        if circuit_context is not None:
-            if not isinstance(circuit_context, (QuantumCircuit, Gate)):
-                raise ValueError("target_op should be either Gate or QuantumCircuit")
-            if isinstance(circuit_context, Gate):  # Convert gate to circuit
-                target_circuit = QuantumCircuit(circuit_context.num_qubits)
-                target_circuit.append(
-                    circuit_context, range(circuit_context.num_qubits)
-                )
-                circuit_context = target_circuit
-        else:  # If no context is provided, use the gate itself
-            circuit_context = QuantumCircuit(gate.num_qubits)
-            circuit_context.append(gate, list(range(gate.num_qubits)))
+        if circuit_context is None:  # If no context is provided, use the gate itself
+            circuit_context = QuantumCircuit(self.tgt_register)
+            circuit_context.append(gate, self.tgt_register)
+        elif not isinstance(circuit_context, QuantumCircuit):
+            raise ValueError("circuit_context should be a QuantumCircuit")
+
         self._circuit_context: QuantumCircuit = circuit_context
 
-        n_qubits = self._circuit_context.num_qubits
+        if self.has_context:
+            # Filter context to get causal cone of the target gate
+            target_qubits = [
+                self._circuit_context.qubits[i] for i in self.physical_qubits
+            ]
+            filtered_context, filtered_qubits = causal_cone_circuit(
+                self._circuit_context,
+                target_qubits,
+            )
+
+            self._causal_cone_qubits = filtered_qubits
+            self._causal_cone_size = len(filtered_qubits)
+            self._causal_cone_circuit = filtered_context
+
+        else:  # If no context is provided, the causal cone is the target qubits
+            self._causal_cone_qubits = self._circuit_context.qubits
+            self._causal_cone_circuit = self._circuit_context
+            self._causal_cone_size = self.n_qubits
+
+        n_qubits = self.causal_cone_size
+
         if input_states_choice == "pauli4":
             input_circuits = [
                 PauliPreparationBasis().circuit(s)
@@ -370,7 +384,7 @@ class GateTarget(BaseTarget):
         self.input_states = [
             InputState(
                 input_circuit=circ,
-                target_op=self._circuit_context,
+                target_op=self.causal_cone_circuit,
                 tgt_register=self.tgt_register,
                 n_reps=n_reps,
             )
@@ -465,7 +479,7 @@ class GateTarget(BaseTarget):
         """
         Get the target unitary operator
         """
-        return Operator(self._circuit_context)
+        return Operator(self.causal_cone_circuit)
 
     @property
     def target_circuit(self):
@@ -515,6 +529,35 @@ class GateTarget(BaseTarget):
         self.Chi = _calculate_chi_target(Operator(self._circuit_context).power(n_reps))
         for input_state in self.input_states:
             input_state.n_reps = n_reps
+
+    @property
+    def causal_cone_qubits(self):
+        """
+        Get the qubits forming the causal cone of the target gate
+        (i.e. the qubits that are logically entangled with the target qubits)
+        """
+        return self._causal_cone_qubits
+
+    @property
+    def causal_cone_qubits_indices(self):
+        """
+        Get the indices of the qubits forming the causal cone of the target gate
+        """
+        return [self.target_circuit.find_bit(q).index for q in self.causal_cone_qubits]
+
+    @property
+    def causal_cone_circuit(self):
+        """
+        Get the circuit forming the causal cone of the target gate
+        """
+        return self._causal_cone_circuit
+
+    @property
+    def causal_cone_size(self):
+        """
+        Get the size of the causal cone of the target gate
+        """
+        return self._causal_cone_size
 
     def __repr__(self):
         return (

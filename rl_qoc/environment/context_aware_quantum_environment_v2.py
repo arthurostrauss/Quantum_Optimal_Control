@@ -362,14 +362,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             return np.array(
                 [
                     0.0,
-                    self._target_instruction_timings[self._inside_trunc_tracker],
+                    self.trunc_index,
                 ]
                 + list(self._observable_to_observation())
             )
         else:
-            return np.array(
-                [0, self._target_instruction_timings[self._inside_trunc_tracker]]
-            )
+            return np.array([0, self.trunc_index])
 
     def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
         """

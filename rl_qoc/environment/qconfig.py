@@ -241,6 +241,9 @@ class RewardConfig(ABC):
     @property
     @abstractmethod
     def reward_method(self) -> str:
+        """
+        String identifier for the reward method
+        """
         raise NotImplementedError
 
 
@@ -261,9 +264,15 @@ class StateRewardConfig(RewardConfig):
     Configuration for computing the reward based on state fidelity estimation
     """
 
+    input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
+
     @property
     def reward_method(self):
         return "state"
+
+    @property
+    def reward_args(self):
+        return {"input_states_choice": self.input_states_choice}
 
 
 @dataclass
