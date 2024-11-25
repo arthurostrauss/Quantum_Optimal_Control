@@ -42,7 +42,7 @@ qibo_config = QiboConfig(
     param_circuit,
     get_backend(),
     platform="dummy",
-    qubit_pair=(0, 2),
+    physical_qubits=(0, 2),
     gate_rule="cz",
     parametrized_circuit_kwargs={"target": target},
     instruction_durations=None,

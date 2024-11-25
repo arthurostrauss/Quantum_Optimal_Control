@@ -226,6 +226,8 @@ class QiboBackendInfo(BackendInfo):
         self, qc_input: Union[QuantumCircuit, List[QuantumCircuit]], *args, **kwargs
     ):
 
-        return transpile(
-            qc_input, basis_gates=self.basis_gates, coupling_map=self.coupling_map
+        return (
+            qc_input.decompose()
+            if isinstance(qc_input, QuantumCircuit)
+            else [circ.decompose() for circ in qc_input]
         )
