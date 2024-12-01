@@ -15,7 +15,7 @@
             "amplitude": 0.0,
             "alpha": -0.015030603678546904,
             "anharmonicity": 10000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x": {
             "length": 20,
@@ -23,7 +23,7 @@
             "amplitude": 0.059882700933552066,
             "alpha": -0.05755167099106291,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "y": {
             "length": 20,
@@ -31,7 +31,7 @@
             "amplitude": 0.059882700933552066,
             "alpha": -0.05755167099106291,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sx": {
             "length": 20,
@@ -39,7 +39,7 @@
             "amplitude": 0.029941350466776033,
             "alpha": -0.05755167099106291,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sx": {
             "length": 20,
@@ -47,7 +47,7 @@
             "amplitude": 0.029941350466776033,
             "alpha": -0.05755167099106291,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sy": {
             "length": 20,
@@ -55,7 +55,7 @@
             "amplitude": 0.029941350466776033,
             "alpha": -0.05755167099106291,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sy": {
             "length": 20,
@@ -63,7 +63,7 @@
             "amplitude": 0.029941350466776033,
             "alpha": -0.05755167099106291,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x_ef": {
             "length": 20,
@@ -71,7 +71,7 @@
             "amplitude": 0.0515804572300122,
             "alpha": 0.0,
             "anharmonicity": 204500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x_12": {
             "length": 20,
@@ -79,7 +79,7 @@
             "amplitude": 0.05681512990799589,
             "alpha": 0.0,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           }
         },
         "opx_output_I": "#/architecture/qubits/qubit0/xy/opx_output_I",
@@ -239,7 +239,7 @@
             "amplitude": 0.0,
             "alpha": -0.016992456784943814,
             "anharmonicity": 10000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x": {
             "length": 20,
@@ -247,7 +247,7 @@
             "amplitude": 0.054181162967120965,
             "alpha": -0.01659105313953996,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "y": {
             "length": 20,
@@ -255,7 +255,7 @@
             "amplitude": 0.054181162967120965,
             "alpha": -0.01659105313953996,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sx": {
             "length": 20,
@@ -263,7 +263,7 @@
             "amplitude": 0.027090581483560482,
             "alpha": -0.01659105313953996,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sx": {
             "length": 20,
@@ -271,7 +271,7 @@
             "amplitude": 0.027090581483560482,
             "alpha": -0.01659105313953996,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sy": {
             "length": 20,
@@ -279,7 +279,7 @@
             "amplitude": 0.027090581483560482,
             "alpha": -0.01659105313953996,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sy": {
             "length": 20,
@@ -287,7 +287,7 @@
             "amplitude": 0.027090581483560482,
             "alpha": -0.01659105313953996,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x_ef": {
             "length": 20,
@@ -295,7 +295,7 @@
             "amplitude": 0.042302383470103753,
             "alpha": 0.0,
             "anharmonicity": 203000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x_12": {
             "length": 20,
@@ -303,7 +303,7 @@
             "amplitude": 0.04121503830588906,
             "alpha": 0.0,
             "anharmonicity": 204000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           }
         },
         "opx_output_I": "#/architecture/qubits/qubit1/xy/opx_output_I",
@@ -463,7 +463,7 @@
             "amplitude": 0.0,
             "alpha": -0.007318318008420118,
             "anharmonicity": 10000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x": {
             "length": 20,
@@ -471,7 +471,7 @@
             "amplitude": 0.06665163076168193,
             "alpha": -0.007220566410645972,
             "anharmonicity": 200500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "y": {
             "length": 20,
@@ -479,7 +479,7 @@
             "amplitude": 0.06665163076168193,
             "alpha": -0.007220566410645972,
             "anharmonicity": 200500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sx": {
             "length": 20,
@@ -487,7 +487,7 @@
             "amplitude": 0.033325815380840965,
             "alpha": -0.007220566410645972,
             "anharmonicity": 200500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sx": {
             "length": 20,
@@ -495,7 +495,7 @@
             "amplitude": 0.033325815380840965,
             "alpha": -0.007220566410645972,
             "anharmonicity": 200500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sy": {
             "length": 20,
@@ -503,7 +503,7 @@
             "amplitude": 0.033325815380840965,
             "alpha": -0.007220566410645972,
             "anharmonicity": 200500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sy": {
             "length": 20,
@@ -511,7 +511,7 @@
             "amplitude": 0.033325815380840965,
             "alpha": -0.007220566410645972,
             "anharmonicity": 200500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x_ef": {
             "length": 20,
@@ -519,7 +519,7 @@
             "amplitude": 0.048646879275876374,
             "alpha": 0.0,
             "anharmonicity": 198000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x_12": {
             "length": 20,
@@ -527,7 +527,7 @@
             "amplitude": 0.05168811708493496,
             "alpha": 0.0,
             "anharmonicity": 200500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           }
         },
         "opx_output_I": "#/architecture/qubits/qubit2/xy/opx_output_I",
@@ -685,7 +685,7 @@
             "amplitude": 0.0,
             "alpha": 0.05918123736352604,
             "anharmonicity": 10000000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x": {
             "length": 20,
@@ -693,7 +693,7 @@
             "amplitude": 0.09436252379113182,
             "alpha": 0.054665287162162145,
             "anharmonicity": 191500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "y": {
             "length": 20,
@@ -701,7 +701,7 @@
             "amplitude": 0.09436252379113182,
             "alpha": 0.054665287162162145,
             "anharmonicity": 191500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sx": {
             "length": 20,
@@ -709,7 +709,7 @@
             "amplitude": 0.04718126189556591,
             "alpha": 0.054665287162162145,
             "anharmonicity": 191500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sx": {
             "length": 20,
@@ -717,7 +717,7 @@
             "amplitude": 0.04718126189556591,
             "alpha": 0.054665287162162145,
             "anharmonicity": 191500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "sy": {
             "length": 20,
@@ -725,7 +725,7 @@
             "amplitude": 0.04718126189556591,
             "alpha": 0.054665287162162145,
             "anharmonicity": 191500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "-sy": {
             "length": 20,
@@ -733,7 +733,7 @@
             "amplitude": 0.04718126189556591,
             "alpha": 0.054665287162162145,
             "anharmonicity": 191500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           },
           "x_12": {
             "length": 20,
@@ -741,7 +741,7 @@
             "amplitude": 0.07147276513781482,
             "alpha": 0.0,
             "anharmonicity": 191500000.0,
-            "__class__": "quam.components.pulses.DragPulseCosine"
+            "__class__": "quam.components.pulses.DragCosinePulse"
           }
         },
         "opx_output_I": "#/architecture/qubits/qubit3/xy/opx_output_I",

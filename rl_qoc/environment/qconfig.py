@@ -375,7 +375,7 @@ class QEnvConfig:
     action_space: Box
     execution_config: ExecutionConfig
     reward_config: (
-        RewardConfig | Literal["channel", "orbit", "state", "cafe", "xeb"]
+        RewardConfig | Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"]
     ) = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     training_with_cal: bool = True

@@ -422,7 +422,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 raise exc
 
         else:  # Perform simulation at circuit or pulse level
-            print("Starting simulation benchmark...")
             if not self.config.reward_method == "fidelity":
                 params = np.array(
                     [self.mean_action]
@@ -431,7 +430,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 fids = self.simulate_circuit(qc, params)
             else:  # Pulse simulation
                 fids = self.simulate_pulse_circuit(qc, params)
-            print("Avg gate fidelity:", self.avg_fidelity_history[-1])
             print("Finished simulation benchmark \n")
             return fids
 

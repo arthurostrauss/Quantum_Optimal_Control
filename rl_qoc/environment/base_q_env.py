@@ -876,12 +876,15 @@ class BaseQuantumEnvironment(ABC, Env):
 
         return pubs, total_shots
 
-    def simulate_circuit(self, qc: QuantumCircuit, params: np.array) -> np.array:
+    def simulate_circuit(
+        self, qc: QuantumCircuit, params: np.array, update_env_history: bool = True
+    ) -> np.array:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         This method should be called only when the abstraction level is "circuit"
         :param qc: QuantumCircuit to execute on quantum system
         :param params: List of Action vectors to execute on quantum system
+        :param update_env_history: Boolean to update the environment history
         :return: Fidelity metric or array of fidelities for all actions in the batch
         """
         from qiskit_aer import AerSimulator
@@ -996,9 +999,12 @@ class BaseQuantumEnvironment(ABC, Env):
                 and n_reps == 1
             ):
                 returned_fidelities = fidelities
-
-            fid_array.append(np.mean(fidelities))
-        print("Fidelity stored", np.mean(returned_fidelities))
+            if update_env_history:
+                fid_array.append(np.mean(fidelities))
+        print(
+            f"{returned_fidelity_type.capitalize()} Fidelity stored:",
+            np.mean(returned_fidelities),
+        )
         return returned_fidelities
 
     def _observable_to_observation(self):
