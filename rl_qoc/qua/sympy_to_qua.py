@@ -53,10 +53,10 @@ def sympy_to_qua(
         QuaVariableType: The equivalent QUA variable transformed from the sympy expression
     """
     # Convert sympy_expr that could be from symengine to actual sympy
-    if any([isinstance(param.type, fixed) for param in parameter_vals.values()]):
-        new_val = declare(fixed)
-    else:
-        new_val = declare(int)
+    # if any([isinstance(param.type, fixed) for param in parameter_vals.values()]):
+    #     new_val = declare(fixed)
+    # else:
+    #     new_val = declare(int)
 
     sympy_to_qua_dict = {}
     for symbol in sympy_expr.free_symbols:
@@ -68,7 +68,16 @@ def sympy_to_qua(
     if isinstance(sympy_expr, se.Basic):
         sympy_expr = sp.sympify(str(sympy_expr))
     if isinstance(sympy_expr, sp.Symbol):
-        result = sympy_to_qua_dict[sympy_expr]
+        # Proceed to name comparison, as direct comparison of sympy symbols is not working
+        initial_key = sympy_expr.name
+        final_key = None
+        for key in sympy_to_qua_dict.keys():
+            if key.name == initial_key:
+                final_key = key
+                break
+        if not final_key:
+            raise ValueError(f"Parameter {initial_key} not found in parameter_vals")
+        result = sympy_to_qua_dict[final_key]
 
     elif isinstance(sympy_expr, sp.Number):
         result = sympy_expr.evalf()
@@ -97,5 +106,5 @@ def sympy_to_qua(
             result = qua_func(sympy_to_qua(sympy_expr.args[0], parameter_vals))
     else:
         raise ValueError(f"Unsupported sympy expression: {sympy_expr}")
-    assign(new_val, result)
-    return new_val
+    # assign(new_val, result)
+    return result

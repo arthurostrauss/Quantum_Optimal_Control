@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 from quam.core import QuamRoot, quam_dataclass
 from quam.components.octave import Octave
@@ -15,13 +16,11 @@ from quam.components.ports import (
 from .transmon import Transmon
 from .transmon_pair import TransmonPair
 
-from qm.qua import align
 from qm import QuantumMachinesManager, QuantumMachine
 from qualang_tools.results.data_handler import DataHandler
 
 from dataclasses import field
-from typing import List, Dict, ClassVar, Any, Sequence, Union
-
+from typing import List, Dict, ClassVar, Any, Optional, Sequence, Union
 
 __all__ = ["QuAM", "FEMQuAM", "OPXPlusQuAM"]
 
@@ -33,7 +32,7 @@ class QuAM(QuamRoot):
     octaves: Dict[str, Octave] = field(default_factory=dict)
 
     qubits: Dict[str, Transmon] = field(default_factory=dict)
-    qubit_pairs: List[TransmonPair] = field(default_factory=list)
+    qubit_pairs: Dict[str, TransmonPair] = field(default_factory=dict)
     wiring: dict = field(default_factory=dict)
     network: dict = field(default_factory=dict)
 
@@ -41,6 +40,7 @@ class QuAM(QuamRoot):
     active_qubit_pair_names: List[str] = field(default_factory=list)
 
     _data_handler: ClassVar[DataHandler] = None
+    qmm: ClassVar[Optional[QuantumMachinesManager]] = None
 
     @classmethod
     def load(cls, *args, **kwargs) -> "QuAM":
@@ -58,7 +58,7 @@ class QuAM(QuamRoot):
     def save(
         self,
         path: Union[Path, str] = None,
-        content_mapping: Dict[str, str] = None,
+        content_mapping: Dict[Union[Path, str], Sequence[str]] = None,
         include_defaults: bool = False,
         ignore: Sequence[str] = None,
     ):
@@ -85,7 +85,7 @@ class QuAM(QuamRoot):
     @property
     def active_qubit_pairs(self) -> List[TransmonPair]:
         """Return the list of active qubits."""
-        return self.qubit_pairs
+        return [self.qubit_pairs[q] for q in self.active_qubit_pair_names]
 
     @property
     def depletion_time(self) -> int:
@@ -99,24 +99,71 @@ class QuAM(QuamRoot):
 
     def apply_all_couplers_to_min(self) -> None:
         """Apply the offsets that bring all the active qubit pairs to a decoupled point."""
-        align()
         for qp in self.active_qubit_pairs:
-            qp.coupler.to_decouple_idle()
-        align()
+            if qp.coupler is not None:
+                qp.coupler.to_decouple_idle()
+
+    def apply_all_flux_to_joint_idle(self) -> None:
+        """Apply the offsets that bring all the active qubits to the joint sweet spot."""
+        for q in self.active_qubits:
+            if q.z is not None:
+                q.z.to_joint_idle()
+            else:
+                warnings.warn(
+                    f"Didn't find z-element on qubit {q.name}, didn't set to joint-idle"
+                )
+        for q in self.qubits:
+            if self.qubits[q] not in self.active_qubits:
+                if self.qubits[q].z is not None:
+                    self.qubits[q].z.to_min()
+                else:
+                    warnings.warn(
+                        f"Didn't find z-element on qubit {q}, didn't set to min"
+                    )
+        self.apply_all_couplers_to_min()
 
     def apply_all_flux_to_min(self) -> None:
         """Apply the offsets that bring all the active qubits to the minimum frequency point."""
-        align()
-        for q in self.active_qubits:
-            q.z.to_min()
-        align()
+        for q in self.qubits:
+            if self.qubits[q].z is not None:
+                self.qubits[q].z.to_min()
+            else:
+                warnings.warn(f"Didn't find z-element on qubit {q}, didn't set to min")
+        self.apply_all_couplers_to_min()
 
     def apply_all_flux_to_zero(self) -> None:
         """Apply the offsets that bring all the active qubits to the zero bias point."""
-        align()
         for q in self.active_qubits:
             q.z.to_zero()
-        align()
+
+    def set_all_fluxes(self, flux_point: str, target: Union[Transmon, TransmonPair]):
+        if flux_point == "independent":
+            assert isinstance(
+                target, Transmon
+            ), "Independent flux point is only supported for individual transmons"
+        elif flux_point == "pairwise":
+            assert isinstance(
+                target, TransmonPair
+            ), "Pairwise flux point is only supported for transmon pairs"
+
+        if flux_point == "joint":
+            self.apply_all_flux_to_joint_idle()
+            if isinstance(target, TransmonPair):
+                target_bias = target.mutual_flux_bias
+            else:
+                target_bias = target.z.joint_offset
+        else:
+            self.apply_all_flux_to_min()
+
+        if flux_point == "independent":
+            target.z.to_independent_idle()
+            target_bias = target.z.independent_offset
+
+        elif flux_point == "pairwise":
+            target.to_mutual_idle()
+            target_bias = target.mutual_flux_bias
+
+        return target_bias
 
     def connect(self) -> QuantumMachinesManager:
         """Open a Quantum Machine Manager with the credentials ("host" and "cluster_name") as defined in the network file.
@@ -130,7 +177,8 @@ class QuAM(QuamRoot):
         )
         if "port" in self.network:
             settings["port"] = self.network["port"]
-        return QuantumMachinesManager(**settings)
+        self.qmm = QuantumMachinesManager(**settings)
+        return self.qmm
 
     def get_octave_config(self) -> dict:
         """Return the Octave configuration."""

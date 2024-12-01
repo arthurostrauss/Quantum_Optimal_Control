@@ -1,19 +1,18 @@
-import math
-from typing import List
+from typing import List, Union, Sequence
 
-from qiskit.circuit import ParameterExpression, QuantumCircuit
+from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.parametervector import (
     ParameterVectorElement,
-    ParameterVector,
     Parameter,
+    ParameterVector,
 )
+from qiskit.pulse import Schedule, ScheduleBlock
 
 from qm.qua import *
 from qm.qua._expressions import QuaArrayType
 
 from qualang_tools.video_mode import ParameterTable
 from qualang_tools.video_mode.videomode import ParameterValue
-from qiskit import pulse
 import numpy as np
 from quam.examples.superconducting_qubits import Transmon
 
@@ -72,9 +71,55 @@ def add_parameter_table_to_circuit(qc: QuantumCircuit):
             param_dict[parameter.name] = 0.0
 
     # Create a ParameterTable object.
-    param_table = ParameterTable(param_dict)
+    param_table = ParameterTable(param_dict) if param_dict else None
     qc.metadata["parameter_table"] = param_table
-    return qc
+    return qc, param_table
+
+
+def parameter_table_from_qiskit(
+    parameter_input: Union[
+        ParameterVector, Sequence[Parameter], QuantumCircuit, Schedule, ScheduleBlock
+    ]
+):
+    """
+    Create a parameter table from a Qiskit object
+
+    Args:
+        parameter_input: The Qiskit object from which to create the parameter table
+
+    Returns:
+        The parameter table created from the Qiskit object
+    """
+    param_dict = {}
+    if isinstance(parameter_input, QuantumCircuit):
+        qc = parameter_input
+        qc, parameter_table = add_parameter_table_to_circuit(qc)
+        return parameter_table
+    elif isinstance(parameter_input, (Schedule, ScheduleBlock)):
+        for channel in list(
+            filter(lambda ch: ch.is_parameterized(), parameter_input.channels)
+        ):
+            ch_params = list(channel.parameters)
+            if len(ch_params) > 1:
+                raise NotImplementedError(
+                    "Only single parameterized channels are supported"
+                )
+            ch_param = ch_params[0]
+            if ch_param.name not in param_dict:
+                param_dict[ch_param.name] = 0
+        for param in parameter_input.parameters:
+            if param.name not in param_dict:
+                param_dict[param.name] = 0.0
+    elif isinstance(parameter_input, (ParameterVector, Sequence[Parameter])):
+        for parameter in parameter_input:
+            if isinstance(parameter, ParameterVectorElement):
+                if parameter.vector.name not in param_dict:
+                    param_dict[parameter.vector.name] = [
+                        0.0 for _ in range(len(parameter.vector))
+                    ]
+            elif isinstance(parameter, Parameter):
+                param_dict[parameter.name] = 0.0
+    return ParameterTable(param_dict) if param_dict else None
 
 
 def clip_qua(param: ParameterValue, min_value, max_value):
