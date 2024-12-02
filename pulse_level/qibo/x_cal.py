@@ -38,14 +38,18 @@ def get_backend():
 
 target = {"state": Statevector.from_label("1"), "physical_qubits": [0]}
 instruction_durations = {}
-action_space_low = np.array([0.0], dtype=np.float32)  # [amp, phase, phase, duration]
-action_space_high = np.array([0.5], dtype=np.float32)  # [amp, phase, phase, duration]
+action_space_low = np.array(
+    [0.0], dtype=np.float32
+)  # [amp, phase, phase, duration]
+action_space_high = np.array(
+    [0.1], dtype=np.float32
+)  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
     get_backend(),
-    platform="dummy",
-    physical_qubits=[[0]],
+    platform="qw11q",
+    physical_qubits=(["D1"]),
     gate_rule="x",
     parametrized_circuit_kwargs={"target": target},
     instruction_durations=None,
