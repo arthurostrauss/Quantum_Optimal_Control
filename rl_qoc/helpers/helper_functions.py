@@ -53,8 +53,8 @@ from qiskit.providers import (
     QiskitBackendNotFoundError,
 )
 
-from qiskit_ibm_runtime.fake_provider import FakeProvider, FakeProviderForBackendV2
-from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackendV2, FakeBackend
+from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
+from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackendV2
 from qiskit_aer.backends.aerbackend import AerBackend
 from qiskit_ibm_runtime import (
     Session,
@@ -386,7 +386,7 @@ def retrieve_primitives(
             options={"qubits": config.physical_qubits, "gate_rule": config.gate_rule},
         )
         sampler = StatevectorSampler()  # Dummy sampler
-    elif isinstance(backend, (FakeBackend, FakeBackendV2, AerBackend)):
+    elif isinstance(backend, (FakeBackendV2, AerBackend)):
         from qiskit_aer.primitives import (
             EstimatorV2 as AerEstimatorV2,
             SamplerV2 as AerSamplerV2,
@@ -533,10 +533,6 @@ def select_backend(
             try:
                 if not use_dynamics:
                     backend = FakeProviderForBackendV2().backend(
-                        backend_name if backend_name is not None else "fake_jakarta"
-                    )
-                else:
-                    backend = FakeProvider().get_backend(
                         backend_name if backend_name is not None else "fake_jakarta"
                     )
             except QiskitBackendNotFoundError:
