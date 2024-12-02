@@ -79,7 +79,7 @@ file_name = "agent_config.yaml"
 
 agent_config = load_from_yaml_file(file_name)
 # %%
-ppo = CustomPPO(agent_config, ClipAction(env))
+ppo = CustomPPO(agent_config, ClipAction(env), save_data=True)
 total_updates = TotalUpdates(500)
 # hardware_runtime = HardwareRuntime(300)
 training_config = TrainingConfig(
