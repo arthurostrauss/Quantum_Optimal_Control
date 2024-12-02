@@ -2,7 +2,9 @@
 from qiskit import QuantumRegister
 import numpy as np
 from gymnasium.spaces import Box
-from rl_qoc import QuantumEnvironment, BenchmarkConfig
+from qiskit.quantum_info import Statevector
+
+from rl_qoc import QuantumEnvironment, BenchmarkConfig, StateRewardConfig
 from qiskit.circuit import QuantumCircuit, ParameterVector, Gate
 from qiskit.circuit.library import CZGate, RXGate, XGate
 from rl_qoc import (
@@ -18,9 +20,13 @@ def param_circuit(
     qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
 ):
     target = kwargs["target"]
-    gate: Gate = target["gate"]
+    gate: Gate = target.get("gate", "G")
+    if gate == "G":
+        gate_name = "G"
+    else:
+        gate_name = gate.name
     physical_qubits = target["physical_qubits"]
-    custom_gate = Gate(f"{gate.name}_cal", len(physical_qubits), params.params)
+    custom_gate = Gate(f"{gate_name}_cal", len(physical_qubits), params.params)
     qc.append(custom_gate, qreg)
 
     return qc
@@ -30,13 +36,13 @@ def get_backend():
     return "qibolab"
 
 
-target = {"gate": XGate(), "physical_qubits": [0]}
+target = {"state": Statevector.from_label('1'), "physical_qubits": [0]}
 instruction_durations = {}
 action_space_low = np.array(
-    [0.0, 16], dtype=np.float32
+    [0.0], dtype=np.float32
 )  # [amp, phase, phase, duration]
 action_space_high = np.array(
-    [1.0, 160], dtype=np.float32
+    [0.5], dtype=np.float32
 )  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
@@ -52,7 +58,7 @@ q_env_config = QEnvConfig(
     target=target,
     backend_config=qibo_config,
     action_space=action_space,
-    reward_config=ChannelRewardConfig(),
+    reward_config=StateRewardConfig(),
     benchmark_config=BenchmarkConfig(0),
     execution_config=ExecutionConfig(
         batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1
