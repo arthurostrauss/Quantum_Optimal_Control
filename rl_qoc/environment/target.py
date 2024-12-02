@@ -171,7 +171,7 @@ class StateTarget(BaseTarget):
                 raise ValueError("Either state or circuit should be provided")
             self.dm = DensityMatrix(circuit)
             self.circuit = circuit if isinstance(circuit, QuantumCircuit) else None
-        if self.circuit is None:
+        if circuit is None:
             qc = QuantumCircuit(self.dm.num_qubits)
             if not isinstance(state, Statevector):
                 state = density_matrix_to_statevector(state)
