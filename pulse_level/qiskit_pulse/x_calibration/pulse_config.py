@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Optional, List
 
 from qiskit.transpiler import Target, InstructionProperties
@@ -7,6 +8,8 @@ from qiskit_experiments.calibration_management import (
     FixedFrequencyTransmon,
     EchoedCrossResonance,
 )
+
+from rl_qoc.environment.target import BaseTarget
 from rl_qoc.helpers import (
     to_python_identifier,
     new_params_ecr,
@@ -117,14 +120,18 @@ def validate_pulse_kwargs(
     """
     Validate the kwargs passed to the parametrized circuit function for pulse level calibration
     """
+
     if "target" not in kwargs or "backend" not in kwargs:
         raise ValueError("Missing target and backend in kwargs.")
+
     target, backend = kwargs["target"], kwargs["backend"]
+    if isinstance(target, BaseTarget):
+        target = asdict(target)
     assert isinstance(
         backend, (BackendV1, BackendV2)
     ), "Backend should be a valid Qiskit Backend instance"
     assert isinstance(
-        target, dict
+        asdict(target), dict
     ), "Target should be a dictionary with 'physical_qubits' keys."
 
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]

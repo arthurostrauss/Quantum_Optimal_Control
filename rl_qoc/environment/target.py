@@ -183,10 +183,11 @@ class StateTarget(BaseTarget):
             self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
         )
 
-    def fidelity(self, state: QuantumState | QuantumCircuit):
+    def fidelity(self, state: QuantumState | QuantumCircuit, n_reps: int = 1):
         """
         Compute the fidelity of the state with the target
         :param state: State to compare with the target state
+        :param n_reps: Number of repetitions of the target gate (default is 1)
         """
         if isinstance(state, QuantumCircuit):
             try:

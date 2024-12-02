@@ -20,9 +20,9 @@ def param_circuit(
     qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
 ):
     target = kwargs["target"]
-    gate: Gate = target.get("gate", "X")
-    if gate == "X":
-        gate_name = "X"
+    gate: Gate = target.get("gate", "x")
+    if gate == "x":
+        gate_name = "x"
     else:
         gate_name = gate.name
     physical_qubits = target["physical_qubits"]
@@ -36,14 +36,10 @@ def get_backend():
     return "qibolab"
 
 
-target = {"state": Statevector.from_label('1'), "physical_qubits": [0]}
+target = {"state": Statevector.from_label("1"), "physical_qubits": [0]}
 instruction_durations = {}
-action_space_low = np.array(
-    [0.0], dtype=np.float32
-)  # [amp, phase, phase, duration]
-action_space_high = np.array(
-    [0.5], dtype=np.float32
-)  # [amp, phase, phase, duration]
+action_space_low = np.array([0.0], dtype=np.float32)  # [amp, phase, phase, duration]
+action_space_high = np.array([0.5], dtype=np.float32)  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,

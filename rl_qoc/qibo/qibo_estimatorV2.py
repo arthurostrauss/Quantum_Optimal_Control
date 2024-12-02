@@ -214,7 +214,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
                 op_nodes = dag.op_nodes()
                 for node in op_nodes:
                     if node.name not in gate_map:
-                        gate_name:str = node.name.split("_")[0]
+                        gate_name: str = node.name.split("_")[0]
                         try:
                             gate = gate_map[gate_name.lower()]
                         except KeyError:

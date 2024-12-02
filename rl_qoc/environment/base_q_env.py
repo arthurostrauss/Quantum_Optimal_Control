@@ -961,16 +961,23 @@ class BaseQuantumEnvironment(ABC, Env):
         ]
         data_length = len(params)
 
-        for circ, method, fid_array in zip(
-            [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
-            [channel_output] * 2 + [state_output] * 2,
-            [
+        if isinstance(self.target, GateTarget):
+            circuits = [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps]
+            methods = ([channel_output] * 2 + [state_output] * 2,)
+            fid_arrays = [
                 self.avg_fidelity_history,
                 self.avg_fidelity_history_nreps,
                 self.circuit_fidelity_history,
                 self.circuit_fidelity_history_nreps,
-            ],
-        ):
+            ]
+        else:
+            circuits = [qc_state, qc_state_nreps]
+            fid_arrays = [
+                self.circuit_fidelity_history,
+                self.circuit_fidelity_history_nreps,
+            ]
+            methods = [state_output] * 2
+        for circ, method, fid_array in zip(circuits, methods, fid_arrays):
             # Avoid channel simulation for more than 3 qubits
             if (method == "superop" or method == "unitary") and circ.num_qubits > 3:
                 fidelities = [0.0] * data_length
