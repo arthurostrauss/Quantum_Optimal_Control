@@ -104,7 +104,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 input_states_choice=input_states_choice,
             )
         else:
-            target = StateTarget(**self.config.target)
+            target = StateTarget(**asdict(self.config.target))
 
         custom_circuit = QuantumCircuit(target.tgt_register, name="custom_circuit")
         ref_circuit = QuantumCircuit(target.tgt_register, name="baseline_circuit")
