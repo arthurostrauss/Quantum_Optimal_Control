@@ -20,9 +20,9 @@ def param_circuit(
     qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
 ):
     target = kwargs["target"]
-    gate: Gate = target.get("gate", "G")
-    if gate == "G":
-        gate_name = "G"
+    gate: Gate = target.get("gate", "X")
+    if gate == "X":
+        gate_name = "X"
     else:
         gate_name = gate.name
     physical_qubits = target["physical_qubits"]
