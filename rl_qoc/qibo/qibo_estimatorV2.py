@@ -214,9 +214,16 @@ class QiboEstimatorV2(BaseEstimatorV2):
                 op_nodes = dag.op_nodes()
                 for node in op_nodes:
                     if node.name not in gate_map:
-                        gate_name = node.name.split("_")[0]
+                        gate_name:str = node.name.split("_")[0]
+                        try:
+                            gate = gate_map[gate_name.lower()]
+                        except KeyError:
+                            raise QiskitError(
+                                f"Cannot bind the circuit to the backend because the gate "
+                                f"{gate_name} is not found in the standard gate set."
+                            )
                         qc = QuantumCircuit(list(node.qargs))
-                        qc.append(gate_map[gate_name], node.qargs)
+                        qc.append(gate, node.qargs)
                         dag.substitute_node_with_dag(node, circuit_to_dag(qc))
                 new_circuits2.append(dag_to_circuit(dag))
             circuits.extend(new_circuits2)
