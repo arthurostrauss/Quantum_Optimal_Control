@@ -383,7 +383,7 @@ def retrieve_primitives(
 
         estimator = QiboEstimatorV2(
             platform=config.platform,
-            options={"qubits": config.qubit_pair, "gate_rule": config.gate_rule},
+            options={"qubits": config.physical_qubits, "gate_rule": config.gate_rule},
         )
         sampler = StatevectorSampler()  # Dummy sampler
     elif isinstance(backend, (FakeBackend, FakeBackendV2, AerBackend)):

@@ -30,7 +30,7 @@ def get_backend():
     return "qibolab"
 
 
-target = {"gate": CZGate(), "physical_qubits": [0, 1]}
+target = {"gate": XGate(), "physical_qubits": [0]}
 instruction_durations = {}
 action_space_low = np.array(
     [0.0, 16], dtype=np.float32
@@ -43,8 +43,8 @@ qibo_config = QiboConfig(
     param_circuit,
     get_backend(),
     platform="dummy",
-    physical_qubits=[[0, 2]],
-    gate_rule="cz",
+    physical_qubits=[[0]],
+    gate_rule="x",
     parametrized_circuit_kwargs={"target": target},
     instruction_durations=None,
 )
@@ -61,9 +61,9 @@ q_env_config = QEnvConfig(
 
 env = QuantumEnvironment(q_env_config)
 # %%
-env.circuits[0].draw(output="mpl")
-# %%
-env.baseline_circuits[0].draw(output="mpl")
+# env.circuits[0].draw(output="mpl")
+# # %%
+# env.baseline_circuits[0].draw(output="mpl")
 # %%
 from rl_qoc import CustomPPO
 from rl_qoc.agent import TrainFunctionSettings, TotalUpdates, TrainingConfig
