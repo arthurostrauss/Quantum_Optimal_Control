@@ -436,6 +436,11 @@ def take_step(
             "charts/episodic_return", np.mean(reward.numpy()), global_step
         )
         writer.add_scalar("charts/episodic_length", num_steps, global_step)
+        for i in range(env.unwrapped.mean_action.shape[0]):
+            writer.add_scalar(
+                "charts/mean_action", env.unwrapped.mean_action[i], global_step
+            )
+            writer.add_scalar("charts/std_action", np.array(std_action)[i], global_step)
 
     return next_obs, next_done, mean_action, std_action
 
