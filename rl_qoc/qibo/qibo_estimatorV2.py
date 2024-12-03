@@ -249,11 +249,11 @@ class QiboEstimatorV2(BaseEstimatorV2):
 
         results = []
         start = 0
-        for pub, data in zip(pubs, preprocessed_data):
+        for pub, data, count in zip(pubs, preprocessed_data, counts):
             end = start + len(data.circuits)
             expval_map = self._calc_expval_map(counts[start:end], metadata[start:end])
             start = end
-            results.append(self._postprocess_pub(pub, expval_map, data, shots))
+            results.append(self._postprocess_pub(pub, expval_map, data, shots, count))
         return results
 
     def _preprocess_pub(self, pub: EstimatorPub) -> _PreprocessedData:
@@ -292,7 +292,8 @@ class QiboEstimatorV2(BaseEstimatorV2):
         return _PreprocessedData(bound_circuits, bc_param_ind, bc_obs)
 
     def _postprocess_pub(
-        self, pub: EstimatorPub, expval_map: dict, data: _PreprocessedData, shots: int
+        self, pub: EstimatorPub, expval_map: dict, data: _PreprocessedData, shots: int,
+            counts: list[Counts]
     ) -> PubResult:
         """Computes expectation values (evs) and standard errors (stds).
 
@@ -325,6 +326,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
                 "target_precision": pub.precision,
                 "shots": shots,
                 "circuit_metadata": pub.circuit.metadata,
+                "counts": counts,
             },
         )
 
