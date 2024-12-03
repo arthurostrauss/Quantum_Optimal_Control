@@ -112,10 +112,11 @@ def execute_action(
 
     # Change CZ pulse parameters
     compiler = backend.compiler
-    rule = lambda gate, platform: gate_rule[1](
-        gate, platform, pulse_params, hardware_targets
-    )
-    compiler.register(gate_rule[0])(rule)
+    if pulse_params:
+        rule = lambda gate, platform: gate_rule[1](
+            gate, platform, pulse_params, hardware_targets
+        )
+        compiler.register(gate_rule[0])(rule)
     _, results = execute_transpiled_circuits(
         circuits,
         [qubit_map] * len(circuits),
