@@ -5,6 +5,7 @@ from gymnasium.spaces import Box
 from qiskit.quantum_info import Statevector
 
 from rl_qoc import QuantumEnvironment, BenchmarkConfig, StateRewardConfig
+from rl_qoc.qibo import QiboEnvironment
 from qiskit.circuit import QuantumCircuit, ParameterVector, Gate
 from qiskit.circuit.library import CZGate, RXGate, XGate
 from rl_qoc import (
@@ -59,13 +60,14 @@ q_env_config = QEnvConfig(
     backend_config=qibo_config,
     action_space=action_space,
     reward_config=StateRewardConfig(),
-    benchmark_config=BenchmarkConfig(0),
+    benchmark_config=BenchmarkConfig(1),
     execution_config=ExecutionConfig(
         batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1
     ),
 )
 
-env = QuantumEnvironment(q_env_config)
+# env = QuantumEnvironment(q_env_config)
+env = QiboEnvironment(q_env_config)
 # %%
 # env.circuits[0].draw(output="mpl")
 # # %%

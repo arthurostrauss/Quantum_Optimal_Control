@@ -3,7 +3,7 @@ import numpy as np
 from qibocal.auto.execute import Executor
 from qibocal.cli.report import report
 
-import ..environment.quantumenvironment import QuantumEnvironment
+from rl_qoc import QuantumEnvironment
 
 class QiboEnvironment(QuantumEnvironment):
 
@@ -16,7 +16,7 @@ class QiboEnvironment(QuantumEnvironment):
         backend_config = self.config.backend_config
         if self.config.check_on_exp:
             if backend_config.config_type != "qibo":
-                raise.TypeError("Backend config is not qibo config")
+                raise TypeError("Backend config is not qibo config")
             else:
                 with Executor.open(
                     "myexec",
@@ -45,7 +45,7 @@ class QiboEnvironment(QuantumEnvironment):
                     fidelity = r_c / AVG_GATE
        
             self.circuit_fidelity_history.append(fidelity)
-            print(fidelity)
+            print("AAAAAAAAAAAAAAAAAAAAAAAAAAA",fidelity)
             return fidelity
         return 0
 
