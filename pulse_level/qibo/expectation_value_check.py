@@ -61,19 +61,12 @@ q_env_config = QEnvConfig(
 )
 
 env = QuantumEnvironment(q_env_config)
+rescaled_env = ClipAction(env)
 estimator = env.estimator
 
 observable = SparsePauliOp.from_list([("Z", 1)])
 qc = QuantumCircuit(1)
 qc.x(0)
 
-job = estimator.run([(qc, observable) , (qc, observable)])
-result = job.result()
-
-evs = result[0].data.evs
-print(evs)
-print(result[0].metadata["counts"])
-
-ev2s = result[1].data.evs
-print(ev2s)
-print(result[1].metadata["counts"])
+results = env.step(np.array([[0.4] * 32]))
+print(results)

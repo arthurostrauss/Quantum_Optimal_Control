@@ -14,7 +14,7 @@ from rl_qoc import (
     ChannelRewardConfig,
 )
 from rl_qoc.qibo import QiboConfig
-from gymnasium.wrappers import ClipAction
+from gymnasium.wrappers import ClipAction, RescaleAction
 
 
 def param_circuit(
@@ -81,7 +81,7 @@ file_name = "agent_config.yaml"
 
 agent_config = load_from_yaml_file(file_name)
 # %%
-ppo = CustomPPO(agent_config, ClipAction(env), save_data=True)
+ppo = CustomPPO(agent_config, ClipAction(RescaleAction(env, action_space.low, action_space_high)), save_data=True)
 total_updates = TotalUpdates(500)
 # hardware_runtime = HardwareRuntime(300)
 training_config = TrainingConfig(
