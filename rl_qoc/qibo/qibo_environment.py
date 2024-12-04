@@ -1,9 +1,13 @@
+from time import strftime, gmtime
+
 from qiskit.circuit import QuantumCircuit
 import numpy as np
 from qibocal.auto.execute import Executor
 from qibocal.cli.report import report
 
 from rl_qoc import QuantumEnvironment
+
+AVG_GATE = 1.875
 
 class QiboEnvironment(QuantumEnvironment):
 
@@ -14,19 +18,21 @@ class QiboEnvironment(QuantumEnvironment):
         :return: None
         """
         backend_config = self.config.backend_config
+        target = backend_config.physical_qubits[0]
         if self.config.check_on_exp:
             if backend_config.config_type != "qibo":
                 raise TypeError("Backend config is not qibo config")
             else:
+                path = "rlqoc"+strftime("%d_%b_%H_%M_%S", gmtime())
                 with Executor.open(
                     "myexec",
-                    # path=executor_path,
+                    path= path,
                     platform=backend_config.platform,
-                    targets=[backend_config.physical_qubit],
-                    update=True,
+                    targets=[target],
+                    update=False,
                     force=True,
                 ) as e:
-                    e.platform.qubits[target].native_gates.RX.amplitude = self.mean_action[0]
+                    e.platform.qubits[target].native_gates.RX.amplitude = float(self.mean_action[0])
                     rb_output = e.rb_ondevice(
                             num_of_sequences=1000,
                             max_circuit_depth=1000,

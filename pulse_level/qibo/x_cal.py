@@ -60,7 +60,7 @@ q_env_config = QEnvConfig(
     backend_config=qibo_config,
     action_space=action_space,
     reward_config=StateRewardConfig(),
-    benchmark_config=BenchmarkConfig(1),
+    benchmark_config=BenchmarkConfig(1, check_on_exp = True),
     execution_config=ExecutionConfig(
         batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1
     ),
