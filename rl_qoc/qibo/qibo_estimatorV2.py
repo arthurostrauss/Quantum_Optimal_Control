@@ -292,8 +292,12 @@ class QiboEstimatorV2(BaseEstimatorV2):
         return _PreprocessedData(bound_circuits, bc_param_ind, bc_obs)
 
     def _postprocess_pub(
-        self, pub: EstimatorPub, expval_map: dict, data: _PreprocessedData, shots: int,
-            counts: list[Counts]
+        self,
+        pub: EstimatorPub,
+        expval_map: dict,
+        data: _PreprocessedData,
+        shots: int,
+        counts: list[Counts],
     ) -> PubResult:
         """Computes expectation values (evs) and standard errors (stds).
 
