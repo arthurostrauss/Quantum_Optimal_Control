@@ -553,7 +553,7 @@ class QEnvConfig:
                 "gate": self.target.gate.name if isinstance(self.target, GateTargetConfig) else self.target.state.data,
             },
             "backend_config": {
-                "backend": self.backend.name if self.backend is not None else None,
+                "backend": self.backend.name if isinstance(self.backend, BackendV2) else self.backend,
             },
             "action_space": {
                 "low": self.action_space.low.tolist(),
