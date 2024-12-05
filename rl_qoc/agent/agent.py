@@ -37,7 +37,7 @@ class ActorNetwork(nn.Module):
         # Create the actor network using Sequential container
         self.layers = layers
         self.mean_action = nn.Linear(hidden_layers[-1], n_actions)
-        self.mean_activation = nn.Softplus()
+        self.mean_activation = lambda x: x
         self.std_action = nn.Linear(hidden_layers[-1], n_actions)
         self.std_activation = nn.Sigmoid()
 

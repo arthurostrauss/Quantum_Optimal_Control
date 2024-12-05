@@ -1,10 +1,28 @@
 from dataclasses import dataclass
 from typing import Optional, Union
 from dataclasses import field, asdict
+from abc import ABC, abstractmethod
 
 
 @dataclass
-class TotalUpdates:
+class TrainingConstraint(ABC):
+    """
+    Abstract class for training constraints
+    """
+
+    @property
+    @abstractmethod
+    def constraint_name(self):
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def constraint_value(self):
+        raise NotImplementedError
+
+
+@dataclass
+class TotalUpdates(TrainingConstraint):
     """
     Total updates constraint for training (number of epochs)
 
@@ -18,9 +36,17 @@ class TotalUpdates:
             isinstance(self.total_updates, int) and self.total_updates > 0
         ), "total_updates must be an integer greater than 0"
 
+    @property
+    def constraint_name(self):
+        return "TotalUpdates"
+
+    @property
+    def constraint_value(self):
+        return self.total_updates
+
 
 @dataclass
-class HardwareRuntime:
+class HardwareRuntime(TrainingConstraint):
     """
     Hardware runtime constraint for training (in seconds). To use this mode, you should ensure that the selected backend
     does have a non-trivial InstructionDurations attribute (the user can set this attribute manually in the config as
@@ -33,6 +59,14 @@ class HardwareRuntime:
 
     def __post_init__(self):
         assert self.hardware_runtime > 0, "hardware_runtime must be greater than 0"
+
+    @property
+    def constraint_name(self):
+        return "HardwareRuntime"
+
+    @property
+    def constraint_value(self):
+        return self.hardware_runtime
 
 
 @dataclass
