@@ -550,7 +550,7 @@ class QEnvConfig:
         return {
             "target": {
                 "physical_qubits": self.physical_qubits,
-                "gate": self.target.gate.name,
+                "gate": self.target.gate.name if isinstance(self.target, GateTargetConfig) else self.target.state.data,
             },
             "backend_config": {
                 "backend": self.backend.name if self.backend is not None else None,
