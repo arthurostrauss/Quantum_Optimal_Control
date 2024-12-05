@@ -545,3 +545,33 @@ class QEnvConfig:
     @pass_manager.setter
     def pass_manager(self, value: PassManager):
         self.backend_config.pass_manager = value
+
+    def as_dict(self):
+        return {
+            "target": {
+                "physical_qubits": self.physical_qubits,
+                "gate": self.target.gate.name,
+            },
+            "backend_config": {
+                "backend": self.backend.name if self.backend is not None else None,
+            },
+            "action_space": {
+                "low": self.action_space.low.tolist(),
+                "high": self.action_space.high.tolist(),
+            },
+            "execution_config": {
+                "batch_size": self.batch_size,
+                "sampling_paulis": self.sampling_paulis,
+                "n_shots": self.n_shots,
+                "n_reps": self.n_reps,
+                "c_factor": self.c_factor,
+                "seed": self.seed,
+            },
+            "reward_config": self.reward_method,
+            "benchmark_config": {
+                "benchmark_cycle": self.benchmark_cycle,
+                "benchmark_batch_size": self.benchmark_batch_size,
+                "tomography_analysis": self.tomography_analysis,
+                "check_on_exp": self.check_on_exp,
+            },
+        }

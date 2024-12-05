@@ -909,8 +909,6 @@ class BaseQuantumEnvironment(ABC, Env):
         for _ in range(self.n_reps - 1):
             qc_channel_nreps.compose(qc, inplace=True)
             qc_state_nreps.compose(qc, inplace=True)
-
-        print("Starting simulation benchmark...")
         backend = AerSimulator()
         if self.backend is None or (
             isinstance(self.backend, AerSimulator) and not has_noise_model(self.backend)
@@ -963,7 +961,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         if isinstance(self.target, GateTarget):
             circuits = [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps]
-            methods = ([channel_output] * 2 + [state_output] * 2,)
+            methods = [channel_output] * 2 + [state_output] * 2
             fid_arrays = [
                 self.avg_fidelity_history,
                 self.avg_fidelity_history_nreps,
@@ -1008,10 +1006,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 returned_fidelities = fidelities
             if update_env_history:
                 fid_array.append(np.mean(fidelities))
-        print(
-            f"{returned_fidelity_type.capitalize()} Fidelity stored:",
-            np.mean(returned_fidelities),
-        )
+
         return returned_fidelities
 
     def _observable_to_observation(self):
@@ -1228,7 +1223,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 returned_fidelities = fidelities
             if update_env_history:
                 fid_array.append(np.mean(fidelities))
-            print("Fidelity stored", np.mean(returned_fidelities))
+
         return returned_fidelities
 
     def _handle_virtual_rotations(self, operations, fidelities, subsystem_dims, n_reps):

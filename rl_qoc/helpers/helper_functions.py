@@ -801,9 +801,18 @@ def remove_none_values(dictionary: Dict):
     return new_dict
 
 
-def load_from_yaml_file(file_path: str):
+def load_from_yaml_file(file_path: str, **kwargs):
+    """
+    Load data from a yaml file
+
+    Args:
+        file_path: Path to the yaml file
+        **kwargs: Additional keyword arguments to update the configuration dictionary
+    """
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
+    if kwargs:
+        config.update(kwargs)
     return config
 
 

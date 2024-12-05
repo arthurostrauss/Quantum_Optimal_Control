@@ -1,355 +1,37 @@
-import time
-from matplotlib.ticker import MaxNLocator
-import numpy as np
 from typing import Optional, Dict
-import tqdm
 from IPython.display import clear_output
 from gymnasium import Wrapper
+import wandb
 
 # Torch imports for building RL agent and framework
-from gymnasium.spaces import Box
 import torch
 import torch.nn as nn
-from matplotlib import pyplot as plt
-from torch.utils.tensorboard import SummaryWriter
-import torch.optim as optim
 from torch.distributions import Normal
-from .agent import ActorNetwork, CriticNetwork, Agent
-from ..environment.base_q_env import BaseQuantumEnvironment
+from .agent import Agent
 from .ppo_config import (
-    HardwareRuntime,
     TotalUpdates,
     TrainFunctionSettings,
     TrainingConfig,
 )
+from .ppo_initialization import (
+    initialize_environment,
+    initialize_agent_config,
+    initialize_rl_params,
+    initialize_networks,
+    initialize_optimizer,
+)
+from .ppo_logging import *
 
 import sys
 import logging
+import signal
 
 logging.basicConfig(
-    level=logging.WARNING,
+    level=logging.INFO,
     format="%(asctime)s INFO %(message)s",  # hardcoded INFO level
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
-
-
-def get_module_from_str(module_str):
-    """
-    Converts a string representation of a module to the corresponding PyTorch module class.
-
-    Args:
-        module_str (str): The string representation of the module.
-
-    Returns:
-        torch.nn.Module: The PyTorch module class corresponding to the input string.
-
-    Raises:
-        ValueError: If the input string does not match any of the supported module names.
-    """
-    module_dict = {
-        "tanh": nn.Tanh,
-        "relu": nn.ReLU,
-        "sigmoid": nn.Sigmoid,
-        "elu": nn.ELU,
-        "selu": nn.SELU,
-        "leaky_relu": nn.LeakyReLU,
-        "none": nn.ReLU,
-        "softmax": nn.Softmax,
-        "log_softmax": nn.LogSoftmax,
-        "gelu": nn.GELU,
-    }
-    if module_str not in module_dict:
-        raise ValueError(
-            f"Agent Config `ACTIVATION` needs to be one of {module_dict.keys()}"
-        )
-    return module_dict[module_str]
-
-
-def get_optimizer_from_str(optim_str):
-    """
-    Returns the optimizer class corresponding to the given optimizer string.
-
-    Args:
-        optim_str (str): The optimizer string.
-
-    Returns:
-        torch.optim.Optimizer: The optimizer class.
-
-    Raises:
-        ValueError: If the optimizer string is not valid.
-    """
-    optim_dict = {
-        "adam": optim.Adam,
-        "adamw": optim.AdamW,
-        "adagrad": optim.Adagrad,
-        "adadelta": optim.Adadelta,
-        "adamax": optim.Adamax,
-        "asgd": optim.ASGD,
-        "rmsprop": optim.RMSprop,
-        "rprop": optim.Rprop,
-        "sgd": optim.SGD,
-    }
-    if optim_str not in optim_dict:
-        raise ValueError(
-            f"Agent Config `OPTIMIZER` needs to be one of {optim_dict.keys()}"
-        )
-
-    return optim_dict[optim_str]
-
-
-def initialize_environment(env: BaseQuantumEnvironment | Wrapper) -> tuple:
-    """
-    Initializes the environment by extracting necessary information.
-
-    Args:
-        env: The environment object.
-
-    Returns:
-        A tuple containing the following information:
-        - seed: The seed value of the environment.
-        - n_actions: The number of actions in the environment.
-        - batchsize: The batch size of the environment.
-        - num_time_steps: The number of time steps in the environment.
-        - min_action: The minimum action value in the environment.
-        - max_action: The maximum action value in the environment.
-
-    Raises:
-        ValueError: If the environment action space is not a Box.
-    """
-    seed = env.unwrapped.seed
-    n_actions = env.action_space.shape[-1]
-    batchsize = env.unwrapped.batch_size
-    num_time_steps = env.unwrapped.tgt_instruction_counts
-
-    if hasattr(env, "min_action") and hasattr(env, "max_action"):
-        min_action = env.min_action
-        max_action = env.max_action
-    elif isinstance(env.action_space, Box):
-        min_action = env.action_space.low
-        max_action = env.action_space.high
-    else:
-        raise ValueError("Environment action space is not a Box")
-
-    return seed, n_actions, batchsize, num_time_steps, min_action, max_action
-
-
-def initialize_agent_config(agent_config, batchsize):
-    """
-    Initializes the agent configuration.
-
-    Args:
-        agent_config (dict): A dictionary containing the agent configuration parameters.
-        batchsize (int): The batch size.
-
-    Returns:
-        tuple: A tuple containing the following elements:
-            - hidden_units (list): A list of hidden units.
-            - activation_functions (list): A list of activation functions.
-            - include_critic (bool): A boolean indicating whether to include the critic.
-            - minibatch_size (int): The minibatch size.
-            - writer (SummaryWriter): A SummaryWriter object for writing TensorBoard logs.
-    """
-    hidden_units = agent_config["N_UNITS"]
-    activation_fn = agent_config["ACTIVATION"]
-    activation_functions = [
-        get_module_from_str(activation_fn)() for _ in range(len(hidden_units) + 1)
-    ]
-    include_critic = agent_config["INCLUDE_CRITIC"]
-    minibatch_size = agent_config["MINIBATCH_SIZE"]
-
-    if batchsize % minibatch_size != 0:
-        raise ValueError(
-            f"The current minibatch size of {minibatch_size} does not evenly divide the batchsize of {batchsize}"
-        )
-
-    return hidden_units, activation_functions, include_critic, minibatch_size
-
-
-def initialize_rl_params(agent_config):
-    """
-    Initializes the parameters for the reinforcement learning agent.
-
-    Args:
-        agent_config (dict): A dictionary containing the configuration parameters for the agent.
-
-    Returns:
-        tuple: A tuple containing the initialized parameters for the agent.
-
-    """
-    n_epochs = agent_config["N_EPOCHS"]
-    lr = agent_config["LR"]
-    ppo_epsilon = agent_config["CLIP_RATIO"]
-    critic_loss_coef = agent_config["V_COEF"]
-    gamma = agent_config["GAMMA"]
-    gae_lambda = agent_config["GAE_LAMBDA"]
-    clip_vloss = agent_config["CLIP_VALUE_LOSS"]
-    grad_clip = agent_config["GRADIENT_CLIP"]
-    clip_coef = agent_config["CLIP_VALUE_COEF"]
-    normalize_advantage = agent_config["NORMALIZE_ADVANTAGE"]
-    ent_coef = agent_config["ENT_COEF"]
-
-    return (
-        n_epochs,
-        lr,
-        ppo_epsilon,
-        critic_loss_coef,
-        gamma,
-        gae_lambda,
-        clip_vloss,
-        grad_clip,
-        clip_coef,
-        normalize_advantage,
-        ent_coef,
-    )
-
-
-def initialize_networks(
-    env,
-    hidden_units,
-    n_actions,
-    activation_functions,
-    include_critic,
-    chkpt_dir,
-    chkpt_dir_critic,
-):
-    """
-    Initializes the actor and critic networks for the Proximal Policy Optimization (PPO) algorithm.
-
-    Args:
-        env (gym.Env): The environment for which the networks are being initialized.
-        hidden_units (list): A list of integers specifying the number of units in each hidden layer of the networks.
-        n_actions (int): The number of possible actions in the environment.
-        activation_functions (list): A list of activation functions to be used in the networks.
-        include_critic (bool): Whether to include a critic network or not.
-        chkpt_dir (str): The directory where the actor network checkpoints will be saved.
-        chkpt_dir_critic (str): The directory where the critic network checkpoints will be saved.
-
-    Returns:
-        agent (Agent): An instance of the Agent class that encapsulates the actor and critic networks.
-
-    """
-    actor_net = ActorNetwork(
-        env.observation_space,
-        hidden_units,
-        n_actions,
-        activation_functions,
-        include_critic,
-        chkpt_dir,
-    )
-    critic_net = CriticNetwork(
-        env.observation_space, hidden_units, activation_functions, chkpt_dir_critic
-    )
-
-    if include_critic:
-        agent = Agent(actor_net, critic_net=None)
-    else:
-        agent = Agent(actor_net, critic_net=critic_net)
-
-    return agent
-
-
-def initialize_optimizer(agent: Agent, agent_config):
-    """
-    Initializes the optimizer for the agent.
-
-    Args:
-        agent: The agent for which the optimizer is initialized.
-        agent_config: A dictionary containing the configuration parameters for the agent.
-
-    Returns:
-        The initialized optimizer.
-
-    """
-    optim_name = agent_config["OPTIMIZER"]
-    optim_eps = 1e-5
-    optimizer = get_optimizer_from_str(optim_name)(
-        agent.parameters(), lr=agent_config["LR"], eps=optim_eps
-    )
-
-    return optimizer
-
-
-def plot_curves(env: BaseQuantumEnvironment):
-    """
-    Plots the reward history and fidelity history of the environment
-    """
-    fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
-    plt.plot(np.mean(env.reward_history, axis=1), label="Reward")
-    if env.target.target_type == "gate" and env.target.target_circuit.num_qubits < 3:
-        fidelity_type = "Avg gate"
-    else:
-        fidelity_type = "State"
-
-    plt.plot(
-        fidelity_range,
-        env.fidelity_history,
-        label=f"{fidelity_type} Fidelity",
-    )
-
-    plt.title("Reward History")
-    plt.legend()
-    plt.xlabel("Iteration")
-    plt.ylabel("Reward")
-    # Ensure integer ticks on the x-axis
-    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-    plt.show()
-
-
-def get_empty_tensors(env, num_time_steps, batchsize):
-    """
-    Create empty tensors for observations, actions, log probabilities, rewards, dones, values,
-    average reward, fidelities, standard actions, and average action history.
-    """
-    obs = torch.zeros((num_time_steps, batchsize) + env.observation_space.shape)
-    actions = torch.zeros((num_time_steps, batchsize) + env.action_space.shape)
-    logprobs = torch.zeros((num_time_steps, batchsize))
-    rewards = torch.zeros((num_time_steps, batchsize))
-    dones = torch.zeros((num_time_steps, batchsize))
-    values = torch.zeros((num_time_steps, batchsize))
-
-    avg_reward = []
-    fidelities = []
-    std_actions = []
-    avg_action_history = []
-    return (
-        obs,
-        actions,
-        logprobs,
-        rewards,
-        dones,
-        values,
-        avg_reward,
-        fidelities,
-        std_actions,
-        avg_action_history,
-    )
-
-
-def reset_env(
-    env: BaseQuantumEnvironment | Wrapper, seed, global_step, batchsize, dones
-):
-    """
-    Resets the environment and returns the initial observation, number of steps, batch observations, and batch done flags.
-
-    Args:
-        env (object): The environment object.
-        seed (int): The seed for the environment reset.
-        global_step (int): The global step count.
-        batchsize (int): The size of the batch.
-        dones (list): A list of done flags for each environment instance.
-
-    Returns:
-        next_obs (object): The initial observation after resetting the environment.
-        num_steps (int): The number of steps in the episode.
-        batch_obs (object): The batch observations.
-        batch_done (object): The batch done flags.
-    """
-    next_obs, _ = env.reset(seed=seed)
-    num_steps = env.unwrapped.episode_length(global_step)
-    batch_obs = torch.tile(torch.Tensor(next_obs), (batchsize, 1))
-    batch_done = torch.zeros_like(dones[0])
-    return next_obs, num_steps, batch_obs, batch_done
 
 
 def take_step(
@@ -438,313 +120,30 @@ def take_step(
         writer.add_scalar("charts/episodic_length", num_steps, global_step)
         for i in range(env.unwrapped.mean_action.shape[0]):
             writer.add_scalar(
-                "charts/clipped_mean_action", env.unwrapped.mean_action[i], global_step
+                f"charts/clipped_mean_action_{i}",
+                env.unwrapped.mean_action[i],
+                global_step,
             )
-            writer.add_scalar("charts/std_action", np.array(std_action)[i], global_step)
-            writer.add_scalar("charts/unclipped_action", np.array(action)[i], global_step)
+            writer.add_scalar(
+                f"charts/std_action_{i}", np.array(std_action)[i], global_step
+            )
+            writer.add_scalar(
+                f"charts/unclipped_action_{i}", np.array(action)[i], global_step
+            )
 
     return next_obs, next_done, mean_action, std_action
 
 
-def do_bootstrap(
-    next_obs, next_done, num_steps, rewards, dones, values, gamma, gae_lambda, agent
-):
+def write_to_wandb(summary, training_results):
     """
-    Calculates advantages and returns for the Proximal Policy Optimization (PPO) algorithm.
-
-    Args:
-        next_obs (torch.Tensor): The next observation tensor.
-        next_done (torch.Tensor): The tensor indicating whether the next state is terminal.
-        num_steps (int): The number of steps in the trajectory.
-        rewards (torch.Tensor): The tensor containing the rewards for each step.
-        dones (torch.Tensor): The tensor indicating whether each step is terminal.
-        values (torch.Tensor): The tensor containing the predicted values for each step.
-        gamma (float): The discount factor.
-        gae_lambda (float): The Generalized Advantage Estimation (GAE) lambda parameter.
-        agent (Agent): The agent used for value prediction.
-
-    Returns:
-        torch.Tensor: The advantages for each step.
-        torch.Tensor: The estimated returns for each step.
+    Writes the training results to Weights and Biases.
     """
-    with torch.no_grad():
-        next_value = agent.get_value(next_obs).reshape(1, -1)
-        advantages = torch.zeros_like(rewards)
-        lastgaelam = 0
-        for t in reversed(range(num_steps)):
-            if t == num_steps - 1:
-                nextnonterminal = 1.0 - next_done
-                nextvalues = next_value
-            else:
-                nextnonterminal = 1.0 - dones[t + 1]
-                nextvalues = values[t + 1]
-            delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
-            advantages[t] = lastgaelam = (
-                delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-            )
-        returns = advantages + values
-    return advantages, returns
+    for key, value in summary.items():
+        wandb.run.summary[key] = value
 
-
-def flatten_batch(
-    env: BaseQuantumEnvironment | Wrapper,
-    obs,
-    logprobs,
-    actions,
-    advantages,
-    returns,
-    values,
-):
-    """
-    Flattens the batch of observations, log probabilities, actions, advantages, returns, and values.
-    """
-    b_obs = obs.reshape((-1,) + env.observation_space.shape)
-    b_logprobs = logprobs.reshape(-1)
-    b_actions = actions.reshape((-1,) + env.action_space.shape)
-    b_advantages = advantages.reshape(-1)
-    b_returns = returns.reshape(-1)
-    b_values = values.reshape(-1)
-    return b_obs, b_logprobs, b_actions, b_advantages, b_returns, b_values
-
-
-def optimize_policy_and_value_network(
-    b_obs,
-    b_logprobs,
-    b_actions,
-    b_advantages,
-    b_returns,
-    b_values,
-    b_inds,
-    start,
-    minibatch_size,
-    agent: Agent,
-    optimizer: torch.optim.Optimizer,
-    ppo_epsilon,
-    ent_coef,
-    critic_loss_coef,
-    clip_vloss,
-    clip_coef,
-    grad_clip,
-    normalize_advantage,
-    clipfracs,
-):
-    """
-    Optimizes the policy and value network using Proximal Policy Optimization (PPO) algorithm.
-
-    Args:
-        b_obs (tensor): Batch of observations.
-        b_logprobs (tensor): Batch of log probabilities of actions.
-        b_actions (tensor): Batch of actions.
-        b_advantages (tensor): Batch of advantages.
-        b_returns (tensor): Batch of returns.
-        b_values (tensor): Batch of predicted values.
-        b_inds (tensor): Batch indices.
-        start (int): Start index of the minibatch.
-        minibatch_size (int): Size of the minibatch.
-        agent (object): Policy and value network agent.
-        optimizer (object): Optimizer for updating the agent's parameters.
-        ppo_epsilon (float): PPO epsilon value for clipping the ratio.
-        ent_coef (float): Coefficient for the entropy loss.
-        critic_loss_coef (float): Coefficient for the value loss.
-        clip_vloss (bool): Whether to clip the value loss.
-        clip_coef (float): Coefficient for clipping the value loss.
-        grad_clip (float): Maximum gradient norm for clipping gradients.
-        normalize_advantage (bool): Whether to normalize the advantages.
-        clipfracs (list): List to store the clipping fractions.
-
-    Returns:
-        tuple: Tuple containing the policy loss, entropy loss, value loss, approximate KL divergence,
-               old approximate KL divergence, and the list of clipping fractions.
-    """
-    end = start + minibatch_size
-    mb_inds = b_inds[start:end]
-    new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
-    new_dist = Normal(new_mean, new_sigma)
-    new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(
-        1
-    ), new_dist.entropy().sum(1)
-    logratio = new_logprob - b_logprobs[mb_inds]
-    ratio = logratio.exp()
-
-    with torch.no_grad():
-        # calculate approx_kl http://joschu.net/blog/kl-approx.html
-        old_approx_kl = (-logratio).mean()
-        approx_kl = ((ratio - 1) - logratio).mean()
-        clipfracs += [((ratio - 1.0).abs() > ppo_epsilon).float().mean().item()]
-
-    mb_advantages = b_advantages[mb_inds]
-    if normalize_advantage:  # Normalize advantage
-        mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-            mb_advantages.std() + 1e-8
-        )
-
-    # Policy loss
-    pg_loss1 = -mb_advantages * ratio
-    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
-    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-    # Value loss
-    newvalue = new_value.view(-1)
-    if clip_vloss:
-        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-        v_clipped = b_values[mb_inds] + torch.clamp(
-            newvalue - b_values[mb_inds],
-            -clip_coef,
-            clip_coef,
-        )
-        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-        v_loss = 0.5 * v_loss_max.mean()
-    else:
-        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
-
-    entropy_loss = entropy.mean()
-    loss = pg_loss - ent_coef * entropy_loss + v_loss * critic_loss_coef
-
-    optimizer.zero_grad()
-    loss.backward()
-    nn.utils.clip_grad_norm_(agent.parameters(), grad_clip)
-    optimizer.step()
-
-    return pg_loss, entropy_loss, v_loss, approx_kl, old_approx_kl, clipfracs
-
-
-def print_debug_info(
-    env: BaseQuantumEnvironment, mean_action, std_action, b_returns, b_advantages
-):
-    """
-    Print debug information for the training process.
-    """
-    print("mean", mean_action[0])
-    print("sigma", std_action[0])
-    print(
-        "DFE Rewards Mean:",
-        np.mean(env.reward_history, axis=1)[-1],
-    )
-    print(
-        "DFE Rewards standard dev",
-        np.std(env.reward_history, axis=1)[-1],
-    )
-    print("Returns Mean:", np.mean(b_returns.numpy()))
-    print("Returns standard dev:", np.std(b_returns.numpy()))
-    print("Advantages Mean:", np.mean(b_advantages.numpy()))
-    print("Advantages standard dev", np.std(b_advantages.numpy()))
-
-
-def write_to_tensorboard(
-    writer,
-    global_step,
-    optimizer,
-    v_loss,
-    env,
-    clipfracs,
-    entropy_loss,
-    old_approx_kl,
-    approx_kl,
-    pg_loss,
-    explained_var,
-):
-    """
-    Writes various metrics and losses to TensorBoard.
-    """
-    writer.add_scalar(
-        "charts/learning_rate", optimizer.param_groups[0]["lr"], global_step
-    )
-    writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-    writer.add_scalar(
-        "losses/avg_return",
-        np.mean(env.unwrapped.reward_history, axis=1)[-1],
-        global_step,
-    )
-    writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-    writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-    writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-    writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-    writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-    writer.add_scalar("losses/explained_variance", explained_var, global_step)
-
-
-def check_convergence_std_actions(std_action, std_actions_eps):
-    """
-    Check if the standard deviation of actions has converged to a specified value.
-
-    Args:
-        std_action (Tensor): The current standard deviation of actions.
-        std_actions_eps (float): The desired value for the standard deviation of actions.
-
-    Returns:
-        bool: True if the standard deviation of actions has converged to the desired value, False otherwise.
-    """
-    if np.allclose(np.mean(std_action.numpy()), std_actions_eps):
-        logging.warning(
-            "Standard deviation of actions converged to {}".format(std_actions_eps)
-        )
-        logging.warning("Stop training")
-        return True
-    return False
-
-
-def update_metric_lists(
-    env: BaseQuantumEnvironment,
-    mean_action,
-    std_action,
-    avg_reward,
-    fidelities,
-    avg_action_history,
-    std_actions,
-):
-    """
-    Update the metric lists with the latest values.
-    """
-    avg_reward.append(np.mean(env.reward_history, axis=1)[-1])
-    if len(env.fidelity_history) > 0:
-        fidelities.append(env.fidelity_history[-1])
-    avg_action_history.append(mean_action[0].numpy())
-    std_actions.append(std_action[0].numpy())
-
-
-def update_fidelity_info(
-    fidelity_info,
-    fidelities,
-    target_fidelities,
-    lookback_window,
-    env: BaseQuantumEnvironment,
-    update_step,
-    mean_action,
-    std_action,
-    start_time,
-):
-    """
-    Update the fidelity information based on the current fidelities and target fidelities.
-    """
-    if len(fidelities) > lookback_window:
-        for fidelity in target_fidelities:
-            info = fidelity_info[fidelity]
-            # Sliding window lookback to check if target fidelity has been surpassed
-            if (
-                not info["achieved"]
-                and np.mean(fidelities[-lookback_window:]) > fidelity
-            ):
-                info.update(
-                    {
-                        "achieved": True,
-                        "update_at": update_step,
-                        "mean_action": mean_action[0].numpy(),
-                        "std_action": std_action.numpy()[0],
-                        "hardware_runtime": np.sum(env.hardware_runtime),
-                        "simulation_train_time": time.time() - start_time,
-                        "shots_used": np.cumsum(env.total_shots)[update_step - 1],
-                        "shots_per_updates": int(
-                            np.ceil(
-                                np.cumsum(env.total_shots)[update_step - 1]
-                                / update_step
-                            )
-                        ),
-                    }
-                )
-                logging.warning(
-                    f"Target fidelity {fidelity} surpassed at update {update_step}"
-                )
+    wandb.define_metric("fidelity_history", summary="max")
+    wandb.define_metric("avg_reward", summary="max")
+    wandb.log(training_results)
 
 
 class CustomPPO:
@@ -756,6 +155,18 @@ class CustomPPO:
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
         save_data: Optional[bool] = False,
     ):
+        """
+        Custom Agent implementing Proximal Policy Optimization (PPO) using PyTorch.
+        We define a custom class because the existing PPO implementation in stable-baselines3 does not support
+        the submission of batches of actions to the environment, which is the typical use case for quantum control.
+
+        Args:
+            agent_config (Dict): Configuration parameters for the PPO agent.
+            env (QuantumEnvironment): The quantum environment for training.
+            chkpt_dir (Optional[str], optional): Directory to save the PPO agent's checkpoint files. Defaults to "tmp/ppo".
+            chkpt_dir_critic (Optional[str], optional): Directory to save the critic network's checkpoint files. Defaults to "tmp/critic_ppo"
+        """
+
         self.agent_config = agent_config
         self.env = env
         self.chkpt_dir = chkpt_dir
@@ -764,38 +175,33 @@ class CustomPPO:
         self._training_config = TrainingConfig(
             TotalUpdates(agent_config["NUM_UPDATES"])
         )
+        self._training_results = None
         self._train_function_settings = TrainFunctionSettings(save_data=save_data)
         if save_data:
             run_name = agent_config["RUN_NAME"]
             writer = SummaryWriter(f"runs/{run_name}")
+            if agent_config.get("WANDB", None) is not None:
+                wandb_config = agent_config["WANDB"]
+                api_key = agent_config["WANDB"].get("API_KEY", None)
+                if wandb_config.get("ENABLED", False):
+                    wandb.login(key=api_key, verify=True)
+                    wandb.config = agent_config | self.unwrapped_env.config.as_dict()
+
         else:
             writer = None
+
         self.writer = writer
-        """
-        Factory function that creates a training function for the Proximal Policy Optimization (PPO) algorithm.
 
-        Args:
-            agent_config (Dict): Configuration parameters for the PPO agent.
-            env (QuantumEnvironment): The quantum environment for training.
-            chkpt_dir (Optional[str], optional): Directory to save the PPO agent's checkpoint files. Defaults to "tmp/ppo".
-            chkpt_dir_critic (Optional[str], optional): Directory to save the critic network's checkpoint files. Defaults to "tmp/critic_ppo".
-
-        Returns:
-            train (function): The training function for the PPO algorithm.
-        """
         # Initialize environment parameters
         (
             self.seed,
-            self.n_actions,
-            self.batchsize,
-            self.num_time_steps,
             self.min_action,
             self.max_action,
         ) = initialize_environment(env)
 
         # Initialize agent configuration
         (hidden_units, activation_functions, include_critic, self.minibatch_size) = (
-            initialize_agent_config(self.agent_config, self.batchsize)
+            initialize_agent_config(self.agent_config, self.batch_size)
         )
 
         # Initialize RL parameters
@@ -815,9 +221,9 @@ class CustomPPO:
 
         # Initialize networks
         self.agent = initialize_networks(
-            self.env,
+            self.unwrapped_env.observation_space,
             hidden_units,
-            self.n_actions,
+            self.unwrapped_env.n_actions,
             activation_functions,
             include_critic,
             self.chkpt_dir,
@@ -826,30 +232,48 @@ class CustomPPO:
         # Initialize optimizer
         self.optimizer = initialize_optimizer(self.agent, self.agent_config)
 
-    def _update_training_results(
-        self,
-        avg_reward,
-        std_actions,
-        fidelities,
-        avg_action_history,
-        iteration,
-        fidelity_info,
+    def close(self):
+        """
+        Close all resources used by the agent.
+        """
+        self.unwrapped_env.close()
+        if self.save_data:
+            self.writer.close()
+            wandb.finish()
+
+    def process_action(self, mean_action, std_action, probs):
+        """
+        Decide how actions should be processed before being sent to environment.
+        For certain environments such as QUA, policy parameters should be streamed to the environment directly
+        and actions are sampled within the environment (in real time).
+        """
+
+        action = torch.clip(
+            probs.sample(),
+            torch.Tensor(self.min_action),
+            torch.Tensor(self.max_action),
+        )
+        logprob = probs.log_prob(action).sum(1)
+
+        if isinstance(self.env, Wrapper):
+            self.unwrapped_env.mean_action = self.env.action(mean_action.cpu().numpy())[
+                0
+            ]
+        else:
+            self.unwrapped_env.mean_action = mean_action.cpu().numpy()[0]
+
+        self.unwrapped_env.std_action = std_action.cpu().numpy()[0]
+        return action, logprob
+
+    def post_process_action(
+        self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor
     ):
-        return {
-            "env_ident_str": self.unwrapped_env.ident_str,
-            "reward_method": self.unwrapped_env.config.reward_config.reward_method,
-            "training_constraint": self.training_constraint,
-            "avg_reward": avg_reward,
-            "std_action": std_actions,
-            "fidelity_history": fidelities,
-            "hardware_runtime": self.unwrapped_env.hardware_runtime,
-            "action_history": avg_action_history,
-            "best_action_vector": self.unwrapped_env.optimal_action,
-            "total_shots": self.unwrapped_env.total_shots,
-            "total_updates": iteration,
-            "n_reps": self.unwrapped_env.n_reps,
-            "fidelity_info": fidelity_info,
-        }
+        """
+        Decide how actions should be processed after being sent to environment.
+        For certain environments such as QUA, actions should be streamed back from the environment directly.
+        Default implementation returns the action and logprob as is.
+        """
+        return action, logprob
 
     def train(
         self,
@@ -873,81 +297,292 @@ class CustomPPO:
         if train_function_settings is not None:
             self._train_function_settings = train_function_settings
 
-        try:
-            fidelity_info = {
-                fidelity: {
-                    "achieved": False,
-                    "update_at": None,
-                    "train_time": None,
-                    "shots_used": None,
-                }
-                for fidelity in self.target_fidelities
+        if self.save_data and self.agent_config.get("WANDB", None) is not None:
+            wandb.init(
+                project=self.agent_config["WANDB"]["PROJECT"],
+                config=self.agent_config,
+                name=self.agent_config["RUN_NAME"],
+                sync_tensorboard=True,
+            )
+
+        fidelity_info = {
+            fidelity: {
+                "achieved": False,
+                "update_at": None,
+                "train_time": None,
+                "shots_used": None,
             }
+            for fidelity in self.target_fidelities
+        }
 
-            if self.clear_history or self.hpo_mode:
-                self.unwrapped_env.clear_history()
-                self.global_step = 0
+        # Ease access to all the parameters
+        env, agent, optimizer = self.env, self.agent, self.optimizer
+        u_env = self.unwrapped_env
+        gamma, gae_lambda, n_epochs = self.gamma, self.gae_lambda, self.n_epochs
+        num_time_steps, batch_size, minibatch_size = (
+            self.num_time_steps,
+            self.batch_size,
+            self.minibatch_size,
+        )
+        ppo_epsilon, ent_coef, critic_loss_coef = (
+            self.ppo_epsilon,
+            self.ent_coef,
+            self.critic_loss_coef,
+        )
+        clip_vloss, grad_clip = self.clip_vloss, self.grad_clip
+        clip_coef, normalize_advantage = self.clip_coef, self.normalize_advantage
+        obs_space = env.observation_space.shape
+        action_space = env.action_space.shape
 
-            (
-                self.obs,
-                self.actions,
-                self.logprobs,
-                self.rewards,
-                self.dones,
-                self.values,
-                avg_reward,
-                fidelities,
-                std_actions,
-                avg_action_history,
-            ) = get_empty_tensors(self.env, self.num_time_steps, self.batchsize)
+        obs = torch.zeros((num_time_steps, batch_size) + obs_space)
+        actions = torch.zeros((num_time_steps, batch_size) + action_space)
+        logprobs = torch.zeros((num_time_steps, batch_size))
+        rewards = torch.zeros((num_time_steps, batch_size))
+        dones = torch.zeros((num_time_steps, batch_size))
+        values = torch.zeros((num_time_steps, batch_size))
 
-            start_time = time.time()
+        # avg_reward = fidelities = std_actions = avg_action_history = []
+        start_time = time.time()
 
+        # Clear the history of the environment if required
+        if self.clear_history or self.hpo_mode:
+            u_env.clear_history()
+            self.global_step = 0
+        try:
             ### Training Loop ###
             if isinstance(self.training_constraint, TotalUpdates):
-                self.total_updates = self.training_constraint.total_updates
-                logging.warning("Training Constraint: Total Updates")
-                for iteration in tqdm.tqdm(range(1, self.total_updates + 1)):
-                    if self.execute_training_cycle(
-                        iteration,
-                        self.num_prints,
-                        avg_reward,
-                        fidelities,
-                        avg_action_history,
-                        std_actions,
-                        fidelity_info,
-                        start_time,
-                    ):
-                        break
-
+                end_condition = self.training_constraint.total_updates
+                step_tracker = lambda i: i
             elif isinstance(self.training_constraint, HardwareRuntime):
-                # Hardware Constraint Mode: Train until hardware runtime exceeds maximum
-                self.max_hardware_runtime = self.training_constraint.hardware_runtime
-                logging.warning("Training Constraint: Hardware Runtime")
-                iteration = 0
-                while (
-                    np.sum(self.unwrapped_env.hardware_runtime)
-                    < self.max_hardware_runtime
-                ):
-                    iteration += 1
-                    if self.execute_training_cycle(
-                        iteration,
-                        self.num_prints,
-                        avg_reward,
-                        fidelities,
-                        avg_action_history,
-                        std_actions,
+                end_condition = self.training_constraint.hardware_runtime
+                step_tracker = lambda i: np.sum(self.unwrapped_env.hardware_runtime)
+            else:
+                raise ValueError(
+                    "Invalid training constraint. Please provide either TotalUpdates or HardwareRuntime."
+                )
+
+            iteration = 1
+            while step_tracker(iteration) < end_condition:
+                if self.anneal_learning_rate:  # Anneal learning rate
+                    self.learning_rate_annealing(iteration=iteration)
+
+                # mean_action, std_action = self.perform_training_iteration()
+                # Reset the environment
+                next_obs, _ = env.reset(seed=self.seed)
+                batch_obs = torch.tile(torch.Tensor(next_obs), (batch_size, 1))
+                batch_done = torch.zeros_like(dones[0])
+
+                for step in range(num_time_steps):
+                    self.global_step += 1
+                    obs[step] = batch_obs
+                    dones[step] = batch_done
+
+                    with torch.no_grad():
+                        mean_action, std_action, critic_value = agent(batch_obs)
+                        probs = Normal(mean_action, std_action)
+                        action, logprob = self.process_action(
+                            mean_action, std_action, probs
+                        )
+                        values[step] = critic_value.flatten()
+
+                    next_obs, reward, terminated, truncated, infos = env.step(
+                        action.cpu().numpy()
+                    )
+                    next_obs = torch.Tensor(next_obs)
+                    done = int(np.logical_or(terminated, truncated))
+                    reward = torch.Tensor(reward)
+                    rewards[step] = reward
+
+                    actions[step], logprobs[step] = self.post_process_action(
+                        probs, action, logprob
+                    )
+
+                    batch_obs = torch.tile(next_obs, (batch_size, 1))
+                    next_done = done * torch.ones_like(dones[0])
+                    obs[step] = batch_obs
+                    dones[step] = next_done
+
+                with torch.no_grad():
+                    next_value = agent.get_value(next_obs).reshape(1, -1)
+                    advantages = torch.zeros_like(rewards)
+                    lastgaelam = 0
+                    for t in reversed(range(num_time_steps)):
+                        if t == num_time_steps - 1:
+                            nextnonterminal = 1.0 - next_done
+                            nextvalues = next_value
+                        else:
+                            nextnonterminal = 1.0 - dones[t + 1]
+                            nextvalues = values[t + 1]
+                        delta = (
+                            rewards[t]
+                            + gamma * nextvalues * nextnonterminal
+                            - values[t]
+                        )
+                        advantages[t] = lastgaelam = (
+                            delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+                        )
+                    returns = advantages + values
+
+                # Flatten batches
+                b_obs = obs.reshape((-1,) + env.observation_space.shape)
+                b_logprobs = logprobs.reshape(-1)
+                b_actions = actions.reshape((-1,) + env.action_space.shape)
+                b_advantages = advantages.reshape(-1)
+                b_returns = returns.reshape(-1)
+                b_values = values.reshape(-1)
+
+                b_inds = np.arange(batch_size)
+                clipfracs = []
+
+                # Optimization loop
+                for epoch in range(n_epochs):
+                    np.random.shuffle(b_inds)
+                    for start in range(0, batch_size, minibatch_size):
+                        end = start + minibatch_size
+                        mb_inds = b_inds[start:end]
+                        new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
+                        new_dist = Normal(new_mean, new_sigma)
+                        new_logprob = new_dist.log_prob(b_actions[mb_inds]).sum(1)
+                        entropy = new_dist.entropy().sum(1)
+                        logratio = new_logprob - b_logprobs[mb_inds]
+                        ratio = logratio.exp()
+
+                        with torch.no_grad():
+                            # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                            old_approx_kl = (-logratio).mean()
+                            approx_kl = ((ratio - 1) - logratio).mean()
+                            clipfracs += [
+                                ((ratio - 1.0).abs() > ppo_epsilon)
+                                .float()
+                                .mean()
+                                .item()
+                            ]
+
+                        mb_advantages = b_advantages[mb_inds]
+                        if normalize_advantage:  # Normalize advantage
+                            mb_advantages = (mb_advantages - mb_advantages.mean()) / (
+                                mb_advantages.std() + 1e-8
+                            )
+
+                        # Policy loss
+                        pg_loss1 = -mb_advantages * ratio
+                        pg_loss2 = -mb_advantages * torch.clamp(
+                            ratio, 1 - ppo_epsilon, 1 + ppo_epsilon
+                        )
+                        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+                        # Value loss
+                        new_value = new_value.view(-1)
+                        if clip_vloss:
+                            v_loss_unclipped = (new_value - b_returns[mb_inds]) ** 2
+                            v_clipped = b_values[mb_inds] + torch.clamp(
+                                new_value - b_values[mb_inds],
+                                -clip_coef,
+                                clip_coef,
+                            )
+                            v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
+                            v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                            v_loss = 0.5 * v_loss_max.mean()
+                        else:
+                            v_loss = (
+                                0.5 * ((new_value - b_returns[mb_inds]) ** 2).mean()
+                            )
+
+                        entropy_loss = entropy.mean()
+                        loss = (
+                            pg_loss
+                            - ent_coef * entropy_loss
+                            + v_loss * critic_loss_coef
+                        )
+
+                        optimizer.zero_grad()
+                        loss.backward()
+                        nn.utils.clip_grad_norm_(agent.parameters(), grad_clip)
+                        optimizer.step()
+
+                y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
+                var_y = np.var(y_true)
+                explained_var = (
+                    np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
+                )
+
+                # Print debug information
+                if self.print_debug:
+                    print_debug_info(
+                        u_env, mean_action, std_action, b_returns, b_advantages
+                    )
+
+                if self.target_fidelities is not None:
+                    update_fidelity_info(
                         fidelity_info,
+                        u_env.fidelity_history,
+                        self.target_fidelities,
+                        self.lookback_window,
+                        u_env,
+                        iteration,
+                        mean_action,
+                        std_action,
                         start_time,
-                    ):
-                        break
+                    )
 
-            self.unwrapped_env.close()
-            if self.writer is not None:
-                self.writer.close()
+                if self.global_step % self.num_prints == 0:
+                    clear_output(wait=False)
+                    if self.plot_real_time:
+                        plt.close()
+                        plot_curves(u_env)
+                        plt.draw()
+                if self.save_data:
+                    write_to_tensorboard(
+                        self.writer,
+                        self.global_step,
+                        optimizer,
+                        v_loss,
+                        env,
+                        clipfracs,
+                        entropy_loss,
+                        old_approx_kl,
+                        approx_kl,
+                        pg_loss,
+                        explained_var,
+                    )
+                    summary = {
+                        "n_reps": u_env.n_reps,
+                        "training_constraint": self.training_constraint.constraint_name,
+                        "env_ident_str": u_env.ident_str,
+                        "reward_method": u_env.config.reward_config.reward_method,
+                    }
+                    training_results = {
+                        "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],
+                        "fidelity_history": (
+                            u_env.fidelity_history[-1]
+                            if u_env.do_benchmark()
+                            else np.nan
+                        ),
+                        "hardware_runtime": (
+                            u_env.hardware_runtime[-1]
+                            if u_env.backend_info.instruction_durations is not None
+                            else np.nan
+                        ),
+                        "total_shots": u_env.total_shots[-1],
+                        "total_updates": iteration,
+                        "mean_action": mean_action,
+                        "std_action": std_action,
+                    }
+                    self._training_results = training_results
+                    write_to_wandb(summary, training_results)
+                iteration += 1
 
-            self.log_fidelity_info_summary(fidelity_info)
+                if check_convergence_std_actions(std_action, self.std_actions_eps):
+                    break
+            if self.clear_history:
+                self.close()
+            log_fidelity_info_summary(
+                self._training_config.training_constraint, fidelity_info
+            )
 
+            return self.training_results
+        except KeyboardInterrupt:
+            self.close()
             return self.training_results
 
         except Exception as e:
@@ -955,195 +590,10 @@ class CustomPPO:
                 logging.error(f"An error occurred during training: {e}")
                 return {
                     "avg_reward": -1.0,
-                    "fidelity_history": [0] * self.total_updates,
+                    "fidelity_history": [0] * self.training_constraint.constraint_value,
                 }
             else:  # Raise the error for debugging in the normal mode
                 raise
-
-    def perform_training_iteration(self):
-        """
-        Perform a single training iteration of the Proximal Policy Optimization (PPO) algorithm.
-
-        Returns:
-            mean_action: The mean action taken during the training iteration.
-            std_action: The standard deviation of the action taken during the training iteration.
-        """
-        next_obs, num_steps, batch_obs, batch_done = reset_env(
-            self.env, self.seed, self.global_step, self.batchsize, self.dones
-        )
-
-        for step in range(num_steps):
-            next_obs, next_done, mean_action, std_action = take_step(
-                step,
-                self.global_step,
-                self.batchsize,
-                num_steps,
-                self.obs,
-                self.dones,
-                self.actions,
-                self.logprobs,
-                self.rewards,
-                self.values,
-                batch_obs,
-                batch_done,
-                self.min_action,
-                self.max_action,
-                self.agent,
-                self.env,
-                self.writer,
-            )
-
-        advantages, returns = do_bootstrap(
-            next_obs,
-            next_done,
-            num_steps,
-            self.rewards,
-            self.dones,
-            self.values,
-            self.gamma,
-            self.gae_lambda,
-            self.agent,
-        )
-        b_obs, b_logprobs, b_actions, b_advantages, b_returns, b_values = flatten_batch(
-            self.env,
-            self.obs,
-            self.logprobs,
-            self.actions,
-            advantages,
-            returns,
-            self.values,
-        )
-
-        b_inds = np.arange(self.batchsize)
-        clipfracs = []
-        for epoch in range(self.n_epochs):
-            np.random.shuffle(b_inds)
-            for start in range(0, self.batchsize, self.minibatch_size):
-                (
-                    pg_loss,
-                    entropy_loss,
-                    v_loss,
-                    approx_kl,
-                    old_approx_kl,
-                    clipfracs,
-                ) = optimize_policy_and_value_network(
-                    b_obs,
-                    b_logprobs,
-                    b_actions,
-                    b_advantages,
-                    b_returns,
-                    b_values,
-                    b_inds,
-                    start,
-                    self.minibatch_size,
-                    self.agent,
-                    self.optimizer,
-                    self.ppo_epsilon,
-                    self.ent_coef,
-                    self.critic_loss_coef,
-                    self.clip_vloss,
-                    self.clip_coef,
-                    self.grad_clip,
-                    self.normalize_advantage,
-                    clipfracs,
-                )
-
-        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
-        var_y = np.var(y_true)
-        explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-
-        if self.print_debug:
-            print_debug_info(
-                self.unwrapped_env, mean_action, std_action, b_returns, b_advantages
-            )
-
-        if self.global_step % self.num_prints == 0:
-            clear_output(wait=False)
-            if self.plot_real_time:
-                plt.close()
-                plot_curves(self.unwrapped_env)
-                plt.draw()
-        if self.save_data:
-            write_to_tensorboard(
-                self.writer,
-                self.global_step,
-                self.optimizer,
-                v_loss,
-                self.env,
-                clipfracs,
-                entropy_loss,
-                old_approx_kl,
-                approx_kl,
-                pg_loss,
-                explained_var,
-            )
-
-        return mean_action, std_action
-
-    def execute_training_cycle(
-        self,
-        iteration,
-        num_prints,
-        avg_reward,
-        fidelities,
-        avg_action_history,
-        std_actions,
-        fidelity_info,
-        start_time,
-    ):
-        if self.anneal_learning_rate:
-            self.learning_rate_annealing(iteration=iteration)
-
-        mean_action, std_action = self.perform_training_iteration()
-
-        update_metric_lists(
-            self.unwrapped_env,
-            mean_action,
-            std_action,
-            avg_reward,
-            fidelities,
-            avg_action_history,
-            std_actions,
-        )
-
-        if self.target_fidelities is not None:
-            update_fidelity_info(
-                fidelity_info,
-                fidelities,
-                self.target_fidelities,
-                self.lookback_window,
-                self.unwrapped_env,
-                iteration,
-                mean_action,
-                std_action,
-                start_time,
-            )
-
-        self._training_results = self._update_training_results(
-            avg_reward,
-            std_actions,
-            fidelities,
-            avg_action_history,
-            iteration,
-            fidelity_info,
-        )
-
-        return check_convergence_std_actions(std_action, self.std_actions_eps)
-
-    def log_fidelity_info_summary(self, fidelity_info):
-        """
-        Logs a summary of fidelity information.
-        """
-
-        for fidelity, info in fidelity_info.items():
-            if info["achieved"]:
-                logging.warning(
-                    f"Target fidelity {fidelity} achieved: Update {info['update_at']}, Hardware Runtime: {round(info['hardware_runtime'], 2)} sec, Simulation Train Time: {round(info['simulation_train_time'] / 60, 4)} mins, Shots Used {info['shots_used']:,}"
-                )
-            else:
-                logging.warning(
-                    f"Target fidelity {fidelity} not achieved within {self.training_constraint}{'s' if isinstance(self.training_constraint, HardwareRuntime) else ''}."
-                )
 
     def learning_rate_annealing(
         self,
@@ -1161,15 +611,38 @@ class CustomPPO:
             iteration: The current iteration number (optional).
             max_hardware_runtime: The maximum hardware runtime (optional).
         """
+        constraint_val = self.training_constraint.constraint_value
         if isinstance(self.training_constraint, TotalUpdates):
-            frac = 1.0 - (iteration - 1.0) / self.training_constraint.total_updates
+            frac = 1.0 - (iteration - 1.0) / constraint_val
         elif isinstance(self.training_constraint, HardwareRuntime):
-            frac = 1.0 - (
-                np.sum(self.unwrapped_env.hardware_runtime)
-                / self.training_constraint.hardware_runtime
+            frac = 1.0 - (np.sum(self.unwrapped_env.hardware_runtime) / constraint_val)
+        else:
+            raise ValueError(
+                "Invalid training constraint. Please provide either TotalUpdates or HardwareRuntime."
             )
         lrnow = frac * self.lr
         self.optimizer.param_groups[0]["lr"] = lrnow
+
+    @property
+    def batch_size(self):
+        """
+        The size of the batch
+        """
+        return self.unwrapped_env.batch_size
+
+    @property
+    def num_time_steps(self):
+        """
+        The number of time steps in the environment (number of times the target gate is applied)
+        """
+        return self.unwrapped_env.episode_length(self.global_step)
+
+    @property
+    def n_actions(self):
+        """
+        The number of actions in the environment
+        """
+        return self.unwrapped_env.n_actions
 
     @property
     def global_step(self):

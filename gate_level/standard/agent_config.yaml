@@ -1,3 +1,8 @@
+WANDB: 
+    ENABLED: True # Whether to enable Weights & Biases logging
+    PROJECT: "GateCalibration" # Weights & Biases project name
+    ENTITY: null # Weights & Biases entity name
+    API_KEY: null # Weights & Biases API key
 RUN_NAME: "test" # Name of the run
 OPTIMIZER: "adam" # Optimizer for the policy network
 NUM_UPDATES: 1 # Number of policy updates
