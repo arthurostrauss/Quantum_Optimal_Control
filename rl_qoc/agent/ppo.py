@@ -553,6 +553,7 @@ class CustomPPO:
                         ),
                         "total_shots": u_env.total_shots[-1],
                         "total_updates": iteration,
+                        "clipped_mean_action": env.action(mean_action[0]),
                         "mean_action": mean_action[0],
                         "std_action": std_action[0],
                     }
