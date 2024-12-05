@@ -109,7 +109,6 @@ def execute_action(
     # Transpile circuits
     transpiler = dummy_transpiler(backend)
     qubit_map = hardware_targets
-
     # Change CZ pulse parameters
     compiler = backend.compiler
     if pulse_params:
