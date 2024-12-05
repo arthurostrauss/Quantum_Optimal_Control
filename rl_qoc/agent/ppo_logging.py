@@ -1,5 +1,6 @@
 import time
 
+import wandb
 from matplotlib.ticker import MaxNLocator
 from ..environment.base_q_env import BaseQuantumEnvironment
 import matplotlib.pyplot as plt
@@ -89,7 +90,18 @@ def write_to_tensorboard(
     writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
     writer.add_scalar("losses/explained_variance", explained_var, global_step)
 
+def write_to_wandb(summary, training_results):
+    """
+    Writes the training results to Weights and Biases.
+    """
+    for key, value in summary.items():
+        wandb.run.summary[key] = value
 
+    wandb.define_metric("fidelity_history", summary="max")
+    wandb.define_metric("avg_reward", summary="max")
+    wandb.log(training_results)
+    
+    
 def check_convergence_std_actions(std_action, std_actions_eps):
     """
     Check if the standard deviation of actions has converged to a specified value.

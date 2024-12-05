@@ -134,18 +134,6 @@ def take_step(
     return next_obs, next_done, mean_action, std_action
 
 
-def write_to_wandb(summary, training_results):
-    """
-    Writes the training results to Weights and Biases.
-    """
-    for key, value in summary.items():
-        wandb.run.summary[key] = value
-
-    wandb.define_metric("fidelity_history", summary="max")
-    wandb.define_metric("avg_reward", summary="max")
-    wandb.log(training_results)
-
-
 class CustomPPO:
     def __init__(
         self,
@@ -565,8 +553,8 @@ class CustomPPO:
                         ),
                         "total_shots": u_env.total_shots[-1],
                         "total_updates": iteration,
-                        "mean_action": mean_action,
-                        "std_action": std_action,
+                        "mean_action": mean_action[0],
+                        "std_action": std_action[0],
                     }
                     self._training_results = training_results
                     write_to_wandb(summary, training_results)
