@@ -90,6 +90,7 @@ def write_to_tensorboard(
     writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
     writer.add_scalar("losses/explained_variance", explained_var, global_step)
 
+
 def write_to_wandb(summary, training_results):
     """
     Writes the training results to Weights and Biases.
@@ -100,8 +101,8 @@ def write_to_wandb(summary, training_results):
     wandb.define_metric("fidelity_history", summary="max")
     wandb.define_metric("avg_reward", summary="max")
     wandb.log(training_results)
-    
-    
+
+
 def check_convergence_std_actions(std_action, std_actions_eps):
     """
     Check if the standard deviation of actions has converged to a specified value.

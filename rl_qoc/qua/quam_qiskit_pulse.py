@@ -1,14 +1,9 @@
 from copy import deepcopy
 
+import numpy as np
 from qiskit.circuit import ParameterExpression
 from qiskit.pulse.channels import DriveChannel, Channel as QiskitChannel
-from qiskit.pulse import (
-    SymbolicPulse,
-    Waveform,
-    Play,
-    Schedule,
-    PulseError,
-)
+from qiskit.pulse import SymbolicPulse, Waveform, Play, Schedule, PulseError, Constant
 from typing import List, Tuple, Union, Optional
 from .pulse_support_utils import _ref_amp, _ref_phase
 from .sympy_to_qua import sympy_to_qua
@@ -84,6 +79,7 @@ class QuAMQiskitPulse(QuAMPulse):
     ]:
         if isinstance(self.pulse, Waveform):
             return self.pulse.samples.tolist()
+
         elif isinstance(self.pulse, SymbolicPulse) and self.pulse.is_parameterized():
             # Assign reference values to the parameters
             # Real-time parameters to be binded to temporary reference values
@@ -106,10 +102,18 @@ class QuAMQiskitPulse(QuAMPulse):
             pulse = deepcopy(self.pulse)
             pulse._params.update(new_pulse_parameters)
 
-            return pulse.get_waveform().samples
+            return (
+                pulse.amp * np.exp(1j * pulse.angle)
+                if isinstance(pulse, Constant)
+                else pulse.get_waveform().samples
+            )
 
         try:
-            return self.pulse.get_waveform().samples
+            return (
+                self.pulse.amp * np.exp(1j * self.pulse.angle)
+                if isinstance(self.pulse, Constant)
+                else self.pulse.get_waveform().samples
+            )
         except (AttributeError, PulseError) as e:
             raise PulseError(
                 "Pulse waveform could not be retrieved from the given pulse"

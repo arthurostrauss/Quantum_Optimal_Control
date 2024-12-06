@@ -565,10 +565,7 @@ class CustomPPO:
                     break
             if self.clear_history:
                 self.close()
-            log_fidelity_info_summary(
-                self._training_config.training_constraint, fidelity_info
-            )
-
+            log_fidelity_info_summary(self.training_constraint, fidelity_info)
             return self.training_results
         except KeyboardInterrupt:
             self.close()

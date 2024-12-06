@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import List, Iterable, Tuple, Callable
 
 from qiskit import QuantumCircuit, QiskitError, QuantumRegister, ClassicalRegister
-from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.primitives.backend_estimator import _pauli_expval_with_variance
 from qiskit.primitives.backend_estimator_v2 import Options, _PreprocessedData
 from qiskit.primitives.containers.bindings_array import BindingsArray
@@ -29,6 +28,7 @@ from qibo.backends import set_backend
 from qibo import Circuit as QiboCircuit
 
 from .utils import execute_action, resolve_gate_rule
+from .qibo_environment import from_custom_to_baseline_circuit
 
 
 @dataclass
@@ -210,22 +210,8 @@ class QiboEstimatorV2(BaseEstimatorV2):
                 circ.metadata["parameter_values"] = parameter_values[
                     param_index
                 ].as_array()
-                dag = circuit_to_dag(circ)
-                op_nodes = dag.op_nodes()
-                for node in op_nodes:
-                    if node.name not in gate_map:
-                        gate_name: str = node.name.split("_")[0]
-                        try:
-                            gate = gate_map[gate_name.lower()]
-                        except KeyError:
-                            raise QiskitError(
-                                f"Cannot bind the circuit to the backend because the gate "
-                                f"{gate_name} is not found in the standard gate set."
-                            )
-                        qc = QuantumCircuit(list(node.qargs))
-                        qc.append(gate, node.qargs)
-                        dag.substitute_node_with_dag(node, circuit_to_dag(qc))
-                new_circuits2.append(dag_to_circuit(dag))
+                new_circ = from_custom_to_baseline_circuit(circ)
+                new_circuits2.append(new_circ)
             circuits.extend(new_circuits2)
         return circuits
 

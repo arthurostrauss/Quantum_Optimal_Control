@@ -312,6 +312,7 @@ class BaseQuantumEnvironment(ABC, Env):
         print(
             f"Finished {'Estimator' if isinstance(self.primitive, BaseEstimatorV2) else 'Sampler'} job"
         )
+        print("Reward (avg):", np.mean(reward_table), "Std:", np.std(reward_table))
 
         return reward_table  # Shape [batch size]
 
