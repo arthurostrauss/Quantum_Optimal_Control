@@ -1573,7 +1573,7 @@ class BaseQuantumEnvironment(ABC, Env):
         Index of the truncation to be applied
         """
         raise NotImplementedError("Truncation index not implemented")
-    
+
     @property
     def metadata(self):
         """

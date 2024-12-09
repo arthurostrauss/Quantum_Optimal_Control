@@ -62,10 +62,11 @@ class CustomPPO:
             "hardware_runtime": [],
             "total_shots": [],
             "total_updates": [],
-            "clipped_mean_action": [],
-            "mean_action": [],
-            "std_action": [],
         }
+        for i in range(self.unwrapped_env.n_actions):
+            self._training_results[f"clipped_mean_action_{i}"] = []
+            self._training_results[f"mean_action_{i}"] = []
+            self._training_results[f"std_action_{i}"] = []
 
         self._train_function_settings = self.agent_config.train_function_settings
         if save_data:
@@ -74,9 +75,6 @@ class CustomPPO:
 
             if self.agent_config.wandb_config.enabled:
                 wandb.login(key=self.agent_config.wandb_config.api_key, verify=True)
-                wandb.config = (
-                    agent_config.as_dict() | self.unwrapped_env.config.as_dict()
-                )
 
         else:
             writer = None
@@ -177,7 +175,8 @@ class CustomPPO:
         if self.save_data and self.agent_config.wandb_config.enabled:
             wandb.init(
                 project=self.agent_config.wandb_config.project,
-                config=self.agent_config.as_dict(),
+                config=self.agent_config.as_dict()
+                | self.unwrapped_env.config.as_dict(),
                 name=self.agent_config.run_name,
                 sync_tensorboard=True,
             )
