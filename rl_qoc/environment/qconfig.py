@@ -379,8 +379,7 @@ class QEnvConfig:
         RewardConfig | Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"]
     ) = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
-    training_with_cal: bool = True
-    device: Optional[torch.device] = None
+    env_metadata: Dict = field(default_factory=dict)
 
     def __post_init__(self):
         if isinstance(self.target, Dict):
@@ -583,4 +582,5 @@ class QEnvConfig:
                 "tomography_analysis": self.tomography_analysis,
                 "check_on_exp": self.check_on_exp,
             },
+            "metadata": self.env_metadata,
         }

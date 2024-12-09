@@ -100,7 +100,6 @@ from .qconfig import (
 
 
 class BaseQuantumEnvironment(ABC, Env):
-    metadata = {"render_modes": ["human"]}
 
     def __init__(self, training_config: QEnvConfig):
         """
@@ -128,8 +127,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self.sampling_Pauli_space = training_config.sampling_paulis
         self.c_factor = training_config.c_factor
         self.batch_size = training_config.batch_size
-
-        self.training_with_cal = training_config.training_with_cal
 
         self.action_space: Box = training_config.action_space
 
@@ -1576,6 +1573,13 @@ class BaseQuantumEnvironment(ABC, Env):
         Index of the truncation to be applied
         """
         raise NotImplementedError("Truncation index not implemented")
+    
+    @property
+    def metadata(self):
+        """
+        Return metadata of the environment
+        """
+        return self.config.env_metadata
 
     def to_json(self):
         return json.dumps(

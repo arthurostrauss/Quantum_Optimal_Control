@@ -73,7 +73,6 @@ from qiskit_experiments.library import (
     ProcessTomography,
 )
 
-from itertools import chain
 from typing import Optional, Tuple, List, Union, Dict, Sequence, Callable, Any
 import yaml
 

@@ -1,7 +1,17 @@
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 from dataclasses import field, asdict
 from abc import ABC, abstractmethod
+import torch.nn as nn
+import torch.optim as optim
+from .ppo_initialization import (
+    get_optimizer,
+    get_module,
+    reverse_module_dict,
+    reverse_optim_dict,
+)
+from ..helpers import load_from_yaml_file
+import wandb
 
 
 @dataclass
@@ -79,7 +89,7 @@ class TrainFunctionSettings:
     :param num_prints: Number of prints to be displayed during training
     :param hpo_mode: Whether to use hyperparameter optimization mode
     :param clear_history: Whether to clear the history of the training (e.g. rewards, losses, etc.)
-    :param save_data: Whether to save the data during training through tensorboard
+    :param save_data: Whether to save the data during training through tensorboard/wandb
     """
 
     plot_real_time: bool = False
@@ -93,6 +103,16 @@ class TrainFunctionSettings:
         assert (
             isinstance(self.num_prints, int) and self.num_prints > 0
         ), "num_prints must be an integer greater than 0"
+
+    def as_dict(self):
+        return {
+            "plot_real_time": self.plot_real_time,
+            "print_debug": self.print_debug,
+            "num_prints": self.num_prints,
+            "hpo_mode": self.hpo_mode,
+            "clear_history": self.clear_history,
+            "save_data": self.save_data,
+        }
 
 
 @dataclass
@@ -118,6 +138,191 @@ class TrainingConfig:
     anneal_learning_rate: Optional[bool] = False
     std_actions_eps: Optional[float] = 1e-2
 
-    @property
     def as_dict(self):
-        return asdict(self)
+        return {
+            "training_constraint_name": self.training_constraint.constraint_name,
+            "training_constraint_value": self.training_constraint.constraint_value,
+            "target_fidelities": self.target_fidelities,
+            "lookback_window": self.lookback_window,
+            "anneal_learning_rate": self.anneal_learning_rate,
+            "std_actions_eps": self.std_actions_eps,
+        }
+
+
+@dataclass
+class WandBConfig:
+    """
+    Weights and Biases configuration
+
+    :param project: Name of the project
+    :param entity: Name of the entity
+    :param tags: List of tags
+    :param notes: Notes for the project
+    """
+
+    enabled: bool = False
+    project: str = "Quantum-RL"
+    entity: Optional[str] = None
+    tags: Optional[list] = None
+    notes: Optional[str] = None
+    api_key: Optional[str] = None
+
+    def as_dict(self):
+        return {
+            "project_name": self.project,
+            "entity": self.entity,
+            "tags": self.tags,
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, config_dict):
+        """
+        Create a WandBConfig object from a dictionary
+        """
+        # Ensure all keys are written in lowercase
+        config_dict = {k.lower(): v for k, v in config_dict.items()}
+        return cls(**config_dict)
+
+
+@dataclass
+class PPOConfig:
+    """
+    PPO configuration
+
+    :param training_config: TrainingConfig
+    :param train_function_settings: TrainFunctionSettings
+    :param wandb_config: WandBConfig
+    """
+
+    run_name: str = "test"
+    num_updates: int = 500
+    n_epochs: int = 8
+    learning_rate: float = 5e-4
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    clip_ratio: float = 0.2
+    clip_value_loss: bool = True
+    clip_value_coef: float = 0.5
+    normalize_advantage: bool = True
+    entropy_coef: float = 0.01
+    value_loss_coef: float = 0.5
+    gradient_clip: float = 0.5
+    include_critic: bool = True
+    hidden_layers: list = field(default_factory=lambda: [64, 64])
+    hidden_activation_functions: list = field(default_factory=lambda: ["tanh", "tanh"])
+    input_activation_function: nn.Module | str = "identity"
+    output_activation_mean: nn.Module | str = "tanh"
+    output_activation_std: nn.Module | str = "identity"
+    optimizer: str | optim.Optimizer = "adam"
+    minibatch_size: int = 16
+    checkpoint_dir: str = "tmp/ppo"
+    training_config: Optional[TrainingConfig] = field(default_factory=TrainingConfig)
+    train_function_settings: Optional[TrainFunctionSettings] = field(
+        default_factory=TrainFunctionSettings
+    )
+    wandb_config: Optional[WandBConfig] = None
+
+    def __post_init__(self):
+        """
+        Check validity of the configuration
+        """
+        if not len(self.hidden_layers) == len(self.hidden_activation_functions):
+            raise ValueError(
+                "Number of hidden layers and activation functions must be the same"
+            )
+        if isinstance(self.optimizer, str):
+            self.optimizer = get_optimizer(self.optimizer)
+        if self.wandb_config is not None and not isinstance(
+            self.wandb_config, WandBConfig
+        ):
+            self.wandb_config = WandBConfig.from_dict(self.wandb_config)
+        else:
+            self.wandb_config = WandBConfig()
+        self.hidden_activation_functions = [
+            get_module(activation) for activation in self.hidden_activation_functions
+        ]
+        self.input_activation_function = get_module(self.input_activation_function)
+        self.output_activation_mean = get_module(self.output_activation_mean)
+        self.output_activation_std = get_module(self.output_activation_std)
+
+    def as_dict(self):
+        return {
+            "training_config": self.training_config.as_dict(),
+            "train_function_settings": self.train_function_settings.as_dict(),
+            "wandb_config": (
+                self.wandb_config.as_dict() if self.wandb_config is not None else None
+            ),
+            "run_name": self.run_name,
+            "num_updates": self.num_updates,
+            "n_epochs": self.n_epochs,
+            "learning_rate": self.learning_rate,
+            "gamma": self.gamma,
+            "gae_lambda": self.gae_lambda,
+            "clip_ratio": self.clip_ratio,
+            "clip_value_loss": self.clip_value_loss,
+            "clip_value_coef": self.clip_value_coef,
+            "normalize_advantage": self.normalize_advantage,
+            "entropy_coef": self.entropy_coef,
+            "value_loss_coef": self.value_loss_coef,
+            "gradient_clip": self.gradient_clip,
+            "include_critic": self.include_critic,
+            "hidden_layers": self.hidden_layers,
+            "hidden_activation_functions": [
+                reverse_module_dict[type(activation)]
+                for activation in self.hidden_activation_functions
+            ],
+            "input_activation_function": reverse_module_dict[
+                type(self.input_activation_function)
+            ],
+            "output_activation_mean": reverse_module_dict[
+                type(self.output_activation_mean)
+            ],
+            "output_activation_std": reverse_module_dict[
+                type(self.output_activation_std)
+            ],
+            "optimizer": reverse_optim_dict[self.optimizer],
+            "minibatch_size": self.minibatch_size,
+            "checkpoint_dir": self.checkpoint_dir,
+        }
+
+    @classmethod
+    def from_dict(cls, config_dict):
+        """
+        Create a PPOConfig object from a dictionary
+        """
+        # Ensure all keys are written in lowercase
+        config_dict = {k.lower(): v for k, v in config_dict.items()}
+        return cls(**config_dict)
+
+    @classmethod
+    def from_yaml(cls, file_path):
+        """
+        Create a PPOConfig object from a YAML file
+        """
+        config_dict = load_from_yaml_file(file_path)
+        config_dict = {k.lower(): v for k, v in config_dict.items()}
+        return cls.from_dict(config_dict)
+
+    def initialize_wandb(self):
+        """
+        Initialize Weights and Biases
+        """
+        wandb.init(
+            project=self.wandb_config.project,
+            entity=self.wandb_config.entity,
+            tags=self.wandb_config.tags,
+            notes=self.wandb_config.notes,
+        )
+
+    def log_wandb(self, **kwargs):
+        """
+        Log data to Weights and Biases
+        """
+        wandb.log(kwargs)
+
+    def finish_wandb(self):
+        """
+        Finish Weights and Biases
+        """
+        wandb.finish()

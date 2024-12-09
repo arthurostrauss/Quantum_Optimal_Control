@@ -169,30 +169,30 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
         return self._get_obs(), reward, terminated, False, self._get_info()
 
-    def check_reward(self):
-        if self.training_with_cal:
-            print("Checking reward to adjust C Factor...")
-            example_obs, _ = self.reset()
-            if example_obs.shape != self.observation_space.shape:
-                raise ValueError(
-                    f"Training Config observation space ({self.observation_space.shape}) does not "
-                    f"match Environment observation shape ({example_obs.shape})"
-                )
-            sample_action = np.random.normal(
-                loc=(self.action_space.low + self.action_space.high) / 2,
-                scale=(self.action_space.high - self.action_space.low) / 2,
-                size=(self.batch_size, self.action_space.shape[-1]),
-            )
-
-            batch_rewards = self.perform_action(sample_action)
-            mean_reward = np.mean(batch_rewards)
-            if not np.isclose(mean_reward, self.fidelity_history[-1], atol=1e-2):
-                self.c_factor *= self.fidelity_history[-1] / mean_reward
-                self.c_factor = np.round(self.c_factor, 1)
-                print("C Factor adjusted to", self.c_factor)
-            self.clear_history()
-        else:
-            pass
+    # def check_reward(self):
+    #     if self.training_with_cal:
+    #         print("Checking reward to adjust C Factor...")
+    #         example_obs, _ = self.reset()
+    #         if example_obs.shape != self.observation_space.shape:
+    #             raise ValueError(
+    #                 f"Training Config observation space ({self.observation_space.shape}) does not "
+    #                 f"match Environment observation shape ({example_obs.shape})"
+    #             )
+    #         sample_action = np.random.normal(
+    #             loc=(self.action_space.low + self.action_space.high) / 2,
+    #             scale=(self.action_space.high - self.action_space.low) / 2,
+    #             size=(self.batch_size, self.action_space.shape[-1]),
+    #         )
+    #
+    #         batch_rewards = self.perform_action(sample_action)
+    #         mean_reward = np.mean(batch_rewards)
+    #         if not np.isclose(mean_reward, self.fidelity_history[-1], atol=1e-2):
+    #             self.c_factor *= self.fidelity_history[-1] / mean_reward
+    #             self.c_factor = np.round(self.c_factor, 1)
+    #             print("C Factor adjusted to", self.c_factor)
+    #         self.clear_history()
+    #     else:
+    #         pass
 
     def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
         """

@@ -146,3 +146,7 @@ class QuAMQiskitPulse(QuAMPulse):
     @property
     def parameters(self):
         return self.pulse.parameters
+
+    @property
+    def stored_parameter_expressions(self):
+        return self._stored_parameter_expressions
