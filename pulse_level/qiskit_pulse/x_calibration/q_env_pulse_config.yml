@@ -62,7 +62,7 @@ ENV: # Environment configuration
     #    LOW: [ -1., -3.14, -1., -3.14 ]
     #    HIGH: [ 1., 3.14, 1., 3.14 ]
     LOW: [ 0. , ]
-    HIGH: [ 1. ]
+    HIGH: [ 0.5 ]
   REWARD:
     REWARD_METHOD: "state" # Choose between "fidelity", "state", "channel", "xeb", "cafe"
   REWARD_PARAMS: # All unused parameters should be set to null (only assign values to parameters used by chosen reward method)

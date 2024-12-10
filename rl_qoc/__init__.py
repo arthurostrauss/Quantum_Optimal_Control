@@ -5,5 +5,6 @@ from .environment.quantumenvironment import QuantumEnvironment
 from .environment.context_aware_quantum_environment import (
     ContextAwareQuantumEnvironment,
 )
+from .environment.custom_wrappers import RescaleAndClipAction
 from .agent import CustomPPO
 from .hpo.hpo_config import HPOConfig

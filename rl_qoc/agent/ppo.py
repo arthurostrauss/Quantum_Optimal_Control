@@ -429,25 +429,23 @@ class CustomPPO:
                 }
                 training_results = {
                     "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],
-                    "fidelity_history": (
-                        u_env.fidelity_history[-1] if u_env.do_benchmark() else np.nan
-                    ),
-                    "hardware_runtime": (
-                        u_env.hardware_runtime[-1]
-                        if u_env.backend_info.instruction_durations is not None
-                        else np.nan
-                    ),
-                    "total_shots": u_env.total_shots[-1],
-                    "total_updates": iteration,
+                    "total_shots": int(u_env.total_shots[-1]),
                 }
+                if u_env.backend_info.instruction_durations is not None:
+                    training_results["hardware_runtime"] = u_env.hardware_runtime[-1]
+                if u_env.do_benchmark():
+                    training_results["fidelity_history"] = u_env.fidelity_history[-1]
+
                 for i in range(u_env.n_actions):
-                    training_results[f"clipped_mean_action_{i}"] = mean_action[0][i]
+                    training_results[f"clipped_mean_action_{i}"] = env.action(
+                        mean_action[0]
+                    )[i]
                     training_results[f"mean_action_{i}"] = mean_action[0][i]
                     training_results[f"std_action_{i}"] = std_action[0][i]
 
                 for key, value in training_results.items():
                     self._training_results[key].append(value)
-                if self.agent_config.wandb_config.enabled:
+                if self.agent_config.wandb_config.enabled and self.save_data:
                     write_to_wandb(summary, training_results)
                 iteration += 1
 
