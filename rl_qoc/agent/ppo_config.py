@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Union, Dict
+from typing import Optional, Union, Dict, Callable
 from dataclasses import field, asdict
 from abc import ABC, abstractmethod
 import torch.nn as nn
@@ -114,6 +114,15 @@ class TrainFunctionSettings:
             "save_data": self.save_data,
         }
 
+    @classmethod
+    def from_dict(cls, config_dict):
+        """
+        Create a TrainFunctionSettings object from a dictionary
+        """
+        # Ensure all keys are written in lowercase
+        config_dict = {k.lower(): v for k, v in config_dict.items()}
+        return cls(**config_dict)
+
 
 @dataclass
 class TrainingConfig:
@@ -214,7 +223,7 @@ class PPOConfig:
     input_activation_function: nn.Module | str = "identity"
     output_activation_mean: nn.Module | str = "tanh"
     output_activation_std: nn.Module | str = "identity"
-    optimizer: str | optim.Optimizer = "adam"
+    optimizer: str | optim.Optimizer | Callable = "adam"
     minibatch_size: int = 16
     checkpoint_dir: str = "tmp/ppo"
     training_config: Optional[TrainingConfig] = field(default_factory=TrainingConfig)

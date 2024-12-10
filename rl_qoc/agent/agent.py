@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from gymnasium import Space
 from .ppo_utils import get_module
+from numpy import sqrt
 
 
 class ActorNetwork(nn.Module):
@@ -64,8 +65,9 @@ class ActorNetwork(nn.Module):
         self.base_layers = layers
         self.mean_action = nn.Linear(hidden_layers[-1], n_actions)
         self.mean_activation = get_module(output_activation_mean)
-        self.std_action = nn.Linear(hidden_layers[-1], n_actions)
-        self.std_activation = get_module(output_activation_std)
+        # self.std_action = nn.Linear(hidden_layers[-1], n_actions)
+        # self.std_activation = get_module(output_activation_std)
+        self.std_action = nn.Parameter(torch.zeros(1, n_actions))
 
         self.include_critic = include_critic
         self.critic_output = nn.Linear(hidden_layers[-1], 1)
@@ -75,15 +77,17 @@ class ActorNetwork(nn.Module):
         # Initialize the weights of the network
         for layer in self.base_network.modules():
             if isinstance(layer, nn.Linear):
-                nn.init.orthogonal_(layer.weight)
+                nn.init.orthogonal_(layer.weight, sqrt(2))
                 nn.init.constant_(layer.bias, 0.0)
 
     def forward(self, x):
         x = self.base_network(x)
         mean_action = self.mean_action(x)
         mean_action = self.mean_activation(mean_action)
-        std_action = self.std_action(x)
-        std_action = self.std_activation(std_action)
+        # std_action = self.std_action(x)
+        std_action = self.std_action.expand_as(mean_action)
+        std_action = torch.exp(std_action)  # log std -> std
+        # std_action = self.std_activation(std_action)
         critic_output = self.critic_output(x)
 
         if self.include_critic:

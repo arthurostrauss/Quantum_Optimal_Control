@@ -159,11 +159,8 @@ class CustomPPO:
         Trains the model using Proximal Policy Optimization (PPO) algorithm.
 
         Args:
-            training_config (Dict): A dictionary containing the training configuration parameters.
-            plot_real_time (bool, optional): Whether to plot the training progress in real time. Defaults to False.
-            print_debug (bool, optional): Whether to print debug information during training. Defaults to False.
-            num_prints (int, optional): The number of times to print training progress. Defaults to 40.
-
+            training_config (Optional[TrainingConfig], optional): Training configuration parameters. Defaults to None.
+            train_function_settings (Optional[TrainFunctionSettings], optional): Training function settings. Defaults to None.
         Returns:
             Dict: A dictionary containing the training results, including average reward and fidelity history.
         """
