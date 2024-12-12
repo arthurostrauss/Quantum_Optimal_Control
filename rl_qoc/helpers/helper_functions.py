@@ -663,7 +663,6 @@ def load_q_env_from_yaml_file(file_path: str):
                 )
             )
         ),
-        "training_with_cal": env_config.get("TRAINING_WITH_CAL", False),
         "target": {
             "physical_qubits": config["TARGET"]["PHYSICAL_QUBITS"],
         },
