@@ -122,22 +122,22 @@ class CustomPPO:
         and actions are sampled within the environment (in real time).
         """
 
-        action = torch.clip(
-            probs.sample(),
-            torch.Tensor(self.min_action),
-            torch.Tensor(self.max_action),
-        )
-        # action = probs.sample()
+        # action = torch.clip(
+        #     probs.sample(),
+        #     torch.Tensor(self.min_action),
+        #     torch.Tensor(self.max_action),
+        # )
+        action = probs.sample()
         logprob = probs.log_prob(action).sum(1)
 
         if isinstance(self.env, ActionWrapper):
-            self.unwrapped_env.mean_action = self.env.action(mean_action.cpu().numpy())[
-                0
-            ]
+            self.unwrapped_env.mean_action = self.env.action(
+                mean_action[0].cpu().numpy()
+            )
         else:
-            self.unwrapped_env.mean_action = mean_action.cpu().numpy()[0]
+            self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
 
-        self.unwrapped_env.std_action = std_action.cpu().numpy()[0]
+        self.unwrapped_env.std_action = std_action[0].cpu().numpy()
         return action, logprob
 
     def post_process_action(
@@ -239,7 +239,6 @@ class CustomPPO:
                 if self.anneal_learning_rate:  # Anneal learning rate
                     self.learning_rate_annealing(iteration=iteration)
 
-                # mean_action, std_action = self.perform_training_iteration()
                 # Reset the environment
                 next_obs, _ = env.reset(seed=self.seed)
                 batch_obs = torch.tile(torch.Tensor(next_obs), (batch_size, 1))

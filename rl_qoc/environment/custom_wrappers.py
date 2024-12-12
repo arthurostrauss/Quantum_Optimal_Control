@@ -20,8 +20,8 @@ class RescaleAndClipAction(
     def __init__(
         self,
         env: Env[ObsType, ActType],
-        min_action: np.floating | np.integer | np.ndarray,
-        max_action: np.floating | np.integer | np.ndarray,
+        min_action: np.floating | np.integer | np.ndarray | float,
+        max_action: np.floating | np.integer | np.ndarray | float,
     ):
         """
         Initializes the RescaleAndClipAction wrapper.

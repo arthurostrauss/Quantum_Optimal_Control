@@ -37,6 +37,8 @@ from qiskit.primitives import (
     BaseEstimatorV2,
     BaseSamplerV2,
 )
+from qiskit.primitives.containers.estimator_pub import EstimatorPub
+from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from qiskit.quantum_info import partial_trace
 
@@ -475,7 +477,7 @@ class BaseQuantumEnvironment(ABC, Env):
         ]
         total_shots = self.batch_size * np.sum(self._pauli_shots * self.n_shots)
 
-        return pubs, total_shots
+        return [EstimatorPub.coerce(pub) for pub in pubs], total_shots
 
     def channel_reward_pubs(
         self,
@@ -676,7 +678,7 @@ class BaseQuantumEnvironment(ABC, Env):
         if len(pubs) == 0:  # If nothing was sampled, retry
             pubs, total_shots = self.channel_reward_pubs(qc, params)
 
-        return pubs, total_shots
+        return [EstimatorPub.coerce(pub) for pub in pubs], total_shots
 
     def cafe_reward_pubs(self, circuit: QuantumCircuit, params):
         """
@@ -748,7 +750,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 pubs_.append((transpiled_circuit, params, self.n_shots))
             total_shots += self.batch_size * self.n_shots
 
-        return pubs, total_shots
+        return [SamplerPub.coerce(pub) for pub in pubs], total_shots
 
     def xeb_reward_pubs(self, circuit: QuantumCircuit, params):
         """
@@ -779,7 +781,7 @@ class BaseQuantumEnvironment(ABC, Env):
             for l in range(self.n_reps):
                 pass
 
-        return pubs, total_shots
+        return [SamplerPub.coerce(pub) for pub in pubs], total_shots
 
     def orbit_reward_pubs(self, circuit: QuantumCircuit, params):
         """
@@ -872,7 +874,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
                 total_shots += self.batch_size * self.n_shots
 
-        return pubs, total_shots
+        return [SamplerPub.coerce(pub) for pub in pubs], total_shots
 
     def simulate_circuit(
         self, qc: QuantumCircuit, params: np.array, update_env_history: bool = True
@@ -1528,14 +1530,34 @@ class BaseQuantumEnvironment(ABC, Env):
         Return set of observables sampled for current epoch of training (relevant only for
         direct fidelity estimation methods, e.g. 'channel' or 'state')
         """
-        return self._observables
+        if self.config.reward_config.dfe:
+            return self._observables
+        else:
+            raise ValueError(
+                f"Observables not defined for reward method {self.config.reward_method}"
+            )
 
     @property
     def total_shots(self):
+        """
+        Return the total number of shots executed on the quantum system
+        (as a list of shots executed for each step of the training)
+        """
         return self._total_shots
 
     @property
+    def pubs(self) -> List[EstimatorPub | SamplerPub]:
+        """
+        Return the current PUBs used in the environment
+        """
+        return self._pubs
+
+    @property
     def hardware_runtime(self):
+        """
+        Return the total hardware runtime for the quantum system
+        (as a list of runtimes for each step of the training)
+        """
         return self._hardware_runtime
 
     @property
