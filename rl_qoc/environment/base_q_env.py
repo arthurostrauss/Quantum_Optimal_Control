@@ -73,7 +73,9 @@ from qiskit_ibm_runtime import (
 
 from .backend_info import QiskitBackendInfo, QiboBackendInfo, BackendInfo
 from .target import GateTarget, StateTarget
+from .calibration_pubs import CalibrationEstimatorPub, CalibrationSamplerPub
 from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
+from ..helpers import precision_to_shots, shots_to_precision
 
 from ..helpers.helper_functions import (
     retrieve_primitives,
@@ -182,6 +184,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.action_history = []
         self.reward_history = []
         self._pubs, self._ideal_pubs = [], []
+        self._calibration_pubs: List[CalibrationEstimatorPub|CalibrationSamplerPub] = []
         self._observables, self._pauli_shots = None, None
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -400,17 +403,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
             shots_per_basis.append(max_pauli_shots)
 
-        if (
-            isinstance(self.target, GateTarget)
-            and qc.num_qubits > self.target.causal_cone_size
-        ):  # If circuit has more qubits than causal cone, extend to full qubit space
-            other_qubit_indices = set(range(qc.num_qubits)) - set(
-                self.target.causal_cone_qubits_indices
-            )
-            observables = observables.apply_layout(None, qc.num_qubits)
-            observables = observables.apply_layout(
-                self.target.causal_cone_qubits_indices + list(other_qubit_indices)
-            )
+        observables = self._extend_observables(observables, qc)
 
         return observables, shots_per_basis
 
@@ -420,38 +413,26 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         if not isinstance(self.config.reward_config, StateRewardConfig):
             raise TypeError("StateConfig object required for state reward method")
-
+        
         prep_circuit = qc
         target_state = self.target
+    
         if isinstance(self.target, GateTarget):
             # State reward: sample a random input state for target gate
             input_state = np.random.choice(self.target.input_states)
-
-            # Prepend input state to custom circuit with front composition
-            prep_circuit = qc.compose(
-                input_state.circuit,
-                self.target.causal_cone_qubits,
-                front=True,
-            )
-            for _ in range(self.n_reps - 1):  # Repeat circuit for noise amplification
-                prep_circuit.compose(qc, inplace=True)
-
-            if (
-                qc.num_qubits > self.target.causal_cone_size
-            ):  # Add random input state on all qubits (not part of reward calculation)
-                other_qubits_indices = set(range(qc.num_qubits)) - set(
-                    self.target.causal_cone_qubits_indices
-                )
-                other_qubits = [qc.qubits[i] for i in other_qubits_indices]
-                random_input_context = Pauli6PreparationBasis().circuit(
-                    np.random.randint(0, 6, len(other_qubits)).tolist()
-                )
-                prep_circuit.compose(
-                    random_input_context, other_qubits, inplace=True, front=True
-                )
-
             # Modify target state to match input state and target gate
             target_state = input_state.target_state  # (Gate |input>=|target>)
+
+            # Prepend input state to custom circuit with front composition
+            
+            prep_circuit = qc.repeat(self.n_reps)
+            input_circuit = self._extend_input_state_prep(input_state.circuit, qc)
+            prep_circuit.compose(
+                input_circuit,
+                front=True,
+                inplace=True
+            )
+            
 
         self._observables, self._pauli_shots = self.retrieve_observables(
             target_state, qc
@@ -475,9 +456,41 @@ class BaseQuantumEnvironment(ABC, Env):
                 self._pauli_shots,
             )
         ]
+        
         total_shots = self.batch_size * np.sum(self._pauli_shots * self.n_shots)
 
         return [EstimatorPub.coerce(pub) for pub in pubs], total_shots
+
+    def _extend_input_state_prep(self, input_circuit, qc):
+        if (
+                qc.num_qubits > self.target.causal_cone_size
+        ):  # Add random input state on all qubits (not part of reward calculation)
+            other_qubits_indices = set(range(qc.num_qubits)) - set(
+                self.target.causal_cone_qubits_indices
+            )
+            other_qubits = [qc.qubits[i] for i in other_qubits_indices]
+            random_input_context = Pauli6PreparationBasis().circuit(
+                np.random.randint(0, 6, len(other_qubits)).tolist()
+            )
+            return input_circuit.compose(
+                random_input_context, other_qubits, front=True
+            )
+        return input_circuit
+    
+    def _extend_observables(self, observables: SparsePauliOp, qc: QuantumCircuit):
+        if (
+            qc.num_qubits > self.target.causal_cone_size
+        ):
+            other_qubits_indices = set(range(qc.num_qubits)) - set(
+                self.target.causal_cone_qubits_indices
+            )
+            observables = observables.apply_layout(
+                None, qc.num_qubits
+            ).apply_layout(self.target.causal_cone_qubits_indices + list(other_qubits_indices))
+            
+        return observables
+            
+            
 
     def channel_reward_pubs(
         self,
@@ -508,8 +521,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 f"Number of eigenstates per Pauli should be less than {2 ** qc.num_qubits}"
             )
         n_qubits = self.target.causal_cone_size
-        d = 2**n_qubits
-        probabilities = self.target.Chi**2 / (d**2)
+        dim = 2**n_qubits
+        probabilities = self.target.Chi**2 / (dim**2)
         non_zero_indices = np.nonzero(probabilities)[0]  # Filter out zero probabilities
         non_zero_probabilities = probabilities[non_zero_indices]
 
@@ -529,51 +542,37 @@ class BaseQuantumEnvironment(ABC, Env):
             return_counts=True,
         )
         pauli_indices = np.array(
-            [np.unravel_index(sample, (d**2, d**2)) for sample in samples], dtype=int
+            [np.unravel_index(sample, (dim**2, dim**2)) for sample in samples], dtype=int
         )
 
         pauli_prep, pauli_meas = zip(
             *[(basis[p[1]], basis[p[0]]) for p in pauli_indices]
         )
         pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
-        reward_factor = [self.c_factor / (d * self.target.Chi[p]) for p in samples]
+        reward_factor = [self.c_factor / (dim * self.target.Chi[p]) for p in samples]
 
         observables = SparsePauliOp(pauli_meas, reward_factor, ignore_pauli_phase=True)
-        if qc.num_qubits > self.target.causal_cone_size:
-            other_qubit_indices = set(range(qc.num_qubits)) - set(
-                self.target.causal_cone_qubits_indices
-            )
-            observables = observables.apply_layout(
-                None, qc.num_qubits
-            )  # Extend to full qubit space
-            # Apply layout to apply non-trivial observables on causal cone qubits
-            observables = observables.apply_layout(
-                self.target.causal_cone_qubits_indices + list(other_qubit_indices)
-            )
-        self._observables = observables
+        
+        self._observables = self._extend_observables(observables, qc)
 
         if dfe_precision is not None:
             self._pauli_shots = np.ceil(
                 2
                 * np.log(2 / delta)
-                / (d * pauli_sampling * eps**2 * self.target.Chi[samples] ** 2)
+                / (dim * pauli_sampling * eps**2 * self.target.Chi[samples] ** 2)
             )
 
         pubs, total_shots = [], 0
-        used_prep_indices, used_indices, idx = (
-            [],
-            [],
-            0,
-        )  # Track used input states to reduce number of PUBs
+        used_prep_indices= [] # Track used input states to reduce number of PUBs
 
         for prep, obs, shots in zip(pauli_prep, self._observables, self._pauli_shots):
 
             # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis
             # Below, we select at random a subset of pure input states to prepare for each prep
             # If nb_states = 1, we prepare all pure input states for each prep (no random selection)
-            max_input_states = d // nb_states
+            max_input_states = dim // nb_states
             selected_input_states = np.random.choice(
-                d, size=max_input_states, replace=False
+                dim, size=max_input_states, replace=False
             )
             for input_state in selected_input_states:
                 prep_indices = []
@@ -599,31 +598,22 @@ class BaseQuantumEnvironment(ABC, Env):
                     tuple(prep_indices) not in used_prep_indices
                 ):  # If input state not already used, add a PUB
                     used_prep_indices.append(tuple(prep_indices))
-                    used_indices.append(idx)
-                    idx += 1
-                    # Prepare input state in Pauli6 basis (front composition)
-                    prep_circuit = qc.compose(
-                        Pauli6PreparationBasis().circuit(prep_indices),
-                        self.target.causal_cone_qubits,
+                    
+                    # Repeat the circuit n_reps times and prepend the input state preparation
+                    prep_circuit = qc.repeat(self.n_reps)
+                    
+                    # Create input state preparation circuit
+                    input_circuit = qc.copy_empty_like()
+                    input_circuit.compose(Pauli6PreparationBasis().circuit(prep_indices),
+                        self.target.causal_cone_qubits, inplace=True)
+                    input_circuit = self._extend_input_state_prep(input_circuit, qc)
+                    
+                    # Prepend input state to custom circuit with front composition
+                    prep_circuit.compose(
+                        input_circuit,
                         front=True,
+                        inplace=True,
                     )
-                    # Repeat circuit for noise amplification
-                    for _ in range(self.n_reps - 1):
-                        prep_circuit.compose(qc, inplace=True)
-
-                    if (
-                        qc.num_qubits > self.target.causal_cone_size
-                    ):  # Add random input state on other qubits (not part of reward calculation, just for enhanced calibration)
-                        other_qubits_indices = set(range(qc.num_qubits)) - set(
-                            self.target.causal_cone_qubits_indices
-                        )
-                        other_qubits = [qc.qubits[i] for i in other_qubits_indices]
-                        random_input_context = Pauli6PreparationBasis().circuit(
-                            np.random.randint(0, 6, len(other_qubits)).tolist()
-                        )
-                        prep_circuit.compose(
-                            random_input_context, other_qubits, inplace=True, front=True
-                        )
 
                     # Transpile the circuit again to decompose input state preparation
                     prep_circuit = self.backend_info.custom_transpile(
@@ -647,16 +637,12 @@ class BaseQuantumEnvironment(ABC, Env):
                         * len(obs.group_commuting(qubit_wise=True))
                     )
                 else:  # If input state already used, reuse PUB and just update observable and precision
-                    pub_ref_index: int = used_indices[
-                        used_prep_indices.index(tuple(prep_indices))
-                    ]
+                    pub_ref_index: int = used_prep_indices.index(tuple(prep_indices))
 
-                    prep_circuit, ref_obs, ref_params, ref_precision = pubs[
-                        pub_ref_index
-                    ]
-                    ref_shots = int(math.ceil(1.0 / ref_precision**2))
-                    new_precision = min(ref_precision, 1 / np.sqrt(dedicated_shots))
-                    new_shots = int(math.ceil(1.0 / new_precision**2))
+                    prep_circuit, ref_obs, ref_params, ref_precision = pubs[pub_ref_index]
+                    ref_shots = precision_to_shots(ref_precision)
+                    new_precision = min(ref_precision, shots_to_precision(dedicated_shots))
+                    new_shots = precision_to_shots(new_precision)
                     new_pub = (
                         prep_circuit,
                         ref_obs + parity * obs.apply_layout(prep_circuit.layout),
