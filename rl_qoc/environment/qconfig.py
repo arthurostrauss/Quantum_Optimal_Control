@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, List, Any, Literal, Tuple
+from typing import Callable, Dict, Optional, List, Any, Literal, Tuple, Union, Iterable
 
 import torch
 from gymnasium.spaces import Box
@@ -19,8 +19,13 @@ from qiskit.circuit import (
     Gate,
 )
 from qiskit.transpiler import InstructionDurations, PassManager
+from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
+from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
+from .calibration_pubs import (CalibrationEstimatorPub, CalibrationEstimatorPubLike, 
+                               CalibrationSamplerPub, CalibrationSamplerPubLike)
 
-
+PubLike = Union[EstimatorPubLike, SamplerPubLike, CalibrationEstimatorPubLike, CalibrationSamplerPubLike]
+Pub = Union[EstimatorPub, SamplerPub, CalibrationEstimatorPub, CalibrationSamplerPub]
 @dataclass
 class BackendConfig(ABC):
     """
@@ -54,6 +59,22 @@ class BackendConfig(ABC):
     @abstractmethod
     def config_type(self):
         return "backend"
+    
+    
+    def process_pubs(self, pubs: Iterable[Pub|PubLike]) -> Iterable[Pub]:
+        """
+        Process the pub to the correct type for the backend
+        """
+        return pubs
+    
+    def as_dict(self):
+        return {
+            "parametrized_circuit": self.parametrized_circuit,
+            "backend": self.backend,
+            "parametrized_circuit_kwargs": self.parametrized_circuit_kwargs,
+            "pass_manager": self.pass_manager,
+            "instruction_durations": self.instruction_durations,
+        }
 
 
 @dataclass
@@ -72,18 +93,32 @@ class QiskitConfig(BackendConfig):
     @property
     def config_type(self):
         return "qiskit"
+    
+    def process_pubs(self, pubs: Iterable[Pub|PubLike]) -> List[Pub]:
+        """
+        Process the pub to the correct type for the backend
+        """
+        new_pubs = []
+        for pub in pubs:
+            if isinstance(pub, (CalibrationEstimatorPubLike, CalibrationEstimatorPub)):
+                new_pubs.extend(CalibrationEstimatorPub.coerce(pub).to_pub_list())
+            elif isinstance(pub, (CalibrationSamplerPubLike, CalibrationSamplerPub)):
+                new_pubs.extend(CalibrationSamplerPub.coerce(pub).to_pub_list())
+            elif isinstance(pub, (EstimatorPubLike, EstimatorPub)):
+                new_pubs.append(EstimatorPub.coerce(pub))
+            elif isinstance(pub, (SamplerPubLike, SamplerPub)):
+                new_pubs.append(SamplerPub.coerce(pub))
+            else:
+                raise ValueError(f"Pub type {type(pub)} not recognized")
+        return new_pubs
 
 
 @dataclass
-class DynamicsConfig(BackendConfig):
+class DynamicsConfig(QiskitConfig):
     """
     Qiskit Dynamics configuration elements.
 
     Args:
-        estimator_options: Options to feed the Estimator primitive
-        solver: Relevant only if dealing with pulse simulation (typically with DynamicsBackend), gives away solver used
-        to run simulations for computing exact fidelity benchmark
-        channel_freq: Relevant only if dealing with pulse simulation, Dictionary containing information mapping
         the channels and the qubit frequencies
         calibration_files: load existing gate calibrations from json file for DynamicsBackend
         baseline gate calibrations for running algorithm
@@ -96,10 +131,16 @@ class DynamicsConfig(BackendConfig):
     @property
     def config_type(self):
         return "dynamics"
+    
+    def as_dict(self):
+        return super().as_dict() | {
+            "calibration_files": self.calibration_files,
+            "do_calibrations": self.do_calibrations,
+        }
 
 
 @dataclass
-class QiskitRuntimeConfig(BackendConfig):
+class QiskitRuntimeConfig(QiskitConfig):
     """
     Qiskit Runtime configuration elements.
 
@@ -112,6 +153,11 @@ class QiskitRuntimeConfig(BackendConfig):
     @property
     def config_type(self):
         return "runtime"
+    
+    def as_dict(self):
+        return super().as_dict() | {
+            "estimator_options": self.estimator_options,
+        }
 
 
 @dataclass
@@ -163,6 +209,12 @@ class GateTargetConfig(TargetConfig):
                 self.gate = get_standard_gate_name_mapping()[self.gate.lower()]
             except KeyError as e:
                 raise ValueError(f"Gate {self.gate} not recognized") from e
+    
+    def as_dict(self):
+        return {
+            "gate": self.gate.name,
+            "physical_qubits": self.physical_qubits,
+        }
 
 
 @dataclass
@@ -183,6 +235,12 @@ class StateTargetConfig(TargetConfig):
                 self.state = Statevector.from_label(self.state)
             except QiskitError as e:
                 raise ValueError(f"State {self.state} not recognized") from e
+            
+    def as_dict(self):
+        return {
+            "state": self.state.data,
+            "physical_qubits": self.physical_qubits,
+        }
 
 
 @dataclass
@@ -209,18 +267,35 @@ class ExecutionConfig:
 
     Args:
         batch_size: Batch size (iterate over a bunch of actions per policy to estimate expected return). Defaults to 50.
-        sampling_Paulis: Number of Paulis to sample for the fidelity estimation scheme. Defaults to 100.
+        sampling_paulis: Number of Paulis to sample for the fidelity estimation scheme. For ORBIT, this would be the number of
+            random Clifford sequences to sample.
         n_shots: Number of shots per Pauli for the fidelity estimation. Defaults to 1.
+        n_reps: Number of repetitions of cycle circuit (can be an integer or a list of integers to play multiple lengths)
         c_factor: Renormalization factor. Defaults to 0.5.
         seed: Seed for Observable sampling. Defaults to 1234.
     """
 
     batch_size: int = 100
     sampling_paulis: int = 100
-    n_shots: int = 1
-    n_reps: int = 1
-    c_factor: float = 0.5
+    n_shots: int = 10
+    n_reps: int|List[int] = 1
+    c_factor: float = 1.0
     seed: int = 1234
+    
+    def as_dict(self):
+        return {
+            "batch_size": self.batch_size,
+            "sampling_paulis": self.sampling_paulis,
+            "n_shots": self.n_shots,
+            "n_reps": self.n_reps,
+            "c_factor": self.c_factor,
+            "seed": self.seed,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict):
+        return cls(**data)
+    
 
 
 @dataclass
@@ -369,9 +444,7 @@ class QEnvConfig:
         device (torch.device): Device on which the simulation is run
     """
 
-    target: (
-        Dict[str, List | Gate | QuantumRegister | QuantumCircuit | str] | TargetConfig
-    )
+    target: GateTargetConfig | StateTargetConfig
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
@@ -439,7 +512,7 @@ class QEnvConfig:
         self.execution_config.n_shots = value
 
     @property
-    def n_reps(self) -> int:
+    def n_reps(self) -> int|List[int]:
         return self.execution_config.n_reps
 
     @n_reps.setter

@@ -154,6 +154,17 @@ def to_python_identifier(s):
 
     return s
 
+def shots_to_precision(n_shots: int) -> float:
+    """
+    Convert number of shots to precision on expectation value
+    """
+    return 1 / np.sqrt(n_shots)
+
+def precision_to_shots(precision: float) -> int:
+    """
+    Convert precision on expectation value to number of shots
+    """
+    return int(np.ceil(1 / precision ** 2))
 
 def count_gates(qc: QuantumCircuit):
     """
@@ -330,7 +341,7 @@ def fidelity_from_tomography(
     return results if len(results) > 1 else results[0]
 
 
-def get_gate(gate: Gate | str):
+def get_gate(gate: Gate | str)-> Gate:
     """
     Get gate from gate_map
     """

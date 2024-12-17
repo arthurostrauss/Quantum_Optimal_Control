@@ -320,15 +320,11 @@ class InputState(StateTarget):
         if isinstance(self._target_op, Gate):
             circ = QuantumCircuit(self.tgt_register)
             circ.append(self._target_op, self.tgt_register)
+            circ = circ.repeat(n_reps).decompose()
         else:
-            circ = self._target_op.copy("target")
+            circ = self._target_op.repeat(n_reps).decompose()
 
         circ.compose(self.input_circuit, inplace=True, front=True)
-        for _ in range(self.n_reps - 1):
-            if isinstance(self._target_op, Gate):
-                circ.append(self._target_op, self.tgt_register)
-            else:
-                circ.compose(self._target_op, inplace=True)
         self.target_state = StateTarget(circuit=circ)
 
     @property

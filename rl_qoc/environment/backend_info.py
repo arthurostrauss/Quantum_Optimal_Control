@@ -231,3 +231,10 @@ class QiboBackendInfo(BackendInfo):
             if isinstance(qc_input, QuantumCircuit)
             else [circ.decompose() for circ in qc_input]
         )
+    
+    def asdict(self):
+        return {
+            "n_qubits": self._n_qubits,
+            "coupling_map": self._coupling_map,
+            "pass_manager": self._pass_manager,
+        }
