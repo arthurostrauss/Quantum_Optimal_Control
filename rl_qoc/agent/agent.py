@@ -3,6 +3,8 @@ from typing import Sequence, Optional
 import torch
 import torch.nn as nn
 from gymnasium import Space
+from .ppo_utils import get_module
+from numpy import sqrt
 
 
 class ActorNetwork(nn.Module):
@@ -11,7 +13,12 @@ class ActorNetwork(nn.Module):
         observation_space: Space,
         hidden_layers: Sequence[int],
         n_actions: int,
-        hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
+        input_activation_function: nn.Module | str = "identity",
+        hidden_activation_functions: (
+            Sequence[nn.Module | str] | nn.Module | str
+        ) = "tanh",
+        output_activation_mean: nn.Module | str = "tanh",
+        output_activation_std: nn.Module | str = "identity",
         include_critic=True,
         chkpt_dir: str = "tmp/agent",
     ):
@@ -19,27 +26,48 @@ class ActorNetwork(nn.Module):
 
         self.checkpoint_dir = chkpt_dir
         # Define a list to hold the layer sizes including input and output sizes
-        layer_sizes = [observation_space.shape[0]] + list(hidden_layers)
-        if hidden_activation_functions is None:
-            hidden_activation_functions = [nn.ReLU() for _ in range(len(layer_sizes))]
+        input_activation_function = get_module(input_activation_function)
+        output_activation_mean = get_module(output_activation_mean)
+        output_activation_std = get_module(output_activation_std)
+        input_size = observation_space.shape[
+            0
+        ]  # TODO: Check if it's not shape[-1] that we actually need
+        hidden_sizes = list(hidden_layers)
 
-        assert len(hidden_activation_functions) == len(layer_sizes)
+        if isinstance(hidden_activation_functions, nn.Module) or isinstance(
+            hidden_activation_functions, str
+        ):
+            hidden_activation_functions = [
+                get_module(hidden_activation_functions)
+                for _ in range(len(hidden_sizes))
+            ]
+        else:
+            if len(hidden_activation_functions) != len(hidden_sizes):
+                raise ValueError(
+                    "Number of hidden layers and hidden activation functions must be the same"
+                )
+            hidden_activation_functions = [
+                get_module(activation) for activation in hidden_activation_functions
+            ]
+
         # Define a list to hold the layers of the network
         layers = []
+        # Handle the input layer
+        layers.append(nn.Linear(input_size, hidden_sizes[0]))
+        layers.append(input_activation_function)
 
-        # Iterate over the layer sizes to create the network layers
-        for i in range(len(layer_sizes) - 1):
-            # Add a linear layer with the current and next layer sizes
-            layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
-
+        # Handle the hidden layers
+        for i in range(len(hidden_sizes) - 1):
+            layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
             layers.append(hidden_activation_functions[i])
 
         # Create the actor network using Sequential container
-        self.layers = layers
+        self.base_layers = layers
         self.mean_action = nn.Linear(hidden_layers[-1], n_actions)
-        self.mean_activation = lambda x: x
-        self.std_action = nn.Linear(hidden_layers[-1], n_actions)
-        self.std_activation = nn.Sigmoid()
+        self.mean_activation = get_module(output_activation_mean)
+        # self.std_action = nn.Linear(hidden_layers[-1], n_actions)
+        # self.std_activation = get_module(output_activation_std)
+        self.std_action = nn.Parameter(torch.zeros(1, n_actions))
 
         self.include_critic = include_critic
         self.critic_output = nn.Linear(hidden_layers[-1], 1)
@@ -49,15 +77,17 @@ class ActorNetwork(nn.Module):
         # Initialize the weights of the network
         for layer in self.base_network.modules():
             if isinstance(layer, nn.Linear):
-                nn.init.orthogonal_(layer.weight)
+                nn.init.orthogonal_(layer.weight, sqrt(2))
                 nn.init.constant_(layer.bias, 0.0)
 
     def forward(self, x):
         x = self.base_network(x)
         mean_action = self.mean_action(x)
         mean_action = self.mean_activation(mean_action)
-        std_action = self.std_action(x)
-        std_action = self.std_activation(std_action)
+        # std_action = self.std_action(x)
+        std_action = self.std_action.expand_as(mean_action)
+        std_action = torch.exp(std_action)  # log std -> std
+        # std_action = self.std_activation(std_action)
         critic_output = self.critic_output(x)
 
         if self.include_critic:
@@ -82,34 +112,54 @@ class CriticNetwork(nn.Module):
         self,
         observation_space: Space,
         hidden_layers: Sequence[int],
-        hidden_activation_functions: Optional[Sequence[nn.Module]] = None,
+        input_activation_function: nn.Module | str = "identity",
+        hidden_activation_functions: (
+            Sequence[nn.Module | str] | nn.Module | str
+        ) = "tanh",
         chkpt_dir: str = "tmp/critic_ppo",
     ):
         super(CriticNetwork, self).__init__()
         self.checkpoint_dir = chkpt_dir
-        # Define a list to hold the layer sizes including input and output sizes
-        layer_sizes = [observation_space.shape[0]] + list(hidden_layers)
-        if hidden_activation_functions is None:
-            hidden_activation_functions = [nn.ReLU() for _ in range(len(layer_sizes))]
 
-        assert len(hidden_activation_functions) == len(layer_sizes)
+        # Define a list to hold the layer sizes including input and output sizes
+        input_activation_function = get_module(input_activation_function)
+        input_size = observation_space.shape[
+            0
+        ]  # TODO: Check if it's not shape[-1] that we actually need
+        hidden_sizes = list(hidden_layers)
+
+        if isinstance(hidden_activation_functions, nn.Module) or isinstance(
+            hidden_activation_functions, str
+        ):
+            hidden_activation_functions = [
+                get_module(hidden_activation_functions)
+                for _ in range(len(hidden_sizes))
+            ]
+        else:
+            if len(hidden_activation_functions) != len(hidden_sizes):
+                raise ValueError(
+                    "Number of hidden layers and hidden activation functions must be the same"
+                )
+            hidden_activation_functions = [
+                get_module(activation) for activation in hidden_activation_functions
+            ]
+
         # Define a list to hold the layers of the network
         layers = []
+        # Handle the input layer
+        layers.append(nn.Linear(input_size, hidden_sizes[0]))
+        layers.append(input_activation_function)
 
-        # Iterate over the layer sizes to create the network layers
-        for i in range(len(layer_sizes) - 1):
-            # Add a linear layer with the current and next layer sizes
-            layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
-
-            # Add a ReLU activation function for all layers except the output layer
-
+        # Handle the hidden layers
+        for i in range(len(hidden_sizes) - 1):
+            layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
             layers.append(hidden_activation_functions[i])
 
         # Create the actor network using Sequential container
-        self.layers = layers
+        self.base_layers = layers
         self.critic_output = nn.Linear(hidden_layers[-1], 1)
-        self.layers.append(self.critic_output)
-        self.critic_network = nn.Sequential(*self.layers)
+        self.base_layers.append(self.critic_output)
+        self.critic_network = nn.Sequential(*self.base_layers)
 
         # Initialize the weights of the network
         for layer in self.critic_network.modules():

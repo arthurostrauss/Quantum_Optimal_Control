@@ -1,30 +1,21 @@
 from typing import Optional, Dict
 from IPython.display import clear_output
-from gymnasium import Wrapper
-import wandb
+from gymnasium import ActionWrapper
 
 # Torch imports for building RL agent and framework
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
 from .agent import Agent
-from .ppo_config import (
-    TotalUpdates,
-    TrainFunctionSettings,
-    TrainingConfig,
-)
+from .ppo_config import TotalUpdates, TrainFunctionSettings, TrainingConfig, PPOConfig
 from .ppo_initialization import (
     initialize_environment,
-    initialize_agent_config,
-    initialize_rl_params,
     initialize_networks,
-    initialize_optimizer,
 )
 from .ppo_logging import *
 
 import sys
 import logging
-import signal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,111 +25,11 @@ logging.basicConfig(
 )
 
 
-def take_step(
-    step,
-    global_step,
-    batchsize,
-    num_steps,
-    obs,
-    dones,
-    actions,
-    logprobs,
-    rewards,
-    values,
-    batch_obs,
-    batch_done,
-    min_action,
-    max_action,
-    agent: Agent,
-    env: BaseQuantumEnvironment | Wrapper,
-    writer,
-):
-    """
-    Takes a step in the environment using the PPO algorithm.
-
-    Args:
-        step (int): current step index.
-        global_step (int): global step index.
-        batchsize (int): Size of the batch.
-        num_steps (int): Total number of steps.
-        obs (list): List to store observations.
-        dones (list): List to store done flags.
-        actions (list): List to store actions.
-        logprobs (list): List to store log probabilities.
-        rewards (list): List to store rewards.
-        values (list): List to store critic values.
-        batch_obs (torch.Tensor): Batch of observations.
-        batch_done (torch.Tensor): Batch of done flags.
-        min_action (list): List of minimum action values.
-        max_action (list): List of maximum action values.
-        agent (object): The agent model.
-        env (object): The environment.
-        writer (object): The writer object for logging.
-
-    Returns:
-        torch.Tensor: The next observations.
-        torch.Tensor: The next done flags.
-        torch.Tensor: The mean action.
-        torch.Tensor: The standard deviation of the action distribution.
-    """
-    global_step += 1
-    obs[step] = batch_obs
-    dones[step] = batch_done
-
-    with torch.no_grad():
-        mean_action, std_action, critic_value = agent(batch_obs)
-        probs = Normal(mean_action, std_action)
-        env.unwrapped.mean_action = env.action(mean_action.cpu().numpy())[0]
-        env.unwrapped.std_action = std_action[0]
-        action = torch.clip(
-            probs.sample(),
-            torch.Tensor(min_action),
-            torch.Tensor(max_action),
-        )
-        logprob = probs.log_prob(action).sum(1)
-        values[step] = critic_value.flatten()
-
-    actions[step] = action
-    logprobs[step] = logprob
-
-    next_obs, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
-    next_obs = torch.Tensor(next_obs)
-    done = int(np.logical_or(terminated, truncated))
-    reward = torch.Tensor(reward)
-    rewards[step] = reward
-
-    batch_obs = torch.tile(next_obs, (batchsize, 1))
-    next_done = done * torch.ones_like(dones[0])
-    obs[step] = batch_obs
-    dones[step] = next_done
-
-    # print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
-    if writer is not None:
-        writer.add_scalar(
-            "charts/episodic_return", np.mean(reward.numpy()), global_step
-        )
-        writer.add_scalar("charts/episodic_length", num_steps, global_step)
-        for i in range(env.unwrapped.mean_action.shape[0]):
-            writer.add_scalar(
-                f"charts/clipped_mean_action_{i}",
-                env.unwrapped.mean_action[i],
-                global_step,
-            )
-            writer.add_scalar(
-                f"charts/std_action_{i}", np.array(std_action)[i], global_step
-            )
-            writer.add_scalar(
-                f"charts/unclipped_action_{i}", np.array(action)[i], global_step
-            )
-
-    return next_obs, next_done, mean_action, std_action
-
-
 class CustomPPO:
     def __init__(
         self,
-        agent_config: Dict,
-        env: BaseQuantumEnvironment | Wrapper,
+        agent_config: Dict | PPOConfig | str,
+        env: BaseQuantumEnvironment | ActionWrapper,
         chkpt_dir: Optional[str] = "tmp/ppo",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
         save_data: Optional[bool] = False,
@@ -149,31 +40,41 @@ class CustomPPO:
         the submission of batches of actions to the environment, which is the typical use case for quantum control.
 
         Args:
-            agent_config (Dict): Configuration parameters for the PPO agent.
+            agent_config (Dict|PPOConfig|str): Configuration parameters for the PPO agent (can be a dictionary, PPOConfig object, or a file path to a YAML file).
             env (QuantumEnvironment): The quantum environment for training.
             chkpt_dir (Optional[str], optional): Directory to save the PPO agent's checkpoint files. Defaults to "tmp/ppo".
             chkpt_dir_critic (Optional[str], optional): Directory to save the critic network's checkpoint files. Defaults to "tmp/critic_ppo"
         """
+        if isinstance(agent_config, str):
+            agent_config = PPOConfig.from_yaml(agent_config)
+        elif isinstance(agent_config, Dict):
+            agent_config = PPOConfig.from_dict(agent_config)
 
         self.agent_config = agent_config
         self.env = env
         self.chkpt_dir = chkpt_dir
         self.chkpt_dir_critic = chkpt_dir_critic
 
-        self._training_config = TrainingConfig(
-            TotalUpdates(agent_config["NUM_UPDATES"])
-        )
-        self._training_results = None
-        self._train_function_settings = TrainFunctionSettings(save_data=save_data)
+        self._training_config = self.agent_config.training_config
+        self._training_results = {
+            "avg_reward": [],
+            "fidelity_history": [],
+            "hardware_runtime": [],
+            "total_shots": [],
+            "total_updates": [],
+        }
+        for i in range(self.unwrapped_env.n_actions):
+            self._training_results[f"clipped_mean_action_{i}"] = []
+            self._training_results[f"mean_action_{i}"] = []
+            self._training_results[f"std_action_{i}"] = []
+
+        self._train_function_settings = self.agent_config.train_function_settings
         if save_data:
-            run_name = agent_config["RUN_NAME"]
+            run_name = self.agent_config.run_name
             writer = SummaryWriter(f"runs/{run_name}")
-            if agent_config.get("WANDB", None) is not None:
-                wandb_config = agent_config["WANDB"]
-                api_key = agent_config["WANDB"].get("API_KEY", None)
-                if wandb_config.get("ENABLED", False):
-                    wandb.login(key=api_key, verify=True)
-                    wandb.config = agent_config | self.unwrapped_env.config.as_dict()
+
+            if self.agent_config.wandb_config.enabled:
+                wandb.login(key=self.agent_config.wandb_config.api_key, verify=True)
 
         else:
             writer = None
@@ -185,40 +86,25 @@ class CustomPPO:
             self.seed,
             self.min_action,
             self.max_action,
-        ) = initialize_environment(env)
-
-        # Initialize agent configuration
-        (hidden_units, activation_functions, include_critic, self.minibatch_size) = (
-            initialize_agent_config(self.agent_config, self.batch_size)
-        )
-
-        # Initialize RL parameters
-        (
-            self.n_epochs,
-            self.lr,
-            self.ppo_epsilon,
-            self.critic_loss_coef,
-            self.gamma,
-            self.gae_lambda,
-            self.clip_vloss,
-            self.grad_clip,
-            self.clip_coef,
-            self.normalize_advantage,
-            self.ent_coef,
-        ) = initialize_rl_params(self.agent_config)
+        ) = initialize_environment(env.unwrapped)
 
         # Initialize networks
         self.agent = initialize_networks(
             self.unwrapped_env.observation_space,
-            hidden_units,
+            agent_config.hidden_layers,
             self.unwrapped_env.n_actions,
-            activation_functions,
-            include_critic,
+            agent_config.hidden_activation_functions,
+            agent_config.include_critic,
+            agent_config.input_activation_function,
+            agent_config.output_activation_mean,
+            agent_config.output_activation_std,
             self.chkpt_dir,
             self.chkpt_dir_critic,
         )
         # Initialize optimizer
-        self.optimizer = initialize_optimizer(self.agent, self.agent_config)
+        self.optimizer = self.agent_config.optimizer(
+            self.agent.parameters(), lr=self.agent_config.learning_rate, eps=1e-5
+        )
 
     def close(self):
         """
@@ -236,21 +122,22 @@ class CustomPPO:
         and actions are sampled within the environment (in real time).
         """
 
-        action = torch.clip(
-            probs.sample(),
-            torch.Tensor(self.min_action),
-            torch.Tensor(self.max_action),
-        )
+        # action = torch.clip(
+        #     probs.sample(),
+        #     torch.Tensor(self.min_action),
+        #     torch.Tensor(self.max_action),
+        # )
+        action = probs.sample()
         logprob = probs.log_prob(action).sum(1)
 
-        if isinstance(self.env, Wrapper):
-            self.unwrapped_env.mean_action = self.env.action(mean_action.cpu().numpy())[
-                0
-            ]
+        if isinstance(self.env, ActionWrapper):
+            self.unwrapped_env.mean_action = self.env.action(
+                mean_action[0].cpu().numpy()
+            )
         else:
-            self.unwrapped_env.mean_action = mean_action.cpu().numpy()[0]
+            self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
 
-        self.unwrapped_env.std_action = std_action.cpu().numpy()[0]
+        self.unwrapped_env.std_action = std_action[0].cpu().numpy()
         return action, logprob
 
     def post_process_action(
@@ -272,11 +159,8 @@ class CustomPPO:
         Trains the model using Proximal Policy Optimization (PPO) algorithm.
 
         Args:
-            training_config (Dict): A dictionary containing the training configuration parameters.
-            plot_real_time (bool, optional): Whether to plot the training progress in real time. Defaults to False.
-            print_debug (bool, optional): Whether to print debug information during training. Defaults to False.
-            num_prints (int, optional): The number of times to print training progress. Defaults to 40.
-
+            training_config (Optional[TrainingConfig], optional): Training configuration parameters. Defaults to None.
+            train_function_settings (Optional[TrainFunctionSettings], optional): Training function settings. Defaults to None.
         Returns:
             Dict: A dictionary containing the training results, including average reward and fidelity history.
         """
@@ -285,11 +169,12 @@ class CustomPPO:
         if train_function_settings is not None:
             self._train_function_settings = train_function_settings
 
-        if self.save_data and self.agent_config.get("WANDB", None) is not None:
+        if self.save_data and self.agent_config.wandb_config.enabled:
             wandb.init(
-                project=self.agent_config["WANDB"]["PROJECT"],
-                config=self.agent_config,
-                name=self.agent_config["RUN_NAME"],
+                project=self.agent_config.wandb_config.project,
+                config=self.agent_config.as_dict()
+                | self.unwrapped_env.config.as_dict(),
+                name=self.agent_config.run_name,
                 sync_tensorboard=True,
             )
 
@@ -354,7 +239,6 @@ class CustomPPO:
                 if self.anneal_learning_rate:  # Anneal learning rate
                     self.learning_rate_annealing(iteration=iteration)
 
-                # mean_action, std_action = self.perform_training_iteration()
                 # Reset the environment
                 next_obs, _ = env.reset(seed=self.seed)
                 batch_obs = torch.tile(torch.Tensor(next_obs), (batch_size, 1))
@@ -533,31 +417,31 @@ class CustomPPO:
                         pg_loss,
                         explained_var,
                     )
-                    summary = {
-                        "n_reps": u_env.n_reps,
-                        "training_constraint": self.training_constraint.constraint_name,
-                        "env_ident_str": u_env.ident_str,
-                        "reward_method": u_env.config.reward_config.reward_method,
-                    }
-                    training_results = {
-                        "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],
-                        "fidelity_history": (
-                            u_env.fidelity_history[-1]
-                            if u_env.do_benchmark()
-                            else np.nan
-                        ),
-                        "hardware_runtime": (
-                            u_env.hardware_runtime[-1]
-                            if u_env.backend_info.instruction_durations is not None
-                            else np.nan
-                        ),
-                        "total_shots": u_env.total_shots[-1],
-                        "total_updates": iteration,
-                        "clipped_mean_action": env.action(mean_action[0]),
-                        "mean_action": mean_action[0],
-                        "std_action": std_action[0],
-                    }
-                    self._training_results = training_results
+                summary = {
+                    "n_reps": u_env.n_reps,
+                    "training_constraint": self.training_constraint.constraint_name,
+                    "env_ident_str": u_env.ident_str,
+                    "reward_method": u_env.config.reward_config.reward_method,
+                }
+                training_results = {
+                    "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],
+                    "total_shots": int(u_env.total_shots[-1]),
+                }
+                if u_env.backend_info.instruction_durations is not None:
+                    training_results["hardware_runtime"] = u_env.hardware_runtime[-1]
+                if u_env.do_benchmark():
+                    training_results["fidelity_history"] = u_env.fidelity_history[-1]
+
+                for i in range(u_env.n_actions):
+                    training_results[f"clipped_mean_action_{i}"] = env.action(
+                        mean_action[0]
+                    )[i]
+                    training_results[f"mean_action_{i}"] = mean_action[0][i]
+                    training_results[f"std_action_{i}"] = std_action[0][i]
+
+                for key, value in training_results.items():
+                    self._training_results[key].append(value)
+                if self.agent_config.wandb_config.enabled and self.save_data:
                     write_to_wandb(summary, training_results)
                 iteration += 1
 
@@ -565,10 +449,7 @@ class CustomPPO:
                     break
             if self.clear_history:
                 self.close()
-            log_fidelity_info_summary(
-                self._training_config.training_constraint, fidelity_info
-            )
-
+            log_fidelity_info_summary(self.training_constraint, fidelity_info)
             return self.training_results
         except KeyboardInterrupt:
             self.close()
@@ -744,3 +625,194 @@ class CustomPPO:
     @property
     def save_data(self):
         return self.writer is not None
+
+    @property
+    def n_epochs(self):
+        """
+        The number of epochs for training
+        """
+        return self.agent_config.n_epochs
+
+    @property
+    def lr(self):
+        """
+        The learning rate for training
+        """
+        return self.agent_config.learning_rate
+
+    @property
+    def ppo_epsilon(self):
+        """
+        The PPO epsilon value
+        """
+        return self.agent_config.clip_ratio
+
+    @property
+    def critic_loss_coef(self):
+        """
+        The coefficient for the critic loss
+        """
+        return self.agent_config.value_loss_coef
+
+    @property
+    def gamma(self):
+        """
+        The discount factor
+        """
+        return self.agent_config.gamma
+
+    @property
+    def gae_lambda(self):
+        """
+        The GAE lambda value
+        """
+        return self.agent_config.gae_lambda
+
+    @property
+    def clip_vloss(self):
+        """
+        Whether to clip the value loss
+        """
+        return self.agent_config.clip_value_loss
+
+    @property
+    def grad_clip(self):
+        """
+        The gradient clipping value
+        """
+        return self.agent_config.gradient_clip
+
+    @property
+    def clip_coef(self):
+        """
+        The clipping coefficient
+        """
+        return self.agent_config.clip_value_coef
+
+    @property
+    def normalize_advantage(self):
+        """
+        Whether to normalize the advantage
+        """
+        return self.agent_config.normalize_advantage
+
+    @property
+    def ent_coef(self):
+        """
+        The entropy coefficient
+        """
+        return self.agent_config.entropy_coef
+
+    @property
+    def include_critic(self):
+        """
+        Whether to include a critic network
+        """
+        return self.agent_config.include_critic
+
+    @property
+    def minibatch_size(self):
+        """
+        The size of the minibatch
+        """
+        return self.agent_config.minibatch_size
+
+
+def take_step(
+    step,
+    global_step,
+    batchsize,
+    num_steps,
+    obs,
+    dones,
+    actions,
+    logprobs,
+    rewards,
+    values,
+    batch_obs,
+    batch_done,
+    min_action,
+    max_action,
+    agent: Agent,
+    env: BaseQuantumEnvironment | ActionWrapper,
+    writer,
+):
+    """
+    Takes a step in the environment using the PPO algorithm.
+
+    Args:
+        step (int): current step index.
+        global_step (int): global step index.
+        batchsize (int): Size of the batch.
+        num_steps (int): Total number of steps.
+        obs (list): List to store observations.
+        dones (list): List to store done flags.
+        actions (list): List to store actions.
+        logprobs (list): List to store log probabilities.
+        rewards (list): List to store rewards.
+        values (list): List to store critic values.
+        batch_obs (torch.Tensor): Batch of observations.
+        batch_done (torch.Tensor): Batch of done flags.
+        min_action (list): List of minimum action values.
+        max_action (list): List of maximum action values.
+        agent (object): The agent model.
+        env (object): The environment.
+        writer (object): The writer object for logging.
+
+    Returns:
+        torch.Tensor: The next observations.
+        torch.Tensor: The next done flags.
+        torch.Tensor: The mean action.
+        torch.Tensor: The standard deviation of the action distribution.
+    """
+    global_step += 1
+    obs[step] = batch_obs
+    dones[step] = batch_done
+
+    with torch.no_grad():
+        mean_action, std_action, critic_value = agent(batch_obs)
+        probs = Normal(mean_action, std_action)
+        env.unwrapped.mean_action = env.action(mean_action.cpu().numpy())[0]
+        env.unwrapped.std_action = std_action[0]
+        action = torch.clip(
+            probs.sample(),
+            torch.Tensor(min_action),
+            torch.Tensor(max_action),
+        )
+        logprob = probs.log_prob(action).sum(1)
+        values[step] = critic_value.flatten()
+
+    actions[step] = action
+    logprobs[step] = logprob
+
+    next_obs, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
+    next_obs = torch.Tensor(next_obs)
+    done = int(np.logical_or(terminated, truncated))
+    reward = torch.Tensor(reward)
+    rewards[step] = reward
+
+    batch_obs = torch.tile(next_obs, (batchsize, 1))
+    next_done = done * torch.ones_like(dones[0])
+    obs[step] = batch_obs
+    dones[step] = next_done
+
+    # print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
+    if writer is not None:
+        writer.add_scalar(
+            "charts/episodic_return", np.mean(reward.numpy()), global_step
+        )
+        writer.add_scalar("charts/episodic_length", num_steps, global_step)
+        for i in range(env.unwrapped.mean_action.shape[0]):
+            writer.add_scalar(
+                f"charts/clipped_mean_action_{i}",
+                env.unwrapped.mean_action[i],
+                global_step,
+            )
+            writer.add_scalar(
+                f"charts/std_action_{i}", np.array(std_action)[i], global_step
+            )
+            writer.add_scalar(
+                f"charts/unclipped_action_{i}", np.array(action)[i], global_step
+            )
+
+    return next_obs, next_done, mean_action, std_action

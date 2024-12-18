@@ -70,6 +70,65 @@ def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Ga
     return chi
 
 
+def get_2design_input_states(d: int = 4) -> List[Statevector]:
+    """
+    Function that return the 2-design input states (used for CAFE reward scheme)
+    Follows this Reference: https://arxiv.org/pdf/1008.1138 (see equations 2 and 13)
+    """
+    # Define constants
+    golden_ratio = (np.sqrt(5) - 1) / 2
+    omega = np.exp(2 * np.pi * 1j / d)
+
+    # Define computational basis states
+    e0 = np.array([1, 0, 0, 0], dtype=complex)  # |00⟩
+    e1 = np.array([0, 1, 0, 0], dtype=complex)  # |01⟩
+    e2 = np.array([0, 0, 1, 0], dtype=complex)  # |10⟩
+    e3 = np.array([0, 0, 0, 1], dtype=complex)  # |11⟩
+
+    # Create the Z matrix (diagonal matrix with powers of omega)
+    Z = np.diag([omega**r for r in range(d)])
+
+    # Create the X matrix (shift matrix)
+    X = np.zeros((d, d), dtype=complex)
+    for r in range(d - 1):
+        X[r, r + 1] = 1
+    X[d - 1, 0] = 1  # Wrap-around to satisfy the condition for |e_0>
+
+    # Define the fiducial state from Eq. (13)
+    coefficients = (
+        1
+        / (2 * np.sqrt(3 + golden_ratio))
+        * np.array(
+            [
+                1 + np.exp(-1j * np.pi / 4),
+                np.exp(1j * np.pi / 4) + 1j * golden_ratio ** (-3 / 2),
+                1 - np.exp(-1j * np.pi / 4),
+                np.exp(1j * np.pi / 4) - 1j * golden_ratio ** (-3 / 2),
+            ]
+        )
+    )
+
+    fiducial_state = (
+        coefficients[0] * e0
+        + coefficients[1] * e1
+        + coefficients[2] * e2
+        + coefficients[3] * e3
+    ).reshape(d, 1)
+    # Prepare all 16 states
+    states = []
+    for k in range(0, d):
+        for l in range(0, d):
+            # state = apply_hw_group(p1, p2, coefficients)
+            state = (
+                np.linalg.matrix_power(X, k)
+                @ np.linalg.matrix_power(Z, l)
+                @ fiducial_state
+            )
+            states.append(Statevector(state))
+
+    return states
+
+
 @dataclass
 class BaseTarget(ABC):
     """
@@ -372,11 +431,10 @@ class GateTarget(BaseTarget):
         elif input_states_choice == "2-design":  # 2-design
             # TODO: Update this part with Lukas latest code
             d = 2**n_qubits
-            unitaries = [random_unitary(d) for _ in range(4**n_qubits)]
-            circuits = [QuantumCircuit(n_qubits) for _ in range(4**n_qubits)]
-            for circ, unitary in zip(circuits, unitaries):
-                circ.unitary(unitary, range(n_qubits))
-            input_circuits = circuits
+            states = get_2design_input_states(d)
+            input_circuits = [QuantumCircuit(n_qubits) for _ in range(len(states))]
+            for circ, state in zip(input_circuits, states):
+                circ.prepare_state(state)
         else:
             raise ValueError(
                 f"Input states choice {input_states_choice} not recognized. Should be 'pauli4', 'pauli6' or '2-design'"

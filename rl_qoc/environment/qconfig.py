@@ -199,6 +199,7 @@ class BenchmarkConfig:
     check_on_exp: bool = False
     tomography_analysis: str = "default"
     dfe_precision: Tuple[float, float] = field(default=(1e-2, 1e-2))
+    method: Literal["tomography", "rb"] = "rb"
 
 
 @dataclass
@@ -378,8 +379,7 @@ class QEnvConfig:
         RewardConfig | Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"]
     ) = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
-    training_with_cal: bool = True
-    device: Optional[torch.device] = None
+    env_metadata: Dict = field(default_factory=dict)
 
     def __post_init__(self):
         if isinstance(self.target, Dict):
@@ -550,10 +550,18 @@ class QEnvConfig:
         return {
             "target": {
                 "physical_qubits": self.physical_qubits,
-                "gate": self.target.gate.name if isinstance(self.target, GateTargetConfig) else self.target.state.data,
+                "gate": (
+                    self.target.gate.name
+                    if isinstance(self.target, GateTargetConfig)
+                    else self.target.state.data
+                ),
             },
             "backend_config": {
-                "backend": self.backend.name if isinstance(self.backend, BackendV2) else self.backend,
+                "backend": (
+                    self.backend.name
+                    if isinstance(self.backend, BackendV2)
+                    else self.backend
+                ),
             },
             "action_space": {
                 "low": self.action_space.low.tolist(),
@@ -574,4 +582,5 @@ class QEnvConfig:
                 "tomography_analysis": self.tomography_analysis,
                 "check_on_exp": self.check_on_exp,
             },
+            "metadata": self.env_metadata,
         }

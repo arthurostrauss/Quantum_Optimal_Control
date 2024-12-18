@@ -268,11 +268,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """Reset the Environment, chooses a new input state"""
         super().reset(seed=seed)
 
+        new_obs = self._get_obs()
+        self.modify_environment_params()
         self._param_values = create_array(
             self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0]
         )
         self._inside_trunc_tracker = 0
-        return self._get_obs(), self._get_info()
+        return new_obs, self._get_info()
 
     def step(
         self, action: ActType
@@ -422,6 +424,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 raise exc
 
         else:  # Perform simulation at circuit or pulse level
+            print("Starting simulation benchmark...")
             if not self.config.reward_method == "fidelity":
                 params = np.array(
                     [self.mean_action]
@@ -431,6 +434,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             else:  # Pulse simulation
                 fids = self.simulate_pulse_circuit(qc, params)
             print("Finished simulation benchmark \n")
+            print("Fidelities: ", np.mean(fids))
             return fids
 
     @property

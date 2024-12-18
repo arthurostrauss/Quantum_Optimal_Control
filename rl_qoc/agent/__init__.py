@@ -4,5 +4,6 @@ from .ppo_config import (
     TotalUpdates,
     HardwareRuntime,
     TrainFunctionSettings,
+    PPOConfig,
 )
 from .agent import Agent, ActorNetwork, CriticNetwork
