@@ -51,9 +51,8 @@ class QiboEnvironment(QuantumEnvironment):
                     pars = rb_output.results.pars.get(target)
                     one_minus_p = 1 - pars[2]
                     r_c = one_minus_p * (1 - 1 / 2**1)
-                    fidelity = r_c / AVG_GATE
+                    fidelity = 1 - (r_c / AVG_GATE)
 
             self.circuit_fidelity_history.append(fidelity)
-            print("AAAAAAAAAAAAAAAAAAAAAAAAAAA", fidelity)
             return fidelity
         return 0

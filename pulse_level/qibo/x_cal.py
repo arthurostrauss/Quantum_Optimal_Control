@@ -40,7 +40,7 @@ def get_backend():
 target = {"state": Statevector.from_label("1"), "physical_qubits": [0]}
 instruction_durations = {}
 action_space_low = np.array(
-    [0.0], dtype=np.float32
+    [0.001], dtype=np.float32
 )  # [amp, phase, phase, duration]
 action_space_high = np.array(
     [0.1], dtype=np.float32

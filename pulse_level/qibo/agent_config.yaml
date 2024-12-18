@@ -1,6 +1,6 @@
 WANDB: 
-    ENABLED: False # Whether to enable Weights & Biases logging
-    PROJECT: "qibo" # Weights & Biases project name
+    ENABLED: True # Whether to enable Weights & Biases logging
+    PROJECT: "Qibo training" # Weights & Biases project name
     ENTITY: null # Weights & Biases entity name
     API_KEY: null # Weights & Biases API key
 RUN_NAME: "test" # Name of the run

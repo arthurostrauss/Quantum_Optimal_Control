@@ -68,6 +68,7 @@ observable = SparsePauliOp.from_list([("Z", 1)])
 qc = QuantumCircuit(1)
 qc.x(0)
 
-for amplitude in np.arange(0,0.09, 0.001):
-    results = env.step(np.array([[amplitude]]*10))
-    print(results)
+# for amplitude in np.arange(0,0.09, 0.001):
+amplitude = 0.
+results = env.step(np.array([[amplitude]]*10))
+print(results)
