@@ -7,6 +7,7 @@ Author: Arthur Strauss
 Created: 08/11/2024
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from qiskit.quantum_info import (
@@ -425,7 +426,6 @@ class GateTarget(BaseTarget):
                 for s in product(range(6), repeat=n_qubits)
             ]
         elif input_states_choice == "2-design":  # 2-design
-            # TODO: Update this part with Lukas latest code
             d = 2**n_qubits
             states = get_2design_input_states(d)
             input_circuits = [QuantumCircuit(n_qubits) for _ in range(len(states))]

@@ -9,7 +9,6 @@ Last updated: 03/11/2024
 
 from __future__ import annotations
 
-import math
 import time
 from abc import ABC, abstractmethod
 
@@ -98,7 +97,6 @@ from .qconfig import (
     ChannelRewardConfig,
     ORBITRewardConfig,
     XEBRewardConfig,
-    QiskitRuntimeConfig,
     StateRewardConfig,
 )
 
@@ -126,14 +124,6 @@ class BaseQuantumEnvironment(ABC, Env):
                 f"{list(self._reward_methods.keys())} are supported."
             )
 
-        self.n_shots = training_config.n_shots
-        self.n_reps = training_config.n_reps
-        self.sampling_Pauli_space = training_config.sampling_paulis
-        self.c_factor = training_config.c_factor
-        self.batch_size = training_config.batch_size
-
-        self.action_space: Box = training_config.action_space
-
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
         self.backend = training_config.backend
@@ -155,18 +145,12 @@ class BaseQuantumEnvironment(ABC, Env):
             "physical_qubits", None
         )
 
-        if isinstance(training_config.backend_config, QiskitRuntimeConfig):
-            estimator_options = training_config.backend_config.estimator_options
-        else:
-            estimator_options = None
-
         self._estimator, self._sampler = retrieve_primitives(
-            self.backend, self.config.backend_config, estimator_options
+            self.backend, self.config.backend_config, 
+            training_config.backend_config.as_dict().get("estimator_options", None)
         )
 
         self._target, self.circuits, self.baseline_circuits = None, None, None
-
-        # self.fidelity_checker = ComputeUncompute(self._sampler)
 
         self._mean_action = np.zeros(self.action_space.shape[-1])
         self._std_action = np.ones(self.action_space.shape[-1])
@@ -425,7 +409,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
             # Prepend input state to custom circuit with front composition
             
-            prep_circuit = qc.repeat(self.n_reps)
+            prep_circuit = self._handle_n_reps(qc)
             input_circuit = self._extend_input_state_prep(input_state.circuit, qc)
             prep_circuit.compose(
                 input_circuit,
@@ -489,6 +473,17 @@ class BaseQuantumEnvironment(ABC, Env):
             ).apply_layout(self.target.causal_cone_qubits_indices + list(other_qubits_indices))
             
         return observables
+    
+    def _handle_n_reps(self, qc: QuantumCircuit):
+        # Repeat the circuit n_reps times and prepend the input state preparation
+        if isinstance(self.backend, BackendV2) and "for_loop" in self.backend.operation_names:
+            prep_circuit = qc.copy_empty_like()
+
+            with prep_circuit.for_loop(range(self.n_reps)) as i:
+                prep_circuit.compose(qc, inplace=True)
+        else:
+            prep_circuit = qc.repeat(self.n_reps)
+        return prep_circuit
             
             
 
@@ -599,8 +594,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 ):  # If input state not already used, add a PUB
                     used_prep_indices.append(tuple(prep_indices))
                     
-                    # Repeat the circuit n_reps times and prepend the input state preparation
-                    prep_circuit = qc.repeat(self.n_reps)
+                    prep_circuit = self._handle_n_reps(qc)
+  
                     
                     # Create input state preparation circuit
                     input_circuit = qc.copy_empty_like()
@@ -1434,23 +1429,54 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def seed(self):
         return self._seed
-
+    
+    @property
+    def c_factor(self):
+        return self.config.c_factor
+    
+    @property
+    def action_space(self):
+        return self.config.action_space
+    
     @seed.setter
     def seed(self, seed):
         self._seed = seed
 
     @property
-    def batch_size(self) -> Optional[int]:
-        return self._batch_size
+    def batch_size(self) -> int:
+        return self.config.batch_size
 
     @batch_size.setter
     def batch_size(self, size: int):
-        try:
-            assert size > 0 and isinstance(size, int)
-            self._batch_size = size
-        except AssertionError:
-            raise ValueError("Batch size should be positive integer.")
-
+        self.config.batch_size = size
+    
+    @property
+    def n_reps(self) -> int|List[int]:
+        return self.config.n_reps
+    
+    @n_reps.setter
+    def n_reps(self, n_reps: int):
+        self.config.n_reps = n_reps
+        if isinstance(self.target, GateTarget):
+            self.target.n_reps = n_reps
+    
+    @property
+    def n_shots(self) -> int:
+        return self.config.n_shots
+    
+    @n_shots.setter
+    def n_shots(self, n_shots: int):
+        self.config.n_shots = n_shots
+        
+    @property
+    def sampling_Pauli_space(self) -> int:
+        return self.config.sampling_paulis
+    
+    @sampling_Pauli_space.setter
+    def sampling_Pauli_space(self, sampling_paulis: int):
+        self.config.sampling_paulis = sampling_paulis
+    
+    
     @property
     def target(self) -> GateTarget | StateTarget:
         """

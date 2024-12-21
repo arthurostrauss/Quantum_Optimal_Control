@@ -52,7 +52,7 @@ class BackendConfig(ABC):
     backend: Optional[BackendV2] = None
     parametrized_circuit_kwargs: Dict = field(default_factory=dict)
     skip_transpilation: bool = False
-    pass_manager: PassManager = PassManager()
+    pass_manager: Optional[PassManager] = None
     instruction_durations: Optional[InstructionDurations] = None
 
     @property
@@ -278,7 +278,7 @@ class ExecutionConfig:
     batch_size: int = 100
     sampling_paulis: int = 100
     n_shots: int = 10
-    n_reps: int|List[int] = 1
+    n_reps: int = 1
     c_factor: float = 1.0
     seed: int = 1234
     
@@ -493,6 +493,7 @@ class QEnvConfig:
 
     @batch_size.setter
     def batch_size(self, value: int):
+        assert value > 0, "Batch size must be greater than 0"
         self.execution_config.batch_size = value
 
     @property
@@ -509,6 +510,7 @@ class QEnvConfig:
 
     @n_shots.setter
     def n_shots(self, value: int):
+        assert value > 0, "Number of shots must be greater than 0"
         self.execution_config.n_shots = value
 
     @property
@@ -517,6 +519,10 @@ class QEnvConfig:
 
     @n_reps.setter
     def n_reps(self, value: int):
+        if isinstance(value, int):
+            assert value > 0, "Number of repetitions must be greater than 0"
+        else:
+            assert all(v > 0 for v in value), "Number of repetitions must be greater than 0"
         self.execution_config.n_reps = value
 
     @property

@@ -748,7 +748,7 @@ def get_q_env_config(
         [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
     ],
     backend: Optional[Backend_type | Callable[[Any], Backend_type]] = None,
-    pass_manager: Optional[PassManager] = PassManager(),
+    pass_manager: Optional[PassManager] = None,
     instruction_durations: Optional[InstructionDurations] = None,
     **backend_callable_args,
 ):

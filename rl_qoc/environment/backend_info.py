@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Union
 from qiskit import transpile, QiskitError
 from qiskit.circuit import QuantumCircuit
-from qiskit.transpiler import PassManager, InstructionDurations, Layout, CouplingMap
+from qiskit.transpiler import PassManager, InstructionDurations, Layout, CouplingMap, generate_preset_pass_manager
 from qiskit.providers import BackendV2
 from qibo.transpiler import Passes
 
@@ -56,7 +56,7 @@ class BackendInfo(ABC):
         self._n_qubits = n_qubits
 
     @property
-    def pass_manager(self):
+    def pass_manager(self) -> Optional[PassManager]:
         return self._pass_manager
 
     @property
@@ -73,7 +73,7 @@ class QiskitBackendInfo(BackendInfo):
         self,
         backend: Optional[BackendV2] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
-        pass_manager: PassManager = PassManager(),
+        pass_manager: PassManager = None,
         skip_transpilation: bool = False,
         n_qubits: int = 0,
     ):
@@ -120,23 +120,24 @@ class QiskitBackendInfo(BackendInfo):
             circuit = qc_input
 
         if not self.skip_transpilation:
-            circuit = transpile(
-                circuit,
-                backend=self.backend if isinstance(self.backend, BackendV2) else None,
-                scheduling_method=(
-                    "asap"
-                    if self.instruction_durations is not None and scheduling
-                    else None
-                ),
-                basis_gates=self.basis_gates,
-                coupling_map=(
-                    self.coupling_map if self.coupling_map.size() != 0 else None
-                ),
-                instruction_durations=self.instruction_durations,
-                optimization_level=optimization_level,
-                initial_layout=initial_layout,
-                dt=self.dt,
-            )
+            if self._pass_manager is None:
+                self._pass_manager = generate_preset_pass_manager(
+                    optimization_level=optimization_level,
+                    backend=self.backend if isinstance(self.backend, BackendV2) else None,
+                    target=self.backend.target if isinstance(self.backend, BackendV2) else None,
+                    basis_gates=self.basis_gates,
+                    coupling_map=self.coupling_map if self.coupling_map.size() != 0 else None,
+                    instruction_durations=self.instruction_durations,
+                    initial_layout=initial_layout,
+                    dt=self.dt,
+                    scheduling_method=(
+                        "asap"
+                        if self.instruction_durations is not None and scheduling
+                        else None
+                    ),
+                    translation_method='translator'
+                )
+            
             circuit = self.pass_manager.run(circuit)
         return circuit
 

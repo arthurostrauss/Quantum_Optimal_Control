@@ -99,9 +99,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         )
         if isinstance(self.config.target, GateTargetConfig):
             target = GateTarget(
-                n_reps=self.config.n_reps,
-                **asdict(self.config.target),
+                **self.config.target.as_dict(),
                 input_states_choice=input_states_choice,
+                n_reps=self.config.n_reps,
             )
         else:
             target = StateTarget(**asdict(self.config.target))
@@ -228,12 +228,8 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 fids = fidelity_from_tomography(
                     qc_input,
                     self.backend,
-                    (
-                        Operator(self.target.gate)
-                        if isinstance(self.target, GateTarget)
-                        else Statevector(self.target.dm)
-                    ),
                     self.target.physical_qubits,
+                    self.target.target_operator if isinstance(self.target, GateTarget) else self.target.dm,
                     analysis=self.config.tomography_analysis,
                     sampler=self.sampler,
                 )
