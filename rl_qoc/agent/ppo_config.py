@@ -253,7 +253,7 @@ class PPOConfig:
         ]
         self.input_activation_function = get_module(self.input_activation_function)
         self.output_activation_mean = get_module(self.output_activation_mean)
-        self.output_activation_std = get_module(self.output_activation_std)
+        self.output_activation_std = get_module(self.output_activation_std) if self.output_activation_std is not None else None
 
     def as_dict(self):
         return {
