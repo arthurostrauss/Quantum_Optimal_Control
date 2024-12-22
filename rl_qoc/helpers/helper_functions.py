@@ -990,6 +990,18 @@ def retrieve_neighbor_qubits(coupling_map: CouplingMap, target_qubits: List):
     return list(neighbors - set(target_qubits))
 
 
+def isolate_qubit_instructions(circuit: QuantumCircuit, physical_qubits: list[int]):
+    """
+    Extracts instructions from a circuit that act on the specified physical qubits
+    :param circuit: QuantumCircuit to extract instructions from
+    :param physical_qubits: List of physical qubits to extract instructions for
+    :return: List of instructions that act on the specified physical qubits
+    """
+    qubits_to_index = {qubit: circuit.find_bit(qubit).index for qubit in circuit.qubits}
+    instructions = filter(lambda instr: all(qubits_to_index[qubit] in physical_qubits for qubit in instr.qubits), circuit.data)
+    return list(instructions)
+
+
 def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     """
     Retrieve count of target instruction in Quantum Circuit

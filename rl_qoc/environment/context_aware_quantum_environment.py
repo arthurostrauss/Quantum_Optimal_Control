@@ -275,6 +275,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         )
         self._inside_trunc_tracker = 0
         return new_obs, self._get_info()
+    
+    def modify_environment_params(self):
+        self.n_reps = int(np.random.randint(4, 5))
+        print(f"Number of repetitions: {self.n_reps}")
 
     def step(
         self, action: ActType
@@ -567,7 +571,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
             # Adjust target register to match it with circuit context
             self.target_instruction = CircuitInstruction(
-                get_gate(self.config.target["gate"]),
+                get_gate(self.config.target.gate),
                 (qubit for qubit in self.circ_tgt_register),
             )
             tgt_instruction_counts = self.tgt_instruction_counts
