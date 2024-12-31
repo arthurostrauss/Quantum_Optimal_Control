@@ -876,20 +876,17 @@ class BaseQuantumEnvironment(ABC, Env):
                 "This method should only be called when the abstraction level is 'circuit'"
             )
 
-        names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
-        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = [
-            qc.copy(name=name) for name in names
-        ]
+        qc_channel = qc.copy(name="qc_channel")
+        qc_state = qc.copy(name="qc_state")
+        qc_channel_nreps = qc.repeat(self.n_reps).copy(name="qc_channel_nreps")
+        qc_state_nreps = qc.repeat(self.n_reps).copy(name="qc_state_nreps")
+        
         returned_fidelity_type = (
             "gate"
             if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
             else "state"
         )
         returned_fidelities = []
-
-        for _ in range(self.n_reps - 1):
-            qc_channel_nreps.compose(qc, inplace=True)
-            qc_state_nreps.compose(qc, inplace=True)
         backend = AerSimulator()
         if self.backend is None or (
             isinstance(self.backend, AerSimulator) and not has_noise_model(self.backend)

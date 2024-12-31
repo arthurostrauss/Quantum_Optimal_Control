@@ -951,14 +951,12 @@ def get_hardware_runtime_single_circuit(
             )
 
     # Find the maximum execution time among all qubits
+    reset_time = instruction_durations_dict.get(("reset", (0,)), [1000])[0]
+    measure_time = instruction_durations_dict.get(("measure", (0,)), [1000])[0]
     total_execution_time = (
         max(total_time_per_qubit.values())
-        + instruction_durations_dict[("reset", (0,))][
-            0
-        ]  # Reset time is the same for all qubits
-        + instruction_durations_dict[("measure", (0,))][
-            0
-        ]  # Reset time is the same for all qubits
+        + reset_time  # Reset time is the same for all qubits
+        + measure_time  # Reset time is the same for all qubits
     )
 
     return total_execution_time
