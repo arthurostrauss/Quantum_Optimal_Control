@@ -281,6 +281,7 @@ class InputState(StateTarget):
         :param tgt_register: Quantum register for the target gate
         :param n_reps: Number of repetitions of the target gate
         """
+        super().__init__(circuit=input_circuit)
         self._n_reps = n_reps
         self._target_op = target_op
         if isinstance(target_op, Gate):
@@ -288,14 +289,7 @@ class InputState(StateTarget):
             circ.append(target_op, tgt_register)
         else:
             circ = target_op.copy("target")
-
-        circ.compose(input_circuit, inplace=True, front=True)
-        super().__init__(circuit=input_circuit)
-        for _ in range(self.n_reps - 1):
-            if isinstance(target_op, Gate):
-                circ.append(target_op, tgt_register)
-            else:
-                circ.compose(target_op, inplace=True)
+        circ = circ.repeat(self.n_reps).compose(input_circuit, front=True)
         self.target_state = StateTarget(circuit=circ)
 
     @property
@@ -321,11 +315,9 @@ class InputState(StateTarget):
         if isinstance(self._target_op, Gate):
             circ = QuantumCircuit(self.tgt_register)
             circ.append(self._target_op, self.tgt_register)
-            circ = circ.repeat(n_reps).decompose()
         else:
-            circ = self._target_op.repeat(n_reps).decompose()
-
-        circ.compose(self.input_circuit, inplace=True, front=True)
+            circ = self._target_op
+        circ = circ.repeat(n_reps).compose(self.input_circuit, front=True).decompose()
         self.target_state = StateTarget(circuit=circ)
 
     @property

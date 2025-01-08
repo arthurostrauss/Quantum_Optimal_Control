@@ -253,7 +253,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 )
                 * self.total_shots[-1]
             )
-            print("Hardware runtime taken:", sum(self.hardware_runtime))
+            print("Hardware runtime taken:", sum(self.hardware_runtime)/3600, "hours ",
+                  sum(self.hardware_runtime)/60, "min ", sum(self.hardware_runtime)%60, "seconds")
 
         counts = (
             self._session_counts

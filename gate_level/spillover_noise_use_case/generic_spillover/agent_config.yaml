@@ -21,6 +21,6 @@ INPUT_ACTIVATION_FUNCTION: "identity" # Input activation function
 HIDDEN_lAYERS: [ 64, 64 ] # Number of units in hidden layers
 HIDDEN_ACTIVATION_FUNCTIONS: ["tanh", "tanh"] # Activation functions
 OUTPUT_ACTIVATION_MEAN: "tanh" # Output activation function (for continuous action space)
-OUTPUT_ACTIVATION_STD: null # Output activation function (for continuous action space)
+OUTPUT_ACTIVATION_STD: "sigmoid" # Output activation function (for continuous action space)
 INCLUDE_CRITIC: True # Whether to include critic network within ActorCritic model
 NORMALIZE_ADVANTAGE: True # Whether to normalize advantage
