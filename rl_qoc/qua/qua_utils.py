@@ -11,8 +11,7 @@ from qiskit.pulse import Schedule, ScheduleBlock
 from qm.qua import *
 from qm.qua._expressions import QuaArrayType
 
-from qualang_tools.video_mode import ParameterTable
-from qualang_tools.video_mode.videomode import ParameterValue
+from .parameter_table import ParameterTable, ParameterValue
 import numpy as np
 from quam.examples.superconducting_qubits import Transmon
 
@@ -98,7 +97,7 @@ def parameter_table_from_qiskit(
     elif isinstance(parameter_input, (Schedule, ScheduleBlock)):
         for channel in list(
             filter(lambda ch: ch.is_parameterized(), parameter_input.channels)
-        ):
+        ): 
             ch_params = list(channel.parameters)
             if len(ch_params) > 1:
                 raise NotImplementedError(
@@ -106,6 +105,7 @@ def parameter_table_from_qiskit(
                 )
             ch_param = ch_params[0]
             if ch_param.name not in param_dict:
+                # Cast to int the parameter index
                 param_dict[ch_param.name] = 0
         for param in parameter_input.parameters:
             if param.name not in param_dict:

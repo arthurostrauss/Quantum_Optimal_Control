@@ -96,7 +96,7 @@ class QMBackend(Backend, ABC):
                              This mapping enables the conversion of Qiskit schedules into parametric QUA macros.
 
         """
-        Backend.__init__(self, name="QUA backend")
+        Backend.__init__(self, name="QM backend")
         self.machine = machine
         self.channel_mapping: Dict[QiskitChannel, QuAMChannel] = channel_mapping
         self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = {
