@@ -58,7 +58,7 @@ from .qconfig import QEnvConfig, GateTargetConfig
 from .base_q_env import (
     GateTarget,
     BaseQuantumEnvironment,
-    QiskitBackendInfo,
+    QiskitBackendInfo, retrieve_observables, extend_observables,
 )
 
 import logging
@@ -144,6 +144,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
         )
         self.set_unbound_circuit_context(circuit_context, **context_kwargs)
+    
+    def initial_reward_fit(self, params: np.array):
+        """
+        Method to fit the initial reward function to the first set of actions in the environment
+        with respect to the number of repetitions of the cycle circuit
+        """
+        qc = self.circuits[self.trunc_index].copy()
+        for n in range(1, max(self.config.n_reps)):
+            pubs, shots = self._reward_methods[self.config.reward_method](qc, params)
+        
 
     def define_target_and_circuits(self):
         """
@@ -162,7 +172,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         moment_pass = MomentAnalysisPass()
         pm = PassManager(moment_pass)
         _ = pm.run(self.circuit_context)
-        moments = pm.property_set["moments"]
+        moments = pm.property_set["moments"] # type: dict[int, list[DAGOpNode]]
         layouts = [
             Layout({qubit: q for q, qubit in enumerate(self.circuit_context.qubits)})
             for _ in range(tgt_instruction_counts)
@@ -199,9 +209,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 bit_indices = {
                     q: context_dag.find_bit(q).index for q in context_dag.qubits
                 }
-                if DAGOpNode.semantic_eq(
-                    target_op_nodes[0], op, bit_indices, bit_indices
-                ):
+                if (target_op_nodes[0].op == op.op and target_op_nodes[0].qargs == op.qargs 
+                        and target_op_nodes[0].cargs == op.cargs):
+                # if DAGOpNode.semantic_eq(
+                #     target_op_nodes[0], op, bit_indices, bit_indices
+                # ):
                     switch_truncation = True
             if switch_truncation:
                 counts += 1
@@ -246,15 +258,15 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     operations_mapping[op.name] = op
 
         target = [
-            GateTarget(
+            [GateTarget(
                 self.config.target.gate,
                 self.physical_target_qubits,
-                self.config.n_reps,
+                n_reps,
                 baseline_circuit,
                 self.circ_tgt_register,
                 layout,
                 input_states_choice=input_states_choice,
-            )
+            ) for n_reps in self.config.n_reps]
             for baseline_circuit, layout in zip(baseline_circuits, layouts)
         ]
         return target, custom_circuits, baseline_circuits
@@ -269,6 +281,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         super().reset(seed=seed)
 
         new_obs = self._get_obs()
+        self._n_reps_index = np.random.randint(0, len(self.config.n_reps))
         self.modify_environment_params()
         self._param_values = create_array(
             self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0]
@@ -277,8 +290,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return new_obs, self._get_info()
     
     def modify_environment_params(self):
-        self.n_reps = int(np.random.randint(4, 5))
-        print(f"Number of repetitions: {self.n_reps}")
+        # self.n_reps = int(np.random.randint(4, 5))
+        print(f"\n Number of repetitions: {self.n_reps}")
+        
 
     def step(
         self, action: ActType
@@ -390,11 +404,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             try:
                 print("Starting Direct Fidelity Estimation...")
                 input_state = np.random.choice(self.target.input_states)
-                observables, shots = self.retrieve_observables(
+                observables, shots = retrieve_observables(
                     input_state.target_state,
-                    self.circuits[self.trunc_index],
                     self.config.benchmark_config.dfe_precision,
+                    sampling_paulis=self.sampling_pauli_space,
+                    c_factor=self.c_factor
                 )
+                observables = extend_observables(observables, qc, self.target)
                 if self.abstraction_level == "circuit":
                     qc = self.backend_info.custom_transpile(
                         qc,
@@ -457,17 +473,37 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         Return current target to be calibrated
         """
-        return self._target[self.trunc_index]
+        return self._target[self.trunc_index][self._n_reps_index]
 
-    def get_target(self, trunc_index: Optional[int] = None):
+    def get_target(self, trunc_index: Optional[int] = None, n_reps: Optional[int] = None):
         """
         Return target to be calibrated at given truncation index.
         If no index is provided, return list of all targets.
 
         Args:
             trunc_index: Index of truncation to return target for.
+            n_reps: Number of repetitions to return target for.
         """
-        return self._target[trunc_index] if trunc_index is not None else self._target
+        if trunc_index is None and n_reps is None:
+            return self._target
+        if trunc_index is not None:
+            if n_reps is not None:
+                for target in self._target[trunc_index]:
+                    if target.n_reps == n_reps:
+                        return target
+                
+                ref_target = self._target[trunc_index][0]
+                return GateTarget(ref_target.gate,
+                                  ref_target.physical_qubits,
+                                  n_reps,
+                                  ref_target.target_circuit,
+                                  ref_target.tgt_register,
+                                  ref_target.layout,
+                                  ref_target.input_states_choice)
+                                    
+                                  
+            else:
+                return self._target[trunc_index]
 
     @property
     def trunc_index(self) -> int:

@@ -18,6 +18,7 @@ from qiskit.circuit.library import (
     UnitaryGate,
 )
 from qiskit_aer import AerSimulator
+from qiskit_aer.backends.backend_utils import BASIS_GATES
 from qiskit_aer.backends.backendconfiguration import AerBackendConfiguration
 
 
@@ -398,11 +399,21 @@ def noisy_backend(
     noise_model = create_spillover_noise_model_from_circuit(
         qc, rotation_angles, spillover_rate_matrix
     )
-    backend_configuration = AerSimulator._DEFAULT_CONFIGURATION
     if coupling_map is None:
         coupling_map = CouplingMap.from_line(circuit_context.num_qubits, False)
-    backend_configuration["coupling_map"] = list(coupling_map.get_edges())
-    backend_configuration = AerBackendConfiguration(**backend_configuration)
-    backend = AerSimulator(noise_model=noise_model, configuration=backend_configuration)
+    config = AerBackendConfiguration(
+        "custom_spillover_impact_simulator",
+        "2",
+        circuit_context.num_qubits,
+        BASIS_GATES["automatic"],
+        [],
+        int(1e7),
+        list(coupling_map.get_edges()),
+        description="Custom simulator with spillover noise model",
+        custom_instructions=AerSimulator._CUSTOM_INSTR["automatic"],
+        simulator=True,
+    )
+
+    backend = AerSimulator(noise_model=noise_model, configuration=config)
 
     return backend

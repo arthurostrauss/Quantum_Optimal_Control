@@ -21,6 +21,7 @@ class BackendInfo(ABC):
         self._n_qubits = n_qubits
         self._pass_manager = pass_manager
         self._skip_transpilation = skip_transpilation
+        self._backend = None
 
     @abstractmethod
     def custom_transpile(self, qc_input, *args, **kwargs):
@@ -62,6 +63,10 @@ class BackendInfo(ABC):
     @property
     def skip_transpilation(self):
         return self._skip_transpilation
+    
+    @property
+    def backend(self):
+        return self._backend
 
 
 class QiskitBackendInfo(BackendInfo):
@@ -91,7 +96,7 @@ class QiskitBackendInfo(BackendInfo):
         )
         if isinstance(backend, BackendV2) and backend.coupling_map is None:
             raise QiskitError("Backend does not have a coupling map")
-        self.backend = backend
+        self._backend = backend
         self._instruction_durations = custom_instruction_durations
 
     def custom_transpile(

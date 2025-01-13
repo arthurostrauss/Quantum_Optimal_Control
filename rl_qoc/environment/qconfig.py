@@ -278,9 +278,13 @@ class ExecutionConfig:
     batch_size: int = 100
     sampling_paulis: int = 100
     n_shots: int = 10
-    n_reps: int = 1
+    n_reps: List[int]|int = 1
     c_factor: float = 1.0
     seed: int = 1234
+    
+    def __post_init__(self):
+        if isinstance(self.n_reps, int):
+            self.n_reps = [self.n_reps]
     
     def as_dict(self):
         return {
@@ -518,12 +522,12 @@ class QEnvConfig:
         return self.execution_config.n_reps
 
     @n_reps.setter
-    def n_reps(self, value: int):
+    def n_reps(self, value: int|List[int]):
         if isinstance(value, int):
             assert value > 0, "Number of repetitions must be greater than 0"
         else:
             assert all(v > 0 for v in value), "Number of repetitions must be greater than 0"
-        self.execution_config.n_reps = value
+        self.execution_config.n_reps = [value] if isinstance(value, int) else value
 
     @property
     def c_factor(self):

@@ -1147,3 +1147,16 @@ def get_optimal_z_rotation(
     x0 = np.zeros(2**n_qubits)
     res = minimize(cost_function, x0, method="Nelder-Mead")
     return res
+
+def handle_virtual_rotations(operations, fidelities, subsystem_dims, n_reps, target):
+    """
+    Optimize gate fidelity by finding optimal Z-rotations before and after gate
+    """
+    best_op = operations[np.argmax(fidelities)]
+    res = get_optimal_z_rotation(
+        best_op, target.target_operator.power(n_reps), len(subsystem_dims)
+    )
+    rotated_unitaries = [rotate_unitary(res.x, op) for op in operations]
+    fidelities = [target.fidelity(op, n_reps) for op in rotated_unitaries]
+
+    return fidelities

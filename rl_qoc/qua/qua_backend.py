@@ -7,7 +7,7 @@ from typing import Iterable, List, Sequence, Dict, Optional, Callable, Union, Tu
 from quam.components import Channel as QuAMChannel, Qubit, QubitPair
 from quam.components import BasicQuAM as QuAM
 
-from qiskit.circuit import QuantumCircuit
+from qiskit.circuit import QuantumCircuit, SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp
 from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping as gate_map, get_standard_gate_name_mapping,
 )
@@ -106,7 +106,7 @@ def look_for_standard_op(op: str):
     
 
 
-class QMBackend(Backend, ABC):
+class QMBackend(Backend):
     def __init__(
         self,
         machine: QuAM,
@@ -128,13 +128,21 @@ class QMBackend(Backend, ABC):
         self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = {
             v: k for k, v in channel_mapping.items()
         }
-        self._operation_mapping_QUA: OperationsMapping = {}
+        self._qubit_dict = {qubit.name: i for i, qubit in enumerate(machine.active_qubits)}
         self._target, self._operation_mapping_QUA = self._populate_target(machine)
         self._oq3_basis_gates = list(self.target.operation_names)
+        
 
     @property
     def target(self):
         return self._target
+    
+    @property
+    def qubit_dict(self):
+        """
+        Get the qubit dictionary for the backend
+        """
+        return self._qubit_dict
 
     @property
     def qubit_mapping(self) -> QubitsMapping:
@@ -152,7 +160,6 @@ class QMBackend(Backend, ABC):
     def _default_options(cls):
         pass
 
-    @abstractmethod
     def _populate_target(self, machine: QuAM) -> Tuple[Target, Dict[OperationIdentifier, Callable]]:
         """
         Populate the target instructions with the QOP configuration
@@ -162,7 +169,7 @@ class QMBackend(Backend, ABC):
             "Transmon based QuAM",
             dt=1e-9,
             granularity=4,
-            num_qubits=len(machine.qubits),
+            num_qubits=len(machine.active_qubits),
             min_length=16,
             qubit_properties=[
                 QubitProperties(t1=qubit.T1, t2=qubit.T2ramsey, frequency=qubit.f_01)
@@ -172,7 +179,6 @@ class QMBackend(Backend, ABC):
 
         operations_dict = {}
         operations_qua_dict = {}
-        qubit_dict = {qubit.name: i for i, qubit in enumerate(machine.qubits.values())}
         
         # Add single qubit instructions
         for q, qubit in enumerate(machine.active_qubits):
@@ -183,21 +189,25 @@ class QMBackend(Backend, ABC):
                     gate_op = gate_map[op_]
                     num_params = len(gate_op.params)
                     
-                    operations_dict.setdefault(gate_op, {})[(q,)] = None
-                    operations_qua_dict[OperationIdentifier(op_, num_params, (q,))] =  func.func
+                    operations_dict.setdefault(op_, {})[(q,)] = None
+                    operations_qua_dict[OperationIdentifier(op_, num_params, (q,))] =  func.apply
         for qubit_pair in machine.active_qubit_pairs:
-            q_ctrl = qubit_dict[qubit_pair.qubit_control.name]
-            q_tgt = qubit_dict[qubit_pair.qubit_target.name]
+            q_ctrl = self.qubit_dict[qubit_pair.qubit_control.name]
+            q_tgt = self.qubit_dict[qubit_pair.qubit_target.name]
             for op, func in qubit_pair.macros.items():
-                op_ = op.lower()
+                op_ = look_for_standard_op(op)
                 if op_ in gate_map:
                     gate_op = gate_map[op_]
                     num_params = len(gate_op.params)
-                    operations_dict.setdefault(gate_op, {})[(q_ctrl, q_tgt)] = None 
-                    operations_qua_dict[OperationIdentifier(op_, num_params, (q_ctrl, q_tgt))] = func.func
+                    operations_dict.setdefault(op_, {})[(q_ctrl, q_tgt)] = None 
+                    operations_qua_dict[OperationIdentifier(op_, num_params, (q_ctrl, q_tgt))] = func.apply
                         
         for op, properties in operations_dict.items():
-            target.add_instruction(op, properties=properties)
+            target.add_instruction(gate_map[op], properties=properties)
+        
+        for control_flow_op, control_op_name in zip([SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp],
+                                                    ["switch_case", "for_loop", "if_else", "while_loop"]):                                        
+            target.add_instruction(control_flow_op, name=control_op_name)
             
         return target, operations_qua_dict
 
@@ -595,52 +605,52 @@ class FluxTunableTransmonBackend(QMBackend):
             for i, qubit in enumerate(self.machine.qubits.values())
         }
 
-    def _populate_target(self, machine: QuAM):
-        """
-        Populate the target instructions with the QOP configuration (currently hardcoded for
-        Transmon based QuAM architecture)
-
-        """
-        gates = gate_map()
-        target = Target(
-            "Transmon based QuAM",
-            dt=1e-9,
-            granularity=4,
-            num_qubits=len(machine.qubits),
-            min_length=16,
-            qubit_properties=[
-                QubitProperties(t1=qubit.T1, t2=qubit.T2ramsey, frequency=qubit.f_01)
-                for qubit in machine.qubits.values()
-            ],
-        )
-        # Create CouplingMap from QuAM qubit pairs
-        qubit_dict = {qubit.name: i for i, qubit in enumerate(machine.qubits.values())}
-        coupling_map = CouplingMap()
-        for qubit in range(len(machine.qubits)):
-            coupling_map.add_physical_qubit(qubit)
-        for qubit_pair in machine.qubit_pairs.values():
-            coupling_map.add_edge(
-                qubit_dict[qubit_pair.qubit_control.name],
-                qubit_dict[qubit_pair.qubit_target.name],
-            )
-
-        target.add_instruction(
-            gates["x"], properties={(i,): None for i in range(len(machine.qubits))}
-        )
-        target.add_instruction(
-            gates["sx"], properties={(i,): None for i in range(len(machine.qubits))}
-        )
-        target.add_instruction(
-            gates["cz"], properties={(i, j): None for i, j in coupling_map.get_edges()}
-        )
-        # TODO: Add the rest of the channels for QubitPairs (ControlChannels)
-
-        # TODO: Update the instructions both in Qiskit and in the OQC operations mapping
-        # TODO: Figure out if pulse calibrations should be added to Target
-
-        self._coupling_map = target.build_coupling_map()
-
-        return target, ()
+    # def _populate_target(self, machine: QuAM):
+    #     """
+    #     Populate the target instructions with the QOP configuration (currently hardcoded for
+    #     Transmon based QuAM architecture)
+    # 
+    #     """
+    #     gates = gate_map()
+    #     target = Target(
+    #         "Transmon based QuAM",
+    #         dt=1e-9,
+    #         granularity=4,
+    #         num_qubits=len(machine.qubits),
+    #         min_length=16,
+    #         qubit_properties=[
+    #             QubitProperties(t1=qubit.T1, t2=qubit.T2ramsey, frequency=qubit.f_01)
+    #             for qubit in machine.qubits.values()
+    #         ],
+    #     )
+    #     # Create CouplingMap from QuAM qubit pairs
+    #     qubit_dict = {qubit.name: i for i, qubit in enumerate(machine.qubits.values())}
+    #     coupling_map = CouplingMap()
+    #     for qubit in range(len(machine.qubits)):
+    #         coupling_map.add_physical_qubit(qubit)
+    #     for qubit_pair in machine.qubit_pairs.values():
+    #         coupling_map.add_edge(
+    #             qubit_dict[qubit_pair.qubit_control.name],
+    #             qubit_dict[qubit_pair.qubit_target.name],
+    #         )
+    # 
+    #     target.add_instruction(
+    #         gates["x"], properties={(i,): None for i in range(len(machine.qubits))}
+    #     )
+    #     target.add_instruction(
+    #         gates["sx"], properties={(i,): None for i in range(len(machine.qubits))}
+    #     )
+    #     target.add_instruction(
+    #         gates["cz"], properties={(i, j): None for i, j in coupling_map.get_edges()}
+    #     )
+    #     # TODO: Add the rest of the channels for QubitPairs (ControlChannels)
+    # 
+    #     # TODO: Update the instructions both in Qiskit and in the OQC operations mapping
+    #     # TODO: Figure out if pulse calibrations should be added to Target
+    # 
+    #     self._coupling_map = target.build_coupling_map()
+    # 
+    #     return target, ()
 
 
 def qua_declaration(n_qubits, readout_elements):

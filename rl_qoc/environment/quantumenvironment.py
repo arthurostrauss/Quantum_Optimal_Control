@@ -54,7 +54,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         self._parameters = ParameterVector("θ", training_config.n_actions)
 
         super().__init__(training_config)
-
+        
         self._target, self.circuits, self.baseline_circuits = (
             self.define_target_and_circuits()
         )
@@ -107,7 +107,6 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             target = StateTarget(**asdict(self.config.target))
 
         custom_circuit = QuantumCircuit(target.tgt_register, name="custom_circuit")
-        ref_circuit = QuantumCircuit(target.tgt_register, name="baseline_circuit")
 
         self.parametrized_circuit_func(
             custom_circuit,
@@ -116,9 +115,11 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             **self._func_args,
         )
         if isinstance(target, GateTarget):
-            ref_circuit.append(target.gate, target.tgt_register)
+            ref_circuit = target.target_circuit.copy(name="baseline_circuit")
         elif isinstance(target, StateTarget):
-            ref_circuit = target.dm
+            ref_circuit = target.circuit.copy(name="baseline_circuit")
+        else:
+            raise ValueError("Target type not recognized")
         return target, [custom_circuit], [ref_circuit]
 
     def _get_obs(self):

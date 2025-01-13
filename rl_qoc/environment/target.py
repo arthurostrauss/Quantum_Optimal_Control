@@ -427,6 +427,7 @@ class GateTarget(BaseTarget):
             raise ValueError(
                 f"Input states choice {input_states_choice} not recognized. Should be 'pauli4', 'pauli6' or '2-design'"
             )
+        self._input_states_choice = input_states_choice
 
         self.input_states = [
             InputState(
@@ -605,6 +606,13 @@ class GateTarget(BaseTarget):
         Get the size of the causal cone of the target gate
         """
         return self._causal_cone_size
+    
+    @property
+    def input_states_choice(self):
+        """
+        Get the choice of input states for the calibration
+        """
+        return self._input_states_choice
 
     def __repr__(self):
         return (

@@ -382,7 +382,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             try:
                 print("Starting Direct Fidelity Estimation...")
                 input_state = np.random.choice(self.target.input_states)
-                observables, shots = self.retrieve_observables(
+                observables, shots = retrieve_observables(
                     input_state.target_state,
                     self.circuits[self.trunc_index],
                     self.config.benchmark_config.dfe_precision,

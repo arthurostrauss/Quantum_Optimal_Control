@@ -149,6 +149,11 @@ class CustomPPO:
         Default implementation returns the action and logprob as is.
         """
         return action, logprob
+    
+    
+    def process_std(self, std_action):
+        return std_action
+    
 
     def train(
         self,
@@ -251,6 +256,7 @@ class CustomPPO:
 
                     with torch.no_grad():
                         mean_action, std_action, critic_value = agent(batch_obs)
+                        std_action = self.process_std(std_action)
                         probs = Normal(mean_action, std_action)
                         action, logprob = self.process_action(
                             mean_action, std_action, probs
@@ -722,6 +728,7 @@ class CustomPPO:
         The size of the minibatch
         """
         return self.agent_config.minibatch_size
+
 
 
 def take_step(
