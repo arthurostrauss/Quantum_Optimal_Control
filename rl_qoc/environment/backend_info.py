@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Union
 from qiskit import transpile, QiskitError
@@ -24,22 +26,22 @@ class BackendInfo(ABC):
         self._backend = None
 
     @abstractmethod
-    def custom_transpile(self, qc_input, *args, **kwargs):
+    def custom_transpile(self, qc_input, *args, **kwargs) -> QuantumCircuit|List[QuantumCircuit]:
         pass
 
     @property
     @abstractmethod
-    def coupling_map(self):
+    def coupling_map(self)->CouplingMap|List[Tuple[int, int]]:
         pass
 
     @property
     @abstractmethod
-    def basis_gates(self):
+    def basis_gates(self)->List[str]:
         pass
 
     @property
     @abstractmethod
-    def dt(self):
+    def dt(self)->float:
         pass
 
     @property

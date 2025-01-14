@@ -16,9 +16,8 @@ from qiskit.circuit import (
     Delay,
     Qubit,
 )
-from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map, RZGate
+from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 from qiskit.converters import circuit_to_dag, dag_to_circuit
-from qiskit.dagcircuit import DAGCircuit
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import (
     BackendEstimator,
@@ -390,10 +389,12 @@ def retrieve_primitives(
             _, _ = perform_standard_calibrations(backend, calibration_files)
     elif config.config_type == "qibo":
         from ..qibo import QiboEstimatorV2
-
+        platform = getattr(config, "platform", None)
+        physical_qubits = getattr(config, "physical_qubits", None)
+        gate_rule = getattr(config, "gate_rule", None)
         estimator = QiboEstimatorV2(
-            platform=config.platform,
-            options={"qubits": config.physical_qubits, "gate_rule": config.gate_rule},
+            platform=platform,
+            options={"qubits": physical_qubits, "gate_rule": gate_rule},
         )
         sampler = StatevectorSampler()  # Dummy sampler
     elif isinstance(backend, (FakeBackendV2, AerBackend)):
@@ -441,6 +442,7 @@ def substitute_target_gate(
         target_gate: Target gate to be substituted
         custom_gate: Custom gate to be substituted with
         qubits: Physical qubits on which the gate is to be applied (if None, all qubits of input circuit are considered)
+        parameters: Parameters for the custom gate
     """
 
     if isinstance(custom_gate, str):
@@ -476,8 +478,6 @@ def handle_session(
         estimator: Estimator instance
         backend: Backend instance
         counter: Optional session counter (for RuntimeEstimator) or circuit macro counter (for DynamicsBackendEstimator)
-        qc: Optional QuantumCircuit instance (for DynamicsBackendEstimator)
-        input_state_circ: Optional input state QuantumCircuit instance (for DynamicsBackendEstimator)
 
     Returns:
         Updated Estimator instance
@@ -534,7 +534,7 @@ def select_backend(
                     min_num_qubits=2, simulator=False, operational=True, open_pulse=True
                 )
             else:
-                backend = service.get_backend(backend_name)
+                backend = service.backend(backend_name)
 
             # Specify options below if needed
             # backend.set_options(**options)
@@ -552,7 +552,7 @@ def select_backend(
 
     if backend is not None:
         if use_dynamics:
-            solver_options = convert_solver_options(solver_options)
+            solver_options = convert_solver_options(solver_options, backend.dt)
             assert isinstance(
                 backend, BackendV1
             ), "DynamicsBackend can only be used with BackendV1 instances"
@@ -760,8 +760,10 @@ def get_q_env_config(
         parametrized_circ_func: Function to applying parametrized gate (should be defined in your Python config)
         backend: Optional custom backend instance
             (if None, backend will be selected based on configuration set in yaml file)
-
+        pass_manager: PassManager instance
+        instruction_durations: InstructionDurations instance
         backend_callable_args: Additional arguments for backend if it was passed as a callable
+        
 
     """
     params, backend_params, runtime_options = load_q_env_from_yaml_file(

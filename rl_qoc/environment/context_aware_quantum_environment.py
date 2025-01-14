@@ -281,7 +281,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         super().reset(seed=seed)
 
         new_obs = self._get_obs()
-        self._n_reps_index = np.random.randint(0, len(self.config.n_reps))
         self.modify_environment_params()
         self._param_values = create_array(
             self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0]

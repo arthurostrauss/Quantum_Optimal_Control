@@ -298,7 +298,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 #     for counts in pub_counts
                 # ]
                 pub_data = [[pub_result.data.meas[i].postselect(self.target.causal_cone_qubits_indices,
-                                                                0) for i in range(self.batch_size)]
+                                                                [0]*self.target.causal_cone_size) 
+                             for i in range(self.batch_size)]
                             for pub_result in pub_results]
                 survival_probability = [[bit_array.num_shots/self.n_shots for bit_array in bit_arrays]
                                         for bit_arrays in pub_data]
@@ -325,9 +326,10 @@ class BaseQuantumEnvironment(ABC, Env):
         super().reset(seed=seed)
         self._episode_tracker += 1
         self._episode_ended = False
+        self._n_reps_index = np.random.randint(0, len(self.config.n_reps))
 
         if isinstance(self.estimator, RuntimeEstimatorV2):
-            self.estimator.options.update(job_tags=[f"rl_qoc_step{self._step_tracker}"])
+            self.estimator.options.environment.job_tags =[f"rl_qoc_step{self._step_tracker}"]
 
         return self._get_obs(), self._get_info()
 
@@ -608,11 +610,11 @@ class BaseQuantumEnvironment(ABC, Env):
                 circuit_ref, name="cafe_ref_circ"
             )  # Circuit with reference gate
 
-            for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
+            for qc, context, control_flow in zip([run_qc, ref_qc], [circuit, circuit_ref], [True, False]):
                 # Bind input states to the circuits
                 qc.compose(input_state.circuit, inplace=True)
                 qc.barrier()
-                cycle_circuit = handle_n_reps(context, self.n_reps, self.backend)
+                cycle_circuit = handle_n_reps(context, self.n_reps, self.backend, control_flow=control_flow)
                 qc.compose(cycle_circuit, inplace=True)
 
             # Compute inverse unitary for reference circuit
@@ -640,7 +642,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 transpiled_circuit = self.backend_info.custom_transpile(
                     circ, initial_layout=layout, scheduling=False
                 )
-                transpiled_circuit.barrier(target.causal_cone_qubits)
+                transpiled_circuit.barrier()
                 # Add the inverse unitary + measurement to the circuit
                 transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
                 pubs_.append((transpiled_circuit, params, self.n_shots))

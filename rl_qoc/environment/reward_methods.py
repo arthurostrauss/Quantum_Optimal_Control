@@ -53,15 +53,17 @@ def extend_input_state_prep(input_circuit, qc, target: GateTarget):
     return input_circuit
 
 
-def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None):
+def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flow=True):
     # Repeat the circuit n_reps times and prepend the input state preparation
-    if isinstance(backend, BackendV2) and "for_loop" in backend.operation_names:
+    if n_reps == 1:
+        return qc
+    if isinstance(backend, BackendV2) and "for_loop" in backend.operation_names and control_flow:
         prep_circuit = qc.copy_empty_like()
 
         with prep_circuit.for_loop(range(n_reps)) as i:
             prep_circuit.compose(qc, inplace=True)
     else:
-        prep_circuit = qc.repeat(n_reps)
+        prep_circuit = qc.repeat(n_reps).decompose()
     return prep_circuit
 
 

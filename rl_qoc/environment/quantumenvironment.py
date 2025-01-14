@@ -16,7 +16,7 @@ from typing import List, Any, SupportsFloat, Tuple, Optional
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule, pulse
+from qiskit import schedule, pulse, QuantumRegister
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -79,13 +79,20 @@ class QuantumEnvironment(BaseQuantumEnvironment):
     def tgt_instruction_counts(self) -> int:
         return 1
 
+    @property
+    def target(self) -> GateTarget:
+        """
+        Return current target to be calibrated
+        """
+        return self._target[self._n_reps_index]
+
     def episode_length(self, global_step: int) -> int:
         return 1
 
     def define_target_and_circuits(
         self,
     ) -> Tuple[
-        GateTarget | StateTarget,
+        List[GateTarget] | StateTarget,
         List[QuantumCircuit],
         List[QuantumCircuit | DensityMatrix],
     ]:
@@ -97,29 +104,30 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         input_states_choice = getattr(
             self.config.reward_config.reward_args, "input_states_choice", "pauli4"
         )
+        q_reg = QuantumRegister(self.config.target.gate.num_qubits)
         if isinstance(self.config.target, GateTargetConfig):
-            target = GateTarget(
+            target = [GateTarget(
                 **self.config.target.as_dict(),
                 input_states_choice=input_states_choice,
-                n_reps=self.config.n_reps,
-            )
+                n_reps=n_reps,
+                tgt_register=q_reg,
+            ) for n_reps in self.config.n_reps]
         else:
             target = StateTarget(**asdict(self.config.target))
 
-        custom_circuit = QuantumCircuit(target.tgt_register, name="custom_circuit")
+        custom_circuit = QuantumCircuit(q_reg, name="custom_circuit")
 
         self.parametrized_circuit_func(
             custom_circuit,
             self.parameters,
-            target.tgt_register,
+            q_reg,
             **self._func_args,
         )
-        if isinstance(target, GateTarget):
-            ref_circuit = target.target_circuit.copy(name="baseline_circuit")
-        elif isinstance(target, StateTarget):
+        
+        if isinstance(target, StateTarget):
             ref_circuit = target.circuit.copy(name="baseline_circuit")
         else:
-            raise ValueError("Target type not recognized")
+            ref_circuit = target[0].target_circuit.copy(name="baseline_circuit")
         return target, [custom_circuit], [ref_circuit]
 
     def _get_obs(self):
