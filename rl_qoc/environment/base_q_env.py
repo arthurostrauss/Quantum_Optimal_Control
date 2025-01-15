@@ -489,7 +489,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 if dedicated_shots == 0:
                     continue
                 # Convert input state to Pauli6 basis: preparing pure eigenstates of Pauli_prep
-                inputs = np.unravel_index(input_state, (2,) * qc.num_qubits)
+                inputs = np.unravel_index(input_state, (2,) * n_qubits)
                 parity = (-1) ** np.sum(
                     inputs
                 )  # Parity of input state (weighting factor in Pauli prep decomposition)

@@ -38,7 +38,15 @@ def extend_observables(observables: SparsePauliOp, qc: QuantumCircuit,
     return observables
 
 
-def extend_input_state_prep(input_circuit, qc, target: GateTarget):
+def extend_input_state_prep(input_circuit: QuantumCircuit, qc: QuantumCircuit, target: GateTarget):
+    """
+    Extend the input state preparation to all qubits in the quantum circuit if necessary
+    
+    Args:
+        input_circuit: Input state preparation circuit
+        qc: Quantum circuit to be executed on quantum system
+        target: Target gate to prepare (possibly within a wider circuit context)
+    """
     if qc.num_qubits > target.causal_cone_size:  # Add random input state on all qubits (not part of reward calculation)
         other_qubits_indices = set(range(qc.num_qubits)) - set(
             target.causal_cone_qubits_indices

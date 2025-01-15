@@ -2,8 +2,8 @@
 This file contains the functions to generate a generic spillover noise model for a given quantum circuit.
 The example circuit is drawn from a typical layer of single and two qubit gates in variational circuit.
 """
+from __future__ import annotations
 
-from itertools import combinations
 from typing import Optional, Literal, List, Dict
 
 import numpy as np
@@ -29,7 +29,7 @@ def numpy_to_hashable(matrix):
 def validate_args(
     num_qubits: int,
     rotation_axes: List[Literal["rx", "ry", "rz"]],
-    rotation_angles: List[float],
+    rotation_angles: List[float]|np.ndarray,
     coupling_map: Optional[CouplingMap] = None,
 ):
     """
@@ -348,7 +348,7 @@ def create_spillover_noise_model_from_circuit(
                 elif (
                     j == main_qubit_index
                 ):  # No noise for the main qubit but has to be included in the noise operator
-                    # This is because the noise operator has to be binded to the instruction containing the main qubit and
+                    # This is because the noise operator has to be bound to the instruction containing the main qubit and
                     # noisy qubits
                     noise_ops.append(Operator.from_label("I"))
                 else:
