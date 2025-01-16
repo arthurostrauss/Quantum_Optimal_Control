@@ -61,27 +61,31 @@ class QiboEnvironment(QuantumEnvironment):
                         # Calculate infidelity and error
                         # stdevs = np.sqrt(np.diag(np.reshape(rb_output.results.cov[target], (3, 3))))
 
-                        pars = rb_output.results.pars.get(target)
+                        pars = rb_output.results.pars[target]
                         one_minus_p = 1 - pars[2]
                         r_c = one_minus_p * (1 - 1 / 2**1)
-                        fidelity = r_c / AVG_GATE
+                        fidelity = 1 - (r_c / AVG_GATE)
                     elif benchmarking_method == "tomography":
                         qiskit_baseline_circ = from_custom_to_baseline_circuit(qc)
                         qibo_circ = QiboCircuit.from_qasm(
                             qasm3_dumps(qiskit_baseline_circ)
                         )
+                        #TODO: test following lines
+                        tomography_output = e.state_tomography(
+                                circuit = qibo_circ,
+                        )
+                        rho_real = tomography_output.results.target_density_matrix_real[target]
+                        rho_imaginary = tomography_output.results.target_density_matrix_imag[target]
+                        rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
 
-                        qibo_dm = None  # TODO: Use Qibocal to compute state tomography
-                        output_state = qibo_dm
-                        output_state = qibo_dm.data
 
-                        dm = DensityMatrix(output_state)
-                        fidelity = self.target.fidelity(dm, validate=False)
+                        fidelity = self.target.fidelity(rho, validate=False)
+                        # dm = DensityMatrix(rho)
+                        # fidelity = self.target.fidelity(dm, validate=False)
                     else:
                         raise ValueError("Benchmarking method not recognized")
 
             self.circuit_fidelity_history.append(fidelity)
-            print("AAAAAAAAAAAAAAAAAAAAAAAAAAA", fidelity)
             return fidelity
         return 0
 

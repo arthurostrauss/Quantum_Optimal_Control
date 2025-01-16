@@ -43,8 +43,8 @@ action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
     get_backend(),
-    platform="dummy",
-    physical_qubits=([0]),
+    platform="qw11q",
+    physical_qubits=(["D1"]),
     gate_rule="x",
     parametrized_circuit_kwargs={"target": target},
     instruction_durations=None,
@@ -56,7 +56,7 @@ q_env_config = QEnvConfig(
     reward_config=StateRewardConfig(),
     benchmark_config=BenchmarkConfig(0),
     execution_config=ExecutionConfig(
-        batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1
+        batch_size=10, sampling_paulis=50, n_shots=1000, n_reps=1
     ),
 )
 
@@ -68,5 +68,7 @@ observable = SparsePauliOp.from_list([("Z", 1)])
 qc = QuantumCircuit(1)
 qc.x(0)
 
-results = env.step(np.array([[0.4] * 32]))
+# for amplitude in np.arange(0,0.09, 0.001):
+amplitude = 0.
+results = env.step(np.array([[amplitude]]*10))
 print(results)

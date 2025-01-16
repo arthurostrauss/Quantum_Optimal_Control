@@ -150,7 +150,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
         terminated = self._episode_ended = True
         reward = self.perform_action(action)
-
+        
         if np.mean(reward) > self._max_return:
             self._max_return = np.mean(reward)
             self._optimal_action = self.mean_action
@@ -166,7 +166,6 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         max_fidelity = 1.0 - optimal_error_precision
         reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
         reward = -np.log(1.0 - reward)
-
         return self._get_obs(), reward, terminated, False, self._get_info()
 
     # def check_reward(self):

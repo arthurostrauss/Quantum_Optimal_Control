@@ -39,8 +39,12 @@ def get_backend():
 
 target = {"state": Statevector.from_label("1"), "physical_qubits": [0]}
 instruction_durations = {}
-action_space_low = np.array([0.0], dtype=np.float32)  # [amp, phase, phase, duration]
-action_space_high = np.array([0.1], dtype=np.float32)  # [amp, phase, phase, duration]
+action_space_low = np.array(
+    [0.001], dtype=np.float32
+)  # [amp, phase, phase, duration]
+action_space_high = np.array(
+    [0.1], dtype=np.float32
+)  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
@@ -58,7 +62,7 @@ q_env_config = QEnvConfig(
     reward_config=StateRewardConfig(),
     benchmark_config=BenchmarkConfig(0, check_on_exp=True),
     execution_config=ExecutionConfig(
-        batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1
+        batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1, c_factor = 1,
     ),
 )
 
