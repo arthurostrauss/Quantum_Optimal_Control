@@ -60,6 +60,8 @@ def qibo_execute(
     ]
 
     set_backend("qibolab", platform=platform)
+    import pdb; pdb.set_trace()
+    print("QIBO", qibo.get_backend())
     hardware_qubit_pair = run_options.get(
         "qubits", (0, 1)
     )  # TODO: Figure out how to retrieve it

@@ -7,6 +7,8 @@ from qiskit.circuit.library.standard_gates import (
 )
 from qiskit.exceptions import QiskitError
 from qiskit.qasm3 import dumps as qasm3_dumps
+import qibo
+from qibo import Circuit, gates, set_backend
 from qibo import Circuit as QiboCircuit
 import numpy as np
 from qibocal.auto.execute import Executor
@@ -15,6 +17,7 @@ from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.quantum_info import DensityMatrix
 
 from rl_qoc import QuantumEnvironment
+from rl_qoc.qibo.utils import resolve_gate_rule
 
 AVG_GATE = 1.875
 
@@ -31,6 +34,7 @@ class QiboEnvironment(QuantumEnvironment):
             self.config.benchmark_config.method
         )
         backend_config = self.config.backend_config
+        set_backend("qibolab", platform = backend_config.platform)
         target = backend_config.physical_qubits[0]
         if self.config.check_on_exp:
             if backend_config.config_type != "qibo":
@@ -38,54 +42,47 @@ class QiboEnvironment(QuantumEnvironment):
             else:
                 path = "rlqoc" + strftime("%d_%b_%H_%M_%S", gmtime())
                 with Executor.open(
-                    "myexec",
-                    path=path,
-                    platform=backend_config.platform,
-                    targets=[target],
-                    update=False,
-                    force=True,
+                  "myexec",
+                  path= path,
+                  platform=backend_config.platform,
+                  targets=[backend_config.physical_qubits[0]],
+                  update=True,
+                  force=True,
                 ) as e:
-                    e.platform.qubits[target].native_gates.RX.amplitude = float(
-                        self.mean_action[0]
+                    # Overwrite the rules
+                    backend = qibo.get_backend()
+                    compiler = backend.compiler 
+                    gate_rule = resolve_gate_rule(self.config.backend_config.gate_rule)
+                    rule = lambda qubits_ids, platform, gate_params: gate_rule[1](
+                        qubits_ids, platform, gate_params, params
                     )
-                    if benchmarking_method == "rb":
-                        rb_output = e.rb_ondevice(
-                            num_of_sequences=1000,
-                            max_circuit_depth=1000,
-                            delta_clifford=10,
-                            n_avg=1,
-                            save_sequences=False,
-                            apply_inverse=True,
-                        )
+                    compiler.register(gate_rule[0])(rule)
+                    circuit = Circuit(1)
+                    circuit.add(gates.X(0))
 
-                        # Calculate infidelity and error
-                        # stdevs = np.sqrt(np.diag(np.reshape(rb_output.results.cov[target], (3, 3))))
+                    rabi_output = e.state_tomography(circuit = circuit)
 
-                        pars = rb_output.results.pars[target]
-                        one_minus_p = 1 - pars[2]
-                        r_c = one_minus_p * (1 - 1 / 2**1)
-                        fidelity = 1 - (r_c / AVG_GATE)
-                    elif benchmarking_method == "tomography":
-                        qiskit_baseline_circ = from_custom_to_baseline_circuit(qc)
-                        qibo_circ = QiboCircuit.from_qasm(
-                            qasm3_dumps(qiskit_baseline_circ)
-                        )
-                        #TODO: test following lines
-                        tomography_output = e.state_tomography(
-                                circuit = qibo_circ,
-                        )
-                        rho_real = tomography_output.results.target_density_matrix_real[target]
-                        rho_imaginary = tomography_output.results.target_density_matrix_imag[target]
-                        rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
+                    qiskit_baseline_circ = from_custom_to_baseline_circuit(qc)
+                    qibo_circ = QiboCircuit.from_qasm(
+                        qasm3_dumps(qiskit_baseline_circ)
+                    )
+                    qibo_circ.draw()
+                    tomography_output = e.state_tomography(
+                            circuit = qibo_circ,
+                    )
+                    #rho_real = tomography_output.results.target_density_matrix_real[target]
+                    #print(rho_real)
+                    #rho_imaginary = tomography_output.results.target_density_matrix_imag[target]
+                    #rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
 
 
-                        fidelity = self.target.fidelity(rho, validate=False)
-                        # dm = DensityMatrix(rho)
-                        # fidelity = self.target.fidelity(dm, validate=False)
-                    else:
-                        raise ValueError("Benchmarking method not recognized")
+                    #fidelity = self.target.fidelity(rho, validate=False)
+                    #dm = DensityMatrix(rho)
+                    #fidelity = self.target.fidelity(dm, validate=False)
 
-            self.circuit_fidelity_history.append(fidelity)
+                report(e.path, e.history)
+                    # print("FIDELITY", fidelity)
+            # self.circuit_fidelity_history.append(fidelity)
             return fidelity
         return 0
 
