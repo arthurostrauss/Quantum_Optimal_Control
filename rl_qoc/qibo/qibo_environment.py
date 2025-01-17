@@ -7,6 +7,7 @@ from qiskit.circuit.library.standard_gates import (
 )
 from qiskit.exceptions import QiskitError
 from qiskit.qasm3 import dumps as qasm3_dumps
+from qiskit.quantum_info import DensityMatrix
 import qibo
 from qibo import Circuit, gates, set_backend
 from qibo import Circuit as QiboCircuit
@@ -57,10 +58,6 @@ class QiboEnvironment(QuantumEnvironment):
                         qubits_ids, platform, gate_params, params
                     )
                     compiler.register(gate_rule[0])(rule)
-                    circuit = Circuit(1)
-                    circuit.add(gates.X(0))
-
-                    rabi_output = e.state_tomography(circuit = circuit)
 
                     qiskit_baseline_circ = from_custom_to_baseline_circuit(qc)
                     qibo_circ = QiboCircuit.from_qasm(
@@ -70,15 +67,11 @@ class QiboEnvironment(QuantumEnvironment):
                     tomography_output = e.state_tomography(
                             circuit = qibo_circ,
                     )
-                    #rho_real = tomography_output.results.target_density_matrix_real[target]
-                    #print(rho_real)
-                    #rho_imaginary = tomography_output.results.target_density_matrix_imag[target]
-                    #rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
-
-
-                    #fidelity = self.target.fidelity(rho, validate=False)
-                    #dm = DensityMatrix(rho)
-                    #fidelity = self.target.fidelity(dm, validate=False)
+                    rho_real = tomography_output.results.measured_density_matrix_real[target]
+                    rho_imaginary = tomography_output.results.target_density_matrix_imag[target]
+                    rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
+                    dm = DensityMatrix(rho, validate = False)
+                    fidelity = self.target.fidelity(dm)
 
                 report(e.path, e.history)
                     # print("FIDELITY", fidelity)
@@ -95,11 +88,12 @@ def from_custom_to_baseline_circuit(circ: QuantumCircuit):
     """
     dag = circuit_to_dag(circ)
     op_nodes = dag.op_nodes()
+    gate_dic = gate_map()
     for node in op_nodes:
-        if node.name not in gate_map:
+        if node.name not in gate_dic:
             gate_name: str = node.name.split("_")[0]
             try:
-                gate = gate_map[gate_name.lower()]
+                gate = gate_dic[gate_name.lower()]
             except KeyError:
                 raise QiskitError(
                     f"Cannot bind the circuit to the backend because the gate "
