@@ -931,19 +931,21 @@ def simulate_pulse_input(
     return final_results
 
 
-def get_control_channel_map(backend: BackendV1, qubit_tgt_register: List[int]):
+def get_control_channel_map(backend: BackendV2, qubit_tgt_register: List[int]):
     """
     Get reduced control_channel_map from Backend configuration (needs to be of type BackendV1)
-    :param backend: IBM Backend instance, must carry a configuration method
+    :param backend: IBM Backend instance, must carry a channels_map attribute
     :param qubit_tgt_register: Subsystem of interest from which to build control_channel_map
 
     Returns:
     control_channel_map: Reduced control channel map for the qubit_tgt_register
     """
+    if not hasattr(backend, "channels_map"):
+        raise AttributeError("Backend must have channels_map attribute")
     control_channel_map = {}
     control_channel_map_backend = {
-        qubits: backend.configuration().control_channels[qubits][0].index
-        for qubits in backend.configuration().control_channels
+        qubits: control_channels[0].index
+        for qubits, control_channels in backend.channels_map["control"].items()
     }
     for qubits in control_channel_map_backend:
         if qubits[0] in qubit_tgt_register and qubits[1] in qubit_tgt_register:
@@ -1147,3 +1149,17 @@ def get_optimal_z_rotation(
     x0 = np.zeros(2**n_qubits)
     res = minimize(cost_function, x0, method="Nelder-Mead")
     return res
+
+
+def handle_virtual_rotations(operations, fidelities, subsystem_dims, n_reps, target):
+    """
+    Optimize gate fidelity by finding optimal Z-rotations before and after gate
+    """
+    best_op = operations[np.argmax(fidelities)]
+    res = get_optimal_z_rotation(
+        best_op, target.target_operator.power(n_reps), len(subsystem_dims)
+    )
+    rotated_unitaries = [rotate_unitary(res.x, op) for op in operations]
+    fidelities = [target.fidelity(op, n_reps) for op in rotated_unitaries]
+
+    return fidelities

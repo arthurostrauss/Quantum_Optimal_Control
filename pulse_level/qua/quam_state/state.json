@@ -1289,5 +1289,5 @@
             }
         }
     },
-    "__class__": "quam_libs.components.quam_root.FEMQuAM"
+    "__class__": "rl_qoc.qua.quam_components.quam_root.FEMQuAM"
 }

@@ -18,17 +18,28 @@ class ActorNetwork(nn.Module):
             Sequence[nn.Module | str] | nn.Module | str
         ) = "tanh",
         output_activation_mean: nn.Module | str = "tanh",
-        output_activation_std: nn.Module | str = "identity",
+        output_activation_std: Optional[nn.Module | str] = None,
         include_critic=True,
         chkpt_dir: str = "tmp/agent",
     ):
+        """
+        Initialize the Actor Network
+        :param observation_space: Observation space of the environment
+        :param hidden_layers: List of sizes of the hidden layers
+        :param n_actions: Number of actions
+        :param input_activation_function: Activation function for the input layer
+        :param hidden_activation_functions: Activation functions for the hidden layers
+        :param output_activation_mean: Activation function for the mean output
+        :param output_activation_std: Activation function for the standard deviation output (if None, std is a parameter)
+        :param include_critic: Whether to include a critic network
+        :param chkpt_dir: Directory to save the checkpoint
+        """
         super(ActorNetwork, self).__init__()
 
         self.checkpoint_dir = chkpt_dir
         # Define a list to hold the layer sizes including input and output sizes
         input_activation_function = get_module(input_activation_function)
         output_activation_mean = get_module(output_activation_mean)
-        output_activation_std = get_module(output_activation_std)
         input_size = observation_space.shape[
             0
         ]  # TODO: Check if it's not shape[-1] that we actually need
@@ -65,9 +76,12 @@ class ActorNetwork(nn.Module):
         self.base_layers = layers
         self.mean_action = nn.Linear(hidden_layers[-1], n_actions)
         self.mean_activation = get_module(output_activation_mean)
-        # self.std_action = nn.Linear(hidden_layers[-1], n_actions)
-        # self.std_activation = get_module(output_activation_std)
-        self.std_action = nn.Parameter(torch.zeros(1, n_actions))
+        if output_activation_std is not None:
+            self.std_action = nn.Linear(hidden_layers[-1], n_actions)
+            self.std_activation = get_module(output_activation_std)
+        else:
+            self.std_action = nn.Parameter(torch.zeros(1, n_actions))
+            self.std_activation = None
 
         self.include_critic = include_critic
         self.critic_output = nn.Linear(hidden_layers[-1], 1)
@@ -84,10 +98,13 @@ class ActorNetwork(nn.Module):
         x = self.base_network(x)
         mean_action = self.mean_action(x)
         mean_action = self.mean_activation(mean_action)
-        # std_action = self.std_action(x)
-        std_action = self.std_action.expand_as(mean_action)
-        std_action = torch.exp(std_action)  # log std -> std
-        # std_action = self.std_activation(std_action)
+        if self.std_activation is not None:
+            std_action = self.std_action(x)
+            std_action = self.std_activation(std_action)
+        else:
+            std_action = self.std_action.expand_as(mean_action)
+            std_action = torch.exp(std_action)  # log std -> std
+
         critic_output = self.critic_output(x)
 
         if self.include_critic:

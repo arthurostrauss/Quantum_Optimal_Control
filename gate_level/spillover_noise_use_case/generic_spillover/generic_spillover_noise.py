@@ -3,7 +3,8 @@ This file contains the functions to generate a generic spillover noise model for
 The example circuit is drawn from a typical layer of single and two qubit gates in variational circuit.
 """
 
-from itertools import combinations
+from __future__ import annotations
+
 from typing import Optional, Literal, List, Dict
 
 import numpy as np
@@ -18,6 +19,7 @@ from qiskit.circuit.library import (
     UnitaryGate,
 )
 from qiskit_aer import AerSimulator
+from qiskit_aer.backends.backend_utils import BASIS_GATES
 from qiskit_aer.backends.backendconfiguration import AerBackendConfiguration
 
 
@@ -28,7 +30,7 @@ def numpy_to_hashable(matrix):
 def validate_args(
     num_qubits: int,
     rotation_axes: List[Literal["rx", "ry", "rz"]],
-    rotation_angles: List[float],
+    rotation_angles: List[float] | np.ndarray,
     coupling_map: Optional[CouplingMap] = None,
 ):
     """
@@ -347,7 +349,7 @@ def create_spillover_noise_model_from_circuit(
                 elif (
                     j == main_qubit_index
                 ):  # No noise for the main qubit but has to be included in the noise operator
-                    # This is because the noise operator has to be binded to the instruction containing the main qubit and
+                    # This is because the noise operator has to be bound to the instruction containing the main qubit and
                     # noisy qubits
                     noise_ops.append(Operator.from_label("I"))
                 else:
@@ -398,11 +400,21 @@ def noisy_backend(
     noise_model = create_spillover_noise_model_from_circuit(
         qc, rotation_angles, spillover_rate_matrix
     )
-    backend_configuration = AerSimulator._DEFAULT_CONFIGURATION
     if coupling_map is None:
         coupling_map = CouplingMap.from_line(circuit_context.num_qubits, False)
-    backend_configuration["coupling_map"] = list(coupling_map.get_edges())
-    backend_configuration = AerBackendConfiguration(**backend_configuration)
-    backend = AerSimulator(noise_model=noise_model, configuration=backend_configuration)
+    config = AerBackendConfiguration(
+        "custom_spillover_impact_simulator",
+        "2",
+        circuit_context.num_qubits,
+        BASIS_GATES["automatic"],
+        [],
+        int(1e7),
+        list(coupling_map.get_edges()),
+        description="Custom simulator with spillover noise model",
+        custom_instructions=AerSimulator._CUSTOM_INSTR["automatic"],
+        simulator=True,
+    )
+
+    backend = AerSimulator(noise_model=noise_model, configuration=config)
 
     return backend

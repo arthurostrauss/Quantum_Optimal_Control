@@ -7,6 +7,7 @@ Author: Arthur Strauss
 Created: 08/11/2024
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from qiskit.quantum_info import (
@@ -21,7 +22,6 @@ from qiskit.quantum_info import (
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import Layout
-from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 import numpy as np
 from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruction
 from itertools import product
@@ -30,7 +30,11 @@ from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
 )
-from ..helpers import density_matrix_to_statevector, causal_cone_circuit, get_gate
+from ..helpers.circuit_utils import (
+    density_matrix_to_statevector,
+    get_gate,
+    causal_cone_circuit,
+)
 import warnings
 
 
@@ -280,6 +284,7 @@ class InputState(StateTarget):
         :param tgt_register: Quantum register for the target gate
         :param n_reps: Number of repetitions of the target gate
         """
+        super().__init__(circuit=input_circuit)
         self._n_reps = n_reps
         self._target_op = target_op
         if isinstance(target_op, Gate):
@@ -287,14 +292,7 @@ class InputState(StateTarget):
             circ.append(target_op, tgt_register)
         else:
             circ = target_op.copy("target")
-
-        circ.compose(input_circuit, inplace=True, front=True)
-        super().__init__(circuit=input_circuit)
-        for _ in range(self.n_reps - 1):
-            if isinstance(target_op, Gate):
-                circ.append(target_op, tgt_register)
-            else:
-                circ.compose(target_op, inplace=True)
+        circ = circ.repeat(self.n_reps).compose(input_circuit, front=True)
         self.target_state = StateTarget(circuit=circ)
 
     @property
@@ -321,14 +319,8 @@ class InputState(StateTarget):
             circ = QuantumCircuit(self.tgt_register)
             circ.append(self._target_op, self.tgt_register)
         else:
-            circ = self._target_op.copy("target")
-
-        circ.compose(self.input_circuit, inplace=True, front=True)
-        for _ in range(self.n_reps - 1):
-            if isinstance(self._target_op, Gate):
-                circ.append(self._target_op, self.tgt_register)
-            else:
-                circ.compose(self._target_op, inplace=True)
+            circ = self._target_op
+        circ = circ.repeat(n_reps).compose(self.input_circuit, front=True).decompose()
         self.target_state = StateTarget(circuit=circ)
 
     @property
@@ -429,7 +421,6 @@ class GateTarget(BaseTarget):
                 for s in product(range(6), repeat=n_qubits)
             ]
         elif input_states_choice == "2-design":  # 2-design
-            # TODO: Update this part with Lukas latest code
             d = 2**n_qubits
             states = get_2design_input_states(d)
             input_circuits = [QuantumCircuit(n_qubits) for _ in range(len(states))]
@@ -439,6 +430,7 @@ class GateTarget(BaseTarget):
             raise ValueError(
                 f"Input states choice {input_states_choice} not recognized. Should be 'pauli4', 'pauli6' or '2-design'"
             )
+        self._input_states_choice = input_states_choice
 
         self.input_states = [
             InputState(
@@ -617,6 +609,13 @@ class GateTarget(BaseTarget):
         Get the size of the causal cone of the target gate
         """
         return self._causal_cone_size
+
+    @property
+    def input_states_choice(self):
+        """
+        Get the choice of input states for the calibration
+        """
+        return self._input_states_choice
 
     def __repr__(self):
         return (

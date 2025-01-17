@@ -1,11 +1,8 @@
 from qm.jobs.running_qm_job import RunningQmJob
 
-from ..environment import ContextAwareQuantumEnvironment
-from ..environment.qconfig import QEnvConfig
-from qiskit import QuantumCircuit
+from ..environment import ContextAwareQuantumEnvironment, QEnvConfig
 from qua_backend import QMBackend
 from qua_utils import *
-from .transpiler_passes import QuaParameterTablePass
 from .qua_config import QuaConfig
 
 
@@ -23,7 +20,7 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         ):
             raise ValueError("The backend should be a QMBackend object")
 
-        self.circuits = [add_parameter_table_to_circuit(qc) for qc in self.circuits]
+        self.circuits = [add_parameter_table_to_circuit(qc)[0] for qc in self.circuits]
 
     def rl_qoc_training_qua_prog(self):
         """
