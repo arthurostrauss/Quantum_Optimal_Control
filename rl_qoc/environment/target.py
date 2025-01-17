@@ -275,26 +275,30 @@ class InputState(StateTarget):
         input_circuit: QuantumCircuit,
         target_op: Gate | QuantumCircuit,
         tgt_register: QuantumRegister,
-        n_reps: int = 1,
     ):
         """
         Initialize the input state for the quantum environment
         :param input_circuit: Quantum circuit representing the input state
         :param target_op: Gate to be calibrated (or circuit context)
         :param tgt_register: Quantum register for the target gate
-        :param n_reps: Number of repetitions of the target gate
         """
         super().__init__(circuit=input_circuit)
-        self._n_reps = n_reps
         self._target_op = target_op
-        if isinstance(target_op, Gate):
-            circ = QuantumCircuit(tgt_register)
-            circ.append(target_op, tgt_register)
+    
+    def target_state(self, n_reps: int = 1):
+        """
+        Get the target state
+        """
+        if isinstance(self._target_op, Gate):
+            circ = QuantumCircuit(self.tgt_register)
+            circ.append(self._target_op, self.tgt_register)
         else:
-            circ = target_op.copy("target")
-        circ = circ.repeat(self.n_reps).compose(input_circuit, front=True)
-        self.target_state = StateTarget(circuit=circ)
-
+            circ = self._target_op
+        circ.repeat(n_reps).compose(self.circuit, 
+                                    front=True, 
+                                    inplace=True)
+        return StateTarget(circuit=circ)
+        
     @property
     def layout(self):
         raise AttributeError("Input state does not have a layout")
@@ -308,22 +312,6 @@ class InputState(StateTarget):
         raise AttributeError("Input state does not have a target register")
 
     @property
-    def n_reps(self) -> int:
-        return self._n_reps
-
-    @n_reps.setter
-    def n_reps(self, n_reps: int):
-        assert n_reps > 0, "Number of repetitions should be positive"
-        self._n_reps = n_reps
-        if isinstance(self._target_op, Gate):
-            circ = QuantumCircuit(self.tgt_register)
-            circ.append(self._target_op, self.tgt_register)
-        else:
-            circ = self._target_op
-        circ = circ.repeat(n_reps).compose(self.input_circuit, front=True).decompose()
-        self.target_state = StateTarget(circuit=circ)
-
-    @property
     def input_circuit(self) -> QuantumCircuit:
         """
         Get the input state preparation circuit
@@ -331,18 +319,18 @@ class InputState(StateTarget):
         return self.circuit
 
     @property
-    def target_circuit(self) -> QuantumCircuit:
+    def target_circuit(self, n_reps:int = 1) -> QuantumCircuit:
         """
         Get the target circuit for the input state
         """
-        return self.target_state.circuit
+        return self.target_state(n_reps).circuit
 
     @property
-    def target_dm(self) -> DensityMatrix:
+    def target_dm(self, n_reps:int = 1) -> DensityMatrix:
         """
         Get the target density matrix for the input state
         """
-        return self.target_state.dm
+        return self.target_state(n_reps).dm
 
 
 class GateTarget(BaseTarget):
@@ -354,7 +342,6 @@ class GateTarget(BaseTarget):
         self,
         gate: Gate | str,
         physical_qubits: Optional[List[int]] = None,
-        n_reps: int = 1,
         circuit_context: Optional[QuantumCircuit] = None,
         tgt_register: Optional[QuantumRegister] = None,
         layout: Optional[Layout] = None,
@@ -364,7 +351,6 @@ class GateTarget(BaseTarget):
         Initialize the gate target for the quantum environment
         :param gate: Gate to be calibrated
         :param physical_qubits: Physical qubits forming the target gate
-        :param n_reps: Number of repetitions of the target gate / circuit
         :param circuit_context: circuit to be used for context-aware calibration (default is the gate to be calibrated)
         :param tgt_register: Specify target QuantumRegister if already declared
         :param layout: Specify layout if already declared
@@ -373,7 +359,6 @@ class GateTarget(BaseTarget):
         """
         gate = get_gate(gate)
         self.gate = gate
-        self._n_reps = n_reps
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits,
             "gate",
@@ -437,14 +422,21 @@ class GateTarget(BaseTarget):
                 input_circuit=circ,
                 target_op=self.causal_cone_circuit,
                 tgt_register=self.tgt_register,
-                n_reps=n_reps,
             )
             for circ in input_circuits
         ]
-        if n_qubits <= 3:
-            self.Chi = _calculate_chi_target(self.target_operator.power(n_reps))
+    
+    def Chi(self, n_reps: int = 1):
+        """
+        Compute the characteristic function of the target gate
+        :param n_reps: Number of repetitions of the target gate (default is 1)
+        """
+        if self.causal_cone_size <= 3:
+            return _calculate_chi_target(self.target_operator.power(n_reps,
+                                                                    assume_unitary=True))
         else:
-            self.Chi = None
+            warnings.warn("Chi is not computed for more than 3 qubits")
+            return None
 
     def gate_fidelity(
         self,
@@ -546,18 +538,9 @@ class GateTarget(BaseTarget):
         """
         self._circuit_context = target_op
         self.input_states = [
-            InputState(input_state.circuit, target_op, self.tgt_register, self.n_reps)
+            InputState(input_state.circuit, target_op, self.tgt_register)
             for input_state in self.input_states
         ]
-        if target_op.num_qubits <= 3:
-            self.Chi = np.round(
-                _calculate_chi_target(
-                    Operator(self._circuit_context).power(self.n_reps)
-                ),
-                5,
-            )
-        else:
-            self.Chi = None
 
     @property
     def has_context(self):
@@ -568,18 +551,6 @@ class GateTarget(BaseTarget):
         gate_qc.append(self.gate, list(range(self.gate.num_qubits)))
 
         return Operator(self._circuit_context) != Operator(gate_qc)
-
-    @property
-    def n_reps(self) -> int:
-        return self._n_reps
-
-    @n_reps.setter
-    def n_reps(self, n_reps: int):
-        assert n_reps > 0, "Number of repetitions should be positive"
-        self._n_reps = n_reps
-        self.Chi = _calculate_chi_target(Operator(self._circuit_context).power(n_reps))
-        for input_state in self.input_states:
-            input_state.n_reps = n_reps
 
     @property
     def causal_cone_qubits(self):

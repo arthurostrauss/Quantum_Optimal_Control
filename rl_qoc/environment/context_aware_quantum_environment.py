@@ -260,19 +260,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     self.custom_instructions.append(op)
                     operations_mapping[op.name] = op
 
-        target = [
-            [
-                GateTarget(
+        target = [GateTarget(
                     self.config.target.gate,
                     self.physical_target_qubits,
-                    n_reps,
                     baseline_circuit,
                     self.circ_tgt_register,
                     layout,
                     input_states_choice=input_states_choice,
-                )
-                for n_reps in self.config.n_reps
-            ]
+                ) 
             for baseline_circuit, layout in zip(baseline_circuits, layouts)
         ]
         return target, custom_circuits, baseline_circuits
@@ -479,10 +474,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         Return current target to be calibrated
         """
-        return self._target[self.trunc_index][self.config.execution_config.n_reps_index]
+        return self._target[self.trunc_index]
 
     def get_target(
-        self, trunc_index: Optional[int] = None, n_reps: Optional[int] = None
+        self, trunc_index: Optional[int] = None
     ):
         """
         Return target to be calibrated at given truncation index.
@@ -490,29 +485,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         Args:
             trunc_index: Index of truncation to return target for.
-            n_reps: Number of repetitions to return target for.
         """
-        if trunc_index is None and n_reps is None:
+        if trunc_index is None:
             return self._target
-        if trunc_index is not None:
-            if n_reps is not None:
-                for target in self._target[trunc_index]:
-                    if target.n_reps == n_reps:
-                        return target
-
-                ref_target = self._target[trunc_index][0]
-                return GateTarget(
-                    ref_target.gate,
-                    ref_target.physical_qubits,
-                    n_reps,
-                    ref_target.target_circuit,
-                    ref_target.tgt_register,
-                    ref_target.layout,
-                    ref_target.input_states_choice,
-                )
-
-            else:
-                return self._target[trunc_index]
+        else:
+            return self._target[trunc_index]
 
     @property
     def trunc_index(self) -> int:

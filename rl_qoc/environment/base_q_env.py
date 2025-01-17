@@ -145,7 +145,7 @@ class BaseQuantumEnvironment(ABC, Env):
     def define_target_and_circuits(
         self,
     ) -> tuple[
-        GateTarget | StateTarget | List[List[GateTarget | StateTarget]],
+        GateTarget | StateTarget | List[GateTarget],
         List[QuantumCircuit],
         List[QuantumCircuit],
     ]:
