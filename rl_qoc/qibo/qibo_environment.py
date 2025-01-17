@@ -70,7 +70,7 @@ class QiboEnvironment(QuantumEnvironment):
                     rho_real = tomography_output.results.measured_density_matrix_real[target]
                     rho_imaginary = tomography_output.results.measured_density_matrix_imag[target]
                     rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
-                    dm = DensityMatrix(rho, validate = False)
+                    dm = DensityMatrix(rho)
                     fidelity = self.target.fidelity(dm)
 
                 report(e.path, e.history)

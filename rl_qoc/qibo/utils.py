@@ -61,7 +61,7 @@ def new_rx_rule(
     sequence = PulseSequence()
     # print("SSSSSSSSSSSSSSS", pulse_params)
     pulse = platform.create_RX90_pulse(qubit, start=0, relative_phase=theta)
-    pulse.amplitude = pulse_params[0][0]
+    pulse.amplitude = float(pulse_params[0])
     sequence.add(pulse)
     virtual_z_phases = {}
     return sequence, virtual_z_phases
@@ -116,8 +116,8 @@ def execute_action(
     # Change CZ pulse parameters
     compiler = backend.compiler
     if pulse_params:
-        rule = lambda gate, platform: gate_rule[1](
-            gate, platform, pulse_params, hardware_targets
+        rule = lambda qubits_ids, platform, gate_params: gate_rule[1](
+            qubits_ids, platform, gate_params, pulse_params
         )
         compiler.register(gate_rule[0])(rule)
     _, results = execute_transpiled_circuits(
