@@ -104,7 +104,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         input_states_choice = getattr(
             self.config.reward_config.reward_args, "input_states_choice", "pauli4"
         )
-        q_reg = QuantumRegister(self.config.target.gate.num_qubits)
+        q_reg = QuantumRegister(self.config.target.state.num_qubits)
         if isinstance(self.config.target, GateTargetConfig):
             target = GateTarget(
                     **self.config.target.as_dict(),

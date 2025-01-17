@@ -104,4 +104,4 @@ train_function_settings = TrainFunctionSettings(
 )
 # %%
 # ppo.train(training_config, train_function_settings)
-env.step(np.expand_dims(np.array([0.3333, 40]), axis = 0))
+env.step(np.expand_dims(np.array([0.3333]), axis = 0))

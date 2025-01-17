@@ -68,7 +68,7 @@ class QiboEnvironment(QuantumEnvironment):
                             circuit = qibo_circ,
                     )
                     rho_real = tomography_output.results.measured_density_matrix_real[target]
-                    rho_imaginary = tomography_output.results.target_density_matrix_imag[target]
+                    rho_imaginary = tomography_output.results.measured_density_matrix_imag[target]
                     rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
                     dm = DensityMatrix(rho, validate = False)
                     fidelity = self.target.fidelity(dm)
@@ -88,19 +88,11 @@ def from_custom_to_baseline_circuit(circ: QuantumCircuit):
     """
     dag = circuit_to_dag(circ)
     op_nodes = dag.op_nodes()
-    gate_dic = gate_map()
     for node in op_nodes:
-<<<<<<< HEAD
-        if node.name not in gate_dic:
-            gate_name: str = node.name.split("_")[0]
-            try:
-                gate = gate_dic[gate_name.lower()]
-=======
         if node.name not in gate_map():
             gate_name: str = node.name.split("_")[0]
             try:
                 gate = gate_map()[gate_name.lower()]
->>>>>>> main
             except KeyError:
                 raise QiskitError(
                     f"Cannot bind the circuit to the backend because the gate "
