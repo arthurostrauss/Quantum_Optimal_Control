@@ -69,7 +69,8 @@ _qiskit_to_qua_instructions: Dict[Type, Dict[str, Union[Callable, List[str]]]] =
 
 def get_real_time_pulse_parameters(pulse: QiskitPulse):
     """
-    Get the real-time parameters of a Qiskit Pulse
+    Get the real-time parameters of a Qiskit Pulse, that is parameters of the pulse that are
+    not known at compile time and need to be calculated at runtime (i.e. ParameterExpressions)
     """
     real_time_params = {}
     for param in _real_time_parameters:

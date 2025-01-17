@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from ..environment.qconfig import BackendConfig
+from ..environment.configuration.backend_config import BackendConfig
 from .qua_backend import QMBackend
 from typing import Any
 

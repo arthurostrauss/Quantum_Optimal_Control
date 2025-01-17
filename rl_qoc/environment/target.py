@@ -7,6 +7,7 @@ Author: Arthur Strauss
 Created: 08/11/2024
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from qiskit.quantum_info import (
@@ -21,7 +22,6 @@ from qiskit.quantum_info import (
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import Layout
-from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 import numpy as np
 from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruction
 from itertools import product
@@ -30,7 +30,11 @@ from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
 )
-from ..helpers import density_matrix_to_statevector, causal_cone_circuit, get_gate
+from ..helpers.circuit_utils import (
+    density_matrix_to_statevector,
+    get_gate,
+    causal_cone_circuit,
+)
 import warnings
 
 
@@ -242,7 +246,7 @@ class StateTarget(BaseTarget):
             self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
         )
 
-    def fidelity(self, state: QuantumState | QuantumCircuit, n_reps: int = 1):
+    def fidelity(self, state: QuantumState | QuantumCircuit, n_reps: int = 1, validate=True):
         """
         Compute the fidelity of the state with the target
         :param state: State to compare with the target state
@@ -255,7 +259,7 @@ class StateTarget(BaseTarget):
                 raise ValueError("Input could not be converted to state") from e
         if not isinstance(state, (Statevector, DensityMatrix)):
             raise ValueError("Input should be a Statevector or DensityMatrix object")
-        return state_fidelity(state, self.dm)
+        return state_fidelity(state, self.dm, validate=validate)
 
     def __repr__(self):
         return f"StateTarget({self.dm} on qubits {self.physical_qubits})"
@@ -271,32 +275,30 @@ class InputState(StateTarget):
         input_circuit: QuantumCircuit,
         target_op: Gate | QuantumCircuit,
         tgt_register: QuantumRegister,
-        n_reps: int = 1,
     ):
         """
         Initialize the input state for the quantum environment
         :param input_circuit: Quantum circuit representing the input state
         :param target_op: Gate to be calibrated (or circuit context)
         :param tgt_register: Quantum register for the target gate
-        :param n_reps: Number of repetitions of the target gate
         """
-        self._n_reps = n_reps
-        self._target_op = target_op
-        if isinstance(target_op, Gate):
-            circ = QuantumCircuit(tgt_register)
-            circ.append(target_op, tgt_register)
-        else:
-            circ = target_op.copy("target")
-
-        circ.compose(input_circuit, inplace=True, front=True)
         super().__init__(circuit=input_circuit)
-        for _ in range(self.n_reps - 1):
-            if isinstance(target_op, Gate):
-                circ.append(target_op, tgt_register)
-            else:
-                circ.compose(target_op, inplace=True)
-        self.target_state = StateTarget(circuit=circ)
-
+        self._target_op = target_op
+    
+    def target_state(self, n_reps: int = 1):
+        """
+        Get the target state
+        """
+        if isinstance(self._target_op, Gate):
+            circ = QuantumCircuit(self.tgt_register)
+            circ.append(self._target_op, self.tgt_register)
+        else:
+            circ = self._target_op
+        circ.repeat(n_reps).compose(self.circuit, 
+                                    front=True, 
+                                    inplace=True)
+        return StateTarget(circuit=circ)
+        
     @property
     def layout(self):
         raise AttributeError("Input state does not have a layout")
@@ -310,28 +312,6 @@ class InputState(StateTarget):
         raise AttributeError("Input state does not have a target register")
 
     @property
-    def n_reps(self) -> int:
-        return self._n_reps
-
-    @n_reps.setter
-    def n_reps(self, n_reps: int):
-        assert n_reps > 0, "Number of repetitions should be positive"
-        self._n_reps = n_reps
-        if isinstance(self._target_op, Gate):
-            circ = QuantumCircuit(self.tgt_register)
-            circ.append(self._target_op, self.tgt_register)
-        else:
-            circ = self._target_op.copy("target")
-
-        circ.compose(self.input_circuit, inplace=True, front=True)
-        for _ in range(self.n_reps - 1):
-            if isinstance(self._target_op, Gate):
-                circ.append(self._target_op, self.tgt_register)
-            else:
-                circ.compose(self._target_op, inplace=True)
-        self.target_state = StateTarget(circuit=circ)
-
-    @property
     def input_circuit(self) -> QuantumCircuit:
         """
         Get the input state preparation circuit
@@ -339,18 +319,18 @@ class InputState(StateTarget):
         return self.circuit
 
     @property
-    def target_circuit(self) -> QuantumCircuit:
+    def target_circuit(self, n_reps:int = 1) -> QuantumCircuit:
         """
         Get the target circuit for the input state
         """
-        return self.target_state.circuit
+        return self.target_state(n_reps).circuit
 
     @property
-    def target_dm(self) -> DensityMatrix:
+    def target_dm(self, n_reps:int = 1) -> DensityMatrix:
         """
         Get the target density matrix for the input state
         """
-        return self.target_state.dm
+        return self.target_state(n_reps).dm
 
 
 class GateTarget(BaseTarget):
@@ -362,7 +342,6 @@ class GateTarget(BaseTarget):
         self,
         gate: Gate | str,
         physical_qubits: Optional[List[int]] = None,
-        n_reps: int = 1,
         circuit_context: Optional[QuantumCircuit] = None,
         tgt_register: Optional[QuantumRegister] = None,
         layout: Optional[Layout] = None,
@@ -372,7 +351,6 @@ class GateTarget(BaseTarget):
         Initialize the gate target for the quantum environment
         :param gate: Gate to be calibrated
         :param physical_qubits: Physical qubits forming the target gate
-        :param n_reps: Number of repetitions of the target gate / circuit
         :param circuit_context: circuit to be used for context-aware calibration (default is the gate to be calibrated)
         :param tgt_register: Specify target QuantumRegister if already declared
         :param layout: Specify layout if already declared
@@ -381,7 +359,6 @@ class GateTarget(BaseTarget):
         """
         gate = get_gate(gate)
         self.gate = gate
-        self._n_reps = n_reps
         super().__init__(
             gate.num_qubits if physical_qubits is None else physical_qubits,
             "gate",
@@ -429,7 +406,6 @@ class GateTarget(BaseTarget):
                 for s in product(range(6), repeat=n_qubits)
             ]
         elif input_states_choice == "2-design":  # 2-design
-            # TODO: Update this part with Lukas latest code
             d = 2**n_qubits
             states = get_2design_input_states(d)
             input_circuits = [QuantumCircuit(n_qubits) for _ in range(len(states))]
@@ -439,20 +415,28 @@ class GateTarget(BaseTarget):
             raise ValueError(
                 f"Input states choice {input_states_choice} not recognized. Should be 'pauli4', 'pauli6' or '2-design'"
             )
+        self._input_states_choice = input_states_choice
 
         self.input_states = [
             InputState(
                 input_circuit=circ,
                 target_op=self.causal_cone_circuit,
                 tgt_register=self.tgt_register,
-                n_reps=n_reps,
             )
             for circ in input_circuits
         ]
-        if n_qubits <= 3:
-            self.Chi = _calculate_chi_target(self.target_operator.power(n_reps))
+    
+    def Chi(self, n_reps: int = 1):
+        """
+        Compute the characteristic function of the target gate
+        :param n_reps: Number of repetitions of the target gate (default is 1)
+        """
+        if self.causal_cone_size <= 3:
+            return _calculate_chi_target(self.target_operator.power(n_reps,
+                                                                    assume_unitary=True))
         else:
-            self.Chi = None
+            warnings.warn("Chi is not computed for more than 3 qubits")
+            return None
 
     def gate_fidelity(
         self,
@@ -554,18 +538,9 @@ class GateTarget(BaseTarget):
         """
         self._circuit_context = target_op
         self.input_states = [
-            InputState(input_state.circuit, target_op, self.tgt_register, self.n_reps)
+            InputState(input_state.circuit, target_op, self.tgt_register)
             for input_state in self.input_states
         ]
-        if target_op.num_qubits <= 3:
-            self.Chi = np.round(
-                _calculate_chi_target(
-                    Operator(self._circuit_context).power(self.n_reps)
-                ),
-                5,
-            )
-        else:
-            self.Chi = None
 
     @property
     def has_context(self):
@@ -576,18 +551,6 @@ class GateTarget(BaseTarget):
         gate_qc.append(self.gate, list(range(self.gate.num_qubits)))
 
         return Operator(self._circuit_context) != Operator(gate_qc)
-
-    @property
-    def n_reps(self) -> int:
-        return self._n_reps
-
-    @n_reps.setter
-    def n_reps(self, n_reps: int):
-        assert n_reps > 0, "Number of repetitions should be positive"
-        self._n_reps = n_reps
-        self.Chi = _calculate_chi_target(Operator(self._circuit_context).power(n_reps))
-        for input_state in self.input_states:
-            input_state.n_reps = n_reps
 
     @property
     def causal_cone_qubits(self):
@@ -617,6 +580,13 @@ class GateTarget(BaseTarget):
         Get the size of the causal cone of the target gate
         """
         return self._causal_cone_size
+
+    @property
+    def input_states_choice(self):
+        """
+        Get the choice of input states for the calibration
+        """
+        return self._input_states_choice
 
     def __repr__(self):
         return (

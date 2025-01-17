@@ -90,10 +90,17 @@ def from_custom_to_baseline_circuit(circ: QuantumCircuit):
     op_nodes = dag.op_nodes()
     gate_dic = gate_map()
     for node in op_nodes:
+<<<<<<< HEAD
         if node.name not in gate_dic:
             gate_name: str = node.name.split("_")[0]
             try:
                 gate = gate_dic[gate_name.lower()]
+=======
+        if node.name not in gate_map():
+            gate_name: str = node.name.split("_")[0]
+            try:
+                gate = gate_map()[gate_name.lower()]
+>>>>>>> main
             except KeyError:
                 raise QiskitError(
                     f"Cannot bind the circuit to the backend because the gate "

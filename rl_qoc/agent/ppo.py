@@ -150,6 +150,9 @@ class CustomPPO:
         """
         return action, logprob
 
+    def process_std(self, std_action):
+        return std_action
+
     def train(
         self,
         training_config: Optional[TrainingConfig] = None,
@@ -251,6 +254,7 @@ class CustomPPO:
 
                     with torch.no_grad():
                         mean_action, std_action, critic_value = agent(batch_obs)
+                        std_action = self.process_std(std_action)
                         probs = Normal(mean_action, std_action)
                         action, logprob = self.process_action(
                             mean_action, std_action, probs
@@ -439,10 +443,15 @@ class CustomPPO:
                     training_results[f"mean_action_{i}"] = mean_action[0][i]
                     training_results[f"std_action_{i}"] = std_action[0][i]
 
-                for key, value in training_results.items():
-                    self._training_results[key].append(value)
                 if self.agent_config.wandb_config.enabled and self.save_data:
                     write_to_wandb(summary, training_results)
+                for key, value in training_results.items():
+                    self._training_results[key].append(value)
+                self._training_results["mean_action"] = mean_action[0].cpu().numpy()
+                self._training_results["std_action"] = std_action[0].cpu().numpy()
+                self._training_results["clipped_mean_action"] = env.action(
+                    mean_action[0]
+                )
                 iteration += 1
 
                 if check_convergence_std_actions(std_action, self.std_actions_eps):
