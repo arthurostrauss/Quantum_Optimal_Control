@@ -2,6 +2,7 @@
 This file contains the functions to generate a generic spillover noise model for a given quantum circuit.
 The example circuit is drawn from a typical layer of single and two qubit gates in variational circuit.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Literal, List, Dict
@@ -29,7 +30,7 @@ def numpy_to_hashable(matrix):
 def validate_args(
     num_qubits: int,
     rotation_axes: List[Literal["rx", "ry", "rz"]],
-    rotation_angles: List[float]|np.ndarray,
+    rotation_angles: List[float] | np.ndarray,
     coupling_map: Optional[CouplingMap] = None,
 ):
     """

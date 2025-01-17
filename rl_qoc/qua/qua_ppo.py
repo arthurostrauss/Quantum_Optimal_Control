@@ -29,6 +29,7 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
+
 class CustomQMPPO(CustomPPO):
     def __init__(
         self,
@@ -43,11 +44,11 @@ class CustomQMPPO(CustomPPO):
         :param env: Quantum Environment on which the algorithm is trained
         :param chkpt_dir: Directory where the policy network is saved
         :param chkpt_dir_critic: Directory where the critic network is saved
-        
+
         """
-        
+
         super().__init__(agent_config, env, chkpt_dir, chkpt_dir_critic)
-        
+
     def process_action(self, mean_action, std_action, probs):
         """
         Process the action to be taken by the agent
@@ -56,11 +57,13 @@ class CustomQMPPO(CustomPPO):
         :param probs: Probabilities of the action distribution
         :return: The action to be taken by the agent
         """
-        
+
         action = torch.normal(mean_action, std_action)
-        action = torch.clamp(action, self.env.action_space.low[0], self.env.action_space.high[0])
+        action = torch.clamp(
+            action, self.env.action_space.low[0], self.env.action_space.high[0]
+        )
         return action
-    
+
     def post_process_action(
         self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor
     ):
@@ -71,5 +74,5 @@ class CustomQMPPO(CustomPPO):
         :param logprob: Log probabilities of the action distribution
         :return: The action to be taken by the agent
         """
-        
+
         return action, logprob

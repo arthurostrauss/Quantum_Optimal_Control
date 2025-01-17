@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Union
-from qiskit import transpile, QiskitError
+from qiskit import QiskitError
 from qiskit.circuit import QuantumCircuit
-from qiskit.transpiler import PassManager, InstructionDurations, Layout, CouplingMap, generate_preset_pass_manager
+from qiskit.circuit.controlflow import CONTROL_FLOW_OP_NAMES
+from qiskit.transpiler import (
+    PassManager,
+    InstructionDurations,
+    Layout,
+    CouplingMap,
+    generate_preset_pass_manager,
+)
 from qiskit.providers import BackendV2
-from qibo.transpiler import Passes
 
 
 class BackendInfo(ABC):
@@ -26,22 +32,24 @@ class BackendInfo(ABC):
         self._backend = None
 
     @abstractmethod
-    def custom_transpile(self, qc_input, *args, **kwargs) -> QuantumCircuit|List[QuantumCircuit]:
+    def custom_transpile(
+        self, qc_input, *args, **kwargs
+    ) -> QuantumCircuit | List[QuantumCircuit]:
         pass
 
     @property
     @abstractmethod
-    def coupling_map(self)->CouplingMap|List[Tuple[int, int]]:
+    def coupling_map(self) -> CouplingMap | List[Tuple[int, int]]:
         pass
 
     @property
     @abstractmethod
-    def basis_gates(self)->List[str]:
+    def basis_gates(self) -> List[str]:
         pass
 
     @property
     @abstractmethod
-    def dt(self)->float:
+    def dt(self) -> float:
         pass
 
     @property
@@ -65,7 +73,7 @@ class BackendInfo(ABC):
     @property
     def skip_transpilation(self):
         return self._skip_transpilation
-    
+
     @property
     def backend(self):
         return self._backend
@@ -130,10 +138,18 @@ class QiskitBackendInfo(BackendInfo):
             if self._pass_manager is None:
                 self._pass_manager = generate_preset_pass_manager(
                     optimization_level=optimization_level,
-                    backend=self.backend if isinstance(self.backend, BackendV2) else None,
-                    target=self.backend.target if isinstance(self.backend, BackendV2) else None,
+                    backend=(
+                        self.backend if isinstance(self.backend, BackendV2) else None
+                    ),
+                    target=(
+                        self.backend.target
+                        if isinstance(self.backend, BackendV2)
+                        else None
+                    ),
                     basis_gates=self.basis_gates,
-                    coupling_map=self.coupling_map if self.coupling_map.size() != 0 else None,
+                    coupling_map=(
+                        self.coupling_map if self.coupling_map.size() != 0 else None
+                    ),
                     instruction_durations=self.instruction_durations,
                     initial_layout=initial_layout,
                     dt=self.dt,
@@ -142,9 +158,9 @@ class QiskitBackendInfo(BackendInfo):
                         if self.instruction_durations is not None and scheduling
                         else None
                     ),
-                    translation_method='translator'
+                    translation_method="translator",
                 )
-            
+
             circuit = self.pass_manager.run(circuit)
         return circuit
 
@@ -189,60 +205,15 @@ class QiskitBackendInfo(BackendInfo):
             else self._instruction_durations
         )
 
-
-class QiboBackendInfo(BackendInfo):
-    """
-    Class to store information on Qibo backend (can also generate some dummy information for the case of no backend)
-    """
-
-    def __init__(
-        self,
-        n_qubits: int = 0,
-        coupling_map: Optional[List[Tuple[int, int]]] = None,
-        pass_manager: Optional[Passes] = None,
-    ):
+    @property
+    def control_flow(self) -> bool:
         """
-        Initialize the backend information
-        :param n_qubits: Number of qubits for the quantum environment
-        :param coupling_map: Coupling map for the quantum environment
-
+        Assess if the backend supports real-time control flow
         """
-        super().__init__(n_qubits, pass_manager)
-        self._coupling_map = coupling_map
-
-    @property
-    def basis_gates(self):
-        return ["rx", "cz", "measure", "rz", "x", "sx"]
-
-    @property
-    def dt(self):
-        return 1e-9
-
-    @property
-    def instruction_durations(self):
-        return None
-
-    @property
-    def coupling_map(self):
-        return (
-            CouplingMap(self._coupling_map)
-            if self._coupling_map is not None
-            else CouplingMap.from_full(self._n_qubits)
-        )
-
-    def custom_transpile(
-        self, qc_input: Union[QuantumCircuit, List[QuantumCircuit]], *args, **kwargs
-    ):
-
-        return (
-            qc_input.decompose()
-            if isinstance(qc_input, QuantumCircuit)
-            else [circ.decompose() for circ in qc_input]
-        )
-    
-    def asdict(self):
-        return {
-            "n_qubits": self._n_qubits,
-            "coupling_map": self._coupling_map,
-            "pass_manager": self._pass_manager,
-        }
+        if isinstance(self.backend, BackendV2):
+            if any(
+                operation_name in CONTROL_FLOW_OP_NAMES
+                for operation_name in self.backend.operation_names
+            ):
+                return True
+        return False

@@ -7,9 +7,16 @@ from typing import Iterable, List, Sequence, Dict, Optional, Callable, Union, Tu
 from quam.components import Channel as QuAMChannel, Qubit, QubitPair
 from quam.components import BasicQuAM as QuAM
 
-from qiskit.circuit import QuantumCircuit, SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp
+from qiskit.circuit import (
+    QuantumCircuit,
+    SwitchCaseOp,
+    ForLoopOp,
+    IfElseOp,
+    WhileLoopOp,
+)
 from qiskit.circuit.library.standard_gates import (
-    get_standard_gate_name_mapping as gate_map, get_standard_gate_name_mapping,
+    get_standard_gate_name_mapping as gate_map,
+    get_standard_gate_name_mapping,
 )
 from qiskit.providers import BackendV2 as Backend, QubitProperties
 from qiskit.pulse import (
@@ -67,7 +74,9 @@ class QMProvider:
         super().__init__(self)
         self.qmm = qmm
 
-    def get_backend(self, machine: QuAM, channel_mapping:Optional[Dict[QiskitChannel, QuAMChannel]]):
+    def get_backend(
+        self, machine: QuAM, channel_mapping: Optional[Dict[QiskitChannel, QuAMChannel]]
+    ):
         return QMBackend(machine, channel_mapping)
 
     def backends(self, name=None, filters=None, **kwargs):
@@ -88,10 +97,10 @@ def validate_machine(machine) -> QuAM:
     if not all(isinstance(qubit, Qubit) for qubit in machine.qubits.values()):
         raise ValueError("All qubits should be of type Qubit")
     if not all(
-            isinstance(qubit_pair, QubitPair) for qubit_pair in machine.qubit_pairs.values()
+        isinstance(qubit_pair, QubitPair) for qubit_pair in machine.qubit_pairs.values()
     ):
         raise ValueError("All qubit pairs should be of type QubitPair")
-    
+
     return machine
 
 
@@ -101,9 +110,8 @@ def look_for_standard_op(op: str):
         return "cz"
     elif op == "cnot":
         return "cx"
-    
-    return op   
-    
+
+    return op
 
 
 class QMBackend(Backend):
@@ -120,23 +128,24 @@ class QMBackend(Backend):
                              This mapping enables the conversion of Qiskit schedules into parametric QUA macros.
 
         """
-        
+
         Backend.__init__(self, name="QM backend")
-        
+
         self.machine = validate_machine(machine)
         self.channel_mapping: Dict[QiskitChannel, QuAMChannel] = channel_mapping
         self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = {
             v: k for k, v in channel_mapping.items()
         }
-        self._qubit_dict = {qubit.name: i for i, qubit in enumerate(machine.active_qubits)}
+        self._qubit_dict = {
+            qubit.name: i for i, qubit in enumerate(machine.active_qubits)
+        }
         self._target, self._operation_mapping_QUA = self._populate_target(machine)
         self._oq3_basis_gates = list(self.target.operation_names)
-        
 
     @property
     def target(self):
         return self._target
-    
+
     @property
     def qubit_dict(self):
         """
@@ -150,7 +159,10 @@ class QMBackend(Backend):
         Build the qubit to quantum elements mapping for the backend.
         Should be of the form {qubit_index: (quantum_element1, quantum_element2, ...)}
         """
-        return {i: (channel.name for channel in qubit.channels) for i, qubit in enumerate(self.machine)}
+        return {
+            i: (channel.name for channel in qubit.channels)
+            for i, qubit in enumerate(self.machine)
+        }
 
     @property
     def max_circuits(self):
@@ -160,7 +172,9 @@ class QMBackend(Backend):
     def _default_options(cls):
         pass
 
-    def _populate_target(self, machine: QuAM) -> Tuple[Target, Dict[OperationIdentifier, Callable]]:
+    def _populate_target(
+        self, machine: QuAM
+    ) -> Tuple[Target, Dict[OperationIdentifier, Callable]]:
         """
         Populate the target instructions with the QOP configuration
         """
@@ -179,18 +193,20 @@ class QMBackend(Backend):
 
         operations_dict = {}
         operations_qua_dict = {}
-        
+
         # Add single qubit instructions
         for q, qubit in enumerate(machine.active_qubits):
             for op, func in qubit.macros.items():
                 op_ = look_for_standard_op(op)
-            
+
                 if op_ in gate_map:
                     gate_op = gate_map[op_]
                     num_params = len(gate_op.params)
-                    
+
                     operations_dict.setdefault(op_, {})[(q,)] = None
-                    operations_qua_dict[OperationIdentifier(op_, num_params, (q,))] =  func.apply
+                    operations_qua_dict[OperationIdentifier(op_, num_params, (q,))] = (
+                        func.apply
+                    )
         for qubit_pair in machine.active_qubit_pairs:
             q_ctrl = self.qubit_dict[qubit_pair.qubit_control.name]
             q_tgt = self.qubit_dict[qubit_pair.qubit_target.name]
@@ -199,16 +215,20 @@ class QMBackend(Backend):
                 if op_ in gate_map:
                     gate_op = gate_map[op_]
                     num_params = len(gate_op.params)
-                    operations_dict.setdefault(op_, {})[(q_ctrl, q_tgt)] = None 
-                    operations_qua_dict[OperationIdentifier(op_, num_params, (q_ctrl, q_tgt))] = func.apply
-                        
+                    operations_dict.setdefault(op_, {})[(q_ctrl, q_tgt)] = None
+                    operations_qua_dict[
+                        OperationIdentifier(op_, num_params, (q_ctrl, q_tgt))
+                    ] = func.apply
+
         for op, properties in operations_dict.items():
             target.add_instruction(gate_map[op], properties=properties)
-        
-        for control_flow_op, control_op_name in zip([SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp],
-                                                    ["switch_case", "for_loop", "if_else", "while_loop"]):                                        
+
+        for control_flow_op, control_op_name in zip(
+            [SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp],
+            ["switch_case", "for_loop", "if_else", "while_loop"],
+        ):
             target.add_instruction(control_flow_op, name=control_op_name)
-            
+
         return target, operations_qua_dict
 
     def get_quam_channel(self, channel: QiskitChannel):
@@ -609,7 +629,7 @@ class FluxTunableTransmonBackend(QMBackend):
     #     """
     #     Populate the target instructions with the QOP configuration (currently hardcoded for
     #     Transmon based QuAM architecture)
-    # 
+    #
     #     """
     #     gates = gate_map()
     #     target = Target(
@@ -633,7 +653,7 @@ class FluxTunableTransmonBackend(QMBackend):
     #             qubit_dict[qubit_pair.qubit_control.name],
     #             qubit_dict[qubit_pair.qubit_target.name],
     #         )
-    # 
+    #
     #     target.add_instruction(
     #         gates["x"], properties={(i,): None for i in range(len(machine.qubits))}
     #     )
@@ -644,12 +664,12 @@ class FluxTunableTransmonBackend(QMBackend):
     #         gates["cz"], properties={(i, j): None for i, j in coupling_map.get_edges()}
     #     )
     #     # TODO: Add the rest of the channels for QubitPairs (ControlChannels)
-    # 
+    #
     #     # TODO: Update the instructions both in Qiskit and in the OQC operations mapping
     #     # TODO: Figure out if pulse calibrations should be added to Target
-    # 
+    #
     #     self._coupling_map = target.build_coupling_map()
-    # 
+    #
     #     return target, ()
 
 

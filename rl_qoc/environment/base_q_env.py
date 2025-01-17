@@ -10,23 +10,18 @@ Last updated: 03/11/2024
 from __future__ import annotations
 
 import time
-from abc import ABC, abstractmethod
 
 # For compatibility for options formatting between Estimators.
 import json
 import signal
-from dataclasses import asdict
-from typing import Optional, List, Callable, Any, Tuple
+from typing import Callable, Any
 
 from gymnasium import Env
-import numpy as np
 from gymnasium.core import ObsType
-from gymnasium.spaces import Box
-from qiskit import transpile, QiskitError
+from qiskit import transpile
 
 # Qiskit imports
 from qiskit.circuit import (
-    QuantumCircuit,
     ParameterVector,
     Parameter,
 )
@@ -36,57 +31,36 @@ from qiskit.primitives import (
     BaseEstimatorV2,
     BaseSamplerV2,
 )
-from qiskit.primitives.containers.estimator_pub import EstimatorPub
-from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 from qiskit.quantum_info import partial_trace
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info.states import DensityMatrix, Statevector
-from qiskit.quantum_info.operators import (
-    SparsePauliOp,
-    Operator,
-    pauli_basis,
-    PauliList,
-    Clifford,
-)
-from qiskit.quantum_info.random import random_clifford
 
 from qiskit.transpiler import (
     Layout,
     PassManager,
 )
 from qiskit.providers import BackendV2
-from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
-from qiskit_experiments.library import InterleavedRB
 
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
-from qiskit_experiments.library.tomography.basis import (
-    Pauli6PreparationBasis,
-)
 from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
 )
 
-from .backend_info import QiskitBackendInfo, QiboBackendInfo, BackendInfo
-from .target import GateTarget, StateTarget
-from .calibration_pubs import CalibrationEstimatorPub, CalibrationSamplerPub
+from .backend_info import QiskitBackendInfo
 from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
 from ..helpers.helper_functions import (
     retrieve_primitives,
     handle_session,
-    retrieve_neighbor_qubits,
-    substitute_target_gate,
     get_hardware_runtime_single_circuit,
     has_noise_model,
-    precision_to_shots,
-    shots_to_precision,
-    causal_cone_circuit
 )
+from ..helpers.circuit_utils import substitute_target_gate, retrieve_neighbor_qubits
 from ..helpers.pulse_utils import (
     handle_virtual_rotations,
     projected_state,
@@ -94,14 +68,10 @@ from ..helpers.pulse_utils import (
     rotate_frame,
 )
 from .reward_methods import *
-from .qconfig import (
+from rl_qoc.environment.configuration.qconfig import (
     QEnvConfig,
-    CAFERewardConfig,
-    ChannelRewardConfig,
-    ORBITRewardConfig,
-    XEBRewardConfig,
-    StateRewardConfig,
 )
+
 
 class BaseQuantumEnvironment(ABC, Env):
 
@@ -112,20 +82,6 @@ class BaseQuantumEnvironment(ABC, Env):
             training_config: QEnvConfig object containing the training configuration
         """
         self._training_config = training_config
-        self._reward_methods = {
-            "channel": self.channel_reward_pubs,
-            "state": self.state_reward_pubs,
-            "cafe": self.cafe_reward_pubs,
-            "xeb": self.xeb_reward_pubs,
-            "orbit": self.orbit_reward_pubs,
-            "fidelity": self.compute_benchmarks,
-        }
-        if self.config.reward_method not in self._reward_methods:
-            raise ValueError(
-                f"Reward method {self.config.reward_method} not implemented. Only "
-                f"{list(self._reward_methods.keys())} are supported."
-            )
-
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
         self.backend = training_config.backend
@@ -137,6 +93,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 skip_transpilation=training_config.backend_config.skip_transpilation,
             )
         elif training_config.backend_config.config_type == "qibo":
+            from ..qibo.qibo_config import QiboBackendInfo
+
             self._backend_info = QiboBackendInfo(
                 training_config.backend_config.n_qubits,
                 training_config.backend_config.coupling_map,
@@ -148,12 +106,12 @@ class BaseQuantumEnvironment(ABC, Env):
         )
 
         self._estimator, self._sampler = retrieve_primitives(
-            self.backend, self.config.backend_config, 
-            training_config.backend_config.as_dict().get("estimator_options", None)
+            self.backend,
+            self.config.backend_config,
+            training_config.backend_config.as_dict().get("primitive_options", None),
         )
 
-        self._target, self.circuits, self.baseline_circuits = None, None, None
-        self._n_reps_index = 0
+        self._target, self.circuits, self.baseline_circuits = [], [], []
 
         self._mean_action = np.zeros(self.action_space.shape[-1])
         self._std_action = np.ones(self.action_space.shape[-1])
@@ -171,7 +129,9 @@ class BaseQuantumEnvironment(ABC, Env):
         self.action_history = []
         self.reward_history = []
         self._pubs, self._ideal_pubs = [], []
-        self._calibration_pubs: List[CalibrationEstimatorPub|CalibrationSamplerPub] = []
+        self._calibration_pubs: List[
+            CalibrationEstimatorPub | CalibrationSamplerPub
+        ] = []
         self._observables, self._pauli_shots = None, None
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -231,8 +191,10 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         qc = self.circuits[self.trunc_index].copy()
         params, batch_size = np.array(actions), actions.shape[0]
-        if batch_size != self.batch_size:
-            raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
+        if len(params.shape) == 1:
+            params = np.expand_dims(params, axis=0)
+        # if batch_size != self.batch_size:
+        #     raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
 
         # Get the reward method from the configuration
         reward_method = self.config.reward_method
@@ -244,7 +206,10 @@ class BaseQuantumEnvironment(ABC, Env):
                 return fids
 
         # Check if the reward method exists in the dictionary
-        self._pubs, total_shots = self._reward_methods[reward_method](qc, params)
+        self._pubs = self.config.reward_config.get_reward_pubs(
+            qc, params, self.target, self.backend_info, self.config.execution_config
+        )
+        total_shots = self.config.reward_config.total_shots
         self._total_shots.append(total_shots)
         if self.backend_info.instruction_durations is not None:
             self._hardware_runtime.append(
@@ -254,8 +219,15 @@ class BaseQuantumEnvironment(ABC, Env):
                 )
                 * total_shots
             )
-            print("Hardware runtime taken:", sum(self.hardware_runtime)/3600, "hours ",
-                  sum(self.hardware_runtime)/60, "min ", sum(self.hardware_runtime)%60, "seconds")
+            print(
+                "Hardware runtime taken:",
+                np.round(sum(self.hardware_runtime) / 3600, 4),
+                "hours ",
+                np.round(sum(self.hardware_runtime) / 60, 4),
+                "min ",
+                np.round(sum(self.hardware_runtime) % 60, 4),
+                "seconds",
+            )
 
         counts = (
             self._session_counts
@@ -263,20 +235,22 @@ class BaseQuantumEnvironment(ABC, Env):
             else self.trunc_index
         )
         self.estimator = handle_session(self.estimator, self.backend, counts)
-        primitive_type = "Estimator" if isinstance(self.estimator, BaseEstimatorV2) else "Sampler"
+        primitive_type = (
+            "Estimator" if isinstance(self.primitive, BaseEstimatorV2) else "Sampler"
+        )
         print(f"Sending {primitive_type} job...")
         start = time.time()
 
         job = self.primitive.run(pubs=self._pubs)
         pub_results = job.result()
-        print("Time for running", time.time() - start)
+        print("Time for running", time.time() - start, "seconds")
 
         if self.config.dfe:
             reward_table = np.sum(
                 [pub_result.data.evs for pub_result in pub_results], axis=0
-            ) / len(self._observables)
+            ) / len(self.config.reward_config.observables)
         else:
-                
+
             if self.config.reward_method == "xeb":
                 # TODO: Implement XEB reward computation using Sampler
                 raise NotImplementedError("XEB reward computation not implemented yet")
@@ -297,13 +271,21 @@ class BaseQuantumEnvironment(ABC, Env):
                 #     )
                 #     for counts in pub_counts
                 # ]
-                pub_data = [[pub_result.data.meas[i].postselect(self.target.causal_cone_qubits_indices,
-                                                                [0]*self.target.causal_cone_size) 
-                             for i in range(self.batch_size)]
-                            for pub_result in pub_results]
-                survival_probability = [[bit_array.num_shots/self.n_shots for bit_array in bit_arrays]
-                                        for bit_arrays in pub_data]
-                
+                pub_data = [
+                    [
+                        pub_result.data.meas[i].postselect(
+                            self.target.causal_cone_qubits_indices,
+                            [0] * self.target.causal_cone_size,
+                        )
+                        for i in range(batch_size)
+                    ]
+                    for pub_result in pub_results
+                ]
+                survival_probability = [
+                    [bit_array.num_shots / self.n_shots for bit_array in bit_arrays]
+                    for bit_arrays in pub_data
+                ]
+
                 reward_table = np.mean(survival_probability, axis=0)
 
         print(f"Finished {primitive_type} job")
@@ -326,454 +308,18 @@ class BaseQuantumEnvironment(ABC, Env):
         super().reset(seed=seed)
         self._episode_tracker += 1
         self._episode_ended = False
-        self._n_reps_index = np.random.randint(0, len(self.config.n_reps))
+        self.modify_environment_params()
+        self.config.execution_config.n_reps_index = np.random.randint(
+            0, len(self.config.n_reps)
+        )
 
         if isinstance(self.estimator, RuntimeEstimatorV2):
-            self.estimator.options.environment.job_tags =[f"rl_qoc_step{self._step_tracker}"]
+            self.estimator.options.environment.job_tags = [
+                f"rl_qoc_step{self._step_tracker}"
+            ]
 
         return self._get_obs(), self._get_info()
 
-    def state_reward_pubs(self, qc: QuantumCircuit, params: np.array,
-                          target: GateTarget | StateTarget = None,
-                          dfe_precision: Optional[Tuple[float, float]] = None):
-        """
-        Compute the PUBs for the state reward method
-        """
-        if not isinstance(self.config.reward_config, StateRewardConfig):
-            raise TypeError("StateConfig object required for state reward method")
-        
-        prep_circuit = qc
-        target_instance = self.target if target is None else target
-        target_state = target_instance if isinstance(target_instance, StateTarget) else None
-        
-        if isinstance(target_instance, GateTarget):
-            # State reward: sample a random input state for target gate
-            input_state = np.random.choice(target_instance.input_states)
-            # Modify target state to match input state and target gate
-            target_state = input_state.target_state  # (Gate |input>=|target>)
-
-            # Prepend input state to custom circuit with front composition
-            
-            prep_circuit = handle_n_reps(qc, self.n_reps, self.backend)
-            input_circuit = extend_input_state_prep(input_state.circuit, qc, target_instance)
-            prep_circuit.compose(
-                input_circuit,
-                front=True,
-                inplace=True
-            )
-            
-
-        self._observables, self._pauli_shots = retrieve_observables(
-            target_state, qc, dfe_tuple=dfe_precision,
-            target_instance=target_instance,
-            c_factor=self.c_factor, sampling_paulis=self.sampling_pauli_space
-        )
-        if isinstance(target_instance, GateTarget):
-            self._observables = extend_observables(self._observables, qc, target=target_instance)
-
-        prep_circuit = self.backend_info.custom_transpile(
-            prep_circuit,
-            initial_layout=self.layout,
-            scheduling=False,
-        )
-
-        pubs = [
-            (
-                prep_circuit,
-                obs.apply_layout(prep_circuit.layout),
-                params,
-                shots_to_precision(self.n_shots * pauli_shots),
-            )
-            for obs, pauli_shots in zip(
-                self._observables.group_commuting(qubit_wise=True),
-                self._pauli_shots,
-            )
-        ]
-
-        batch_size = params.shape[0]
-        total_shots = batch_size * np.sum(self._pauli_shots * self.n_shots)
-
-        return [EstimatorPub.coerce(pub) for pub in pubs], total_shots
-
-    def channel_reward_pubs(
-        self,
-        qc: QuantumCircuit,
-        params: np.array,
-        dfe_precision: Optional[Tuple[float, float]] = None,
-        target: GateTarget = None,
-    ):
-        """
-        Retrieve observables and input state to sample for the DFE protocol for a target gate
-
-        :param qc: Quantum circuit to be executed on quantum system
-        :param params: Action vectors to execute on quantum system
-        :param dfe_precision: Optional Tuple (Ɛ, δ) from DFE paper
-        :param target: Target gate to prepare, can override the default (default: self.target)
-        :return: Observables to sample, input state to prepare
-        """
-        if target is None:
-            target = self.target
-        if not isinstance(target, GateTarget):
-            raise TypeError("Target type should be a gate")
-        if not isinstance(self.config.reward_config, ChannelRewardConfig):
-            raise TypeError("ChannelConfig object required for channel reward method")
-        if target.causal_cone_size > 3:
-            raise ValueError("Channel reward method is only supported for 1-3 qubits")
-
-        nb_states = self.config.reward_config.num_eigenstates_per_pauli
-        if (
-            nb_states >= 2**qc.num_qubits
-        ):  # TODO: Rethink this condition for causal cone
-            raise ValueError(
-                f"Number of eigenstates per Pauli should be less than {2 ** qc.num_qubits}"
-            )
-        n_qubits = target.causal_cone_size
-        dim = 2**n_qubits
-        probabilities = target.Chi**2 / (dim**2)
-        non_zero_indices = np.nonzero(probabilities)[0]  # Filter out zero probabilities
-        non_zero_probabilities = probabilities[non_zero_indices]
-
-        basis = pauli_basis(num_qubits=n_qubits)
-
-        if dfe_precision is not None:
-            eps, delta = dfe_precision
-            pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
-        else:
-            eps, delta = None, None
-            pauli_sampling = self.sampling_pauli_space
-
-        samples, self._pauli_shots = np.unique(
-            np.random.choice(
-                non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
-            ),
-            return_counts=True,
-        )
-        pauli_indices = np.array(
-            [np.unravel_index(sample, (dim**2, dim**2)) for sample in samples], dtype=int
-        )
-
-        pauli_prep, pauli_meas = zip(
-            *[(basis[p[1]], basis[p[0]]) for p in pauli_indices]
-        )
-        pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
-        reward_factor = [self.c_factor / (dim * target.Chi[p]) for p in samples]
-
-        observables = SparsePauliOp(pauli_meas, reward_factor, ignore_pauli_phase=True)
-        
-        self._observables = extend_observables(observables, qc, target)
-
-        if dfe_precision is not None:
-            self._pauli_shots = np.ceil(
-                2
-                * np.log(2 / delta)
-                / (dim * pauli_sampling * eps**2 * target.Chi[samples] ** 2)
-            )
-
-        pubs, total_shots = [], 0
-        used_prep_indices= [] # Track used input states to reduce number of PUBs
-
-        for prep, obs, shots in zip(pauli_prep, self._observables, self._pauli_shots):
-
-            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis
-            # Below, we select at random a subset of pure input states to prepare for each prep
-            # If nb_states = 1, we prepare all pure input states for each prep (no random selection)
-            max_input_states = dim // nb_states
-            selected_input_states = np.random.choice(
-                dim, size=max_input_states, replace=False
-            )
-            for input_state in selected_input_states:
-                prep_indices = []
-                dedicated_shots = (
-                    shots * self.n_shots // max_input_states
-                )  # Number of shots per Pauli eigenstate (divided equally)
-                if dedicated_shots == 0:
-                    continue
-                # Convert input state to Pauli6 basis: preparing pure eigenstates of Pauli_prep
-                inputs = np.unravel_index(input_state, (2,) * n_qubits)
-                parity = (-1) ** np.sum(
-                    inputs
-                )  # Parity of input state (weighting factor in Pauli prep decomposition)
-                for i, pauli_op in enumerate(reversed(prep.to_label())):
-                    # Build input state in Pauli6 basis from Pauli prep: look at each qubit individually
-                    if pauli_op == "I" or pauli_op == "Z":
-                        prep_indices.append(inputs[i])
-                    elif pauli_op == "X":
-                        prep_indices.append(2 + inputs[i])
-                    elif pauli_op == "Y":
-                        prep_indices.append(4 + inputs[i])
-
-                batch_size = params.shape[0]
-                
-                if (
-                    tuple(prep_indices) not in used_prep_indices
-                ):  # If input state not already used, add a new PUB
-                    used_prep_indices.append(tuple(prep_indices))
-                    prep_circuit = handle_n_reps(qc, self.n_reps, self.backend)
-                    
-                    # Create input state preparation circuit
-                    input_circuit = qc.copy_empty_like()
-                    input_circuit.compose(Pauli6PreparationBasis().circuit(prep_indices),
-                        target.causal_cone_qubits, inplace=True) # Apply input state on causal cone qubits
-                    input_circuit = extend_input_state_prep(input_circuit, qc, target) # Add random input state on other qubits
-                    
-                    # Prepend input state to custom circuit with front composition
-                    prep_circuit.compose(
-                        input_circuit,
-                        front=True,
-                        inplace=True,
-                    )
-
-                    # Transpile circuit to decompose input state preparation
-                    prep_circuit = self.backend_info.custom_transpile(
-                        prep_circuit,
-                        initial_layout=self.layout,
-                        scheduling=False,
-                        optimization_level=0,
-                    )
-                    # Add PUB to list
-                    pubs.append(
-                        (
-                            prep_circuit,
-                            parity * obs.apply_layout(prep_circuit.layout),
-                            params,
-                            1 / np.sqrt(dedicated_shots),
-                        )
-                    )
-    
-                    
-                    total_shots += (
-                        dedicated_shots
-                        * batch_size
-                        * len(obs.group_commuting(qubit_wise=True))
-                    )
-                else:  # If input state already used, reuse PUB and just update observable and precision
-                    pub_ref_index: int = used_prep_indices.index(tuple(prep_indices))
-
-                    prep_circuit, ref_obs, ref_params, ref_precision = pubs[pub_ref_index]
-                    ref_shots = precision_to_shots(ref_precision)
-                    new_precision = min(ref_precision, shots_to_precision(dedicated_shots))
-                    new_shots = precision_to_shots(new_precision)
-                    new_pub = (
-                        prep_circuit,
-                        ref_obs + parity * obs.apply_layout(prep_circuit.layout),
-                        ref_params,
-                        new_precision,
-                    )
-                    pubs[pub_ref_index] = new_pub
-                    total_shots -= (
-                        ref_shots
-                        * batch_size
-                        * len(ref_obs.group_commuting(qubit_wise=True))
-                    )
-                    total_shots += (
-                        new_shots
-                        * batch_size
-                        * len(new_pub[1].group_commuting(qubit_wise=True))
-                    )
-
-        if len(pubs) == 0:  # If nothing was sampled, retry
-            pubs, total_shots = self.channel_reward_pubs(qc, params)
-
-        return [EstimatorPub.coerce(pub) for pub in pubs], total_shots
-
-    def cafe_reward_pubs(self, circuit: QuantumCircuit, params, target: GateTarget = None):
-        """
-        Retrieve PUBs for Context-Aware Fidelity Estimation (CAFE) protocol
-
-        :param circuit: Quantum circuit to be executed on quantum system
-        :param params: Action vectors to execute on quantum system
-        :param target: Target gate to prepare (possibly within a wider circuit context)
-        """
-        
-        target = self.target if target is None else target
-        assert isinstance(target, GateTarget), "Target type should be a gate"
-        assert isinstance(
-            self.config.reward_config, CAFERewardConfig
-        ), "CAFEConfig object required for CAFE reward method"
-
-        pubs = []
-        total_shots = 0
-        circuit_ref = self.baseline_circuits[self.trunc_index]
-        layout = self.layout
-        batch_size = params.shape[0]
-
-        # samples, shots = np.unique(
-        #     np.random.choice(len(input_circuits), self.sampling_Pauli_space),
-        #     return_counts=True,
-        # )
-        # for sample, shot in zip(samples, shots):
-        for input_state in target.input_states:
-            run_qc = QuantumCircuit.copy_empty_like(
-                circuit, name="cafe_circ"
-            )  # Circuit with custom target gate
-            ref_qc = QuantumCircuit.copy_empty_like(
-                circuit_ref, name="cafe_ref_circ"
-            )  # Circuit with reference gate
-
-            for qc, context, control_flow in zip([run_qc, ref_qc], [circuit, circuit_ref], [True, False]):
-                # Bind input states to the circuits
-                qc.compose(input_state.circuit, inplace=True)
-                qc.barrier()
-                cycle_circuit = handle_n_reps(context, self.n_reps, self.backend, control_flow=control_flow)
-                qc.compose(cycle_circuit, inplace=True)
-
-            # Compute inverse unitary for reference circuit
-            sim_qc = causal_cone_circuit(ref_qc.copy().decompose(), target.causal_cone_qubits)[0]
-            sim_qc.save_unitary()
-            sim_unitary = AerSimulator(method="unitary").run(sim_qc).result().get_unitary()
-            reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
-            reverse_unitary_qc.unitary(
-                sim_unitary.adjoint(),
-                target.causal_cone_qubits,
-                label="U_inv",
-            )
-            reverse_unitary_qc.measure_all()
-
-            reverse_unitary_qc = self.backend_info.custom_transpile(
-                reverse_unitary_qc,
-                initial_layout=layout,
-                scheduling=False,
-                optimization_level=3,  # Find smallest circuit implementing inverse unitary
-                remove_final_measurements=False,
-            )
-
-            # Bind inverse unitary + measurement to run circuit
-            for circ, pubs_ in zip([run_qc, ref_qc], [pubs, self._ideal_pubs]):
-                transpiled_circuit = self.backend_info.custom_transpile(
-                    circ, initial_layout=layout, scheduling=False
-                )
-                transpiled_circuit.barrier()
-                # Add the inverse unitary + measurement to the circuit
-                transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-                pubs_.append((transpiled_circuit, params, self.n_shots))
-            total_shots += batch_size * self.n_shots
-
-        return [SamplerPub.coerce(pub) for pub in pubs], total_shots
-
-    def xeb_reward_pubs(self, circuit: QuantumCircuit, params):
-        """
-        Retrieve PUBs for XEB protocol
-
-        :param circuit: Quantum circuit to be executed on quantum system
-        :param params: Action vectors to execute on quantum system
-        """
-        # TODO: Complete XEB (will be relevant once pattern for parallel XEB is figured out)
-        assert isinstance(self.target, GateTarget), "Target type should be a gate"
-        assert isinstance(
-            self.config.reward_config, XEBRewardConfig
-        ), "XEBConfig object required for XEB reward method"
-        layout = self.layout
-        circuit_ref = self.baseline_circuits[self.trunc_index]
-        pubs = []
-        total_shots = 0
-
-        for seq in range(self.sampling_pauli_space):
-            ref_qc = QuantumCircuit.copy_empty_like(
-                circuit_ref,
-                name="xeb_ref_circ",
-            )
-            run_qc = QuantumCircuit.copy_empty_like(
-                circuit,
-                name="xeb_run_circ",
-            )
-            for l in range(self.n_reps):
-                pass
-
-        return [SamplerPub.coerce(pub) for pub in pubs], total_shots
-
-    def orbit_reward_pubs(self, circuit: QuantumCircuit, params):
-        """
-        Retrieve PUBs for ORBIT protocol
-
-        :param circuit: Quantum circuit to be executed on quantum system
-        :param params: Action vectors to execute on quantum system
-        """
-        assert isinstance(self.target, GateTarget), "Target type should be a gate"
-        assert isinstance(
-            self.config.reward_config, ORBITRewardConfig
-        ), "ORBITConfig object required for ORBIT reward method"
-        layout = self.layout
-        circuit_ref = self.baseline_circuits[self.trunc_index]
-        pubs = []
-        total_shots = 0
-        batch_size = params.shape[0]
-        if self.config.reward_config.use_interleaved:  # Interleaved RB
-            try:
-                Clifford(circuit_ref)
-            except QiskitError as e:
-                raise ValueError(
-                    "Circuit should be a Clifford circuit for using interleaved RB directly"
-                ) from e
-            ref_element = circuit_ref.to_gate(label="ref_circ")
-            custom_element = circuit.to_gate(label="custom_circ")
-            exp = InterleavedRB(
-                ref_element,
-                self.target.causal_cone_qubits,
-                [self.n_reps],
-                self.backend,
-                self.sampling_pauli_space,
-                self.seed,
-                circuit_order="RRRIII",
-            )
-            # ref_circuits = exp.circuits()[0: self.n_reps]
-            interleaved_circuits = exp.circuits()[self.n_reps :]
-            run_circuits = [
-                substitute_target_gate(circ, ref_element, custom_element)
-                for circ in interleaved_circuits
-            ]
-            run_circuits = self.backend_info.custom_transpile(
-                run_circuits,
-                initial_layout=layout,
-                scheduling=False,
-                remove_final_measurements=False,
-            )
-            pubs = [(qc, params, self.n_shots) for qc in run_circuits]
-            total_shots += batch_size * self.n_shots * len(pubs)
-            self._ideal_pubs = [
-                (qc, params, self.n_shots) for qc in interleaved_circuits
-            ]
-        else:
-            for seq in range(self.sampling_pauli_space):
-                ref_qc = QuantumCircuit.copy_empty_like(
-                    circuit_ref,
-                    name="orbit_ref_circ",
-                )
-                run_qc = QuantumCircuit.copy_empty_like(circuit, name="orbit_run_circ")
-                for l in range(self.n_reps):
-                    r_cliff = random_clifford(circuit.num_qubits)
-                    for qc, context in zip([run_qc, ref_qc], [circuit, circuit_ref]):
-                        qc.compose(r_cliff.to_circuit(), inplace=True)
-                        qc.barrier()
-                        qc.compose(context, inplace=True)
-                        qc.barrier()
-
-                reverse_unitary = Operator(ref_qc).adjoint()
-                reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
-                reverse_unitary_qc.unitary(
-                    reverse_unitary, reverse_unitary_qc.qubits, label="U_inv"
-                )
-                reverse_unitary_qc.measure_all()
-
-                reverse_unitary_qc = self.backend_info.custom_transpile(
-                    reverse_unitary_qc,
-                    initial_layout=layout,
-                    scheduling=False,
-                    optimization_level=3,
-                    remove_final_measurements=False,
-                )  # Try to get the smallest possible circuit for the reverse unitary
-
-                for circ, pubs_ in zip([run_qc, ref_qc], [pubs, self._ideal_pubs]):
-                    transpiled_circuit = self.backend_info.custom_transpile(
-                        circ, initial_layout=layout, scheduling=False
-                    )
-                    transpiled_circuit.barrier(self.target.causal_cone_qubits)
-                    # Add the inverse unitary + measurement to the circuit
-                    transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-                    pubs_.append((transpiled_circuit, params, self.n_shots))
-
-                total_shots += batch_size * self.n_shots
-
-        return [SamplerPub.coerce(pub) for pub in pubs], total_shots
 
     def simulate_circuit(
         self, qc: QuantumCircuit, params: np.array, update_env_history: bool = True
@@ -796,7 +342,7 @@ class BaseQuantumEnvironment(ABC, Env):
         qc_state = qc.copy(name="qc_state")
         qc_channel_nreps = qc.repeat(self.n_reps).copy(name="qc_channel_nreps")
         qc_state_nreps = qc.repeat(self.n_reps).copy(name="qc_state_nreps")
-        
+
         returned_fidelity_type = (
             "gate"
             if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
@@ -1109,8 +655,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 returned_fidelity_type == "gate"
             ):  # Optimize gate fidelity by finding optimal Z-rotations before and after gate
                 fidelities = handle_virtual_rotations(
-                    data, fidelities, subsystem_dims, n_reps,
-                    self.target
+                    data, fidelities, subsystem_dims, n_reps, self.target
                 )
                 if n_reps == 1:
                     returned_fidelities = fidelities
@@ -1164,7 +709,7 @@ class BaseQuantumEnvironment(ABC, Env):
         Return the primitive to use for the environment (estimator or sampler)
         """
         return self.estimator if self.config.reward_config.dfe else self.sampler
-        
+
     @property
     def physical_target_qubits(self):
         return self._physical_target_qubits
@@ -1327,15 +872,15 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def seed(self):
         return self._seed
-    
+
     @property
     def c_factor(self):
         return self.config.c_factor
-    
+
     @property
     def action_space(self):
         return self.config.action_space
-    
+
     @seed.setter
     def seed(self, seed):
         self._seed = seed
@@ -1347,28 +892,27 @@ class BaseQuantumEnvironment(ABC, Env):
     @batch_size.setter
     def batch_size(self, size: int):
         self.config.batch_size = size
-    
+
     @property
     def n_reps(self) -> int:
-        return self.config.n_reps[self._n_reps_index]
-    
+        return self.config.execution_config.current_n_reps
+
     @property
     def n_shots(self) -> int:
         return self.config.n_shots
-    
+
     @n_shots.setter
     def n_shots(self, n_shots: int):
         self.config.n_shots = n_shots
-        
+
     @property
     def sampling_pauli_space(self) -> int:
         return self.config.sampling_paulis
-    
+
     @sampling_pauli_space.setter
     def sampling_pauli_space(self, sampling_paulis: int):
         self.config.sampling_paulis = sampling_paulis
-    
-    
+
     @property
     def target(self) -> GateTarget | StateTarget:
         """
@@ -1435,7 +979,7 @@ class BaseQuantumEnvironment(ABC, Env):
         direct fidelity estimation methods, e.g. 'channel' or 'state')
         """
         if self.config.reward_config.dfe:
-            return self._observables
+            return self.config.reward_config.observables
         else:
             raise ValueError(
                 f"Observables not defined for reward method {self.config.reward_method}"

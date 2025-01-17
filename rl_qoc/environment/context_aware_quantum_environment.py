@@ -30,10 +30,11 @@ from qiskit.circuit import (
     ParameterVector,
     CircuitInstruction,
     Gate,
+    Instruction,
 )
 from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.converters import circuit_to_dag, dag_to_circuit
-from qiskit.dagcircuit import DAGOpNode, DAGCircuit
+from qiskit.dagcircuit import DAGOpNode
 from qiskit.providers import BackendV2
 from qiskit.quantum_info import Operator
 from qiskit.transpiler import (
@@ -44,21 +45,18 @@ from qiskit.transpiler import (
 
 from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.library import ProcessTomography
-from qiskit_ibm_runtime import EstimatorV2
 
 from ..helpers import (
-    get_instruction_timings,
-    remove_unused_wires,
     simulate_pulse_input,
-    get_gate,
     MomentAnalysisPass,
     CustomGateReplacementPass,
 )
-from .qconfig import QEnvConfig, GateTargetConfig
+from ..helpers.circuit_utils import get_instruction_timings, get_gate
+from .configuration.qconfig import QEnvConfig, GateTargetConfig
 from .base_q_env import (
     GateTarget,
     BaseQuantumEnvironment,
-    QiskitBackendInfo, retrieve_observables, extend_observables,
+    QiskitBackendInfo,
 )
 
 import logging
@@ -137,14 +135,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self._circuit_context = None
         self._training_steps_per_gate = training_steps_per_gate
         self._intermediate_rewards = intermediate_rewards
-        self.custom_instructions: List[Gate] = []
+        self.custom_instructions: List[Instruction] = []
         self.new_gates: List[Gate] = []
 
         self.observation_space = Box(
             low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
         )
         self.set_unbound_circuit_context(circuit_context, **context_kwargs)
-    
+
     def initial_reward_fit(self, params: np.array):
         """
         Method to fit the initial reward function to the first set of actions in the environment
@@ -153,7 +151,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         qc = self.circuits[self.trunc_index].copy()
         for n in range(1, max(self.config.n_reps)):
             pubs, shots = self._reward_methods[self.config.reward_method](qc, params)
-        
 
     def define_target_and_circuits(self):
         """
@@ -172,7 +169,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         moment_pass = MomentAnalysisPass()
         pm = PassManager(moment_pass)
         _ = pm.run(self.circuit_context)
-        moments = pm.property_set["moments"] # type: dict[int, list[DAGOpNode]]
+        moments = pm.property_set["moments"]  # type: dict[int, list[DAGOpNode]]
         layouts = [
             Layout({qubit: q for q, qubit in enumerate(self.circuit_context.qubits)})
             for _ in range(tgt_instruction_counts)
@@ -209,11 +206,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 bit_indices = {
                     q: context_dag.find_bit(q).index for q in context_dag.qubits
                 }
-                if (target_op_nodes[0].op == op.op and target_op_nodes[0].qargs == op.qargs 
-                        and target_op_nodes[0].cargs == op.cargs):
-                # if DAGOpNode.semantic_eq(
-                #     target_op_nodes[0], op, bit_indices, bit_indices
-                # ):
+                if (
+                    target_op_nodes[0].op == op.op
+                    and target_op_nodes[0].qargs == op.qargs
+                    and target_op_nodes[0].cargs == op.cargs
+                ):
+                    # if DAGOpNode.semantic_eq(
+                    #     target_op_nodes[0], op, bit_indices, bit_indices
+                    # ):
                     switch_truncation = True
             if switch_truncation:
                 counts += 1
@@ -247,6 +247,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
 
+        for custom_circ, baseline_circ in zip(custom_circuits, baseline_circuits):
+            custom_circ.metadata["baseline_circuit"] = baseline_circ.copy()
+
         input_states_choice = getattr(
             self.config.reward_config.reward_args, "input_states_choice", "pauli4"
         )
@@ -258,15 +261,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     operations_mapping[op.name] = op
 
         target = [
-            [GateTarget(
-                self.config.target.gate,
-                self.physical_target_qubits,
-                n_reps,
-                baseline_circuit,
-                self.circ_tgt_register,
-                layout,
-                input_states_choice=input_states_choice,
-            ) for n_reps in self.config.n_reps]
+            [
+                GateTarget(
+                    self.config.target.gate,
+                    self.physical_target_qubits,
+                    n_reps,
+                    baseline_circuit,
+                    self.circ_tgt_register,
+                    layout,
+                    input_states_choice=input_states_choice,
+                )
+                for n_reps in self.config.n_reps
+            ]
             for baseline_circuit, layout in zip(baseline_circuits, layouts)
         ]
         return target, custom_circuits, baseline_circuits
@@ -281,17 +287,15 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         super().reset(seed=seed)
 
         new_obs = self._get_obs()
-        self.modify_environment_params()
         self._param_values = create_array(
             self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0]
         )
         self._inside_trunc_tracker = 0
         return new_obs, self._get_info()
-    
+
     def modify_environment_params(self):
         # self.n_reps = int(np.random.randint(4, 5))
         print(f"\n Number of repetitions: {self.n_reps}")
-        
 
     def step(
         self, action: ActType
@@ -400,47 +404,50 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             self.config.check_on_exp
         ):  # Perform real experiments to retrieve from measurement data fidelities
             # Assess circuit fidelity with ComputeUncompute algo
-            try:
-                print("Starting Direct Fidelity Estimation...")
-                input_state = np.random.choice(self.target.input_states)
-                observables, shots = retrieve_observables(
-                    input_state.target_state,
-                    self.config.benchmark_config.dfe_precision,
-                    sampling_paulis=self.sampling_pauli_space,
-                    c_factor=self.c_factor
-                )
-                observables = extend_observables(observables, qc, self.target)
-                if self.abstraction_level == "circuit":
-                    qc = self.backend_info.custom_transpile(
-                        qc,
-                        initial_layout=self.layout,
-                        scheduling=False,
-                    )
-                pubs = [
-                    (
-                        qc,
-                        obs.apply_layout(qc.layout),
-                        [self.mean_action],
-                        1 / np.sqrt(shot),
-                    )
-                    for obs, shot in zip(
-                        observables.group_commuting(qubit_wise=True), shots
-                    )
-                ]
-                if isinstance(self.estimator, EstimatorV2):
-                    self.estimator.options.update(
-                        job_tags=[f"DFE_step{self._step_tracker}"]
-                    )
-                job = self.estimator.run(pubs=pubs)
-                results = job.result()
-                circuit_fidelities = np.sum(
-                    [result.data.evs for result in results], axis=0
-                ) / len(observables)
-                print("Finished DFE")
-                return circuit_fidelities
-            except Exception as exc:
-                self.close()
-                raise exc
+            # try:
+            #     print("Starting Direct Fidelity Estimation...")
+            #     input_state = np.random.choice(self.target.input_states)
+            #     observables, shots = retrieve_observables(
+            #         input_state.target_state,
+            #         self.config.benchmark_config.dfe_precision,
+            #         sampling_paulis=self.sampling_pauli_space,
+            #         c_factor=self.c_factor
+            #     )
+            #     observables = extend_observables(observables, qc, self.target)
+            #     if self.abstraction_level == "circuit":
+            #         qc = self.backend_info.custom_transpile(
+            #             qc,
+            #             initial_layout=self.layout,
+            #             scheduling=False,
+            #         )
+            #     pubs = [
+            #         (
+            #             qc,
+            #             obs.apply_layout(qc.layout),
+            #             [self.mean_action],
+            #             1 / np.sqrt(shot),
+            #         )
+            #         for obs, shot in zip(
+            #             observables.group_commuting(qubit_wise=True), shots
+            #         )
+            #     ]
+            #     if isinstance(self.estimator, EstimatorV2):
+            #         self.estimator.options.update(
+            #             job_tags=[f"DFE_step{self._step_tracker}"]
+            #         )
+            #     job = self.estimator.run(pubs=pubs)
+            #     results = job.result()
+            #     circuit_fidelities = np.sum(
+            #         [result.data.evs for result in results], axis=0
+            #     ) / len(observables)
+            #     print("Finished DFE")
+            #     return circuit_fidelities
+            # except Exception as exc:
+            #     self.close()
+            #     raise exc
+            raise NotImplementedError(
+                "Direct Fidelity Estimation is not yet supported in the context-aware environment"
+            )
 
         else:  # Perform simulation at circuit or pulse level
             print("Starting simulation benchmark...")
@@ -472,9 +479,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         Return current target to be calibrated
         """
-        return self._target[self.trunc_index][self._n_reps_index]
+        return self._target[self.trunc_index][self.config.execution_config.n_reps_index]
 
-    def get_target(self, trunc_index: Optional[int] = None, n_reps: Optional[int] = None):
+    def get_target(
+        self, trunc_index: Optional[int] = None, n_reps: Optional[int] = None
+    ):
         """
         Return target to be calibrated at given truncation index.
         If no index is provided, return list of all targets.
@@ -490,17 +499,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 for target in self._target[trunc_index]:
                     if target.n_reps == n_reps:
                         return target
-                
+
                 ref_target = self._target[trunc_index][0]
-                return GateTarget(ref_target.gate,
-                                  ref_target.physical_qubits,
-                                  n_reps,
-                                  ref_target.target_circuit,
-                                  ref_target.tgt_register,
-                                  ref_target.layout,
-                                  ref_target.input_states_choice)
-                                    
-                                  
+                return GateTarget(
+                    ref_target.gate,
+                    ref_target.physical_qubits,
+                    n_reps,
+                    ref_target.target_circuit,
+                    ref_target.tgt_register,
+                    ref_target.layout,
+                    ref_target.input_states_choice,
+                )
+
             else:
                 return self._target[trunc_index]
 

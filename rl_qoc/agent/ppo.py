@@ -149,11 +149,9 @@ class CustomPPO:
         Default implementation returns the action and logprob as is.
         """
         return action, logprob
-    
-    
+
     def process_std(self, std_action):
         return std_action
-    
 
     def train(
         self,
@@ -445,7 +443,6 @@ class CustomPPO:
                     training_results[f"mean_action_{i}"] = mean_action[0][i]
                     training_results[f"std_action_{i}"] = std_action[0][i]
 
-                
                 if self.agent_config.wandb_config.enabled and self.save_data:
                     write_to_wandb(summary, training_results)
                 for key, value in training_results.items():
@@ -728,7 +725,6 @@ class CustomPPO:
         The size of the minibatch
         """
         return self.agent_config.minibatch_size
-
 
 
 def take_step(

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from typing import Optional, Union, Dict, Callable
-from dataclasses import field, asdict
+from typing import Optional, Union, Callable
+from dataclasses import field
 from abc import ABC, abstractmethod
 import torch.nn as nn
 import torch.optim as optim
@@ -253,7 +253,11 @@ class PPOConfig:
         ]
         self.input_activation_function = get_module(self.input_activation_function)
         self.output_activation_mean = get_module(self.output_activation_mean)
-        self.output_activation_std = get_module(self.output_activation_std) if self.output_activation_std is not None else None
+        self.output_activation_std = (
+            get_module(self.output_activation_std)
+            if self.output_activation_std is not None
+            else None
+        )
 
     def as_dict(self):
         return {

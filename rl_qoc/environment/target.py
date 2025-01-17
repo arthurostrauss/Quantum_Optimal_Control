@@ -22,7 +22,6 @@ from qiskit.quantum_info import (
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import Layout
-from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 import numpy as np
 from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruction
 from itertools import product
@@ -31,7 +30,11 @@ from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
 )
-from ..helpers import density_matrix_to_statevector, causal_cone_circuit, get_gate
+from ..helpers.circuit_utils import (
+    density_matrix_to_statevector,
+    get_gate,
+    causal_cone_circuit,
+)
 import warnings
 
 
@@ -606,7 +609,7 @@ class GateTarget(BaseTarget):
         Get the size of the causal cone of the target gate
         """
         return self._causal_cone_size
-    
+
     @property
     def input_states_choice(self):
         """

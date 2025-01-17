@@ -25,7 +25,7 @@ from qiskit.circuit import (
 )
 
 # Qiskit Quantum Information, for fidelity benchmarking
-from qiskit.quantum_info import DensityMatrix, Statevector, Operator
+from qiskit.quantum_info import DensityMatrix, Operator
 from qiskit.transpiler import InstructionProperties
 from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.library import ProcessTomography
@@ -36,11 +36,11 @@ from .base_q_env import (
     StateTarget,
 )
 from ..helpers import (
-    fidelity_from_tomography,
     simulate_pulse_input,
     get_optimal_z_rotation,
 )
-from .qconfig import QEnvConfig, GateTargetConfig
+from ..helpers.circuit_utils import fidelity_from_tomography
+from .configuration.qconfig import QEnvConfig, GateTargetConfig
 
 
 class QuantumEnvironment(BaseQuantumEnvironment):
@@ -54,7 +54,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         self._parameters = ParameterVector("θ", training_config.n_actions)
 
         super().__init__(training_config)
-        
+
         self._target, self.circuits, self.baseline_circuits = (
             self.define_target_and_circuits()
         )
@@ -84,7 +84,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         """
         Return current target to be calibrated
         """
-        return self._target[self._n_reps_index]
+        return self._target[self.config.execution_config.n_reps_index]
 
     def episode_length(self, global_step: int) -> int:
         return 1
@@ -106,12 +106,15 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         )
         q_reg = QuantumRegister(self.config.target.gate.num_qubits)
         if isinstance(self.config.target, GateTargetConfig):
-            target = [GateTarget(
-                **self.config.target.as_dict(),
-                input_states_choice=input_states_choice,
-                n_reps=n_reps,
-                tgt_register=q_reg,
-            ) for n_reps in self.config.n_reps]
+            target = [
+                GateTarget(
+                    **self.config.target.as_dict(),
+                    input_states_choice=input_states_choice,
+                    n_reps=n_reps,
+                    tgt_register=q_reg,
+                )
+                for n_reps in self.config.n_reps
+            ]
         else:
             target = StateTarget(**asdict(self.config.target))
 
@@ -123,11 +126,25 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             q_reg,
             **self._func_args,
         )
-        
+
         if isinstance(target, StateTarget):
             ref_circuit = target.circuit.copy(name="baseline_circuit")
         else:
-            ref_circuit = target[0].target_circuit.copy(name="baseline_circuit")
+            ref_circuit = None
+            for tgt in target:
+                if tgt.n_reps == 1:
+                    ref_circuit = tgt.target_circuit.copy(name="baseline_circuit")
+                    break
+            if ref_circuit is None:
+                custom_tgt = GateTarget(
+                    **self.config.target.as_dict(),
+                    n_reps=1,
+                    input_states_choice=input_states_choice,
+                    tgt_register=q_reg,
+                )
+                ref_circuit = custom_tgt.target_circuit.copy(name="baseline_circuit")
+
+        custom_circuit.metadata["baseline_circuit"] = ref_circuit.copy()
         return target, [custom_circuit], [ref_circuit]
 
     def _get_obs(self):
@@ -141,6 +158,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             )
         else:
             return np.array([0, 0])
+
+    def modify_environment_params(self, **kwargs):
+        print(f"\n Number of repetitions: {self.n_reps}")
 
     def step(
         self, action: ActType
@@ -158,6 +178,11 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             )
 
         terminated = self._episode_ended = True
+        params, batch_size = np.array(action), len(np.array(action))
+        if params.shape != (batch_size, self.n_actions):
+            raise ValueError(
+                f"Action shape mismatch: {params.shape} != {(batch_size, self.n_actions)}"
+            )
         reward = self.perform_action(action)
 
         if np.mean(reward) > self._max_return:
@@ -238,7 +263,11 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     qc_input,
                     self.backend,
                     self.target.physical_qubits,
-                    self.target.target_operator if isinstance(self.target, GateTarget) else self.target.dm,
+                    (
+                        self.target.target_operator
+                        if isinstance(self.target, GateTarget)
+                        else self.target.dm
+                    ),
                     analysis=self.config.tomography_analysis,
                     sampler=self.sampler,
                 )
@@ -350,3 +379,31 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             return self.circuits[0].assign_parameters(
                 {self.parameters[0]: self.optimal_action}
             )
+
+    def get_target(
+        self, n_reps: Optional[int] = None
+    ) -> GateTarget | List[GateTarget] | StateTarget:
+        """
+        Retrieve a target object from the provided n_reps.
+        If the integer was already specified in the config
+        """
+        if isinstance(self._target, StateTarget):
+            if n_reps is None:
+                return self._target
+            else:
+                raise ValueError("StateTarget does not have n_reps")
+        if n_reps is None:
+            return self._target
+        for target in self._target:
+            if target.n_reps == n_reps:
+                return target
+        ref_target = self._target[0]
+        return GateTarget(
+            ref_target.gate,
+            ref_target.physical_qubits,
+            n_reps,
+            ref_target.target_circuit,
+            ref_target.tgt_register,
+            ref_target.layout,
+            ref_target.input_states_choice,
+        )
