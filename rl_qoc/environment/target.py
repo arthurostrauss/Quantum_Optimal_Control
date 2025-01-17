@@ -246,7 +246,7 @@ class StateTarget(BaseTarget):
             self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
         )
 
-    def fidelity(self, state: QuantumState | QuantumCircuit, n_reps: int = 1):
+    def fidelity(self, state: QuantumState | QuantumCircuit, n_reps: int = 1, validate=True):
         """
         Compute the fidelity of the state with the target
         :param state: State to compare with the target state
@@ -259,7 +259,7 @@ class StateTarget(BaseTarget):
                 raise ValueError("Input could not be converted to state") from e
         if not isinstance(state, (Statevector, DensityMatrix)):
             raise ValueError("Input should be a Statevector or DensityMatrix object")
-        return state_fidelity(state, self.dm)
+        return state_fidelity(state, self.dm, validate=validate)
 
     def __repr__(self):
         return f"StateTarget({self.dm} on qubits {self.physical_qubits})"

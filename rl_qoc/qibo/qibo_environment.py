@@ -78,7 +78,7 @@ class QiboEnvironment(QuantumEnvironment):
                         rho_imaginary = tomography_output.results.target_density_matrix_imag[target]
                         rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
 
-
+                        rho = DensityMatrix(rho)
                         fidelity = self.target.fidelity(rho, validate=False)
                         # dm = DensityMatrix(rho)
                         # fidelity = self.target.fidelity(dm, validate=False)
