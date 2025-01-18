@@ -49,8 +49,8 @@ action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
     get_backend(),
-    platform="dummy",
-    physical_qubits=([0]),
+    platform="qw11q",
+    physical_qubits=(["B2"]),
     gate_rule="x",
     parametrized_circuit_kwargs={"target": target},
     instruction_durations=None,
@@ -103,5 +103,5 @@ train_function_settings = TrainFunctionSettings(
     clear_history=True,
 )
 # %%
-# ppo.train(training_config, train_function_settings)
-env.step(np.expand_dims(np.array([0.3333]), axis = 0))
+ppo.train(training_config, train_function_settings)
+# env.step(np.expand_dims(np.array([0.0486095/2]), axis = 0))

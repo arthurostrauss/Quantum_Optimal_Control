@@ -66,16 +66,15 @@ class QiboEnvironment(QuantumEnvironment):
                     qibo_circ.draw()
                     tomography_output = e.state_tomography(
                             circuit = qibo_circ,
+                            nshots = 5000,
                     )
                     rho_real = tomography_output.results.measured_density_matrix_real[target]
                     rho_imaginary = tomography_output.results.measured_density_matrix_imag[target]
-                    rho = np.array(rho_real) + 1j * np.array(rho_imaginary)
+                    rho = np.transpose(np.array(rho_real) + 1j * np.array(rho_imaginary))
                     dm = DensityMatrix(rho)
-                    fidelity = self.target.fidelity(dm)
-
+                    fidelity = self.target.fidelity(dm, validate = False)
                 report(e.path, e.history)
-                    # print("FIDELITY", fidelity)
-            # self.circuit_fidelity_history.append(fidelity)
+            self.circuit_fidelity_history.append(fidelity)
             return fidelity
         return 0
 
