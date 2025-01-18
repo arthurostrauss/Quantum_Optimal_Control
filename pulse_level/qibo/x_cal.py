@@ -103,5 +103,5 @@ train_function_settings = TrainFunctionSettings(
     clear_history=True,
 )
 # %%
-ppo.train(training_config, train_function_settings)
-# env.step(np.expand_dims(np.array([0.0486095/2]), axis = 0))
+# ppo.train(training_config, train_function_settings)
+env.step(np.expand_dims(np.array([0.0486095/2]), axis = 0))
