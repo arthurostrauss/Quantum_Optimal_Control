@@ -16,4 +16,5 @@ from .reward_methods import (
     ChannelRewardConfig,
     ORBITRewardConfig,
     StateRewardConfig,
+    get_real_time_reward_pub
 )

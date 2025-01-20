@@ -4,7 +4,7 @@ import numpy as np
 from gymnasium.spaces import Box
 from qiskit.quantum_info import Statevector
 
-from rl_qoc import QuantumEnvironment, BenchmarkConfig, StateRewardConfig
+from rl_qoc import BenchmarkConfig, StateRewardConfig
 from rl_qoc.qibo import QiboEnvironment
 from qiskit.circuit import QuantumCircuit, ParameterVector, Gate
 from qiskit.circuit.library import CZGate, RXGate, XGate

@@ -204,15 +204,10 @@ class QEnvConfig:
     def pass_manager(self, value: PassManager):
         self.backend_config.pass_manager = value
 
-    def as_dict(self):
-        return {
+    def as_dict(self, to_json: bool = False):
+        config =  {
             "target": {
                 "physical_qubits": self.physical_qubits,
-                "gate": (
-                    self.target.gate.name
-                    if isinstance(self.target, GateTargetConfig)
-                    else self.target.state.data
-                ),
             },
             "backend_config": {
                 "backend": (
@@ -242,3 +237,10 @@ class QEnvConfig:
             },
             "metadata": self.env_metadata,
         }
+        
+        if isinstance(self.target, GateTargetConfig):
+            config["target"]["gate"] = self.target.gate.name
+        elif isinstance(self.target, StateTargetConfig) and not to_json:
+            config["target"]["state"] = self.target.state.data
+            
+        return config

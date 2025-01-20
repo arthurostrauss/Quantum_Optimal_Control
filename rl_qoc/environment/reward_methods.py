@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from qiskit import ClassicalRegister
 from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.classical.types import Uint
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
@@ -12,7 +13,8 @@ from qiskit.quantum_info import (
     Operator,
 )
 from qiskit_aer import AerSimulator
-from qiskit_experiments.library.tomography.basis import Pauli6PreparationBasis
+from qiskit_experiments.library.tomography.basis import Pauli6PreparationBasis, PauliPreparationBasis, \
+    PauliMeasurementBasis
 from .backend_info import BackendInfo
 from typing import Optional, Tuple, List, Literal, Union
 import numpy as np
@@ -25,7 +27,7 @@ from .calibration_pubs import (
     CalibrationSamplerPubLike,
 )
 from .configuration.execution_config import ExecutionConfig
-from .target import GateTarget, StateTarget, InputState
+from .target import GateTarget, StateTarget, InputState, get_2design_input_states
 from ..helpers import (
     shots_to_precision,
     precision_to_shots,
@@ -118,6 +120,128 @@ class FidelityConfig(RewardConfig):
         return "fidelity"
 
 
+def get_single_qubit_input_states(input_state_choice):
+    if input_state_choice == "pauli4":
+        input_states = [PauliPreparationBasis().circuit([i]) for i in range(4)]
+    elif input_state_choice == "pauli6":
+        input_states = [Pauli6PreparationBasis().circuit([i]) for i in range(6)]
+    elif input_state_choice == "2-design":
+        states = get_2design_input_states(2)
+        input_circuits = [QuantumCircuit(1) for _ in states]
+        for input_circ, state in zip(input_circuits, states):
+            input_circ.prepare_state(state)
+        input_states = input_circuits
+    else:
+        raise ValueError("Invalid input state choice")
+    return input_states
+
+
+def get_real_time_reward_pub(circuits: QuantumCircuit | List[QuantumCircuit],
+                             params:np.array,
+                             target: List[GateTarget]|GateTarget|StateTarget,
+                             backend_info: BackendInfo,
+                             execution_config: ExecutionConfig,
+                             reward_method: Literal["channel", "state", "cafe"] = "state",
+                             dfe_precision: Optional[Tuple[float, float]] = None) -> SamplerPub:
+    """
+    Compute pubs related to the reward method for real-time execution (relevant for backend enabling real-time
+    control flow)
+    
+    Args:
+        circuits: Quantum circuit to be executed on quantum system
+        params: Parameters to feed the parametrized circuit
+        target: List of target gates
+        backend_info: Backend information
+        execution_config: Execution configuration
+        reward_method: Method to compute the reward (channel, state or cafe)
+        dfe_precision: Tuple (Ɛ, δ) from DFE paper
+    """
+    
+    prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
+    target_instances = [target] if isinstance(target, (GateTarget, StateTarget)) else target
+    if len(prep_circuits) != len(target_instances):
+        raise ValueError("Number of circuits and targets must be the same")
+    if not all(isinstance(target_instance, (GateTarget, StateTarget)) for target_instance in target_instances):
+        raise ValueError("All targets must be gate targets")
+    
+    
+    target_instance = target
+    is_gate_target = isinstance(target_instance, GateTarget)
+    target_state = target_instance if isinstance(target_instance, StateTarget) else None
+    
+    # Compare qubits of each circuit between each other and ensure they are the same
+    qubits = [qc.qubits for qc in prep_circuits]
+    if len(qubits) > 1 and not all(qubits[0] == qubits[i] for i in range(1, len(qubits))):
+        raise ValueError("All circuits must have the same qubits")
+    
+    qc = prep_circuits[0].copy_empty_like(name="real_time_qc")
+    num_qubits = qc.num_qubits # all qubits (even those outside of causal cone)
+    n_reps = execution_config.current_n_reps
+    
+    if is_gate_target:
+        causal_cone_size = target_instance.causal_cone_size
+        causal_cone_qubits = target_instance.causal_cone_qubits
+    else:
+        causal_cone_size = num_qubits
+        causal_cone_qubits = qc.qubits
+
+    meas = ClassicalRegister(causal_cone_size, name="meas")
+    qc.add_register(meas)
+    
+    if is_gate_target: # Declare input states variables
+        input_state_vars = [qc.add_input(f"input_state_{i}", 
+                                Uint(4)) for i in range(num_qubits)] 
+    else:
+        input_state_vars = None
+
+    observables_vars = [qc.add_input(f"observable_{i}", Uint(4)) for i in range(causal_cone_size)]
+    
+    if is_gate_target:
+        input_circuits = get_single_qubit_input_states(target_instance.input_states_choice)
+        if reward_method == "cafe":
+            pass
+            
+        for q_idx, qubit in enumerate(qc.qubits): # Input state preparation
+            with qc.switch(input_state_vars[q_idx]) as case_input_state:
+                for i, input_circuit in enumerate(input_circuits):
+                    with case_input_state(i):
+                        qc.compose(input_circuit, [qubit], inplace=True)
+
+    if len(prep_circuits) > 1:
+        circuit_choice = qc.add_input("circuit_choice", Uint(8))
+        
+        with qc.switch(circuit_choice) as case:
+            for i, prep_circuit in enumerate(prep_circuits):
+                with case(i):
+                    with qc.for_loop(range(n_reps)):
+                        qc.compose(prep_circuit, inplace=True)
+                    
+    else:
+        prep_circuit = prep_circuits[0]
+        with qc.for_loop(range(n_reps)):
+            qc.compose(prep_circuit, inplace=True)
+    
+    if reward_method in ["state", "channel"]:
+        for q_idx, qubit in enumerate(causal_cone_qubits):
+            with qc.switch(observables_vars[q_idx]) as case_observable:
+                for i in range(3):
+                    with case_observable(i):
+                        qc.compose(PauliMeasurementBasis().circuit([i]).remove_final_measurements(False).decompose(),
+                                   [qubit], inplace=True)
+        for qubit, clbit in zip(causal_cone_qubits, meas):
+            qc.measure(qubit, clbit)
+            
+    elif reward_method == "cafe":
+        ref_circuits = [circ.metadata["baseline_circuit"] for circ in prep_circuits]
+        pass
+    
+    qc = backend_info.custom_transpile(qc, initial_layout=target_instance.layout, 
+                                       scheduling=False, remove_final_measurements=False)
+    
+    return SamplerPub.coerce((qc, params, execution_config.n_shots))
+        
+
+
 @dataclass
 class StateRewardConfig(RewardConfig):
     """
@@ -138,105 +262,6 @@ class StateRewardConfig(RewardConfig):
     @property
     def reward_args(self):
         return {"input_states_choice": self.input_states_choice}
-    
-    def get_real_time_reward_pub(self, circuits: QuantumCircuit | List[QuantumCircuit],
-                                 params:np.array,
-                                 target: List[GateTarget]|GateTarget,
-                                 backend_info: BackendInfo,
-                                 execution_config: ExecutionConfig,
-                                 dfe_precision: Optional[Tuple[float, float]] = None) -> SamplerPub:
-        """
-        Compute pubs related to the reward method for real-time execution (relevant for backend enabling real-time
-        control flow)
-        
-        Args:
-            circuits: Quantum circuit to be executed on quantum system
-            params: Parameters to feed the parametrized circuit
-            target: List of target gates
-            backend_info: Backend information
-            execution_config: Execution configuration
-            dfe_precision: Tuple (Ɛ, δ) from DFE paper
-        """
-        
-        prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
-        target_instances = [target] if isinstance(target, GateTarget) else target
-        if len(prep_circuits) != len(target_instances):
-            raise ValueError("Number of circuits and targets must be the same")
-        if not all(isinstance(target_instance, GateTarget) for target_instance in target_instances):
-            raise ValueError("All targets must be gate targets")
-        
-        
-        target_instance = target
-        target_state = target_instance if isinstance(target_instance, StateTarget) else None
-        
-        # Compare qubits of each circuit between each other and ensure they are the same
-        qubits = [qc.qubits for qc in prep_circuits]
-        if len(qubits) > 1 and not all(qubits[0] == qubits[i] for i in range(1, len(qubits))):
-            raise ValueError("All circuits must have the same qubits")
-        
-        qc = prep_circuits[0].copy_empty_like(name="state_reward_real_time")
-        num_qubits = qc.num_qubits
-        
-        if len(prep_circuits) > 1:
-            circuit_choice = qc.add_input("circuit_choice", Uint(8))
-            
-            with qc.switch(circuit_choice) as case:
-                for i, prep_circuit in enumerate(prep_circuits):
-                    with case(i):
-                        pass
-                        
-                        
-        
-
-        if isinstance(target_instance, GateTarget):
-            # State reward: sample a random input state for target gate
-            input_state = np.random.choice(target_instance.input_states)
-            # Modify target state to match input state and target gate
-            target_state = input_state.target_state  # (Gate |input>=|target>)
-
-            # Prepend input state to custom circuit with front composition
-
-            prep_circuit = handle_n_reps(
-                circuits, execution_config.current_n_reps, backend_info.backend
-            )
-            input_circuit = extend_input_state_prep(
-                input_state.circuit, circuits, target_instance
-            )
-            prep_circuit.compose(input_circuit, front=True, inplace=True)
-
-        self._observables, self._pauli_shots = retrieve_observables(
-            target_state,
-            dfe_tuple=dfe_precision,
-            c_factor=execution_config.c_factor,
-            sampling_paulis=execution_config.sampling_paulis,
-        )
-        if isinstance(target_instance, GateTarget):
-            self._observables = extend_observables(
-                self._observables, prep_circuit, target_instance
-            )
-
-        prep_circuit = backend_info.custom_transpile(
-            prep_circuit, initial_layout=target_instance.layout, scheduling=False
-        )
-
-        pubs = [
-            (
-                prep_circuit,
-                obs.apply_layout(prep_circuit.layout),
-                params,
-                shots_to_precision(execution_config.n_shots * pauli_shots),
-            )
-            for obs, pauli_shots in zip(
-                self._observables.group_commuting(qubit_wise=True),
-                self._pauli_shots,
-            )
-        ]
-        self._total_shots = params.shape[0] * sum(
-            self._pauli_shots * execution_config.n_shots
-        )
-
-        return [EstimatorPub.coerce(pub) for pub in pubs]
-                                 
 
     def get_reward_pubs(
         self,

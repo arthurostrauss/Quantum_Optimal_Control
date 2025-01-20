@@ -176,7 +176,7 @@ class CustomPPO:
             wandb.init(
                 project=self.agent_config.wandb_config.project,
                 config=self.agent_config.as_dict()
-                | self.unwrapped_env.config.as_dict(),
+                | self.unwrapped_env.config.as_dict(to_json=True),
                 name=self.agent_config.run_name,
                 sync_tensorboard=True,
             )
