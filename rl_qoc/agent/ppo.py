@@ -1,4 +1,5 @@
 from typing import Optional, Dict
+from copy import deepcopy
 from IPython.display import clear_output
 from gymnasium import ActionWrapper
 
@@ -173,10 +174,12 @@ class CustomPPO:
             self._train_function_settings = train_function_settings
 
         if self.save_data and self.agent_config.wandb_config.enabled:
+            env_config = deepcopy(self.unwrapped_env.config.as_dict())
+            env_config["target"]["gate"] = [str(i) for i in env_config["target"]["gate"]]
             wandb.init(
                 project=self.agent_config.wandb_config.project,
                 config=self.agent_config.as_dict()
-                | self.unwrapped_env.config.as_dict(),
+                | env_config,
                 name=self.agent_config.run_name,
                 sync_tensorboard=True,
             )
