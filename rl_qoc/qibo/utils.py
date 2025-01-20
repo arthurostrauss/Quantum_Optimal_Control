@@ -5,7 +5,7 @@ from qibo import gates, Circuit
 from qibo.gates import Gate
 from qibo.transpiler import Passes
 from qibo.transpiler.unroller import Unroller, NativeGates
-from qibolab.platform import Platform
+from qibolab import Platform
 from qibolab import QibolabBackend
 from qibolab.pulses import FluxPulse, PulseSequence
 from qibolab.qubits import QubitId
@@ -46,18 +46,22 @@ def new_cz_rule(
 
 
 def new_rx_rule(
-    gate: gates.Gate,
+    qubit_ids: list,
     platform: Platform,
+    parameters,
     pulse_params: list,
-    targets: QubitId,
-    parameters=None,
 ):
     """RX rule returning a custom flux pulse defined by `pulse_params`."""
-    qubit = list(platform.qubits)[gate.target_qubits[0]]
-    theta = gate.parameters[0]  # float value by default
+    # import pdb; pdb.set_trace()
+    print("QQQQQQQQQQQQQQQQQQQ")
+    print(pulse_params, parameters)
+    print(qubit_ids)
+    qubit = qubit_ids[1][0]
+    theta = parameters[0]  # float value by default
     sequence = PulseSequence()
+    # print("SSSSSSSSSSSSSSS", pulse_params)
     pulse = platform.create_RX90_pulse(qubit, start=0, relative_phase=theta)
-    pulse.amplitude = pulse_params[0]
+    pulse.amplitude = float(pulse_params[0])
     sequence.add(pulse)
     virtual_z_phases = {}
     return sequence, virtual_z_phases
@@ -112,8 +116,8 @@ def execute_action(
     # Change CZ pulse parameters
     compiler = backend.compiler
     if pulse_params:
-        rule = lambda gate, platform: gate_rule[1](
-            gate, platform, pulse_params, hardware_targets
+        rule = lambda qubits_ids, platform, gate_params: gate_rule[1](
+            qubits_ids, platform, gate_params, pulse_params
         )
         compiler.register(gate_rule[0])(rule)
     _, results = execute_transpiled_circuits(

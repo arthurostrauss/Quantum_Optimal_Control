@@ -24,7 +24,7 @@ from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import Optimize1qGatesDecomposition
 from qiskit.qasm3 import dumps as qasm3_dumps
 from qibo.backends import set_backend
-
+import qibo
 from qibo import Circuit as QiboCircuit
 
 from .utils import execute_action, resolve_gate_rule
@@ -60,6 +60,7 @@ def qibo_execute(
     ]
 
     set_backend("qibolab", platform=platform)
+    print("QIBO", qibo.get_backend())
     hardware_qubit_pair = run_options.get(
         "qubits", (0, 1)
     )  # TODO: Figure out how to retrieve it
