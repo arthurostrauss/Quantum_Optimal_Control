@@ -16,6 +16,7 @@ from rl_qoc import (
 from rl_qoc.qibo import QiboConfig
 from gymnasium.wrappers import ClipAction, RescaleAction
 
+from rl_qoc.agent.ppo import CustomPPO
 
 def param_circuit(
     qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
@@ -49,8 +50,8 @@ action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
     get_backend(),
-    platform="dummy",
-    physical_qubits=([0]),
+    platform="qw11q",
+    physical_qubits=(["B2"]),
     gate_rule="x",
     parametrized_circuit_kwargs={"target": target},
     instruction_durations=None,
@@ -62,7 +63,7 @@ q_env_config = QEnvConfig(
     reward_config=StateRewardConfig(),
     benchmark_config=BenchmarkConfig(1, check_on_exp=True, method ="rb"),
     execution_config=ExecutionConfig(
-        batch_size=1, sampling_paulis=50, n_shots=1000, n_reps=1, c_factor = 1,
+        batch_size=32, sampling_paulis=50, n_shots=500, n_reps=1, c_factor = 1,
     ),
 )
 
@@ -76,15 +77,16 @@ from rl_qoc import CustomPPO
 from rl_qoc.agent import TrainFunctionSettings, TotalUpdates, TrainingConfig
 from rl_qoc.helpers import load_from_yaml_file
 
-file_name = "agent_config_personal.yaml"
+file_name = "agent_config_personal1.yaml"
 
 agent_config = load_from_yaml_file(file_name)
+print(agent_config)
 # %%
-# ppo = CustomPPO(
-#     agent_config,
-#     ClipAction(RescaleAction(env, action_space.low, action_space_high)),
-#     save_data=True,
-# )
+ppo = CustomPPO(
+    agent_config,
+    ClipAction(RescaleAction(env, action_space.low, action_space_high)),
+    save_data=True,
+)
 total_updates = TotalUpdates(500)
 # hardware_runtime = HardwareRuntime(300)
 training_config = TrainingConfig(
@@ -103,5 +105,5 @@ train_function_settings = TrainFunctionSettings(
     clear_history=True,
 )
 # %%
-# ppo.train(training_config, train_function_settings)
-env.step(np.expand_dims(np.array([0.3333]), axis = 0))
+ppo.train(training_config, train_function_settings)
+# env.step(np.expand_dims(np.array([0.0486095/2]), axis = 0))
