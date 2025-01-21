@@ -53,13 +53,9 @@ def new_rx_rule(
 ):
     """RX rule returning a custom flux pulse defined by `pulse_params`."""
     # import pdb; pdb.set_trace()
-    print("QQQQQQQQQQQQQQQQQQQ")
-    print(pulse_params, parameters)
-    print(qubit_ids)
     qubit = qubit_ids[1][0]
     theta = parameters[0]  # float value by default
     sequence = PulseSequence()
-    # print("SSSSSSSSSSSSSSS", pulse_params)
     pulse = platform.create_RX90_pulse(qubit, start=0, relative_phase=theta)
     pulse.amplitude = float(pulse_params[0])
     sequence.add(pulse)

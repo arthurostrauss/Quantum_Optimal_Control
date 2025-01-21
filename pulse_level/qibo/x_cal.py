@@ -63,7 +63,7 @@ q_env_config = QEnvConfig(
     reward_config=StateRewardConfig(),
     benchmark_config=BenchmarkConfig(1, check_on_exp=True, method ="rb"),
     execution_config=ExecutionConfig(
-        batch_size=1, sampling_paulis=50, n_shots=1000, n_reps=1, c_factor = 1,
+        batch_size=32, sampling_paulis=50, n_shots=500, n_reps=1, c_factor = 1,
     ),
 )
 
@@ -77,7 +77,7 @@ from rl_qoc import CustomPPO
 from rl_qoc.agent import TrainFunctionSettings, TotalUpdates, TrainingConfig
 from rl_qoc.helpers import load_from_yaml_file
 
-file_name = "agent_config_personal.yaml"
+file_name = "agent_config_personal1.yaml"
 
 agent_config = load_from_yaml_file(file_name)
 print(agent_config)
