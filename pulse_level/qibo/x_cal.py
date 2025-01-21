@@ -3,8 +3,7 @@ from qiskit import QuantumRegister
 import numpy as np
 from gymnasium.spaces import Box
 from qiskit.quantum_info import Statevector
-
-from rl_qoc import BenchmarkConfig, StateRewardConfig
+ 
 from rl_qoc.qibo import QiboEnvironment
 from qiskit.circuit import QuantumCircuit, ParameterVector, Gate
 from qiskit.circuit.library import CZGate, RXGate, XGate
@@ -12,9 +11,11 @@ from rl_qoc import (
     QEnvConfig,
     ExecutionConfig,
     ChannelRewardConfig,
+    BenchmarkConfig,
+    StateRewardConfig,
+    RescaleAndClipAction
 )
 from rl_qoc.qibo import QiboConfig
-from gymnasium.wrappers import ClipAction, RescaleAction
 
 from rl_qoc.agent.ppo import CustomPPO
 
@@ -69,6 +70,7 @@ q_env_config = QEnvConfig(
 
 # env = QuantumEnvironment(q_env_config)
 env = QiboEnvironment(q_env_config, )
+rescaled_env = RescaleAndClipAction(env, -1., 1.)
 # env.circuits[0].draw(output="mpl")
 # # %%
 # env.baseline_circuits[0].draw(output="mpl")
@@ -84,7 +86,7 @@ print(agent_config)
 # %%
 ppo = CustomPPO(
     agent_config,
-    ClipAction(RescaleAction(env, action_space.low, action_space_high)),
+    rescaled_env,
     save_data=True,
 )
 total_updates = TotalUpdates(500)
