@@ -246,7 +246,9 @@ class StateTarget(BaseTarget):
             self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
         )
 
-    def fidelity(self, state: QuantumState | QuantumCircuit, n_reps: int = 1, validate=True):
+    def fidelity(
+        self, state: QuantumState | QuantumCircuit, n_reps: int = 1, validate=True
+    ):
         """
         Compute the fidelity of the state with the target
         :param state: State to compare with the target state
@@ -284,7 +286,7 @@ class InputState(StateTarget):
         """
         super().__init__(circuit=input_circuit)
         self._target_op = target_op
-    
+
     def target_state(self, n_reps: int = 1):
         """
         Get the target state
@@ -294,11 +296,9 @@ class InputState(StateTarget):
             circ.append(self._target_op, self.tgt_register)
         else:
             circ = self._target_op
-        circ.repeat(n_reps).compose(self.circuit, 
-                                    front=True, 
-                                    inplace=True)
+        circ.repeat(n_reps).compose(self.circuit, front=True, inplace=True)
         return StateTarget(circuit=circ)
-        
+
     @property
     def layout(self):
         raise AttributeError("Input state does not have a layout")
@@ -319,14 +319,14 @@ class InputState(StateTarget):
         return self.circuit
 
     @property
-    def target_circuit(self, n_reps:int = 1) -> QuantumCircuit:
+    def target_circuit(self, n_reps: int = 1) -> QuantumCircuit:
         """
         Get the target circuit for the input state
         """
         return self.target_state(n_reps).circuit
 
     @property
-    def target_dm(self, n_reps:int = 1) -> DensityMatrix:
+    def target_dm(self, n_reps: int = 1) -> DensityMatrix:
         """
         Get the target density matrix for the input state
         """
@@ -425,15 +425,16 @@ class GateTarget(BaseTarget):
             )
             for circ in input_circuits
         ]
-    
+
     def Chi(self, n_reps: int = 1):
         """
         Compute the characteristic function of the target gate
         :param n_reps: Number of repetitions of the target gate (default is 1)
         """
         if self.causal_cone_size <= 3:
-            return _calculate_chi_target(self.target_operator.power(n_reps,
-                                                                    assume_unitary=True))
+            return _calculate_chi_target(
+                self.target_operator.power(n_reps, assume_unitary=True)
+            )
         else:
             warnings.warn("Chi is not computed for more than 3 qubits")
             return None

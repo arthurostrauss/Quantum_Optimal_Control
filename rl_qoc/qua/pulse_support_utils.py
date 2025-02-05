@@ -264,8 +264,6 @@ def handle_parameterized_channel(
             if ch_param.name in param_table:
                 param_table.table[ch_param.name].type = int
             else:
-                ch_parameter_value = QuaParameter(
-                    ch_param.name, 0, int
-                )
+                ch_parameter_value = QuaParameter(ch_param.name, 0, int)
                 param_table.table[ch_param.name] = ch_parameter_value
     return param_table

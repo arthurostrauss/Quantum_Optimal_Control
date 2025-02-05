@@ -7,8 +7,22 @@ _INVALID_CHARS = re.compile(r"[^a-zA-Z0-9_]")
 
 # Reserved QASM3 keywords that cannot be used as variable names
 QASM3_RESERVED_KEYWORDS = {
-    "if", "else", "let", "input", "output", "reset", "gate", "measure",
-    "barrier", "creg", "qreg", "opaque", "cal", "def", "bit", "qubit"
+    "if",
+    "else",
+    "let",
+    "input",
+    "output",
+    "reset",
+    "gate",
+    "measure",
+    "barrier",
+    "creg",
+    "qreg",
+    "opaque",
+    "cal",
+    "def",
+    "bit",
+    "qubit",
 }
 
 

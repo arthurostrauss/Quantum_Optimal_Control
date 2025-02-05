@@ -92,7 +92,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
     def define_target_and_circuits(
         self,
     ) -> Tuple[
-        GateTarget| StateTarget,
+        GateTarget | StateTarget,
         List[QuantumCircuit],
         List[QuantumCircuit | DensityMatrix],
     ]:
@@ -107,10 +107,11 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         q_reg = QuantumRegister(len(self.config.target.physical_qubits))
         if isinstance(self.config.target, GateTargetConfig):
             target = GateTarget(
-                    **self.config.target.as_dict(),
-                    input_states_choice=input_states_choice,
-                    tgt_register=q_reg)
-               
+                **self.config.target.as_dict(),
+                input_states_choice=input_states_choice,
+                tgt_register=q_reg,
+            )
+
         else:
             target = StateTarget(**asdict(self.config.target))
 
@@ -168,7 +169,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 f"Action shape mismatch: {params.shape} != {(batch_size, self.n_actions)}"
             )
         reward = self.perform_action(action)
-        
+
         if np.mean(reward) > self._max_return:
             self._max_return = np.mean(reward)
             self._optimal_action = self.mean_action

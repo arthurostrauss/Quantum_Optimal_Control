@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List, Literal
 from gymnasium.spaces import Box
-
 from qiskit.providers import BackendV2
 from qiskit.transpiler import InstructionDurations, PassManager
 from .backend_config import BackendConfig
@@ -15,6 +14,7 @@ from .benchmark_config import BenchmarkConfig
 
 def default_benchmark_config():
     return BenchmarkConfig()
+
 
 @dataclass
 class QEnvConfig:
@@ -205,7 +205,7 @@ class QEnvConfig:
         self.backend_config.pass_manager = value
 
     def as_dict(self, to_json: bool = False):
-        config =  {
+        config = {
             "target": {
                 "physical_qubits": self.physical_qubits,
             },
@@ -237,10 +237,10 @@ class QEnvConfig:
             },
             "metadata": self.env_metadata,
         }
-        
+
         if isinstance(self.target, GateTargetConfig):
             config["target"]["gate"] = self.target.gate.name
         elif isinstance(self.target, StateTargetConfig) and not to_json:
             config["target"]["state"] = self.target.state.data
-            
+
         return config

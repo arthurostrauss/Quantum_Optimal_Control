@@ -132,9 +132,11 @@ class QMBackend(Backend):
 
         self.machine = validate_machine(machine)
         self.channel_mapping: Dict[QiskitChannel, QuAMChannel] = channel_mapping
-        self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = {
-            v: k for k, v in channel_mapping.items()
-        }
+        self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = (
+            {v: k for k, v in channel_mapping.items()}
+            if channel_mapping is not None
+            else {}
+        )
         self._qubit_dict = {
             qubit.name: i for i, qubit in enumerate(machine.active_qubits)
         }
@@ -186,7 +188,7 @@ class QMBackend(Backend):
             min_length=16,
             qubit_properties=[
                 QubitProperties(t1=qubit.T1, t2=qubit.T2ramsey, frequency=qubit.f_01)
-                for qubit in machine.qubits.values()
+                for qubit in machine.active_qubits
             ],
         )
 

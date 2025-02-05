@@ -11,7 +11,7 @@ from qiskit.pulse import Schedule, ScheduleBlock
 from qm.qua import *
 from qm.qua._expressions import QuaArrayType
 
-from .parameter_table import ParameterTable, Parameter
+from .parameter_table import ParameterTable, Parameter as QuaParameter
 import numpy as np
 from quam.components.quantum_components import Qubit, QubitPair
 
@@ -122,10 +122,10 @@ def parameter_table_from_qiskit(
     return ParameterTable(param_dict) if param_dict else None
 
 
-def clip_qua(param: Parameter, min_value, max_value):
+def clip_qua(param: QuaParameter, min_value, max_value):
     """
     Clip the QUA variable or QUA array between the min_value and the max_value
-    :param param: The ParameterValue object containing the QUA variable or QUA array
+    :param param: The Parameter object containing the QUA variable or QUA array
     :param min_value: The minimum value
     :param max_value: The maximum value
     :return: The clipped QUA variable or QUA array
@@ -172,6 +172,25 @@ def clip_qua_array(param: QuaArrayType, min_value, max_value):
             assign(param[i], min_value)
         with elif_(param[i] > max_value):
             assign(param[i], max_value)
+
+
+def get_gaussian_sampling_input():
+    """
+    Get the input for the gaussian sampling function
+    """
+    n_lookup = 512
+
+    cos_array = declare(
+        fixed,
+        value=[(np.cos(2 * np.pi * x / n_lookup).tolist()) for x in range(n_lookup)],
+    )
+    ln_array = declare(
+        fixed,
+        value=[
+            (np.sqrt(-2 * np.log(x / (n_lookup + 1))).tolist())
+            for x in range(1, n_lookup + 1)
+        ],
+    )
 
 
 def rand_gauss_moller_box(z1, z2, mean, std, rand):

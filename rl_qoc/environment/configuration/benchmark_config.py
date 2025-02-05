@@ -19,4 +19,3 @@ class BenchmarkConfig:
     tomography_analysis: str = "default"
     dfe_precision: Tuple[float, float] = field(default=(1e-2, 1e-2))
     method: Literal["tomography", "rb"] = "rb"
-    

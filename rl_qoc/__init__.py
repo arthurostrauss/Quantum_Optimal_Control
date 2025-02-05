@@ -1,12 +1,13 @@
 from .agent import Agent, ActorNetwork, CriticNetwork, CustomPPO, PPOConfig
 from .environment.configuration.qconfig import *
 from .environment.configuration.backend_config import *
-from .environment.reward_methods import (StateRewardConfig, 
-                                         ChannelRewardConfig,
-                                         ORBITRewardConfig,  
-                                         CAFERewardConfig,
-                                         FidelityConfig
-                                         )
+from .environment.reward_methods import (
+    StateRewardConfig,
+    ChannelRewardConfig,
+    ORBITRewardConfig,
+    CAFERewardConfig,
+    FidelityConfig,
+)
 from .environment.target import GateTarget, StateTarget
 from .environment.base_q_env import BaseQuantumEnvironment
 from .environment.quantumenvironment import QuantumEnvironment

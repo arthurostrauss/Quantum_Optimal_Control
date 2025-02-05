@@ -260,14 +260,15 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     self.custom_instructions.append(op)
                     operations_mapping[op.name] = op
 
-        target = [GateTarget(
-                    self.config.target.gate,
-                    self.physical_target_qubits,
-                    baseline_circuit,
-                    self.circ_tgt_register,
-                    layout,
-                    input_states_choice=input_states_choice,
-                ) 
+        target = [
+            GateTarget(
+                self.config.target.gate,
+                self.physical_target_qubits,
+                baseline_circuit,
+                self.circ_tgt_register,
+                layout,
+                input_states_choice=input_states_choice,
+            )
             for baseline_circuit, layout in zip(baseline_circuits, layouts)
         ]
         return target, custom_circuits, baseline_circuits
@@ -476,9 +477,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         return self._target[self.trunc_index]
 
-    def get_target(
-        self, trunc_index: Optional[int] = None
-    ):
+    def get_target(self, trunc_index: Optional[int] = None):
         """
         Return target to be calibrated at given truncation index.
         If no index is provided, return list of all targets.

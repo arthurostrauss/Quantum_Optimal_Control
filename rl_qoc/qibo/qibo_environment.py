@@ -35,7 +35,7 @@ class QiboEnvironment(QuantumEnvironment):
             self.config.benchmark_config.method
         )
         backend_config = self.config.backend_config
-        set_backend("qibolab", platform = backend_config.platform)
+        set_backend("qibolab", platform=backend_config.platform)
         target = backend_config.physical_qubits[0]
         if self.config.check_on_exp:
             if backend_config.config_type != "qibo":
@@ -43,16 +43,16 @@ class QiboEnvironment(QuantumEnvironment):
             else:
                 path = "rlqoc" + strftime("%d_%b_%H_%M_%S", gmtime())
                 with Executor.open(
-                  "myexec",
-                  path= path,
-                  platform=backend_config.platform,
-                  targets=[backend_config.physical_qubits[0]],
-                  update=True,
-                  force=True,
+                    "myexec",
+                    path=path,
+                    platform=backend_config.platform,
+                    targets=[backend_config.physical_qubits[0]],
+                    update=True,
+                    force=True,
                 ) as e:
                     # Overwrite the rules
                     backend = qibo.get_backend()
-                    compiler = backend.compiler 
+                    compiler = backend.compiler
                     gate_rule = resolve_gate_rule(self.config.backend_config.gate_rule)
                     rule = lambda qubits_ids, platform, gate_params: gate_rule[1](
                         qubits_ids, platform, gate_params, params
@@ -60,19 +60,23 @@ class QiboEnvironment(QuantumEnvironment):
                     compiler.register(gate_rule[0])(rule)
 
                     qiskit_baseline_circ = from_custom_to_baseline_circuit(qc)
-                    qibo_circ = QiboCircuit.from_qasm(
-                        qasm3_dumps(qiskit_baseline_circ)
-                    )
+                    qibo_circ = QiboCircuit.from_qasm(qasm3_dumps(qiskit_baseline_circ))
                     qibo_circ.draw()
                     tomography_output = e.state_tomography(
-                            circuit = qibo_circ,
-                            nshots = 5000,
+                        circuit=qibo_circ,
+                        nshots=5000,
                     )
-                    rho_real = tomography_output.results.measured_density_matrix_real[target]
-                    rho_imaginary = tomography_output.results.measured_density_matrix_imag[target]
-                    rho = np.transpose(np.array(rho_real) + 1j * np.array(rho_imaginary))
+                    rho_real = tomography_output.results.measured_density_matrix_real[
+                        target
+                    ]
+                    rho_imaginary = (
+                        tomography_output.results.measured_density_matrix_imag[target]
+                    )
+                    rho = np.transpose(
+                        np.array(rho_real) + 1j * np.array(rho_imaginary)
+                    )
                     dm = DensityMatrix(rho)
-                    fidelity = self.target.fidelity(dm, validate = False)
+                    fidelity = self.target.fidelity(dm, validate=False)
                 report(e.path, e.history)
             self.circuit_fidelity_history.append(fidelity)
             return fidelity

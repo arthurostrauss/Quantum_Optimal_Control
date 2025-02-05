@@ -16,7 +16,7 @@ class QuaConfig(BackendConfig):
         channel_mapping: Dictionary mapping channels to quantum elements
     """
 
-    backend: QMBackend
+    backend: QMBackend = None
     hardware_config: Any = None
 
     @property
