@@ -17,7 +17,7 @@ from qiskit.pulse import (
 )
 from .sympy_to_qua import sympy_to_qua
 from qiskit.circuit.parameterexpression import ParameterExpression
-from .parameter_table import ParameterTable, ParameterValue
+from .parameter_table import ParameterTable, Parameter as QuaParameter
 from typing import Dict, List, Optional, Callable, Union, Type
 from functools import partial
 from qiskit.pulse.transforms import block_to_schedule
@@ -261,8 +261,11 @@ def handle_parameterized_channel(
                     "Only single parameterized channels are supported"
                 )
             ch_param = ch_params[0]
-            ch_parameter_value = ParameterValue(
-                ch_param.name, 0, param_table.table[ch_param.name].index, int
-            )
-            param_table.table[ch_param.name] = ch_parameter_value
+            if ch_param.name in param_table:
+                param_table.table[ch_param.name].type = int
+            else:
+                ch_parameter_value = QuaParameter(
+                    ch_param.name, 0, int
+                )
+                param_table.table[ch_param.name] = ch_parameter_value
     return param_table

@@ -15,7 +15,6 @@ from qiskit.circuit import (
     WhileLoopOp,
 )
 from qiskit.circuit.library.standard_gates import (
-    get_standard_gate_name_mapping as gate_map,
     get_standard_gate_name_mapping,
 )
 from qiskit.providers import BackendV2 as Backend, QubitProperties
@@ -161,7 +160,7 @@ class QMBackend(Backend):
         """
         return {
             i: (channel.name for channel in qubit.channels)
-            for i, qubit in enumerate(self.machine)
+            for i, qubit in enumerate(self.machine.active_qubits)
         }
 
     @property
@@ -322,7 +321,7 @@ class QMBackend(Backend):
             else:
                 validate_parameters(sched.parameters, param_table)
 
-            involved_parameters = [value.name for value in param_table.values]
+            involved_parameters = [value.name for value in param_table.parameters]
 
         def qua_macro(
             *params,
@@ -335,7 +334,7 @@ class QMBackend(Backend):
                         "Parameter table not declared and no parameters provided"
                     )
                 param_table.declare_variables(pause_program=False)
-                for param, value in zip(param_table.values, params):
+                for param, value in zip(param_table.parameters, params):
                     param.assign_value(value)
 
             time_tracker = {channel: 0 for channel in sched.channels}

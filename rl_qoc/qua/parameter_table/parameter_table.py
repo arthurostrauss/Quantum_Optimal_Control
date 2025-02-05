@@ -6,10 +6,10 @@ Author: Arthur Strauss - Quantum Machines
 Created: 25/11/2024
 """
 
-from typing import Optional, List, Dict, Union, Tuple
+from typing import Optional, List, Dict, Union, Tuple, Literal
 import numpy as np
 from qm.qua import *
-from .parameter_value import ParameterValue
+from .parameter import Parameter
 
 
 class ParameterTable:
@@ -24,17 +24,17 @@ class ParameterTable:
 
     def __init__(
         self,
-        parameters_dict: Dict[
+        parameters_dict: Union[Dict[
             str,
             Union[
                 Tuple[
                     Union[float, int, bool, List, np.ndarray],
                     Optional[Union[str, type]],
-                    Optional[str],
+                    Optional[Literal["input_stream", "dgx", "IO1", "IO2"]],
                 ],
                 Union[float, int, bool, List, np.ndarray],
             ],
-        ],
+        ], List[Parameter]],
     ):
         """
         Class enabling the mapping of parameters to be updated to their corresponding "to-be-declared" QUA variables.
@@ -44,68 +44,111 @@ class ParameterTable:
         variable built within the QUA program corresponding to the parameter name and its associated Python initial
         value.
 
-        Args: parameters_dict: Dictionary should be of the form { "parameter_name": (initial_value,
-        qua_type, Literal["input_stream"]) } where qua_type is the type of the QUA variable
-        to be declared (int, fixed, bool) and the last (optional) field indicates if the variable
-        should be declared as an input_stream instead of a standard QUA variable
+        Args: 
+            parameters_dict: Dictionary should be of the form 
+            { "parameter_name": (initial_value, qua_type, Literal["input_stream"]) } 
+            where qua_type is the type of the QUA variable to be declared (int, fixed, bool)
+             and the last (optional) field indicates if the variable should be declared as an input_stream instead 
+             of a standard QUA variable.
+            Can also be a list of pre-declared ParameterValue objects.
 
 
         """
-        self.parameters_dict = parameters_dict
         self.table = {}
-        for index, (parameter_name, parameter_value) in enumerate(
-            self.parameters_dict.items()
-        ):
-            input_stream = False
-            if isinstance(parameter_value, Tuple):
-                assert len(parameter_value) <= 3, "Invalid format for parameter value."
-                assert isinstance(
-                    parameter_value[0], (int, float, bool, List, np.ndarray)
-                ), "Invalid format for parameter value. Please use (initial_value, qua_type) or initial_value."
-                if len(parameter_value) >= 2:
-                    assert (
-                        isinstance(parameter_value[1], (str, type))
-                        or parameter_value[1] is None
-                        or parameter_value[1] == fixed
+        if isinstance(parameters_dict, Dict):
+            for index, (parameter_name, parameter_value) in enumerate(
+                self.parameters_dict.items()
+            ):
+                input_type = None
+                if isinstance(parameter_value, Tuple):
+                    assert len(parameter_value) <= 3, "Invalid format for parameter value."
+                    assert isinstance(
+                        parameter_value[0], (int, float, bool, List, np.ndarray)
                     ), "Invalid format for parameter value. Please use (initial_value, qua_type) or initial_value."
-
-                if len(parameter_value) == 3:
-                    assert (
-                        parameter_value[2] == "input_stream"
-                    ), "Invalid format for parameter value. Please use (initial_value, qua_type, input_stream) or initial_value."
-                    if parameter_value[2] == "input_stream":
-                        input_stream = True
-
-                self.table[parameter_name] = ParameterValue(
-                    parameter_name,
-                    parameter_value[0],
-                    index,
-                    parameter_value[1],
-                    input_stream,
+                    if len(parameter_value) >= 2:
+                        assert (
+                            isinstance(parameter_value[1], (str, type))
+                            or parameter_value[1] is None
+                            or parameter_value[1] == fixed
+                        ), "Invalid format for parameter value. Please use (initial_value, qua_type) or initial_value."
+                    
+                    if len(parameter_value) == 3:
+                        assert (
+                            parameter_value[2] in ["input_stream", "dgx", "IO1", "IO2"]
+                        ), "Invalid format for input type (choose from 'input_stream', 'dgx', 'IO1', 'IO2')."
+                        input_type = parameter_value[2]
+    
+                    self.table[parameter_name] = Parameter(
+                        parameter_name,
+                        parameter_value[0],
+                        parameter_value[1],
+                        input_type,
+                    )
+                    self.table[parameter_name].index = index
+                else:
+                    assert isinstance(parameter_value, (int, float, bool, List, np.ndarray)), (
+                        "Invalid format for parameter value. Please use (initial_value, qua_type) or initial_value."
+                    )
+                    self.table[parameter_name] = Parameter(
+                        parameter_name, parameter_value
+                    )
+                    self.table[parameter_name].index = index
+        elif isinstance(parameters_dict, List):
+            for index, parameter_value in enumerate(parameters_dict):
+                assert isinstance(parameter_value, Parameter), (
+                    "Invalid format for parameter value. Please use ParameterValue object."
                 )
-            else:
-                self.table[parameter_name] = ParameterValue(
-                    parameter_name, parameter_value, index
-                )
+                self.table[parameter_value.name] = parameter_value
+                parameter_value.index = index
 
-    def declare_variables(self, pause_program=False):
+    def declare_variables(self, pause_program=False, declare_streams=True) -> Union[QuaVariableType, List[QuaVariableType]]:
         """
         QUA Macro to declare all QUA variables associated with the parameter table.
         Should be called at the beginning of the QUA program.
+        Args: 
+            pause_program: Boolean indicating if the program should pause after declaring the variables.
+            declare_streams: Boolean indicating if output streams should be declared for all the parameters.
+        
         """
         for parameter_name, parameter in self.table.items():
-            parameter.declare_variable()
+            parameter.declare_variable(declare_stream=declare_streams)
         if pause_program:
             pause()
         if len(self.variables) == 1:
             return self.variables[0]
         else:
             return self.variables
+    
+    def advance_input_streams(self):
+        """
+        Advance all input streams in the parameter table (valid only for parameters declared as input streams).
+        """
+        for parameter in self.parameters:
+            if parameter.input_type is not None:
+                parameter.load_input_value()
+    
+    def save_to_stream(self):
+        """
+        Save all the parameters in the parameter table to their associated output streams.
+        """
+        for parameter in self.parameters:
+            if parameter.is_declared and parameter.stream is not None:
+                parameter.save_to_stream()
+                
+    def stream_processing(self):
+        """
+        Process all the streams in the parameter table.
+        """
+        for parameter in self.parameters:
+            if parameter.stream is not None:
+                parameter.stream_processing()
+                
+      
 
     def assign_parameters(
         self,
         values: Dict[
-            Union[str, ParameterValue],
+            Union[str, Parameter],
             Union[int, float, bool, List, np.ndarray, QuaExpressionType],
         ],
     ):
@@ -125,12 +168,12 @@ class ParameterTable:
             if isinstance(parameter_name, str):
                 self.table[parameter_name].assign_value(parameter_value)
             else:
-                if not isinstance(parameter_name, ParameterValue):
+                if not isinstance(parameter_name, Parameter):
                     raise ValueError(
                         "Invalid parameter name. Please use a string or a ParameterValue object."
                     )
                 assert (
-                    parameter_name in self.values
+                    parameter_name in self.parameters
                 ), "Provided ParameterValue not in this ParameterTable."
                 parameter_name.assign_value(parameter_value)
 
@@ -155,7 +198,7 @@ class ParameterTable:
                 )
             return self.table[parameter].type
         elif isinstance(parameter, int):
-            for param in self.values:
+            for param in self.parameters:
                 if param.index == parameter:
                     return param.type
 
@@ -188,7 +231,7 @@ class ParameterTable:
                 )
             return self.table[parameter]
         elif isinstance(parameter, int):
-            for param in self.values:
+            for param in self.parameters:
                 if param.index == parameter:
                     return param
 
@@ -207,32 +250,36 @@ class ParameterTable:
                 )
             return self.table[parameter].var
         elif isinstance(parameter, int):
-            for param in self.values:
+            for param in self.parameters:
                 if param.index == parameter:
                     return param.var
 
     def add_parameter(
-        self, parameter_value: Union[ParameterValue, List[ParameterValue]]
+        self, parameter: Union[Parameter, List[Parameter]]
     ):
         """
         Add a (list of) parameter(s) to the parameter table. The index of the parameter is automatically set to the
         next available index in the table.
         Args: parameter_value: (List of) ParameterValue(s) object(s) to be added to current parameter table.
         """
-        if isinstance(parameter_value, List):
-            for parameter in parameter_value:
+        if isinstance(parameter, List):
+            for parameter in parameter:
+                if not isinstance(parameter, Parameter):
+                    raise ValueError(
+                        "Invalid parameter type. Please use a ParameterValue object."
+                    )
                 if parameter.name in self.table.keys():
                     raise KeyError(
                         f"Parameter {parameter.name} already exists in the parameter table."
                     )
-                max_index = max([param.index for param in self.values])
+                max_index = max([param.index for param in self.parameters])
                 parameter.index = max_index + 1
 
                 self.table[parameter.name] = parameter
-        elif isinstance(parameter_value, ParameterValue):
-            return self.add_parameter([parameter_value])
+        elif isinstance(parameter, Parameter):
+            return self.add_parameter([parameter])
 
-    def remove_parameter(self, parameter_value: Union[str, ParameterValue]):
+    def remove_parameter(self, parameter_value: Union[str, Parameter]):
         """
         Remove a parameter from the parameter table.
         Args: parameter_value: Name of the parameter to be removed or ParameterValue object to be removed.
@@ -243,8 +290,8 @@ class ParameterTable:
                     f"No parameter named {parameter_value} in the parameter table."
                 )
             del self.table[parameter_value]
-        elif isinstance(parameter_value, ParameterValue):
-            if parameter_value not in self.values:
+        elif isinstance(parameter_value, Parameter):
+            if parameter_value not in self.parameters:
                 raise KeyError("Provided ParameterValue not in this ParameterTable.")
             del self.table[parameter_value.name]
         else:
@@ -323,6 +370,13 @@ class ParameterTable:
 
     def __len__(self):
         return len(self.table)
+    
+    def __getattr__(self, item):
+        # Get the QUA variable corresponding to the specified parameter name.
+        if item in self.table.keys():
+            return self.table[item].var
+        else:
+            raise AttributeError(f"No attribute named {item} in the parameter table.")
 
     @property
     def variables(self):
@@ -345,7 +399,7 @@ class ParameterTable:
         }
 
     @property
-    def values(self):
+    def parameters(self):
         """
         List of the parameter values objects in the parameter table.
 
@@ -356,7 +410,7 @@ class ParameterTable:
     @property
     def is_declared(self):
         """Boolean indicating if all the QUA variables have been declared."""
-        return all(parameter.is_declared for parameter in self.values)
+        return all(parameter.is_declared for parameter in self.parameters)
 
     def __repr__(self):
         text = ""

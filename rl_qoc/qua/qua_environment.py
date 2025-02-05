@@ -28,7 +28,6 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
         """
         # TODO: Set IO2 and IO1 to be the number of input states and the number of observables respectively
         trunc_index = self.trunc_index
-        real_time_parameters = self.parameter_tables[trunc_index]
         input_stream_template = (0, int, "input_stream")
         counter_template = (0, int)
         indices_template = ([0 for _ in range(self.n_qubits)], int, "input_stream")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from qiskit import ClassicalRegister
 from qiskit.circuit import QuantumCircuit
+from qiskit.circuit.classical.expr import Var
 from qiskit.circuit.classical.types import Uint
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
@@ -121,6 +122,10 @@ class FidelityConfig(RewardConfig):
 
 
 def get_single_qubit_input_states(input_state_choice):
+    """
+    Get single qubit input states for a given choice of input states
+    (pauli4, pauli6, 2-design)
+    """
     if input_state_choice == "pauli4":
         input_states = [PauliPreparationBasis().circuit([i]) for i in range(4)]
     elif input_state_choice == "pauli6":
@@ -178,15 +183,24 @@ def get_real_time_reward_pub(circuits: QuantumCircuit | List[QuantumCircuit],
     num_qubits = qc.num_qubits # all qubits (even those outside of causal cone)
     n_reps = execution_config.current_n_reps
     
+    if len(execution_config.n_reps)>1: # Switch over possible number of repetitions
+        n_reps_var = qc.add_input("n_reps", Uint(8))
+    else:
+        n_reps_var = n_reps
+    
     if is_gate_target:
         causal_cone_size = target_instance.causal_cone_size
         causal_cone_qubits = target_instance.causal_cone_qubits
     else:
         causal_cone_size = num_qubits
         causal_cone_qubits = qc.qubits
-
-    meas = ClassicalRegister(causal_cone_size, name="meas")
-    qc.add_register(meas)
+    
+    # Add classical register for measurements
+    if not qc.clbits:
+        meas = ClassicalRegister(causal_cone_size, name="meas")
+        qc.add_register(meas)
+    else:
+        meas = qc.clbits
     
     if is_gate_target: # Declare input states variables
         input_state_vars = [qc.add_input(f"input_state_{i}", 
@@ -198,28 +212,22 @@ def get_real_time_reward_pub(circuits: QuantumCircuit | List[QuantumCircuit],
     
     if is_gate_target:
         input_circuits = get_single_qubit_input_states(target_instance.input_states_choice)
-        if reward_method == "cafe":
-            pass
-            
+     
         for q_idx, qubit in enumerate(qc.qubits): # Input state preparation
             with qc.switch(input_state_vars[q_idx]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):
                         qc.compose(input_circuit, [qubit], inplace=True)
 
-    if len(prep_circuits) > 1:
+    if len(prep_circuits) > 1: # Switch over possible circuit contexts
         circuit_choice = qc.add_input("circuit_choice", Uint(8))
-        
-        with qc.switch(circuit_choice) as case:
+        with qc.switch(circuit_choice) as circuit_case:
             for i, prep_circuit in enumerate(prep_circuits):
-                with case(i):
-                    with qc.for_loop(range(n_reps)):
-                        qc.compose(prep_circuit, inplace=True)
-                    
+                with circuit_case(i):
+                    handle_real_time_n_reps(execution_config.n_reps, n_reps_var, prep_circuit, qc)     
     else:
         prep_circuit = prep_circuits[0]
-        with qc.for_loop(range(n_reps)):
-            qc.compose(prep_circuit, inplace=True)
+        handle_real_time_n_reps(execution_config.n_reps, n_reps_var, prep_circuit, qc)
     
     if reward_method in ["state", "channel"]:
         for q_idx, qubit in enumerate(causal_cone_qubits):
@@ -232,14 +240,63 @@ def get_real_time_reward_pub(circuits: QuantumCircuit | List[QuantumCircuit],
             qc.measure(qubit, clbit)
             
     elif reward_method == "cafe":
-        ref_circuits = [circ.metadata["baseline_circuit"] for circ in prep_circuits]
-        pass
+        for circ in prep_circuits:
+            if circ.metadata.get("baseline_circuit") is None:
+                raise ValueError("Baseline circuit not found in metadata")
+        ref_circuits: List[QuantumCircuit] = [circ.metadata["baseline_circuit"].copy() for circ in prep_circuits]
+        layout = target_instance.layout
+        cycle_circuit_inverses = [[] for _ in range(len(ref_circuits))]
+        for i, ref_circ in enumerate(ref_circuits):
+            for n in execution_config.n_reps:
+                cycle_circuit = ref_circ.repeat(n)
+                cycle_circuit = causal_cone_circuit(cycle_circuit, causal_cone_qubits)[0]
+                cycle_circuit.save_unitary()
+                sim_unitary = AerSimulator(method='unitary').run(cycle_circuit).result().get_unitary()
+                inverse_circuit = ref_circ.copy_empty_like()
+                inverse_circuit.unitary(sim_unitary.adjoint(), causal_cone_qubits, label="U_inv")
+                inverse_circuit.measure(causal_cone_qubits, meas)
+                cycle_circuit_inverses[i].append(inverse_circuit)
+                
+            
+            
+            with qc.switch(circuit_choice) as case_circuit:
+                with case_circuit(i):
+                    qc.compose(cycle_circuit, inplace=True)
+        
+            
     
     qc = backend_info.custom_transpile(qc, initial_layout=target_instance.layout, 
                                        scheduling=False, remove_final_measurements=False)
     
     return SamplerPub.coerce((qc, params, execution_config.n_shots))
-        
+
+
+def handle_real_time_n_reps(n_reps: List[int], n_reps_var: int|Var, prep_circuit: QuantumCircuit,
+                            qc: QuantumCircuit):
+    """
+    Handle the number of repetitions of the circuit in the real-time reward computation
+    
+    Args:
+        n_reps: List of possible number of repetitions
+        n_reps_var: Variable for the number of repetitions
+        prep_circuit: Circuit to be executed
+        qc: Quantum circuit to add the repetitions to
+    """
+    if isinstance(n_reps_var, int):
+        if n_reps_var > 1:
+            with qc.for_loop(range(n_reps_var)):
+                qc.compose(prep_circuit, inplace=True)
+        else:
+            qc.compose(prep_circuit, inplace=True)
+    elif isinstance(n_reps_var, Var):
+        with qc.switch(n_reps_var) as case_reps:
+            for n in n_reps:
+                with case_reps(n):
+                    if n > 1:
+                        with qc.for_loop(range(n)):
+                            qc.compose(prep_circuit, inplace=True)
+                    else:
+                        qc.compose(prep_circuit, inplace=True)
 
 
 @dataclass
@@ -745,7 +802,7 @@ class CAFERewardConfig(RewardConfig):
 
             # Compute inverse unitary for reference circuit
             sim_qc = causal_cone_circuit(
-                ref_qc.copy().decompose(), target.causal_cone_qubits
+                ref_qc.decompose(), target.causal_cone_qubits
             )[0]
             sim_qc.save_unitary()
             sim_unitary = (

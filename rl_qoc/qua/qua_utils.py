@@ -11,22 +11,22 @@ from qiskit.pulse import Schedule, ScheduleBlock
 from qm.qua import *
 from qm.qua._expressions import QuaArrayType
 
-from .parameter_table import ParameterTable, ParameterValue
+from .parameter_table import ParameterTable, Parameter
 import numpy as np
-from quam.examples.superconducting_qubits import Transmon
+from quam.components.quantum_components import Qubit, QubitPair
 
 
 def validate_parameter_table(qc: QuantumCircuit):
     """
-    Validate the parameter table of the circuit
+    Validate the parameter table of the circuit.
+    This assumes that the parameter table is already added to the circuit metadata.
     """
     if "parameter_table" not in qc.metadata:
         raise ValueError("No parameter table found in the circuit")
     for parameter in qc.parameters:
-        if (
-            isinstance(parameter, ParameterVectorElement)
-            and parameter.vector.name not in qc.metadata["parameter_table"].table
-        ):
+        if isinstance(parameter, ParameterVectorElement):
+            if parameter.name in qc.metadata["parameter_table"].table:
+                continue
             if parameter.vector.name not in qc.metadata["parameter_table"].table:
                 raise ValueError(
                     f"ParameterVector {parameter.vector.name} not found in the parameter table"
@@ -97,7 +97,7 @@ def parameter_table_from_qiskit(
     elif isinstance(parameter_input, (Schedule, ScheduleBlock)):
         for channel in list(
             filter(lambda ch: ch.is_parameterized(), parameter_input.channels)
-        ): 
+        ):
             ch_params = list(channel.parameters)
             if len(ch_params) > 1:
                 raise NotImplementedError(
@@ -122,7 +122,7 @@ def parameter_table_from_qiskit(
     return ParameterTable(param_dict) if param_dict else None
 
 
-def clip_qua(param: ParameterValue, min_value, max_value):
+def clip_qua(param: Parameter, min_value, max_value):
     """
     Clip the QUA variable or QUA array between the min_value and the max_value
     :param param: The ParameterValue object containing the QUA variable or QUA array
@@ -144,7 +144,7 @@ def clip_qua(param: ParameterValue, min_value, max_value):
                 assign(param.var[i], max_value)
 
 
-def clip_qua_var(param: QuaVariableType, min_value, max_value):
+def clip_qua_var(param: QuaExpressionType, min_value, max_value):
     """
     Clip the QUA variable between the min_value and the max_value
     :param param: The QUA variable
@@ -205,7 +205,7 @@ def rand_gauss_moller_box(z1, z2, mean, std, rand):
     return z1, z2
 
 
-def prepare_input_state_pauli6(pauli_prep_indices, qubits: List[Transmon]):
+def prepare_input_state_pauli6(pauli_prep_indices, qubits: List[Qubit]):
     for i in range(len(qubits)):
         qubit = qubits[i]
         with switch_(pauli_prep_indices[i], unsafe=True):
@@ -227,7 +227,7 @@ def prepare_input_state_pauli6(pauli_prep_indices, qubits: List[Transmon]):
                 Sdg(qubit)
 
 
-def measure_observable(final_state, observable_indices, qubits: List[Transmon]):
+def measure_observable(final_state, observable_indices, qubits: List[Qubit]):
     """
     Measure the observable given by the observable indices
     Observable indices is an array composed of integers given by the following mapping:
@@ -283,31 +283,31 @@ def measure_observable(final_state, observable_indices, qubits: List[Transmon]):
     return final_state
 
 
-def Id(qubit: Transmon):
+def Id(qubit: Qubit):
     pass
 
 
-def X(qubit: Transmon, condition=None):
+def X(qubit: Qubit, condition=None):
     pass
 
 
-def H(qubit: Transmon):
+def H(qubit: Qubit):
     pass
 
 
-def Z(qubit: Transmon):
+def Z(qubit: Qubit):
     pass
 
 
-def S(qubit: Transmon):
+def S(qubit: Qubit):
     pass
 
 
-def Sdg(qubit: Transmon):
+def Sdg(qubit: Qubit):
     pass
 
 
-def reset_qubit(method: str, qubit: Transmon, **kwargs):
+def reset_qubit(method: str, qubit: Qubit, **kwargs):
     """
     Macro to reset the qubit state.
 
@@ -357,7 +357,7 @@ def reset_qubit(method: str, qubit: Transmon, **kwargs):
 
 
 # Macro for performing active reset until successful for a given number of tries.
-def active_reset(threshold: float, qubit: Transmon, max_tries=1, Ig=None):
+def active_reset(threshold: float, qubit: Qubit, max_tries=1, Ig=None):
     """Macro for performing active reset until successful for a given number of tries.
 
     :param threshold: threshold for the 'I' quadrature discriminating between ground and excited state.
