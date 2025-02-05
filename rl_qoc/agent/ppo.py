@@ -87,7 +87,8 @@ class CustomPPO:
             self.min_action,
             self.max_action,
         ) = initialize_environment(env.unwrapped)
-
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Initialize networks
         self.agent = initialize_networks(
             self.unwrapped_env.observation_space,
@@ -100,7 +101,7 @@ class CustomPPO:
             agent_config.output_activation_std,
             self.chkpt_dir,
             self.chkpt_dir_critic,
-        )
+        ).to(self.device)
         # Initialize optimizer
         self.optimizer = self.agent_config.optimizer(
             self.agent.parameters(), lr=self.agent_config.learning_rate, eps=1e-5
@@ -210,12 +211,12 @@ class CustomPPO:
         obs_space = env.observation_space.shape
         action_space = env.action_space.shape
 
-        obs = torch.zeros((num_time_steps, batch_size) + obs_space)
-        actions = torch.zeros((num_time_steps, batch_size) + action_space)
-        logprobs = torch.zeros((num_time_steps, batch_size))
-        rewards = torch.zeros((num_time_steps, batch_size))
-        dones = torch.zeros((num_time_steps, batch_size))
-        values = torch.zeros((num_time_steps, batch_size))
+        obs = torch.zeros((num_time_steps, batch_size) + obs_space, device=self.device)
+        actions = torch.zeros((num_time_steps, batch_size) + action_space, device=self.device)
+        logprobs = torch.zeros((num_time_steps, batch_size), device=self.device)
+        rewards = torch.zeros((num_time_steps, batch_size), device=self.device)
+        dones = torch.zeros((num_time_steps, batch_size), device=self.device)
+        values = torch.zeros((num_time_steps, batch_size), device=self.device)
 
         # avg_reward = fidelities = std_actions = avg_action_history = []
         start_time = time.time()
@@ -244,8 +245,8 @@ class CustomPPO:
 
                 # Reset the environment
                 next_obs, _ = env.reset(seed=self.seed)
-                batch_obs = torch.tile(torch.Tensor(next_obs), (batch_size, 1))
-                batch_done = torch.zeros_like(dones[0])
+                batch_obs = torch.tile(torch.Tensor(next_obs , device=self.device), (batch_size, 1))
+                batch_done = torch.zeros_like(dones[0], device=self.device)
 
                 for step in range(num_time_steps):
                     self.global_step += 1
@@ -264,9 +265,9 @@ class CustomPPO:
                     next_obs, reward, terminated, truncated, infos = env.step(
                         action.cpu().numpy()
                     )
-                    next_obs = torch.Tensor(next_obs)
+                    next_obs = torch.Tensor(next_obs, device=self.device)
                     done = int(np.logical_or(terminated, truncated))
-                    reward = torch.Tensor(reward)
+                    reward = torch.Tensor(reward, device=self.device)
                     rewards[step] = reward
 
                     actions[step], logprobs[step] = self.post_process_action(
@@ -274,13 +275,13 @@ class CustomPPO:
                     )
 
                     batch_obs = torch.tile(next_obs, (batch_size, 1))
-                    next_done = done * torch.ones_like(dones[0])
+                    next_done = done * torch.ones_like(dones[0], device=self.device)
                     obs[step] = batch_obs
                     dones[step] = next_done
 
                 with torch.no_grad():
                     next_value = agent.get_value(next_obs).reshape(1, -1)
-                    advantages = torch.zeros_like(rewards)
+                    advantages = torch.zeros_like(rewards, device=self.device)
                     lastgaelam = 0
                     for t in reversed(range(num_time_steps)):
                         if t == num_time_steps - 1:
