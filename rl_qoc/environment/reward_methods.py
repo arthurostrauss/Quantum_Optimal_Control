@@ -124,7 +124,7 @@ class FidelityConfig(RewardConfig):
         return "fidelity"
 
 
-def get_single_qubit_input_states(input_state_choice):
+def get_single_qubit_input_states(input_state_choice) -> List[QuantumCircuit]:
     """
     Get single qubit input states for a given choice of input states
     (pauli4, pauli6, 2-design)
@@ -142,6 +142,21 @@ def get_single_qubit_input_states(input_state_choice):
     else:
         raise ValueError("Invalid input state choice")
     return input_states
+
+
+def get_input_states_cardinality_per_qubit(input_state_choice: str) -> int:
+    """
+    Get the cardinality of the input states for a given choice of input states
+    (pauli4, pauli6, 2-design)
+    """
+    if input_state_choice == "pauli4":
+        return 4
+    elif input_state_choice == "pauli6":
+        return 6
+    elif input_state_choice == "2-design":
+        return 4
+    else:
+        raise ValueError("Invalid input state choice")
 
 
 def get_real_time_reward_pub(
@@ -274,10 +289,9 @@ def get_real_time_reward_pub(
         cycle_circuit_inverses = [[] for _ in range(len(ref_circuits))]
         for i, ref_circ in enumerate(ref_circuits):
             for n in execution_config.n_reps:
-                cycle_circuit = ref_circ.repeat(n)
-                cycle_circuit = causal_cone_circuit(cycle_circuit, causal_cone_qubits)[
-                    0
-                ]
+                cycle_circuit, _ = causal_cone_circuit(
+                    ref_circ.repeat(n), causal_cone_qubits
+                )
                 cycle_circuit.save_unitary()
                 sim_unitary = (
                     AerSimulator(method="unitary")
@@ -292,10 +306,6 @@ def get_real_time_reward_pub(
                 inverse_circuit.measure(causal_cone_qubits, meas)
                 cycle_circuit_inverses[i].append(inverse_circuit)
 
-            with qc.switch(circuit_choice) as case_circuit:
-                with case_circuit(i):
-                    qc.compose(cycle_circuit, inplace=True)
-
     qc = backend_info.custom_transpile(
         qc,
         initial_layout=target_instance.layout,
@@ -304,6 +314,24 @@ def get_real_time_reward_pub(
     )
 
     return SamplerPub.coerce((qc, params, execution_config.n_shots))
+
+
+def apply_real_time_n_reps(
+    n_reps_int: int, qc: QuantumCircuit, prep_circuit: QuantumCircuit
+):
+    """
+    Apply the number of repetitions of the circuit in the real-time reward computation
+
+    Args:
+        n_reps_var: Variable for the number of repetitions
+        qc: Quantum circuit to add the repetitions to
+        prep_circuit: Circuit to be repeated
+    """
+    if n_reps_int > 1:
+        with qc.for_loop(range(n_reps_int)):
+            qc.compose(prep_circuit, inplace=True)
+    else:
+        qc.compose(prep_circuit, inplace=True)
 
 
 def handle_real_time_n_reps(
@@ -318,24 +346,18 @@ def handle_real_time_n_reps(
     Args:
         n_reps: List of possible number of repetitions
         n_reps_var: Variable for the number of repetitions
-        prep_circuit: Circuit to be executed
+        prep_circuit: Circuit to be repeated
         qc: Quantum circuit to add the repetitions to
     """
     if isinstance(n_reps_var, int):
-        if n_reps_var > 1:
-            with qc.for_loop(range(n_reps_var)):
-                qc.compose(prep_circuit, inplace=True)
-        else:
-            qc.compose(prep_circuit, inplace=True)
+        apply_real_time_n_reps(n_reps_var, qc, prep_circuit)
     elif isinstance(n_reps_var, Var):
+        # TODO: When Qiskit will support variable range in for loop, replace
+        # this with a for loop with appropriate range object
         with qc.switch(n_reps_var) as case_reps:
             for n in n_reps:
                 with case_reps(n):
-                    if n > 1:
-                        with qc.for_loop(range(n)):
-                            qc.compose(prep_circuit, inplace=True)
-                    else:
-                        qc.compose(prep_circuit, inplace=True)
+                    apply_real_time_n_reps(n, qc, prep_circuit)
 
 
 @dataclass
@@ -345,6 +367,9 @@ class StateRewardConfig(RewardConfig):
     """
 
     input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
+    shots_seed: int = 2000
+    input_state_seed: int = 2001
+    observables_seed: int = 2002
 
     def __post_init__(self):
         super().__post_init__()
@@ -359,6 +384,69 @@ class StateRewardConfig(RewardConfig):
     def reward_args(self):
         return {"input_states_choice": self.input_states_choice}
 
+    def get_reward_real_time_inputs(
+        self,
+        target: StateTarget | GateTarget,
+        execution_config: ExecutionConfig,
+        dfe_precision: Optional[Tuple[float, float]] = None,
+    ):
+        """
+        Get input states and observables for reward computation
+        """
+
+        target_instance = target
+        target_state = (
+            target_instance if isinstance(target_instance, StateTarget) else None
+        )
+        n_reps = execution_config.current_n_reps
+        input_state_indices = []
+        if isinstance(target_instance, GateTarget):
+            num_qubits = target_instance.causal_cone_size
+        else:
+            num_qubits = target_instance.n_qubits
+
+        if isinstance(target_instance, GateTarget):
+            # State reward: sample a random input state for target gate
+            input_state_index = np.random.choice(len(target_instance.input_states))
+            input_choice = target_instance.input_states_choice
+            indices = np.unravel_index(
+                input_state_index,
+                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
+            )
+            input_state_indices.append((int(i) for i in indices))
+            input_state: InputState = target_instance.input_states[input_state_index]
+
+            # Modify target state to match input state and target gate
+            target_state = input_state.target_state(n_reps)  # (Gate |input>=|target>)
+
+        self._observables, self._pauli_shots = retrieve_observables(
+            target_state,
+            dfe_tuple=dfe_precision,
+            c_factor=execution_config.c_factor,
+            sampling_paulis=execution_config.sampling_paulis,
+        )
+
+        observable_indices = []
+        observables_grouping = self._observables.group_commuting(qubit_wise=True)
+        for obs_group in observables_grouping:  # Get indices of Pauli observables
+            current_indices = []
+            paulis = obs_group.paulis  # Get Pauli List out of the SparsePauliOp
+            reference_pauli = paulis[
+                0
+            ].to_label()  # Get first Pauli in the group to identify measurement basis
+            for pauli_term in reversed(
+                reference_pauli
+            ):  # Get individual qubit indices for each Pauli term
+                if pauli_term == "I" or pauli_term == "Z":
+                    current_indices.append(0)
+                elif pauli_term == "X":
+                    current_indices.append(1)
+                elif pauli_term == "Y":
+                    current_indices.append(2)
+            observable_indices.append(tuple(current_indices))
+
+        return input_state_indices, observable_indices, self._pauli_shots
+
     def get_reward_pubs(
         self,
         qc: QuantumCircuit,
@@ -369,7 +457,8 @@ class StateRewardConfig(RewardConfig):
         dfe_precision: Optional[Tuple[float, float]] = None,
     ) -> List[Pub]:
         """
-        Compute pubs related to the reward method
+        Compute pubs related to the reward method.
+        This is used when real-time action sampling is not enabled on the backend.
 
         Args:
             qc: Quantum circuit to be executed on quantum system
@@ -521,6 +610,102 @@ class ChannelRewardConfig(RewardConfig):
         Fiducial states and observables to sample
         """
         return self._fiducials
+
+    def get_reward_real_time_inputs(
+        self,
+        target: GateTarget,
+        execution_config: ExecutionConfig,
+        dfe_precision: Optional[Tuple[float, float]] = None,
+    ):
+        """
+        Get input states and observables for reward computation
+        """
+        n_qubits = target.causal_cone_size
+        n_reps = execution_config.current_n_reps
+        dim = 2**n_qubits
+        Chi = target.Chi(n_reps)
+        self._input_states = []
+
+        nb_states = self.num_eigenstates_per_pauli
+        if nb_states >= dim:
+            raise ValueError(
+                f"Number of eigenstates per Pauli should be less than or equal to {dim}"
+            )
+
+        probabilities = Chi**2 / (dim**2)
+        non_zero_indices = np.nonzero(probabilities)[0]  # Filter out zero probabilities
+        non_zero_probabilities = probabilities[non_zero_indices]
+
+        basis = pauli_basis(num_qubits=n_qubits)
+
+        if dfe_precision is not None:
+            eps, delta = dfe_precision
+            pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
+        else:
+            eps, delta = None, None
+            pauli_sampling = execution_config.sampling_paulis
+
+        samples, self._pauli_shots = np.unique(
+            np.random.choice(
+                non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
+            ),
+            return_counts=True,
+        )
+        pauli_indices = np.array(
+            [np.unravel_index(sample, (dim**2, dim**2)) for sample in samples],
+            dtype=int,
+        )
+
+        pauli_prep, pauli_meas = zip(
+            *[(basis[p[1]], basis[p[0]]) for p in pauli_indices]
+        )
+        pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
+        reward_factor = [execution_config.c_factor / (dim * Chi[p]) for p in samples]
+
+        observables = SparsePauliOp(pauli_meas, reward_factor, ignore_pauli_phase=True)
+        if dfe_precision is not None:
+            self._pauli_shots = np.ceil(
+                2
+                * np.log(2 / delta)
+                / (dim * pauli_sampling * eps**2 * Chi[samples] ** 2)
+            )
+
+        used_prep_indices = []
+        total_shots = 0
+
+        for prep, obs, shots in zip(pauli_prep, observables, self._pauli_shots):
+            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis
+            # Below, we select at random a subset of pure input states to prepare for each prep
+            # If nb_states = 1, we prepare all pure input states for each prep (no random selection)
+            max_input_states = dim // nb_states
+            selected_input_states = np.random.choice(
+                dim, size=max_input_states, replace=False
+            )
+            for input_state in selected_input_states:
+                prep_indices = []
+                dedicated_shots = (
+                    shots * execution_config.n_shots // max_input_states
+                )  # Number of shots per Pauli eigenstate (divided equally)
+                if dedicated_shots == 0:
+                    continue
+                # Convert input state to Pauli6 basis: preparing pure eigenstates of Pauli_prep
+                inputs = np.unravel_index(input_state, (2,) * n_qubits)
+                parity = (-1) ** np.sum(
+                    inputs
+                )  # Parity of input state (weighting factor in Pauli prep decomposition)
+                for i, pauli_op in enumerate(reversed(prep.to_label())):
+                    # Build input state in Pauli6 basis from Pauli prep: look at each qubit individually
+                    if pauli_op == "I" or pauli_op == "Z":
+                        prep_indices.append(inputs[i])
+                    elif pauli_op == "X":
+                        prep_indices.append(2 + inputs[i])
+                    elif pauli_op == "Y":
+                        prep_indices.append(4 + inputs[i])
+
+                if tuple(prep_indices) not in used_prep_indices:
+                    used_prep_indices.append(tuple(prep_indices))
+                    self._input_states.append(prep)
+                    total_shots += dedicated_shots * execution_config.batch_size
 
     def get_reward_pubs(
         self,

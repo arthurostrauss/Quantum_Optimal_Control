@@ -87,7 +87,7 @@ class CustomPPO:
             self.min_action,
             self.max_action,
         ) = initialize_environment(env.unwrapped)
-        
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Initialize networks
         self.agent = initialize_networks(
@@ -212,7 +212,9 @@ class CustomPPO:
         action_space = env.action_space.shape
 
         obs = torch.zeros((num_time_steps, batch_size) + obs_space, device=self.device)
-        actions = torch.zeros((num_time_steps, batch_size) + action_space, device=self.device)
+        actions = torch.zeros(
+            (num_time_steps, batch_size) + action_space, device=self.device
+        )
         logprobs = torch.zeros((num_time_steps, batch_size), device=self.device)
         rewards = torch.zeros((num_time_steps, batch_size), device=self.device)
         dones = torch.zeros((num_time_steps, batch_size), device=self.device)
@@ -245,7 +247,9 @@ class CustomPPO:
 
                 # Reset the environment
                 next_obs, _ = env.reset(seed=self.seed)
-                batch_obs = torch.tile(torch.Tensor(next_obs , device=self.device), (batch_size, 1))
+                batch_obs = torch.tile(
+                    torch.Tensor(next_obs, device=self.device), (batch_size, 1)
+                )
                 batch_done = torch.zeros_like(dones[0], device=self.device)
 
                 for step in range(num_time_steps):
