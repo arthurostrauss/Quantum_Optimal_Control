@@ -16,3 +16,5 @@ optuna>=3.5.0
 qualang-tools >= 0.18.1
 chardet
 tensorboard
+wandb
+pylatexenc
