@@ -101,7 +101,8 @@ class CustomPPO:
             agent_config.output_activation_std,
             self.chkpt_dir,
             self.chkpt_dir_critic,
-        ).to(self.device)
+        )
+        self.agent.to(self.device)
         # Initialize optimizer
         self.optimizer = self.agent_config.optimizer(
             self.agent.parameters(), lr=self.agent_config.learning_rate, eps=1e-5

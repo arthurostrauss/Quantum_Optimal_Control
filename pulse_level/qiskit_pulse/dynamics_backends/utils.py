@@ -79,7 +79,7 @@ def get_couplings(
     """
     Processes coupling information to build coupling Hamiltonian, control channels, and drive operators with
     cross-resonance terms.
-    
+
     Parameters:
     - couplings (Dict): A dictionary where each key is a tuple of two integers representing qubit indices,
       and each value is a float representing the coupling strength between these qubits.
@@ -88,7 +88,7 @@ def get_couplings(
     - freqs (List): A list of frequencies for the qubits.
     - drive_ops (List): A list of drive operators for the qubits.
     """
-    
+
     ecr_ops = []
     coupling_ham = Operator(np.empty_like(drive_ops[0].data, dtype=complex))
     control_channel_map, control_channels_freq = {}, {}
