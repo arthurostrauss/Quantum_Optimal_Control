@@ -145,19 +145,18 @@ class HyperparameterOptimizer:
         """
 
         # q_env.unwrapped.backend
-        self.agent_config, self.hyperparams = create_hpo_agent_config(
-            trial, self.hpo_config_file_data, self.path_agent_config
-        )
-
-        # Include batchsize, n_shots, and sampling_Pauli_space in the hpo scope
-        self.q_env.unwrapped.batch_size = self.agent_config["BATCHSIZE"]
-        self.q_env.unwrapped.n_shots = self.agent_config["N_SHOTS"]
-        self.q_env.unwrapped.sampling_Pauli_space = self.agent_config["SAMPLE_PAULIS"]
+        self.hyperparams = create_hpo_agent_config(trial, self.hpo_config.hpo_scope)
 
         # train_fn = make_train_ppo(self.agent_config, self.q_env, hpo_mode=True)
-        ppo_agent = CustomPPO(self.agent_config, self.q_env)
+        for key, value in self.hyperparams.items():
+            lower_key = key.lower()
+            if hasattr(self.q_env.unwrapped, lower_key):
+                setattr(self.q_env.unwrapped, lower_key, value)
+            elif hasattr(self.hpo_config.agent, lower_key):
+                setattr(self.hpo_config.agent, lower_key, value)
+
         start_time = time.time()
-        training_results = ppo_agent.train(
+        training_results = self.hpo_config.agent.train(
             training_config=self.training_config,
             train_function_settings=self.train_function_settings,
         )

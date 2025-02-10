@@ -51,7 +51,8 @@ from qiskit_dynamics import DynamicsBackend
 from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
 )
-
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
 from .backend_info import QiskitBackendInfo
 from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
 from ..helpers.helper_functions import (
@@ -140,6 +141,8 @@ class BaseQuantumEnvironment(ABC, Env):
         self.circuit_fidelity_history = []
         self.circuit_fidelity_history_nreps = []
         self.avg_fidelity_history_nreps = []
+        self._fit_function: Optional[Callable] = None
+        self._fit_params: Optional[np.array] = None
 
     @abstractmethod
     def define_target_and_circuits(
@@ -183,10 +186,78 @@ class BaseQuantumEnvironment(ABC, Env):
 
         """
 
-    def perform_action(self, actions: np.array):
+    def initial_reward_fit(
+        self,
+        params: np.array,
+        execution_config: Optional[ExecutionConfig] = None,
+        fit_function: Optional[Callable] = None,
+        inverse_fit_function: Optional[Callable] = None,
+        update_fit_params: bool = True,
+    ) -> plt.Figure:
         """
-        Send the action batch to the quantum system and retrieve the reward
+        Method to fit the initial reward function to the first set of actions in the environment
+        with respect to the number of repetitions of the cycle circuit
+        """
+
+        initial_execution_config = self.config.execution_config
+        if execution_config is not None:
+            self.config.execution_config = execution_config
+
+        reward_data = []
+        for i in range(len(self.config.execution_config.n_reps)):
+            self.config.execution_config.n_reps_index = i
+            reward = self.perform_action(params, update_env_history=False)
+            reward_data.append(np.mean(reward))
+        if fit_function is None or inverse_fit_function is None:
+
+            def fit_function(n, spam, eps_lin, eps_quad):
+                return 1 - spam - eps_lin * n - eps_quad * n**2
+
+            def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
+                return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
+
+        p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
+        lower_bounds = [0.0, 0.0, 0.0]
+        upper_bounds = [1.0, np.inf, np.inf]
+
+        popt, pcov = curve_fit(
+            fit_function,
+            self.config.execution_config.n_reps,
+            reward_data,
+            p0=p0,
+            bounds=(lower_bounds, upper_bounds),
+        )
+
+        # Create a figure and return it to the user
+        fig, ax = plt.subplots()
+        ax.plot(
+            self.config.execution_config.n_reps, reward_data, label="Data", marker="o"
+        )
+        ax.plot(
+            self.config.execution_config.n_reps,
+            [fit_function(n, *popt) for n in self.config.execution_config.n_reps],
+            label="Fit",
+        )
+        ax.set_xlabel("Number of repetitions")
+        ax.set_ylabel("Reward")
+        ax.legend()
+        ax.set_title("Initial reward fit (for varying number of repetitions)")
+        # Print found parameters
+        print("Found parameters:", popt)
+
+        self.config.execution_config = initial_execution_config
+        if update_fit_params:
+            self._fit_function = lambda reward, n: inverse_fit_function(
+                reward, n, *popt
+            )
+            self._fit_params = popt
+        return fig
+
+    def perform_action(self, actions: np.array, update_env_history: bool = True):
+        """
+        Send the action batch to the quantum system and retrieve reward
         :param actions: action vectors to execute on quantum system
+        :param update_env_history: Boolean to update the environment history
         :return: Reward table (reward for each action in the batch)
         """
         qc = self.circuits[self.trunc_index].copy()
@@ -201,17 +272,29 @@ class BaseQuantumEnvironment(ABC, Env):
         if self.do_benchmark():  # Benchmarking or fidelity access
             fids = self.compute_benchmarks(qc, params)
             if reward_method == "fidelity":
-                self._total_shots.append(0)
-                self._hardware_runtime.append(0.0)
+                if update_env_history:
+                    self._total_shots.append(0)
+                    self._hardware_runtime.append(0.0)
                 return fids
 
         # Check if the reward method exists in the dictionary
+        last_input = (
+            self.config.execution_config.dfe_precision
+            if self.config.dfe
+            else self.baseline_circuits[self.trunc_index]
+        )
         self._pubs = self.config.reward_config.get_reward_pubs(
-            qc, params, self.target, self.backend_info, self.config.execution_config
+            qc,
+            params,
+            self.target,
+            self.backend_info,
+            self.config.execution_config,
+            last_input,
         )
         total_shots = self.config.reward_config.total_shots
-        self._total_shots.append(total_shots)
-        if self.backend_info.instruction_durations is not None:
+        if update_env_history:
+            self._total_shots.append(total_shots)
+        if self.backend_info.instruction_durations is not None and update_env_history:
             self._hardware_runtime.append(
                 get_hardware_runtime_single_circuit(
                     qc,
@@ -255,22 +338,6 @@ class BaseQuantumEnvironment(ABC, Env):
                 # TODO: Implement XEB reward computation using Sampler
                 raise NotImplementedError("XEB reward computation not implemented yet")
             else:
-                # TODO: Switch to causal cone qubits only
-
-                # pub_counts = [
-                #     [pub_result.data.meas.get_counts(i) for i in range(self.batch_size)]
-                #     for pub_result in pub_results
-                # ]
-
-                # survival_probability = [
-                #     np.array(
-                #         [
-                #             count.get("0" * qc.num_qubits, 0) / self.n_shots
-                #             for count in counts
-                #         ]
-                #     )
-                #     for counts in pub_counts
-                # ]
                 pub_data = [
                     [
                         pub_result.data.meas[i].postselect(
@@ -862,7 +929,7 @@ class BaseQuantumEnvironment(ABC, Env):
         string += f"Physical qubits: {self.target.physical_qubits}\n"
         string += f"Backend: {self.backend},\n"
         string += f"Abstraction level: {self.abstraction_level},\n"
-        string += f"Run options: N_shots ({self.n_shots}), Sampling_Pauli_space ({self.sampling_pauli_space}), \n"
+        string += f"Run options: N_shots ({self.n_shots}), Sampling_Pauli_space ({self.sampling_paulis}), \n"
         string += f"Batch size: {self.batch_size}, \n"
         return string
 
@@ -905,11 +972,11 @@ class BaseQuantumEnvironment(ABC, Env):
         self.config.n_shots = n_shots
 
     @property
-    def sampling_pauli_space(self) -> int:
+    def sampling_paulis(self) -> int:
         return self.config.sampling_paulis
 
-    @sampling_pauli_space.setter
-    def sampling_pauli_space(self, sampling_paulis: int):
+    @sampling_paulis.setter
+    def sampling_paulis(self, sampling_paulis: int):
         self.config.sampling_paulis = sampling_paulis
 
     @property
@@ -1056,7 +1123,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 "n_qubits": self.n_qubits,
                 "config": self.config.as_dict(),
                 "abstraction_level": self.abstraction_level,
-                "sampling_Pauli_space": self.sampling_pauli_space,
+                "sampling_Pauli_space": self.sampling_paulis,
                 "n_shots": self.n_shots,
                 "target_type": self.target.target_type,
                 "target": self.target,

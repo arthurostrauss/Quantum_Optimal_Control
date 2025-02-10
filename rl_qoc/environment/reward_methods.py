@@ -1035,7 +1035,6 @@ class CAFERewardConfig(RewardConfig):
                 label="U_inv",
             )
             reverse_unitary_qc.measure_all()
-
             reverse_unitary_qc = backend_info.custom_transpile(
                 reverse_unitary_qc,
                 initial_layout=layout,

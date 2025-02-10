@@ -1,13 +1,15 @@
-from typing import Literal, Union
+from typing import Literal, Union, Dict
 from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from .. import CustomPPO
 from ..environment.base_q_env import BaseQuantumEnvironment
 from ..environment.context_aware_quantum_environment import (
     ContextAwareQuantumEnvironment,
 )
 from ..environment.quantumenvironment import QuantumEnvironment
+from ..helpers import load_from_yaml_file
 
 QUANTUM_ENVIRONMENT = Union[
     BaseQuantumEnvironment,
@@ -42,6 +44,7 @@ class HardwarePenaltyWeights:
 @dataclass
 class HPOConfig:
     q_env: QUANTUM_ENVIRONMENT
+    agent: CustomPPO
     num_trials: int
     hardware_penalty_weights: HardwarePenaltyWeights
     hpo_paths: DirectoryPaths
@@ -52,6 +55,7 @@ class HPOConfig:
         assert (
             isinstance(self.num_trials, int) and self.num_trials > 0
         ), "num_trials must be an integer greater than 0"
+        self.hpo_scope = load_from_yaml_file(self.hpo_config_path)
 
     @property
     def as_dict(self):
