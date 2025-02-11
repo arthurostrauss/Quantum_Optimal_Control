@@ -294,23 +294,23 @@ class BaseQuantumEnvironment(ABC, Env):
         total_shots = self.config.reward_config.total_shots
         if update_env_history:
             self._total_shots.append(total_shots)
-        if self.backend_info.instruction_durations is not None and update_env_history:
-            self._hardware_runtime.append(
-                get_hardware_runtime_single_circuit(
-                    qc,
-                    self.backend_info.instruction_durations.duration_by_name_qubits,
+            if self.backend_info.instruction_durations is not None:
+                self._hardware_runtime.append(
+                    get_hardware_runtime_single_circuit(
+                        qc,
+                        self.backend_info.instruction_durations.duration_by_name_qubits,
+                    )
+                    * total_shots
                 )
-                * total_shots
-            )
-            print(
-                "Hardware runtime taken:",
-                np.round(sum(self.hardware_runtime) / 3600, 4),
-                "hours ",
-                np.round(sum(self.hardware_runtime) / 60, 4),
-                "min ",
-                np.round(sum(self.hardware_runtime) % 60, 4),
-                "seconds",
-            )
+                print(
+                    "Hardware runtime taken:",
+                    np.round(sum(self.hardware_runtime) / 3600, 4),
+                    "hours ",
+                    np.round(sum(self.hardware_runtime) / 60, 4),
+                    "min ",
+                    np.round(sum(self.hardware_runtime) % 60, 4),
+                    "seconds",
+                )
 
         counts = (
             self._session_counts
@@ -333,7 +333,6 @@ class BaseQuantumEnvironment(ABC, Env):
                 [pub_result.data.evs for pub_result in pub_results], axis=0
             ) / len(self.config.reward_config.observables)
         else:
-
             if self.config.reward_method == "xeb":
                 # TODO: Implement XEB reward computation using Sampler
                 raise NotImplementedError("XEB reward computation not implemented yet")

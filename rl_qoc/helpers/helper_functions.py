@@ -66,7 +66,6 @@ from gymnasium.spaces import Box
 import optuna
 
 from .pulse_utils import perform_standard_calibrations
-from .. import PPOConfig, CustomPPO
 from ..custom_jax_sim import PulseEstimatorV2
 
 
