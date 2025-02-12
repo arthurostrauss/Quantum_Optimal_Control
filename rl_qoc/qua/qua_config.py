@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 from ..environment.configuration.backend_config import BackendConfig
 from .qua_backend import QMBackend
-from typing import Any
+from typing import Any, Callable, Literal
 
 
 @dataclass
-class QuaConfig(BackendConfig):
+class QMBackendConfig(BackendConfig):
     """
     QUA Configuration
 
@@ -13,11 +13,12 @@ class QuaConfig(BackendConfig):
         parametrized_circuit: Function applying parametrized transformation to a QUA program
         backend: Quantum Machine backend
         hardware_config: Hardware configuration
-        channel_mapping: Dictionary mapping channels to quantum elements
     """
 
     backend: QMBackend = None
     hardware_config: Any = None
+    apply_macro: Callable = None
+    input_type: Literal["input_stream", "IO1", "IO2", "dgx"] = "input_stream"
 
     @property
     def config_type(self):

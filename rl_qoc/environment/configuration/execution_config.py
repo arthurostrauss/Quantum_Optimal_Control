@@ -16,7 +16,7 @@ class ExecutionConfig:
         n_shots: Number of shots per Pauli for the fidelity estimation. Defaults to 1.
         n_reps: Number of repetitions of cycle circuit (can be an integer or a list of integers to play multiple lengths)
         c_factor: Renormalization factor. Defaults to 0.5.
-        seed: Seed for Observable sampling. Defaults to 1234.
+        seed: General seed for Environment internal sampling mechanisms (e.g. input state, observable, n_reps). Defaults to 1234.
         dfe_precision: Precision for the DFE. Defaults to None.
             Should be a tuple indicating expected additive error and failure probability.
     """

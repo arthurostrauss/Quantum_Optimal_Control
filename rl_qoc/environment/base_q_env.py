@@ -69,7 +69,7 @@ from ..helpers.pulse_utils import (
     rotate_frame,
 )
 from .reward_methods import *
-from rl_qoc.environment.configuration.qconfig import (
+from .configuration.qconfig import (
     QEnvConfig,
 )
 
@@ -85,7 +85,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self._training_config = training_config
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
-        self.backend = training_config.backend
         if isinstance(self.backend, BackendV2) or self.backend is None:
             self._backend_info = QiskitBackendInfo(
                 self.backend,
@@ -118,7 +117,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self._std_action = np.ones(self.action_space.shape[-1])
         # Data storage
         self._optimal_action = np.zeros(self.action_space.shape[-1])
-        self._seed = training_config.seed
         self._session_counts = 0
         self._step_tracker = 0
         self._inside_trunc_tracker = 0
@@ -143,6 +141,11 @@ class BaseQuantumEnvironment(ABC, Env):
         self.avg_fidelity_history_nreps = []
         self._fit_function: Optional[Callable] = None
         self._fit_params: Optional[np.array] = None
+
+        # Call reset of Env class to set seed
+        self._seed = training_config.seed
+        super().reset(seed=self._seed)
+        self._n_reps_rng = np.random.default_rng(self.np_random.integers(2**32))
 
     @abstractmethod
     def define_target_and_circuits(
@@ -193,6 +196,9 @@ class BaseQuantumEnvironment(ABC, Env):
         fit_function: Optional[Callable] = None,
         inverse_fit_function: Optional[Callable] = None,
         update_fit_params: bool = True,
+        reward_method: Literal[
+            "cafe", "channel", "orbit", "state", "xeb", "fidelity"
+        ] = "cafe",
     ) -> plt.Figure:
         """
         Method to fit the initial reward function to the first set of actions in the environment
@@ -200,9 +206,10 @@ class BaseQuantumEnvironment(ABC, Env):
         """
 
         initial_execution_config = self.config.execution_config
+        initial_reward_method = self.config.reward_method
         if execution_config is not None:
             self.config.execution_config = execution_config
-
+        self.config.reward_method = reward_method
         reward_data = []
         for i in range(len(self.config.execution_config.n_reps)):
             self.config.execution_config.n_reps_index = i
@@ -246,6 +253,7 @@ class BaseQuantumEnvironment(ABC, Env):
         print("Found parameters:", popt)
 
         self.config.execution_config = initial_execution_config
+        self.config.reward_method = initial_reward_method
         if update_fit_params:
             self._fit_function = lambda reward, n: inverse_fit_function(
                 reward, n, *popt
@@ -375,7 +383,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._episode_tracker += 1
         self._episode_ended = False
         self.modify_environment_params()
-        self.config.execution_config.n_reps_index = np.random.randint(
+        self.config.execution_config.n_reps_index = self._n_reps_rng.integers(
             0, len(self.config.n_reps)
         )
 
@@ -751,6 +759,10 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def config(self) -> QEnvConfig:
         return self._training_config
+
+    @property
+    def backend(self) -> Optional[BackendV2]:
+        return self._training_config.backend
 
     @property
     def estimator(self) -> BaseEstimatorV2:

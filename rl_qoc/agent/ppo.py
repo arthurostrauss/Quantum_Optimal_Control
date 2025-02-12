@@ -9,7 +9,7 @@ from torch.distributions import Normal
 from .agent import Agent
 from .ppo_config import TotalUpdates, TrainFunctionSettings, TrainingConfig, PPOConfig
 from .ppo_initialization import (
-    initialize_environment,
+    get_environment_specs,
     initialize_networks,
 )
 from .ppo_logging import *
@@ -86,8 +86,9 @@ class CustomPPO:
             self.seed,
             self.min_action,
             self.max_action,
-        ) = initialize_environment(env.unwrapped)
+        ) = get_environment_specs(env.unwrapped)
 
+        torch.manual_seed(self.seed)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Initialize networks
         self.agent = initialize_networks(
@@ -117,7 +118,7 @@ class CustomPPO:
             self.writer.close()
             wandb.finish()
 
-    def process_action(self, mean_action, std_action, probs):
+    def process_action(self, mean_action, std_action, probs: Normal):
         """
         Decide how actions should be processed before being sent to environment.
         For certain environments such as QUA, policy parameters should be streamed to the environment directly
@@ -247,7 +248,7 @@ class CustomPPO:
                     self.learning_rate_annealing(iteration=iteration)
 
                 # Reset the environment
-                next_obs, _ = env.reset(seed=self.seed)
+                next_obs, _ = env.reset()
                 batch_obs = torch.tile(
                     torch.Tensor(next_obs, device=self.device), (batch_size, 1)
                 )

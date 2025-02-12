@@ -10,7 +10,7 @@ from .ppo_utils import *
 from ..environment.base_q_env import BaseQuantumEnvironment
 
 
-def initialize_environment(env: BaseQuantumEnvironment | Wrapper) -> tuple:
+def get_environment_specs(env: BaseQuantumEnvironment | Wrapper) -> tuple:
     """
     Initializes the environment by extracting necessary information.
 

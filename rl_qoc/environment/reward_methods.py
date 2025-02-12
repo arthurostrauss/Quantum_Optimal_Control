@@ -89,6 +89,7 @@ class RewardConfig(ABC):
         target: StateTarget | GateTarget,
         backend_info: BackendInfo,
         execution_config: ExecutionConfig,
+        *args,
     ) -> List[Pub]:
         """
         Compute pubs related to the reward method
@@ -277,6 +278,7 @@ def get_real_time_reward_pub(
                         )
         for qubit, clbit in zip(causal_cone_qubits, meas):
             qc.measure(qubit, clbit)
+        qc.reset(qc.qubits)
 
     elif reward_method == "cafe":
         for circ in prep_circuits:
@@ -367,14 +369,15 @@ class StateRewardConfig(RewardConfig):
     """
 
     input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
-    shots_seed: int = 2000
-    input_state_seed: int = 2001
-    observables_seed: int = 2002
+    input_state_seed: int = 2000
+    observables_seed: int = 2001
 
     def __post_init__(self):
         super().__post_init__()
         self._observables: Optional[SparsePauliOp] = None
         self._pauli_shots: Optional[List[int]] = None
+        self.input_states_rng = np.random.default_rng(self.input_state_seed)
+        self.observables_rng = np.random.default_rng(self.observables_seed)
 
     @property
     def reward_method(self):
@@ -407,7 +410,9 @@ class StateRewardConfig(RewardConfig):
 
         if isinstance(target_instance, GateTarget):
             # State reward: sample a random input state for target gate
-            input_state_index = np.random.choice(len(target_instance.input_states))
+            input_state_index = self.input_states_rng.choice(
+                len(target_instance.input_states)
+            )
             input_choice = target_instance.input_states_choice
             indices = np.unravel_index(
                 input_state_index,
@@ -424,6 +429,7 @@ class StateRewardConfig(RewardConfig):
             dfe_tuple=dfe_precision,
             c_factor=execution_config.c_factor,
             sampling_paulis=execution_config.sampling_paulis,
+            observables_rng=self.observables_rng,
         )
 
         observable_indices = []
@@ -438,11 +444,11 @@ class StateRewardConfig(RewardConfig):
                 reference_pauli
             ):  # Get individual qubit indices for each Pauli term
                 if pauli_term == "I" or pauli_term == "Z":
-                    current_indices.append(0)
-                elif pauli_term == "X":
-                    current_indices.append(1)
-                elif pauli_term == "Y":
                     current_indices.append(2)
+                elif pauli_term == "X":
+                    current_indices.append(0)
+                elif pauli_term == "Y":
+                    current_indices.append(1)
             observable_indices.append(tuple(current_indices))
 
         return input_state_indices, observable_indices, self._pauli_shots
@@ -477,10 +483,11 @@ class StateRewardConfig(RewardConfig):
             target_instance if isinstance(target_instance, StateTarget) else None
         )
         n_reps = execution_config.current_n_reps
-
         if isinstance(target_instance, GateTarget):
             # State reward: sample a random input state for target gate
-            input_state: InputState = np.random.choice(target_instance.input_states)
+            input_state: InputState = self.input_states_rng.choice(
+                target_instance.input_states
+            )
             # Modify target state to match input state and target gate
             target_state = input_state.target_state(n_reps)  # (Gate |input>=|target>)
 
@@ -497,6 +504,7 @@ class StateRewardConfig(RewardConfig):
             dfe_tuple=dfe_precision,
             c_factor=execution_config.c_factor,
             sampling_paulis=execution_config.sampling_paulis,
+            observables_rng=self.observables_rng,
         )
         if isinstance(target_instance, GateTarget):
             self._observables = extend_observables(
@@ -567,6 +575,8 @@ class ChannelRewardConfig(RewardConfig):
 
     print_debug = True
     num_eigenstates_per_pauli: int = 1
+    fiducials_seed: int = 2000
+    input_states_seed: int = 2001
 
     def __post_init__(self):
         super().__post_init__()
@@ -574,6 +584,8 @@ class ChannelRewardConfig(RewardConfig):
         self._pauli_shots: Optional[List[int]] = None
         self._input_states: List[QuantumCircuit] = []
         self._fiducials: List[Tuple[QuantumCircuit, SparsePauliOp]] = []
+        self.fiducials_rng = np.random.default_rng(self.fiducials_seed)
+        self.input_states_rng = np.random.default_rng(self.input_states_seed)
 
     @property
     def reward_args(self):
@@ -646,7 +658,7 @@ class ChannelRewardConfig(RewardConfig):
             pauli_sampling = execution_config.sampling_paulis
 
         samples, self._pauli_shots = np.unique(
-            np.random.choice(
+            self.fiducials_rng.choice(
                 non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
             ),
             return_counts=True,
@@ -678,7 +690,7 @@ class ChannelRewardConfig(RewardConfig):
             # Below, we select at random a subset of pure input states to prepare for each prep
             # If nb_states = 1, we prepare all pure input states for each prep (no random selection)
             max_input_states = dim // nb_states
-            selected_input_states = np.random.choice(
+            selected_input_states = self.input_states_rng.choice(
                 dim, size=max_input_states, replace=False
             )
             for input_state in selected_input_states:
@@ -763,8 +775,12 @@ class ChannelRewardConfig(RewardConfig):
             eps, delta = None, None
             pauli_sampling = execution_config.sampling_paulis
 
+        master_rng = np.random.default_rng(execution_config.seed)
+        fiducials_rng = np.random.default_rng(master_rng.integers(2**32))
+        input_state_rng = np.random.default_rng(master_rng.integers(2**32))
+
         samples, self._pauli_shots = np.unique(
-            np.random.choice(
+            fiducials_rng.choice(
                 non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
             ),
             return_counts=True,
@@ -775,7 +791,7 @@ class ChannelRewardConfig(RewardConfig):
         )
 
         pauli_prep, pauli_meas = zip(
-            *[(basis[p[1]], basis[p[0]]) for p in pauli_indices]
+            *[(basis[p[0]], basis[p[1]]) for p in pauli_indices]
         )
         pauli_prep, pauli_meas = PauliList(pauli_prep), PauliList(pauli_meas)
         reward_factor = [execution_config.c_factor / (dim * Chi[p]) for p in samples]
@@ -800,7 +816,7 @@ class ChannelRewardConfig(RewardConfig):
             # Below, we select at random a subset of pure input states to prepare for each prep
             # If nb_states = 1, we prepare all pure input states for each prep (no random selection)
             max_input_states = dim // nb_states
-            selected_input_states = np.random.choice(
+            selected_input_states = input_state_rng.choice(
                 dim, size=max_input_states, replace=False
             )
             for input_state in selected_input_states:
@@ -1073,10 +1089,12 @@ class ORBITRewardConfig(RewardConfig):
     """
 
     use_interleaved: bool = False
+    clifford_seed: int = 2000
 
     def __post_init__(self):
         super().__post_init__()
         self._ideal_pubs: [List[SamplerPub]] = []
+        self.clifford_rng = np.random.default_rng(self.clifford_seed)
 
     @property
     def reward_method(self):
@@ -1160,7 +1178,7 @@ class ORBITRewardConfig(RewardConfig):
                 )
                 run_qc = QuantumCircuit.copy_empty_like(qc, name="orbit_run_circ")
                 for l in range(execution_config.current_n_reps):
-                    r_cliff = random_clifford(qc.num_qubits)
+                    r_cliff = random_clifford(qc.num_qubits, self.clifford_rng)
                     for circ, context in zip([run_qc, ref_qc], [qc, circuit_ref]):
                         circ.compose(r_cliff.to_circuit(), inplace=True)
                         circ.barrier()
@@ -1273,6 +1291,7 @@ def retrieve_observables(
     dfe_tuple: Optional[Tuple[float, float]] = None,
     sampling_paulis: int = 100,
     c_factor: float = 1.0,
+    observables_rng: Optional[np.random.Generator] = None,
 ) -> Tuple[SparsePauliOp, List[int]]:
     """
     Retrieve observables to sample for the DFE protocol (PhysRevLett.106.230501) for given target state
@@ -1296,7 +1315,14 @@ def retrieve_observables(
         if dfe_tuple is None
         else int(np.ceil(1 / (dfe_tuple[0] ** 2 * dfe_tuple[1])))
     )
-    k_samples = np.random.choice(len(probabilities), size=sample_size, p=probabilities)
+    if observables_rng is not None:
+        k_samples = observables_rng.choice(
+            len(probabilities), size=sample_size, p=probabilities
+        )
+    else:
+        k_samples = np.random.choice(
+            len(probabilities), size=sample_size, p=probabilities
+        )
 
     pauli_indices, pauli_shots = np.unique(k_samples, return_counts=True)
     reward_factor = c_factor / (
