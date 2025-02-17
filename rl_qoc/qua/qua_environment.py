@@ -1,9 +1,9 @@
-from qm.jobs.running_qm_job import RunningQmJob
-
 from ..environment import ContextAwareQuantumEnvironment, QEnvConfig
-from qua_backend import QMBackend
-from qua_utils import *
-from .qua_config import QMBackendConfig
+from .qua_backend import QMBackend
+from .qua_utils import *
+from .qm_config import QMConfig
+from qm.qua import *
+from qm.jobs.running_qm_job import RunningQmJob
 
 
 class QMEnvironment(ContextAwareQuantumEnvironment):
@@ -16,7 +16,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         super().__init__(training_config, circuit_context)
         if not isinstance(
-            self.config.backend_config, QMBackendConfig
+            self.config.backend_config, QMConfig
         ) or not isinstance(self.backend, QMBackend):
             raise ValueError("The backend should be a QMBackend object")
 

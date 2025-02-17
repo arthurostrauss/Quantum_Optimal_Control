@@ -216,8 +216,8 @@ def rand_gauss_moller_box(z1, z2, mean, std, rand):
     u2 = declare(int)
     assign(tmp, rand.rand_fixed())
     assign(u1, Cast.unsafe_cast_int(tmp >> 19))
-    assign(u2, Cast.unsafe_cast_int((tmp & ((1 << 19) - 1)) << 10))
-    assign(z1, mean + std * ln_array[u1] * cos_array[u2])
+    assign(u2, Cast.unsafe_cast_int(tmp) & ((1 << 19) - 1))
+    assign(z1, mean + std * ln_array[u1] * cos_array[u2 & (n_lookup - 1)])
     assign(
         z2, mean + std * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
     )

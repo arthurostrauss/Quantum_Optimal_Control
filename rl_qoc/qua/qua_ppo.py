@@ -41,14 +41,12 @@ def lcg(seed, a, c, m):
 
 def lcg_int(seed, a, c, m, upper_bound):
     """Generates a random integer between 0 and upper_bound-1 (inclusive)."""
-    seed = np.int32(seed)
     seed = lcg(seed, a, c, m)
     return np.int32(seed / 2**28 * upper_bound), seed  # Return the updated seed
 
 
 def lcg_fixed_point(seed, a, c, m):
     """Generates a 4.28 fixed-point number between 0 and 1."""
-    seed = np.int32(seed)
     seed = lcg(seed, a, c, m)
     # Extract fractional part (assuming 4.28 fixed-point format)
     fractional_part = seed & 0x0FFFFFFF  # Mask to keep only the lower 28 bits
@@ -107,6 +105,7 @@ class CustomQMPPO(CustomPPO):
         :param probs: Probabilities of the action distribution
         :return: The action to be taken by the agent
         """
+        batch_size = mean_action.size(0)
         if isinstance(self.env, ActionWrapper):
             self.unwrapped_env.mean_action = self.env.action(
                 mean_action[0].cpu().numpy()
@@ -118,7 +117,7 @@ class CustomQMPPO(CustomPPO):
         σ = std_action[0].cpu().numpy()
         μ_f = [FixedPoint(μ[i]) for i in range(self.n_actions)]
         σ_f = [FixedPoint(σ[i]) for i in range(self.n_actions)]
-        action = np.zeros((self.batch_size, self.n_actions))
+        action = np.zeros((batch_size, self.n_actions))
         seed = self.seed
         n_lookup = 512
         ln_array = [
@@ -128,13 +127,13 @@ class CustomQMPPO(CustomPPO):
             FixedPoint(np.sqrt(-2 * np.log(x / (n_lookup + 1))))
             for x in range(1, n_lookup + 1)
         ]
-        for b in range(self.batch_size // 2):
+        for b in range(0, batch_size, 2):
             for j in range(self.n_actions):
                 uniform_sample, seed = lcg_fixed_point(seed, a, c, m)
-                uniform_sample = FixedPoint(round(uniform_sample, rounding))
+                uniform_sample = FixedPoint(uniform_sample)
                 u1 = (uniform_sample >> 19).to_unsafe_int()
-                u2 = ((uniform_sample & ((1 << 19) - 1)) << 10).to_unsafe_int()
-                temp_action1 = μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2]
+                u2 = uniform_sample.to_unsafe_int() & ((1 << 19) - 1)
+                temp_action1 = μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
                 temp_action2 = (
                     μ_f[j]
                     + σ_f[j]
@@ -142,7 +141,7 @@ class CustomQMPPO(CustomPPO):
                     * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
                 )
                 action[b][j] = temp_action1.to_float()
-                action[b + 1][j] = temp_action2.to_float()
+                action[b+1][j] = temp_action2.to_float()
         torch_action = torch.tensor(action, device=self.device)
         logprob = probs.log_prob(torch_action)
 
