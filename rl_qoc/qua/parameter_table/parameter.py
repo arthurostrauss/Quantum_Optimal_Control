@@ -116,6 +116,7 @@ class Parameter:
         self._length = 0 if not isinstance(value, (List, np.ndarray)) else len(value)
         self._input_type = input_type
         self._is_declared = False
+        self._counter_var = None
         self.units = units
 
     def get_name(self):
@@ -157,6 +158,9 @@ class Parameter:
             self._length = value.length
             self._input_type = value.input_type
             self._is_declared = value.is_declared
+            self._stream = value.stream
+            self._counter_var = value._counter_var
+            self.units = value.units
             return
         if not self.is_array:
             if isinstance(value, List):
@@ -166,9 +170,15 @@ class Parameter:
             assign(self.var, value)
         else:
             if is_qua_array:
-                iterator = declare(int)
-                with for_(iterator, 0, iterator < self.length, iterator + 1):
-                    assign(self.var[iterator], value[iterator])
+                assign(self._counter_var, 0)
+                with for_(
+                    self._counter_var,
+                    0,
+                    self._counter_var < self.length,
+                    self._counter_var + 1,
+                ):
+                    assign(self.var[self._counter_var], value[self._counter_var])
+                assign(self._counter_var, 0)
             else:
                 if len(value) != self.length:
                     raise ValueError(
@@ -197,11 +207,13 @@ class Parameter:
                     int, size=self.length if self.is_array else None
                 )
         if declare_stream:
-            if self.is_array:
-                self._stream = [qua_declare_stream() for _ in range(self.length)]
-            else:
-                self._stream = qua_declare_stream()
-
+            # if self.is_array:
+            #     self._stream = [qua_declare_stream() for _ in range(self.length)]
+            # else:
+            #     self._stream = qua_declare_stream()
+            self._stream = qua_declare_stream()
+        if self.is_array:
+            self._counter_var = declare(int, value=0)
         if pause_program:
             pause()
         self._is_declared = True
@@ -260,7 +272,7 @@ class Parameter:
     @property
     def stream(self):
         """Output stream associated with the parameter."""
-        if self._stream is None:
+        if self._stream is None or not self.is_declared:
             raise ValueError("Output stream not declared.")
         return self._stream
 
@@ -268,19 +280,35 @@ class Parameter:
         """Save the QUA variable to the output stream."""
         if self.is_declared and self.stream is not None:
             if self.is_array:
-                for i in range(self.length):
-                    save(self.var[i], self.stream[i])
+                assign(self._counter_var, 0)
+                with for_(
+                    self._counter_var,
+                    0,
+                    self._counter_var < self.length,
+                    self._counter_var + 1,
+                ):
+                    save(self.var[self._counter_var], self.stream)
             else:
                 save(self.var, self.stream)
         else:
             raise ValueError("Output stream not declared.")
+
+    def stream_to_dgx(self):
+        """
+        Stream the output stream to the DGX.
+        """
+        if not self.input_type == "dgx":
+            raise ValueError("Invalid input type. Expected dgx.")
 
     def stream_processing(self):
         """
         Process the output stream associated with the parameter.
         """
         if self.stream is not None:
-            self.stream.save_all(self.name)
+            if self.is_array:
+                self.stream.buffer(self.length).save_all(self.name)
+            else:
+                self.stream.save_all(self.name)
 
     def clip(
         self,

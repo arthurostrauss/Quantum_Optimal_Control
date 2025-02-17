@@ -58,17 +58,15 @@ def fixed_frequency_transmon_backend(
     control_channel_map = None
     control_channels = {}
     if couplings is not None:
-        coupling_ham, control_channels, ecr_ops, control_channel_map = (
-            get_couplings(
-                couplings,
-                a_ops,
-                adag_ops,
-                freqs,
-                drive_ops,
-            )
+        coupling_ham, control_channels, ecr_ops, control_channel_map = get_couplings(
+            couplings,
+            a_ops,
+            adag_ops,
+            freqs,
+            drive_ops,
         )
         static_ham += coupling_ham
-        
+
     channels = {**drive_channels, **control_channels}
     dissipator_channels, static_dissipators = get_t1_t2_dissipators(
         t1s, t2s, a_ops, adag_ops
@@ -76,7 +74,7 @@ def fixed_frequency_transmon_backend(
     solver = Solver(
         static_hamiltonian=static_ham,
         hamiltonian_operators=drive_ops + ecr_ops,
-        dissipator_operators= static_dissipators if static_dissipators else None,
+        dissipator_operators=static_dissipators if static_dissipators else None,
         rotating_frame=static_ham,
         hamiltonian_channels=list(channels.keys()),
         dissipator_channels=dissipator_channels if dissipator_channels else None,

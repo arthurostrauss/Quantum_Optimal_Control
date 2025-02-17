@@ -64,7 +64,7 @@ def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Ga
             np.real(
                 [
                     dms[k_].expectation_value(basis[k])
-                    for k, k_ in product(range(d**2), repeat=2)
+                    for k_, k in product(range(d**2), repeat=2)
                 ]
             )
             / d

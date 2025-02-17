@@ -60,7 +60,7 @@ class ParameterTable:
         self.table = {}
         if isinstance(parameters_dict, Dict):
             for index, (parameter_name, parameter_value) in enumerate(
-                self.parameters_dict.items()
+                parameters_dict.items()
             ):
                 input_type = None
                 if isinstance(parameter_value, Tuple):

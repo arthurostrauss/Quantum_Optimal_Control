@@ -573,9 +573,7 @@ def save_to_pickle(data, file_path: str) -> None:
         logging.warning(f"Error Message: {e}")
 
 
-def create_hpo_agent_config(
-    trial: optuna.trial.Trial, hpo_config: Dict, path_to_agent_config: str
-):
+def create_hpo_agent_config(trial: optuna.trial.Trial, hpo_config: Dict):
     hyper_params = {}
     hyperparams_in_scope = []
 
@@ -604,11 +602,12 @@ def create_hpo_agent_config(
             hyper_params[param] = values
 
     # Dynamically calculate batchsize from minibatch_size and num_minibatches
-    print("MINIBATCH_SIZE", hyper_params["MINIBATCH_SIZE"])
-    print("NUM_MINIBATCHES", hyper_params["NUM_MINIBATCHES"])
-    hyper_params["BATCHSIZE"] = (
-        hyper_params["MINIBATCH_SIZE"] * hyper_params["NUM_MINIBATCHES"]
-    )
+    print("MINIBATCH_SIZE", hyper_params.get("MINIBATCH_SIZE", None))
+    print("NUM_MINIBATCHES", hyper_params.get("NUM_MINIBATCHES", None))
+    if "MINIBATCH_SIZE" in hyper_params and "NUM_MINIBATCHES" in hyper_params:
+        hyper_params["BATCH_SIZE"] = (
+            hyper_params["MINIBATCH_SIZE"] * hyper_params["NUM_MINIBATCHES"]
+        )
 
     # Print hyperparameters considered for HPO
     print("Hyperparameters considered for HPO:", hyperparams_in_scope)
@@ -620,12 +619,8 @@ def create_hpo_agent_config(
     print("Hyperparameters NOT in scope of HPO:", hyperparams_not_in_scope)
 
     # Take over attributes from agent_config and populate hyper_params
-    agent_config = load_from_yaml_file(path_to_agent_config)
-    final_config = hyper_params.copy()
-    final_config.update(agent_config)
-    final_config.update(hyper_params)
 
-    return final_config, hyperparams_in_scope
+    return hyper_params
 
 
 def get_hardware_runtime_single_circuit(

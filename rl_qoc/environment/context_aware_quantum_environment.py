@@ -143,15 +143,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         )
         self.set_unbound_circuit_context(circuit_context, **context_kwargs)
 
-    def initial_reward_fit(self, params: np.array):
-        """
-        Method to fit the initial reward function to the first set of actions in the environment
-        with respect to the number of repetitions of the cycle circuit
-        """
-        qc = self.circuits[self.trunc_index].copy()
-        for n in range(1, max(self.config.n_reps)):
-            pubs, shots = self._reward_methods[self.config.reward_method](qc, params)
-
     def define_target_and_circuits(self):
         """
         Define target gate and circuits for calibration
@@ -364,7 +355,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             if np.mean(reward) > self._max_return:
                 self._max_return = np.mean(reward)
                 self._optimal_actions[self.trunc_index] = self.mean_action
-            self.reward_history.append(reward)
+
             assert (
                 len(reward) == self.batch_size
             ), f"Reward table size mismatch {len(reward)} != {self.batch_size} "
@@ -373,7 +364,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             ), "Reward table contains NaN or Inf values"
             optimal_error_precision = 1e-6
             max_fidelity = 1.0 - optimal_error_precision
+            if self._fit_function is not None:
+                reward = self._fit_function(reward, self.n_reps)
             reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
+            self.reward_history.append(reward)
             reward = -np.log(1.0 - reward)
 
             return obs, reward, terminated, False, self._get_info()

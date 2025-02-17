@@ -1,12 +1,12 @@
+from ..environment import ContextAwareQuantumEnvironment, QEnvConfig
+from .qua_backend import QMBackend
+from .qua_utils import *
+from .qm_config import QMConfig
+from qm.qua import *
 from qm.jobs.running_qm_job import RunningQmJob
 
-from ..environment import ContextAwareQuantumEnvironment, QEnvConfig
-from qua_backend import QMBackend
-from qua_utils import *
-from .qua_config import QuaConfig
 
-
-class QUAEnvironment(ContextAwareQuantumEnvironment):
+class QMEnvironment(ContextAwareQuantumEnvironment):
 
     @property
     def backend(self) -> QMBackend:
@@ -15,9 +15,9 @@ class QUAEnvironment(ContextAwareQuantumEnvironment):
     def __init__(self, training_config: QEnvConfig, circuit_context: QuantumCircuit):
 
         super().__init__(training_config, circuit_context)
-        if not isinstance(self.config.backend_config, QuaConfig) or not isinstance(
-            self.backend, QMBackend
-        ):
+        if not isinstance(
+            self.config.backend_config, QMConfig
+        ) or not isinstance(self.backend, QMBackend):
             raise ValueError("The backend should be a QMBackend object")
 
         self.circuits = [add_parameter_table_to_circuit(qc)[0] for qc in self.circuits]
