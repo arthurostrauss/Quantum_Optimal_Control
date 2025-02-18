@@ -160,18 +160,16 @@ def get_input_states_cardinality_per_qubit(input_state_choice: str) -> int:
         raise ValueError("Invalid input state choice")
 
 
-def get_real_time_reward_pub(
+def get_real_time_reward_circuit(
     circuits: QuantumCircuit | List[QuantumCircuit],
-    params: np.array,
     target: List[GateTarget] | GateTarget | StateTarget,
     backend_info: BackendInfo,
     execution_config: ExecutionConfig,
     reward_method: Literal["channel", "state", "cafe"] = "state",
     dfe_precision: Optional[Tuple[float, float]] = None,
-) -> SamplerPub:
+) -> QuantumCircuit:
     """
-    Compute pubs related to the reward method for real-time execution (relevant for backend enabling real-time
-    control flow)
+    Compute the quantum circuit for real-time reward computation
 
     Args:
         circuits: Quantum circuit to be executed on quantum system
@@ -315,7 +313,7 @@ def get_real_time_reward_pub(
         remove_final_measurements=False,
     )
 
-    return SamplerPub.coerce((qc, params, execution_config.n_shots))
+    return qc
 
 
 def apply_real_time_n_reps(

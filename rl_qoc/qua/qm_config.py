@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from ..environment.configuration.backend_config import BackendConfig
-from .qua_backend import QMBackend
+from .qm_backend import QMBackend
 from typing import Any, Callable, Literal
 
 
@@ -26,6 +26,7 @@ class QMConfig(BackendConfig):
     @property
     def config_type(self):
         return "qua"
+
 
 @dataclass
 class DGXConfig(QMConfig):

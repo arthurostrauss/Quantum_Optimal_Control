@@ -133,7 +133,9 @@ class CustomQMPPO(CustomPPO):
                 uniform_sample = FixedPoint(uniform_sample)
                 u1 = (uniform_sample >> 19).to_unsafe_int()
                 u2 = uniform_sample.to_unsafe_int() & ((1 << 19) - 1)
-                temp_action1 = μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
+                temp_action1 = (
+                    μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
+                )
                 temp_action2 = (
                     μ_f[j]
                     + σ_f[j]
@@ -141,7 +143,7 @@ class CustomQMPPO(CustomPPO):
                     * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
                 )
                 action[b][j] = temp_action1.to_float()
-                action[b+1][j] = temp_action2.to_float()
+                action[b + 1][j] = temp_action2.to_float()
         torch_action = torch.tensor(action, device=self.device)
         logprob = probs.log_prob(torch_action)
 

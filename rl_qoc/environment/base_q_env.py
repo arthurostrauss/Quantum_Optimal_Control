@@ -340,6 +340,10 @@ class BaseQuantumEnvironment(ABC, Env):
             reward_table = np.sum(
                 [pub_result.data.evs for pub_result in pub_results], axis=0
             ) / len(self.config.reward_config.observables)
+            if self.config.reward_method == "channel":
+                dim = 2**self.target.causal_cone_size
+                reward_table = (dim * reward_table + 1) / (dim + 1)
+
         else:
             if self.config.reward_method == "xeb":
                 # TODO: Implement XEB reward computation using Sampler

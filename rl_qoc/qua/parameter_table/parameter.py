@@ -5,10 +5,14 @@ Author: Arthur Strauss - Quantum Machines
 Created: 25/11/2024
 """
 
+from __future__ import annotations
+
+import time
 import warnings
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Union, Tuple, Literal
+from typing import Optional, List, Dict, Union, Tuple, Literal, Iterable, Sequence
 import numpy as np
+from qm import QuantumMachine
 from qm.qua import (
     fixed,
     assign,
@@ -27,6 +31,9 @@ from qm.qua import (
     stream_dgx,
     if_,
 )
+from qm.jobs.running_qm_job import RunningQmJob
+
+float_to_int_scaling_factor = 1e6
 
 
 def set_type(qua_type: Union[str, type]):
@@ -298,7 +305,52 @@ class Parameter:
         Stream the output stream to the DGX.
         """
         if not self.input_type == "dgx":
-            raise ValueError("Invalid input type. Expected dgx.")
+            raise ValueError("Invalid input type for this parameter. Must be dgx.")
+        if self.type == int:
+            output_var = declare(int, value=[-2, -1])
+            assign(output_var[0], self.var)
+
+        elif self.type == fixed:
+            if self.is_array:
+                output_var = declare(int, value=[-2] * self.length + [-1])
+                with for_(
+                    self._counter_var,
+                    0,
+                    self._counter_var < self.length,
+                    self._counter_var + 1,
+                ):
+                    assign(
+                        output_var[self._counter_var],
+                        Cast.mul_fixed_by_int(
+                            float_to_int_scaling_factor, self.var[self._counter_var]
+                        ),
+                    )
+            else:
+                output_var = declare(int, value=[-2, -1])
+                assign(
+                    output_var[0],
+                    Cast.mul_fixed_by_int(float_to_int_scaling_factor, self.var),
+                )
+
+        else:  # bool
+            if self.is_array:
+                output_var = declare(int, value=[-2] * self.length + [-1])
+                with for_(
+                    self._counter_var,
+                    0,
+                    self._counter_var < self.length,
+                    self._counter_var + 1,
+                ):
+                    assign(
+                        output_var[self._counter_var],
+                        Cast.to_int(self.var[self._counter_var]),
+                    )
+                assign(output_var[self.length], -1)
+            else:
+                output_var = declare(int, value=[-2, -1])
+                assign(output_var[0], Cast.to_int(self.var))
+
+        stream_dgx(output_var)
 
     def stream_processing(self):
         """
@@ -371,49 +423,179 @@ class Parameter:
                 with if_(self.var > max_val):
                     assign(self.var, max_val)
 
-    def load_input_value(self):
+    def load_input_value(self, start_with_dummy_packet=False):
         """
         Advance the input stream associated with the parameter.
         The mechanism to advance the input stream depends on the input type.
         For input streams, the stream is advanced.
         For IO1 and IO2, the value is assigned to the QUA variable.
         For dgx, the value is polled.
+        Args: start_with_dummy_packet: Boolean indicating if the query should start with a dummy packet
+            (relevant only for dgx when called after another parameter loading).
 
         """
         if self.input_type is None:
             raise ValueError("No input type specified")
         elif self.input_type == "input_stream":
             qua_advance_input_stream(self.var)
-        elif self.input_type == "IO1":
-            assign(self.var, IO1)
-        elif self.input_type == "IO2":
-            assign(self.var, IO2)
-        elif self.input_type == "dgx":
+        elif self.input_type in ["IO1", "IO2"]:
+            io = IO1 if self.input_type == "IO1" else IO2
             if self.is_array:
-                for i in range(self.length):
+                with for_(
+                    self._counter_var,
+                    0,
+                    self._counter_var < self.length,
+                    self._counter_var + 1,
+                ):
+                    pause()
+                    assign(self.var[self._counter_var], io)
+            else:
+                pause()
+                assign(self.var, io)
+        elif self.input_type == "dgx":
+            if start_with_dummy_packet:
+                dummy_packet = declare(int, [-3, -1])
+                stream_dgx(dummy_packet)
+            if self.is_array:
+                with for_(
+                    self._counter_var,
+                    0,
+                    self._counter_var < self.length,
+                    self._counter_var + 1,
+                ):
+                    i = self._counter_var
                     poll_dgx(self._var_int[i])
                     if self.type == fixed:
                         assign(
                             self.var[i],
-                            Cast.mul_fixed_by_int(1 / 1e6, self._var_int[i]),
+                            Cast.mul_fixed_by_int(
+                                1 / float_to_int_scaling_factor, self._var_int[i]
+                            ),
                         )
                     elif self.type == bool:
                         assign(self.var[i], Cast.to_bool(self._var_int[i]))
                     else:
                         assign(self.var[i], self._var_int[i])
-                    if i < self.length - 1:
+                    with if_(i < self.length - 1):
                         dummy_packet = declare(int, [-3, -1])
                         stream_dgx(dummy_packet)
             else:
                 poll_dgx(self._var_int)
                 if self.type == fixed:
-                    assign(self.var, Cast.mul_fixed_by_int(1 / 1e6, self._var_int))
+                    assign(
+                        self.var,
+                        Cast.mul_fixed_by_int(
+                            1 / float_to_int_scaling_factor, self._var_int
+                        ),
+                    )
                 elif self.type == bool:
                     assign(self.var, Cast.to_bool(self._var_int))
-                else:
+                else:  # int
                     assign(self.var, self._var_int)
-
-            # poll_dgx(self.var)
 
         else:
             raise ValueError("Invalid input stream type.")
+
+    def push_to_opx(
+        self,
+        value: Union[int, float, bool, Sequence[Union[int, float, bool]]],
+        job: RunningQmJob,
+        qm: Optional[QuantumMachine] = None,
+        dgx_lib=None,
+        dgx_stream=None,
+        verbosity: int = 0,
+        start_with_dummy_packet: bool = False,
+    ):
+        """
+        To be outside QUA program: pass an input value to the OPX from Python
+        Args:
+            value: Value to be passed to the OPX.
+            job: RunningQmJob object (required if input_type is IO1 or IO2 or input_stream).
+            qm: QuantumMachine object (required if input_type is IO1 or IO2).
+            dgx_lib: DGX library (required if input_type is dgx).
+            dgx_stream: DGX stream (required if input_type is dgx).
+            verbosity: Verbosity level (0, 1, 2).
+            start_with_dummy_packet: Boolean indicating if the query should start with a dummy packet
+                (relevant only for dgx when called after another parameter loading).
+        """
+
+        if self.is_array and len(value) != self.length:
+            raise ValueError(
+                f"Invalid input. {self.name} should be a list of length {self.length}."
+            )
+        elif not self.is_array and not isinstance(value, (int, float, bool)):
+            raise ValueError(
+                f"Invalid input. {self.name} should be a single value (received {type(value)})."
+            )
+
+        if self.is_array:
+            value = list(value)
+
+        if self.input_type == "IO1" or self.input_type == "IO2":
+            io = "set_io1_value" if self.input_type == "IO1" else "set_io2_value"
+            if qm is None:
+                raise ValueError("QuantumMachine object must be provided.")
+            if self.is_array:
+
+                for i in range(self.length):
+                    getattr(qm, io)(value[i])
+                    while not job.is_paused():
+                        time.sleep(0.001)
+                    job.resume()
+            else:
+                if not isinstance(value, (int, float, bool)):
+                    raise ValueError(
+                        f"Invalid input. {self.name} should be a single value (received {type(value)})."
+                    )
+                getattr(qm, io)(value)
+                while not job.is_paused():
+                    time.sleep(0.001)
+                job.resume()
+
+        elif self.input_type == "input_stream":
+            job.push_to_input_stream(self.name, value)
+
+        elif self.input_type == "dgx":
+            if start_with_dummy_packet:
+                dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                if verbosity > 1:
+                    print(f"GH <- dummy ")
+            if self.is_array:
+                if self.type == fixed:
+                    for i in range(self.length):
+                        if verbosity > 1:
+                            print(f"----actions-----")
+                            print(f"GH -> {value[i]}")
+                        dgx_lib.DgxStream_push(
+                            dgx_stream, int(value[i] * float_to_int_scaling_factor)
+                        )
+                        # If not last element, push a dummy packet
+                        if i < self.length - 1:
+                            dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                            if verbosity > 1:
+                                print(f"GH <- dummy ")
+                elif self.type == bool:
+                    for i in range(self.length):
+                        dgx_lib.DgxStream_push(dgx_stream, int(value[i]))
+                        # If not last element, push a dummy packet
+                        if i < self.length - 1:
+                            dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                            if verbosity > 1:
+                                print(f"GH <- dummy ")
+                else:
+                    for i in range(self.length):
+                        dgx_lib.DgxStream_push(dgx_stream, int(value[i]))
+                        # If not last element, push a dummy packet
+                        if i < self.length - 1:
+                            dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                            if verbosity > 1:
+                                print(f"GH <- dummy ")
+            else:
+                if self.type == fixed:
+                    dgx_lib.DgxStream_push(
+                        dgx_stream, int(value * float_to_int_scaling_factor)
+                    )
+                elif self.type == bool:
+                    dgx_lib.DgxStream_push(dgx_stream, int(value))
+                else:
+                    dgx_lib.DgxStream_push(dgx_stream, int(value))

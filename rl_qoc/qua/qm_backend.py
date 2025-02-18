@@ -166,6 +166,14 @@ class QMBackend(Backend):
         }
 
     @property
+    def qubit_index_dict(self):
+        """
+        Returns a dictionary mapping qubit indices (Qiskit numbering) to corresponding Qubit objects (based on
+        active_qubits attribute of QuAM instance)
+        """
+        return {i: qubit for i, qubit in enumerate(self.machine.active_qubits)}
+
+    @property
     def max_circuits(self):
         return None
 

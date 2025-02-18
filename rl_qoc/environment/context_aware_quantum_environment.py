@@ -31,6 +31,7 @@ from qiskit.circuit import (
     CircuitInstruction,
     Gate,
     Instruction,
+    Parameter,
 )
 from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -594,7 +595,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 raise ValueError("Target gate not found in circuit context")
 
             self._parameters = [
-                ParameterVector(f"a_{j}", self.n_actions)
+                [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
                 for j in range(tgt_instruction_counts)
             ]
 
