@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from ..environment import (
     ContextAwareQuantumEnvironment,
     QEnvConfig,
@@ -5,7 +7,7 @@ from ..environment import (
 )
 from .qm_backend import QMBackend
 from .qua_utils import *
-from .qm_config import QMConfig
+from .qm_config import QMConfig, DGXConfig
 from qm.qua import *
 from qm.jobs.running_qm_job import RunningQmJob
 from typing import Optional, Literal
@@ -28,11 +30,20 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 "The backend should be a QMBackend object and the config should be a QMConfig object"
             )
 
-        self.circuits = [add_parameter_table_to_circuit(qc)[0] for qc in self.circuits]
         self.µ = QuaParameter("µ", [0.0] * self.n_actions, input_type=self.input_type)
         self.σ = QuaParameter("σ", [1.0] * self.n_actions, input_type=self.input_type)
         self.policy = ParameterTable([self.µ, self.σ])
         self._qm_job: Optional[RunningQmJob] = None
+        self.real_time_circuit = get_real_time_reward_circuit(
+            self.circuits,
+            self.get_target(),
+            self.backend_info,
+            self.config.execution_config,
+            self.config.reward_method,
+        )
+        self.real_time_circuit_parameters = ParameterTable.from_quantum_circuit(
+            self.real_time_circuit
+        )
 
     def rl_qoc_training_qua_prog(self):
         """
@@ -42,50 +53,36 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         max_input_state = QuaParameter("max_input_state", 0, input_type=self.input_type)
         max_observables = QuaParameter("max_observables", 0, input_type=self.input_type)
         pauli_shots = QuaParameter("pauli_shots", 0, input_type=self.input_type)
-        observable_indices = QuaParameter(
-            "observable_indices", [0] * self.n_qubits, input_type=self.input_type
+        observable_indices = ParameterTable(
+            [
+                QuaParameter(f"observable_{i}", 0, input_type=self.input_type)
+                for i in range(self.n_qubits)
+            ]
         )
-        input_state_indices = QuaParameter(
-            "input_state_indices", [0] * self.n_qubits, input_type=self.input_type
-        )
-        n_reps_var = QuaParameter("n_reps", 0, input_type=self.input_type)
-        circuit_context_input = QuaParameter(
-            "circuit_context_input", 0, input_type=self.input_type
+        input_state_indices = ParameterTable(
+            [
+                QuaParameter(f"input_state_{i}", 0, input_type=self.input_type)
+                for i in range(self.n_qubits)
+            ]
         )
         program_params = ParameterTable(
             [
                 max_input_state,
                 max_observables,
                 pauli_shots,
-                observable_indices,
-                input_state_indices,
-                n_reps_var,
-                circuit_context_input,
             ]
         )
         action = QuaParameter("action", [0.0] * self.n_actions)
 
         dim = 2**self.n_qubits
-        real_time_circuit = get_real_time_reward_circuit(
-            self.circuits,
-            self.get_target(),
-            self.backend_info,
-            self.config.execution_config,
-            self.config.reward_method,
-        )
 
         with program() as rl_qoc_training_prog:
             # Declare necessary variables (all are counters variables to loop over the corresponding hyperparameters)
             program_params.declare_variables(pause_program=False, declare_streams=False)
             action.declare_variable(pause_program=False, declare_stream=False)
-            for (
-                param_table
-            ) in (
-                self.parameter_tables
-            ):  # TODO: Sort out the parameters in Qiskit to avoid redeclaring them
-                param_table.declare_variables(
-                    pause_program=False, declare_streams=False
-                )
+            self.real_time_circuit_parameters.declare_variables(
+                pause_program=False, declare_streams=False
+            )
 
             counts = declare(int, value=[0] * dim)
             b = declare(int)
@@ -109,9 +106,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             u1, u2 = declare(int), declare(int)
             # Infinite loop to run the training
             with infinite_loop_():
+                self.policy.load_input_values()
                 max_input_state.load_input_value()
                 max_observables.load_input_value()
-                self.policy.load_input_values()
 
                 with for_(b, 0, b < self.batch_size // 2, b + 1):
                     # Sample actions from multivariate Gaussian distribution (Muller-Box method)
@@ -153,9 +150,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                                 n_shots < pauli_shots.var * self.n_shots,
                                 n_shots + 1,
                             ):
+                                inputs = {}
                                 compilation_result = (
                                     self.backend.quantum_circuit_to_qua(
-                                        real_time_circuit
+                                        self.real_time_circuit
                                     )
                                 )
 
@@ -175,13 +173,39 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                     assign(input_state_count, 0)
 
             with stream_processing():
-                action_stream.buffer((self.batch_size, self.n_actions)).save_all(
-                    "actions"
-                )
                 for i in range(dim):
                     counts_st[i].buffer(self.batch_size).save(binary(i, self.n_qubits))
 
         return rl_qoc_training_prog
+
+    def step(self, action: np.array):
+        """
+        Perform the action on the quantum environment
+        """
+        if self._qm_job is None:
+            self.start_program()
+
+        mean_val = self.mean_action
+        std_val = self.std_action
+
+        # Push policy parameters to trigger real-time action sampling
+        for parameter, val, dummy_packet in zip(
+            self.policy.parameters, [mean_val, std_val], [False, True]
+        ):
+            parameter.push_to_opx(
+                val,
+                job=self.qm_job,
+                dgx_lib=self.qm_backend_config.dgx_lib,
+                dgx_stream=self.qm_backend_config.dgx_stream,
+                start_with_dummy_packet=dummy_packet,
+            )
+
+    @property
+    def qm_backend_config(self) -> QMConfig | DGXConfig:
+        """
+        Get the QM backend configuration
+        """
+        return self.config.backend_config
 
     def perform_action(self, actions: np.array):
         """
@@ -192,15 +216,17 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.backend.qm.set_io1_value()
         self.backend.qm.set_io2_value(self._index_input_state)
 
-    def start_program(self, qc: QuantumCircuit) -> RunningQmJob:
+    def start_program(self) -> RunningQmJob:
         """
         Start the QUA program
         """
         prog = self.rl_qoc_training_qua_prog()
         config = self.backend.machine.generate_config()
-        job = self.backend.qm.execute(prog)
-        self.job = job
-        return job
+        qmm = self.backend.connect()
+        qm = qmm.open_qm(config)
+        self._qm_job = qm.execute(prog)
+
+        return self.qm_job
 
     def sample_actions(self, mean_action, std_action, batch_r, action_stream):
         """
@@ -243,20 +269,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         """
         self.job.halt()
-
-    @property
-    def parameter_table(self):
-        """
-        Get the parameter table of the current truncation index
-        """
-        return self.parameter_tables[self.trunc_index]
-
-    @property
-    def parameter_tables(self):
-        """
-        Get the parameter tables
-        """
-        return [qc.parameter_table for qc in self.circuits]
 
     @property
     def input_type(self) -> Literal["dgx", "input_stream", "IO1", "IO2"]:

@@ -6,10 +6,13 @@ Author: Arthur Strauss - Quantum Machines
 Created: 25/11/2024
 """
 
-from typing import Optional, List, Dict, Union, Tuple, Literal
+from typing import Optional, List, Dict, Union, Tuple, Literal, Callable
 import numpy as np
+from qiskit.circuit.classical.types import Uint, Bool
 from qm.qua import *
 from .parameter import Parameter
+from qiskit.circuit import QuantumCircuit, Parameter as QiskitParameter
+from qiskit.circuit.parametervector import ParameterVector, ParameterVectorElement
 
 
 class ParameterTable:
@@ -129,13 +132,21 @@ class ParameterTable:
         else:
             return self.variables
 
-    def load_input_values(self):
+    def load_input_values(
+        self, filter_function: Optional[Callable[[Parameter], bool]] = None
+    ):
         """
         Load all the input values of the parameters in the parameter table.
+        Args: filter_func: Optional function to filter the parameters to be loaded.
         """
-        for i, parameter in enumerate(self.parameters):
-            if parameter.input_type is not None:
-                parameter.load_input_value()
+        if filter_function is not None:
+            for parameter in self.parameters:
+                if filter_function(parameter):
+                    parameter.load_input_value()
+        else:
+            for i, parameter in enumerate(self.parameters):
+                if parameter.input_type is not None:
+                    parameter.load_input_value()
 
     def save_to_stream(self):
         """
@@ -423,3 +434,34 @@ class ParameterTable:
         for parameter in self.table.values():
             text += parameter.__repr__()
         return text
+
+    @classmethod
+    def from_quantum_circuit(
+        cls,
+        qc: QuantumCircuit,
+        input_type: Literal["input_stream", "dgx", "IO1", "IO2"] = None,
+    ) -> "ParameterTable":
+        """
+        Create a ParameterTable object from a QuantumCircuit object (and stores it in circuit metadata).
+        Args: qc: QuantumCircuit object to be converted to a ParameterTable object.
+        """
+        param_list = []
+        for parameter in qc.parameters:
+            if isinstance(parameter, QiskitParameter):
+                param_list.append(Parameter(parameter.name, 0.0, input_type=input_type))
+            elif isinstance(parameter, ParameterVectorElement):
+                raise ValueError(
+                    "ParameterVectors are not yet supported "
+                    "(Reason: Qiskit exporter to OpenQASM3 does not "
+                    "support it. Please use individual parameters instead."
+                )
+
+        for var in qc.iter_input_vars():
+            if var.type.kind == Uint:
+                param_list.append(Parameter(var.name, 0, input_type=input_type))
+            elif var.type.kind == Bool:
+                param_list.append(Parameter(var.name, False, input_type=input_type))
+            else:  # Float
+                param_list.append(Parameter(var.name, 0.0, input_type=input_type))
+
+        return cls(param_list)
