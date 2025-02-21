@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import inspect
-from abc import ABC, abstractmethod
-from typing import Iterable, List, Sequence, Dict, Optional, Callable, Union, Tuple
+from typing import Iterable, List, Dict, Optional, Callable, Union, Tuple
 
+import numpy as np
 from quam.components import Channel as QuAMChannel, Qubit, QubitPair
 from quam.components import BasicQuAM as QuAM
 
@@ -13,6 +12,7 @@ from qiskit.circuit import (
     ForLoopOp,
     IfElseOp,
     WhileLoopOp,
+    Gate,
 )
 from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping,
@@ -109,7 +109,14 @@ def look_for_standard_op(op: str):
         return "cz"
     elif op == "cnot":
         return "cx"
-
+    elif op == "x/2" or op == "x90":
+        return "sx"
+    elif op == "x180":
+        return "x"
+    elif op == "y180":
+        return "y"
+    elif op == "y90":
+        return "sy"
     return op
 
 
@@ -188,6 +195,17 @@ class QMBackend(Backend):
         Populate the target instructions with the QOP configuration
         """
         gate_map = get_standard_gate_name_mapping()
+
+        class SYGate(Gate):
+            def __init__(self, label=None):
+                super().__init__("sy", 1, [], label=label)
+
+            def _define(self):
+                qc = QuantumCircuit(1)
+                qc.ry(np.pi / 2, 0)
+                self.definition = qc
+
+        gate_map["sy"] = SYGate()
         target = Target(
             "Transmon based QuAM",
             dt=1e-9,
@@ -465,7 +483,7 @@ class QMBackend(Backend):
         configuration through QuAM) as it modifies the QuAM configuration.
         """
 
-        qc, param_table = add_parameter_table_to_circuit(qc)
+        param_table = add_parameter_table_to_circuit(qc)
 
         if (
             hasattr(qc, "calibrations") and qc.calibrations
@@ -511,17 +529,10 @@ class QMBackend(Backend):
         Returns:
             Compilation result of the QuantumCircuit to QUA
         """
-        if qc.parameters:
-            if param_table is not None:
-                validate_parameters(qc.parameters, param_table)
-                if "parameter_table" not in qc.metadata:
-                    qc.metadata["parameter_table"] = param_table
-                else:
-                    assert (
-                        qc.metadata["parameter_table"] == param_table
-                    ), "Parameter table provided is different from the one in the QuantumCircuit metadata"
-            else:
-                param_table = qc.metadata.get("parameter_table", None)
+        if qc.parameters and param_table is None:
+            raise ValueError(
+                "QuantumCircuit contains parameters but no parameter table provided"
+            )
 
         open_qasm_code = qasm3_dumps(qc, includes=(), basis_gates=self._oq3_basis_gates)
         open_qasm_code = "\n".join(
@@ -529,6 +540,7 @@ class QMBackend(Backend):
             for line in open_qasm_code.splitlines()
             if not line.strip().startswith(("barrier",))
         )
+
         result = self.compiler.compile(
             open_qasm_code,
             inputs=(param_table.variables_dict if param_table.is_declared else None),
@@ -582,6 +594,18 @@ class QMBackend(Backend):
                 physical_qubits=self.qubit_mapping,
             )
         )
+
+    def connect(self) -> QuantumMachinesManager:
+        """
+        Connect to the Quantum Machines Manager
+        """
+        return self.machine.connect()
+
+    def generate_config(self) -> Dict:
+        """
+        Generate the configuration for the Quantum Machine
+        """
+        return self.machine.generate_config()
 
 
 class FluxTunableTransmonBackend(QMBackend):
