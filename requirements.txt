@@ -17,3 +17,4 @@ chardet
 tensorboard
 pylatexenc
 wandb
+pylatexenc
