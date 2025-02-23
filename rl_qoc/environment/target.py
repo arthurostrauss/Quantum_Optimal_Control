@@ -433,7 +433,7 @@ class GateTarget(BaseTarget):
         """
         if self.causal_cone_size <= 3:
             return _calculate_chi_target(
-                self.target_operator.power(n_reps, assume_unitary=True)
+                self.target_operator.power(n_reps)
             )
         else:
             warnings.warn("Chi is not computed for more than 3 qubits")
@@ -537,11 +537,37 @@ class GateTarget(BaseTarget):
         """
         Set the target circuit
         """
+        if not isinstance(target_op, QuantumCircuit):
+            raise ValueError("target_op should be a QuantumCircuit object")
+        elif target_op.num_qubits != self.target_circuit.num_qubits:
+            raise ValueError("Number of qubits in target_op should match the target circuit")
+        
         self._circuit_context = target_op
         self.input_states = [
             InputState(input_state.circuit, target_op, self.tgt_register)
             for input_state in self.input_states
         ]
+        
+        if self.has_context:
+            # Filter context to get causal cone of the target gate
+            target_qubits = [
+                self._circuit_context.qubits[i] for i in self.physical_qubits
+            ]
+            filtered_context, filtered_qubits = causal_cone_circuit(
+                self._circuit_context,
+                target_qubits,
+            )
+
+            self._causal_cone_qubits = filtered_qubits
+            self._causal_cone_size = len(filtered_qubits)
+            self._causal_cone_circuit = filtered_context
+
+        else:  # If no context is provided, the causal cone is the target qubits
+            self._causal_cone_qubits = self._circuit_context.qubits
+            self._causal_cone_circuit = self._circuit_context
+            self._causal_cone_size = self.n_qubits
+            
+        
 
     @property
     def has_context(self):

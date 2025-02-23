@@ -32,6 +32,7 @@ from qm.qua import (
     if_,
 )
 from qm.jobs.running_qm_job import RunningQmJob
+from qualang_tools.results import wait_until_job_is_paused
 
 float_to_int_scaling_factor = 1e6
 
@@ -539,8 +540,7 @@ class Parameter:
 
                 for i in range(self.length):
                     getattr(qm, io)(value[i])
-                    while not job.is_paused():
-                        time.sleep(0.001)
+                    wait_until_job_is_paused(job)
                     job.resume()
             else:
                 if not isinstance(value, (int, float, bool)):
@@ -548,8 +548,7 @@ class Parameter:
                         f"Invalid input. {self.name} should be a single value (received {type(value)})."
                     )
                 getattr(qm, io)(value)
-                while not job.is_paused():
-                    time.sleep(0.001)
+                wait_until_job_is_paused(job)
                 job.resume()
 
         elif self.input_type == "input_stream":

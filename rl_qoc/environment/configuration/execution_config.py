@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Literal
 
 
 @dataclass
@@ -19,6 +19,8 @@ class ExecutionConfig:
         seed: General seed for Environment internal sampling mechanisms (e.g. input state, observable, n_reps). Defaults to 1234.
         dfe_precision: Precision for the DFE. Defaults to None.
             Should be a tuple indicating expected additive error and failure probability.
+        control_flow_enabled: Flag to enable control flow design of runnable circuit (relevant for involving
+            real time control flow). Defaults to False.
     """
 
     batch_size: int = 100
@@ -28,6 +30,8 @@ class ExecutionConfig:
     c_factor: float = 1.0
     seed: int = 1234
     dfe_precision: Optional[Tuple[float, float]] = None
+    control_flow_enabled: bool = False
+    n_reps_mode: Literal["joint", "sequential"] = "sequential"
 
     def __post_init__(self):
         if isinstance(self.n_reps, int):
