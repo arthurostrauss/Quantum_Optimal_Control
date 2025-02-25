@@ -14,20 +14,12 @@ from qiskit.primitives.containers.sampler_pub import SamplerPub
 from qiskit.providers import BackendV2
 from qiskit.transpiler import PassManager, InstructionDurations
 from qiskit_ibm_runtime import OptionsV2
-from ..calibration_pubs import (
-    CalibrationEstimatorPubLike,
-    CalibrationSamplerPubLike,
-    CalibrationEstimatorPub,
-    CalibrationSamplerPub,
-)
 
 PubLike = Union[
     EstimatorPubLike,
     SamplerPubLike,
-    CalibrationEstimatorPubLike,
-    CalibrationSamplerPubLike,
 ]
-Pub = Union[EstimatorPub, SamplerPub, CalibrationEstimatorPub, CalibrationSamplerPub]
+Pub = Union[EstimatorPub, SamplerPub]
 
 
 @dataclass

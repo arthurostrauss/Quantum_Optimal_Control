@@ -312,7 +312,7 @@ def load_q_env_from_yaml_file(file_path: str):
     Args:
         file_path: File path
     """
-    from ..environment.reward_methods import reward_dict
+    from ..rewards import reward_dict
     from ..environment.configuration import (
         ExecutionConfig,
     )

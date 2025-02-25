@@ -46,6 +46,8 @@ class ExecutionConfig:
             "n_reps": self.n_reps,
             "c_factor": self.c_factor,
             "seed": self.seed,
+            "dfe_precision": self.dfe_precision,
+            "control_flow_enabled": self.control_flow_enabled,
         }
 
     @classmethod

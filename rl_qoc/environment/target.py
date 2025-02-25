@@ -17,7 +17,6 @@ from qiskit.quantum_info import (
     pauli_basis,
     state_fidelity,
     average_gate_fidelity,
-    random_unitary,
 )
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
@@ -34,6 +33,7 @@ from ..helpers.circuit_utils import (
     density_matrix_to_statevector,
     get_gate,
     causal_cone_circuit,
+    get_2design_input_states,
 )
 import warnings
 
@@ -72,65 +72,6 @@ def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Ga
     # Real part is taken to convert it in good format,
     # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
     return chi
-
-
-def get_2design_input_states(d: int = 4) -> List[Statevector]:
-    """
-    Function that return the 2-design input states (used for CAFE reward scheme)
-    Follows this Reference: https://arxiv.org/pdf/1008.1138 (see equations 2 and 13)
-    """
-    # Define constants
-    golden_ratio = (np.sqrt(5) - 1) / 2
-    omega = np.exp(2 * np.pi * 1j / d)
-
-    # Define computational basis states
-    e0 = np.array([1, 0, 0, 0], dtype=complex)  # |00⟩
-    e1 = np.array([0, 1, 0, 0], dtype=complex)  # |01⟩
-    e2 = np.array([0, 0, 1, 0], dtype=complex)  # |10⟩
-    e3 = np.array([0, 0, 0, 1], dtype=complex)  # |11⟩
-
-    # Create the Z matrix (diagonal matrix with powers of omega)
-    Z = np.diag([omega**r for r in range(d)])
-
-    # Create the X matrix (shift matrix)
-    X = np.zeros((d, d), dtype=complex)
-    for r in range(d - 1):
-        X[r, r + 1] = 1
-    X[d - 1, 0] = 1  # Wrap-around to satisfy the condition for |e_0>
-
-    # Define the fiducial state from Eq. (13)
-    coefficients = (
-        1
-        / (2 * np.sqrt(3 + golden_ratio))
-        * np.array(
-            [
-                1 + np.exp(-1j * np.pi / 4),
-                np.exp(1j * np.pi / 4) + 1j * golden_ratio ** (-3 / 2),
-                1 - np.exp(-1j * np.pi / 4),
-                np.exp(1j * np.pi / 4) - 1j * golden_ratio ** (-3 / 2),
-            ]
-        )
-    )
-
-    fiducial_state = (
-        coefficients[0] * e0
-        + coefficients[1] * e1
-        + coefficients[2] * e2
-        + coefficients[3] * e3
-    ).reshape(d, 1)
-    # Prepare all 16 states
-    states = []
-    for k in range(0, d):
-        for l in range(0, d):
-            # state = apply_hw_group(p1, p2, coefficients)
-            state = (
-                np.linalg.matrix_power(X, k)
-                @ np.linalg.matrix_power(Z, l)
-                @ fiducial_state
-            )
-            states.append(Statevector(state))
-
-    return states
 
 
 @dataclass
@@ -432,9 +373,7 @@ class GateTarget(BaseTarget):
         :param n_reps: Number of repetitions of the target gate (default is 1)
         """
         if self.causal_cone_size <= 3:
-            return _calculate_chi_target(
-                self.target_operator.power(n_reps)
-            )
+            return _calculate_chi_target(self.target_operator.power(n_reps))
         else:
             warnings.warn("Chi is not computed for more than 3 qubits")
             return None
@@ -540,14 +479,16 @@ class GateTarget(BaseTarget):
         if not isinstance(target_op, QuantumCircuit):
             raise ValueError("target_op should be a QuantumCircuit object")
         elif target_op.num_qubits != self.target_circuit.num_qubits:
-            raise ValueError("Number of qubits in target_op should match the target circuit")
-        
+            raise ValueError(
+                "Number of qubits in target_op should match the target circuit"
+            )
+
         self._circuit_context = target_op
         self.input_states = [
             InputState(input_state.circuit, target_op, self.tgt_register)
             for input_state in self.input_states
         ]
-        
+
         if self.has_context:
             # Filter context to get causal cone of the target gate
             target_qubits = [
@@ -566,8 +507,6 @@ class GateTarget(BaseTarget):
             self._causal_cone_qubits = self._circuit_context.qubits
             self._causal_cone_circuit = self._circuit_context
             self._causal_cone_size = self.n_qubits
-            
-        
 
     @property
     def has_context(self):

@@ -391,10 +391,7 @@ class Parameter:
             raise ValueError(
                 "Invalid range. Minimum value must be less than maximum value."
             )
-        elif min_val is not None and max_val is not None and min_val == max_val:
-            raise ValueError(
-                "Invalid range. Minimum value must be different from maximum value."
-            )
+
         elif min_val is None and max_val is None:
             warnings.warn("No range specified. No clipping performed.")
             return

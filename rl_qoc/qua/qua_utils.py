@@ -191,6 +191,7 @@ def get_gaussian_sampling_input():
             for x in range(1, n_lookup + 1)
         ],
     )
+    return n_lookup, cos_array, ln_array
 
 
 def rand_gauss_moller_box(z1, z2, mean, std, rand):

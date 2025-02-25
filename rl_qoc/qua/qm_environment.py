@@ -138,10 +138,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                         with while_(input_state_count < max_input_state.var):
                             assign(input_state_count, input_state_count + 1)
                             # Load info about input states to prepare
-                            input_state_indices.load_input_value()
+                            input_state_indices.load_input_values()
                         with while_(observable_count < max_observables.var):
                             assign(observable_count, observable_count + 1)
-                            observable_indices.load_input_value()
+                            observable_indices.load_input_values()
                             pauli_shots.load_input_value()
 
                             with for_(
@@ -185,8 +185,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         if self._qm_job is None:
             self.start_program()
 
-        mean_val = self.mean_action
-        std_val = self.std_action
+        mean_val = self.mean_action.tolist()
+        std_val = self.std_action.tolist()
 
         # Push policy parameters to trigger real-time action sampling
         for parameter, val, dummy_packet in zip(
@@ -206,15 +206,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         Get the QM backend configuration
         """
         return self.config.backend_config
-
-    def perform_action(self, actions: np.array):
-        """
-        Perform the actions on the quantum environment
-        """
-        trunc_index = self._inside_trunc_tracker
-        qc = self.circuits[trunc_index].copy()
-        self.backend.qm.set_io1_value()
-        self.backend.qm.set_io2_value(self._index_input_state)
 
     def start_program(self) -> RunningQmJob:
         """

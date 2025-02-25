@@ -145,7 +145,7 @@ class CustomQMPPO(CustomPPO):
                 action[b][j] = temp_action1.to_float()
                 action[b + 1][j] = temp_action2.to_float()
         torch_action = torch.tensor(action, device=self.device)
-        logprob = probs.log_prob(torch_action)
+        logprob = probs.log_prob(torch_action).sum(1)
 
         return torch_action, logprob
 

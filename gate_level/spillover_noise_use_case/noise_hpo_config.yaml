@@ -7,7 +7,7 @@ LR: 0.0005
 N_SHOTS: 
   - 1
   - 100
-SAMPLE_PAULIS:
+SAMPLING_PAULIS:
   - 10
   - 150
 GAMMA: 0.99 # Discount factor
