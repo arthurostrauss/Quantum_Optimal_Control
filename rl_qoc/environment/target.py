@@ -8,7 +8,7 @@ Created: 08/11/2024
 """
 
 from __future__ import annotations
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from qiskit.quantum_info import (
     DensityMatrix,

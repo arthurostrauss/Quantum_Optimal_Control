@@ -118,7 +118,7 @@ class CustomPPO:
             self.writer.close()
             wandb.finish()
 
-    def process_action(self, mean_action, std_action, probs: Normal):
+    def process_action(self, probs: Normal):
         """
         Decide how actions should be processed before being sent to environment.
         For certain environments such as QUA, policy parameters should be streamed to the environment directly
@@ -132,6 +132,8 @@ class CustomPPO:
         # )
         action = probs.sample()
         logprob = probs.log_prob(action).sum(1)
+        mean_action = probs.mean
+        std_action = probs.stddev
 
         if isinstance(self.env, ActionWrapper):
             self.unwrapped_env.mean_action = self.env.action(
@@ -263,9 +265,7 @@ class CustomPPO:
                         mean_action, std_action, critic_value = agent(batch_obs)
                         std_action = self.process_std(std_action)
                         probs = Normal(mean_action, std_action)
-                        action, logprob = self.process_action(
-                            mean_action, std_action, probs
-                        )
+                        action, logprob = self.process_action(probs)
                         values[step] = critic_value.flatten()
 
                     next_obs, reward, terminated, truncated, infos = env.step(

@@ -37,7 +37,6 @@ from qiskit.quantum_info import (
     DensityMatrix,
     Statevector,
     Operator,
-    Pauli,
     SparsePauliOp,
     partial_trace,
 )
@@ -75,10 +74,6 @@ from ..helpers.pulse_utils import (
     qubit_projection,
     rotate_frame,
 )
-from .configuration.qconfig import (
-    QEnvConfig,
-)
-
 
 class BaseQuantumEnvironment(ABC, Env):
 
