@@ -178,7 +178,6 @@ class Parameter:
             assign(self.var, value)
         else:
             if is_qua_array:
-                assign(self._counter_var, 0)
                 with for_(
                     self._counter_var,
                     0,
@@ -221,7 +220,7 @@ class Parameter:
             #     self._stream = qua_declare_stream()
             self._stream = qua_declare_stream()
         if self.is_array:
-            self._counter_var = declare(int, value=0)
+            self._counter_var = declare(int)
         if pause_program:
             pause()
         self._is_declared = True
@@ -288,7 +287,6 @@ class Parameter:
         """Save the QUA variable to the output stream."""
         if self.is_declared and self.stream is not None:
             if self.is_array:
-                assign(self._counter_var, 0)
                 with for_(
                     self._counter_var,
                     0,
@@ -397,7 +395,7 @@ class Parameter:
             return
 
         if self.is_array:
-            i = declare(int)
+            i = self._counter_var
             with for_(i, 0, i < self.length, i + 1):
                 if is_array:
                     if min_val is not None:

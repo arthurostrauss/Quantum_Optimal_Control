@@ -3,8 +3,8 @@ from __future__ import annotations
 from ..environment import (
     ContextAwareQuantumEnvironment,
     QEnvConfig,
-    get_real_time_reward_circuit,
 )
+from ..rewards.real_time import get_real_time_reward_circuit
 from .qm_backend import QMBackend
 from .qua_utils import *
 from .qm_config import QMConfig, DGXConfig
