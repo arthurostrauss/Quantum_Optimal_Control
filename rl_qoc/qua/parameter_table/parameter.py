@@ -30,6 +30,7 @@ from qm.qua import (
     Cast,
     stream_dgx,
     if_,
+    Util,
 )
 from qm.jobs.running_qm_job import RunningQmJob
 from qualang_tools.results import wait_until_job_is_paused
@@ -136,7 +137,6 @@ class Parameter:
     def assign_value(
         self,
         value: Union[
-            "Parameter",
             float,
             int,
             bool,
@@ -144,6 +144,8 @@ class Parameter:
             QuaVariableType,
         ],
         is_qua_array: bool = False,
+        condition=None,
+        value_cond: Optional[Union[float, int, bool, QuaVariableType]] = None,
     ):
         """
         Assign value to the QUA variable corresponding to the parameter.
@@ -154,22 +156,18 @@ class Parameter:
             If True, the value should be a QUA array of the same length as the parameter. When assigning a QUA array,
             a QUA loop is created to assign each element of the array to the corresponding element of the QUA array.
             If False, a Python loop is used instead.
+        condition: Condition to be met for the value to be assigned to the QUA variable.
+        value_cond: Optional value to be assigned to the QUA variable if provided condition is not met.
         """
         if not self.is_declared:
             raise ValueError(
                 "Variable not declared. Declare the variable first through declare_variable method."
             )
-        if isinstance(value, Parameter):
-            self.var = value.var
-            self.value = value.value
-            self._type = value.type
-            self._length = value.length
-            self._input_type = value.input_type
-            self._is_declared = value.is_declared
-            self._stream = value.stream
-            self._counter_var = value._counter_var
-            self.units = value.units
-            return
+        if condition is not None and value_cond is None:
+            raise ValueError("Condition provided without value to assign.")
+        elif condition is None and value_cond is not None:
+            raise ValueError("2nd Value to assign provided without condition.")
+
         if not self.is_array:
             if isinstance(value, List):
                 raise ValueError(
@@ -178,20 +176,24 @@ class Parameter:
             assign(self.var, value)
         else:
             if is_qua_array:
-                with for_(
-                    self._counter_var,
-                    0,
-                    self._counter_var < self.length,
-                    self._counter_var + 1,
-                ):
-                    assign(self.var[self._counter_var], value[self._counter_var])
-                assign(self._counter_var, 0)
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
+                    if value_cond is not None and condition is not None:
+                        assign(
+                            self.var[i], Util.cond(condition, value[i], value_cond[i])
+                        )
+                    else:
+                        assign(self.var[i], value[i])
             else:
                 if len(value) != self.length:
                     raise ValueError(
                         f"Invalid input. {self.name} should be a list of length {self.length}."
                     )
                 for i in range(self.length):
+                    if value_cond is not None and condition is not None:
+                        assign(
+                            self.var[i], Util.cond(condition, value[i], value_cond[i])
+                        )
                     assign(self.var[i], value[i])
 
     def declare_variable(self, pause_program=False, declare_stream=True):
@@ -238,7 +240,12 @@ class Parameter:
 
     @property
     def index(self):
-        """Index of the parameter in the parameter table."""
+        """
+        Index of the parameter in the parameter table.
+        Relevant only if the parameter is part of a parameter table.
+        This index can be used to access the parameter in the parameter table
+        through the usage of a switch statement.
+        """
         return self._index
 
     @index.setter
@@ -312,17 +319,11 @@ class Parameter:
         elif self.type == fixed:
             if self.is_array:
                 output_var = declare(int, value=[-2] * self.length + [-1])
-                with for_(
-                    self._counter_var,
-                    0,
-                    self._counter_var < self.length,
-                    self._counter_var + 1,
-                ):
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
                     assign(
-                        output_var[self._counter_var],
-                        Cast.mul_fixed_by_int(
-                            float_to_int_scaling_factor, self.var[self._counter_var]
-                        ),
+                        output_var[i],
+                        Cast.mul_fixed_by_int(float_to_int_scaling_factor, self.var[i]),
                     )
             else:
                 output_var = declare(int, value=[-2, -1])
@@ -334,38 +335,43 @@ class Parameter:
         else:  # bool
             if self.is_array:
                 output_var = declare(int, value=[-2] * self.length + [-1])
-                with for_(
-                    self._counter_var,
-                    0,
-                    self._counter_var < self.length,
-                    self._counter_var + 1,
-                ):
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
                     assign(
-                        output_var[self._counter_var],
-                        Cast.to_int(self.var[self._counter_var]),
+                        output_var[i],
+                        Cast.to_int(self.var[i]),
                     )
-                assign(output_var[self.length], -1)
             else:
                 output_var = declare(int, value=[-2, -1])
                 assign(output_var[0], Cast.to_int(self.var))
 
         stream_dgx(output_var)
 
-    def stream_processing(self):
+    def stream_processing(self, mode: Literal["save", "save_all"] = "save_all"):
         """
         Process the output stream associated with the parameter.
         """
         if self.stream is not None:
-            if self.is_array:
-                self.stream.buffer(self.length).save_all(self.name)
+            if mode == "save":
+                if self.is_array:
+                    self.stream.buffer(self.length).save(self.name)
+                else:
+                    self.stream.save(self.name)
+            elif mode == "save_all":
+                if self.is_array:
+                    self.stream.buffer(self.length).save_all(self.name)
+                else:
+                    self.stream.save_all(self.name)
             else:
-                self.stream.save_all(self.name)
+                raise ValueError("Invalid mode. Must be 'save' or 'save_all'.")
+        else:
+            raise ValueError("Output stream not declared.")
 
     def clip(
         self,
         min_val: Optional[Union[int, float, QuaVariableType]] = None,
         max_val: Optional[Union[int, float, QuaVariableType]] = None,
-        is_array: bool = False,
+        is_qua_array: bool = False,
     ):
         """
         Clip the QUA variable to a given range.
@@ -377,7 +383,7 @@ class Parameter:
             raise ValueError(
                 "Variable not declared. Declare the variable first through declare_variable method."
             )
-        if not self.is_array and is_array:
+        if not self.is_array and is_qua_array:
             raise ValueError(
                 "Invalid input. Single value cannot be clipped with array bounds."
             )
@@ -397,7 +403,7 @@ class Parameter:
         if self.is_array:
             i = self._counter_var
             with for_(i, 0, i < self.length, i + 1):
-                if is_array:
+                if is_qua_array:
                     if min_val is not None:
                         with if_(self.var[i] < min_val[i]):
                             assign(self.var[i], min_val[i])
@@ -437,14 +443,10 @@ class Parameter:
         elif self.input_type in ["IO1", "IO2"]:
             io = IO1 if self.input_type == "IO1" else IO2
             if self.is_array:
-                with for_(
-                    self._counter_var,
-                    0,
-                    self._counter_var < self.length,
-                    self._counter_var + 1,
-                ):
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
                     pause()
-                    assign(self.var[self._counter_var], io)
+                    assign(self.var[i], io)
             else:
                 pause()
                 assign(self.var, io)
@@ -453,13 +455,8 @@ class Parameter:
                 dummy_packet = declare(int, [-3, -1])
                 stream_dgx(dummy_packet)
             if self.is_array:
-                with for_(
-                    self._counter_var,
-                    0,
-                    self._counter_var < self.length,
-                    self._counter_var + 1,
-                ):
-                    i = self._counter_var
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
                     poll_dgx(self._var_int[i])
                     if self.type == fixed:
                         assign(
@@ -589,7 +586,5 @@ class Parameter:
                     dgx_lib.DgxStream_push(
                         dgx_stream, int(value * float_to_int_scaling_factor)
                     )
-                elif self.type == bool:
-                    dgx_lib.DgxStream_push(dgx_stream, int(value))
-                else:
+                else:  # int or bool
                     dgx_lib.DgxStream_push(dgx_stream, int(value))

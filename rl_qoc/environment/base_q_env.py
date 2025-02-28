@@ -75,6 +75,7 @@ from ..helpers.pulse_utils import (
     rotate_frame,
 )
 
+
 class BaseQuantumEnvironment(ABC, Env):
 
     def __init__(self, training_config: QEnvConfig):
@@ -324,15 +325,11 @@ class BaseQuantumEnvironment(ABC, Env):
             if self.config.dfe:
                 reward_table = np.sum(
                     [pub_result.data.evs for pub_result in pub_results], axis=0
-                ) / len(self.config.reward_config.observables)
+                )
+                reward_table += self.config.reward_config.id_coeff
+                reward_table /= self.config.reward_config.total_counts
                 if self.config.reward_method == "channel":
                     dim = 2**self.target.causal_cone_size
-                    reward_table *= len(self.config.reward_config.observables)
-                    reward_table += self.config.reward_config.id_coeff
-                    reward_table /= (
-                        len(self.config.reward_config.observables)
-                        + self.config.reward_config.id_count
-                    )
                     reward_table = (dim * reward_table + 1) / (dim + 1)
 
             else:

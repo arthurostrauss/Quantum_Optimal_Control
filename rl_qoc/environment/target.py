@@ -69,6 +69,9 @@ def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Ga
             )
             / d
         )
+        # dms = [target @ basis[k].to_matrix() @ target.adjoint() for k in range(len(basis))]
+        # chi = np.real([np.trace(dms[k_] @ basis[k].to_matrix()) for k_, k in product(range(d**2), repeat=2)])/d
+
     # Real part is taken to convert it in good format,
     # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
     return chi
@@ -237,7 +240,7 @@ class InputState(StateTarget):
             circ.append(self._target_op, self.tgt_register)
         else:
             circ = self._target_op
-        circ.repeat(n_reps).compose(self.circuit, front=True, inplace=True)
+        circ = circ.repeat(n_reps).compose(self.circuit, front=True, inplace=False)
         return StateTarget(circuit=circ)
 
     @property
@@ -373,7 +376,10 @@ class GateTarget(BaseTarget):
         :param n_reps: Number of repetitions of the target gate (default is 1)
         """
         if self.causal_cone_size <= 3:
-            return _calculate_chi_target(self.target_operator.power(n_reps))
+            if n_reps == 1:
+                return _calculate_chi_target(self.target_operator)
+            else:
+                return _calculate_chi_target(self.target_operator.power(n_reps))
         else:
             warnings.warn("Chi is not computed for more than 3 qubits")
             return None

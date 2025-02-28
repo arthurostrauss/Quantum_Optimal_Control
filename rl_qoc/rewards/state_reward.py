@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Literal, Optional
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
-from qiskit.quantum_info import SparsePauliOp
+from qiskit.quantum_info import SparsePauliOp, pauli_basis
 import numpy as np
 from .base_reward import Reward
 from ..environment.backend_info import BackendInfo
@@ -40,6 +40,8 @@ class StateReward(Reward):
         self.observables_rng = np.random.default_rng(self.observables_seed)
         self._fiducials_indices: List[Tuple[List[Indices], List[Indices]]] = []
         self._fiducials = []
+        self.id_coeff = 0.0
+        self.total_counts = 0
 
     @property
     def reward_method(self):
@@ -72,56 +74,6 @@ class StateReward(Reward):
             self.observables_seed = seed + 50
             self.input_states_rng = np.random.default_rng(self.input_state_seed)
             self.observables_rng = np.random.default_rng(self.observables_seed)
-
-    def get_reward_real_time_inputs(
-        self,
-        target: StateTarget | GateTarget,
-        execution_config: ExecutionConfig,
-        dfe_precision: Optional[Tuple[float, float]] = None,
-    ):
-        """
-        Get input states and observables for reward computation
-        """
-        self._fiducials_indices = []
-        target_instance = target
-        target_state = (
-            target_instance if isinstance(target_instance, StateTarget) else None
-        )
-        n_reps = execution_config.current_n_reps
-        input_state_indices = []
-        if isinstance(target_instance, GateTarget):
-            num_qubits = target_instance.causal_cone_size
-        else:
-            num_qubits = target_instance.n_qubits
-
-        if isinstance(target_instance, GateTarget):
-            # State reward: sample a random input state for target gate
-            input_state_index = self.input_states_rng.choice(
-                len(target_instance.input_states)
-            )
-            input_choice = target_instance.input_states_choice
-            indices = np.unravel_index(
-                input_state_index,
-                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
-            )
-            input_state_indices.append((int(i) for i in indices))
-            input_state: InputState = target_instance.input_states[input_state_index]
-
-            # Modify target state to match input state and target gate
-            target_state = input_state.target_state(n_reps)  # (Gate |input>=|target>)
-
-        self._observables, self._pauli_shots = retrieve_observables(
-            target_state,
-            dfe_tuple=dfe_precision,
-            c_factor=execution_config.c_factor,
-            sampling_paulis=execution_config.sampling_paulis,
-            observables_rng=self.observables_rng,
-        )
-
-        observable_indices = observables_to_indices(self._observables)
-        self._fiducials_indices.append((input_state_indices, observable_indices))
-
-        return input_state_indices, observable_indices, self._pauli_shots
 
     def get_reward_pubs(
         self,
@@ -157,6 +109,7 @@ class StateReward(Reward):
             target_instance if isinstance(target_instance, StateTarget) else None
         )
         n_reps = execution_config.current_n_reps
+
         if isinstance(target_instance, GateTarget):
             num_qubits = target_instance.causal_cone_size
         else:
@@ -168,13 +121,15 @@ class StateReward(Reward):
                 len(target_instance.input_states)
             )
             input_choice = target_instance.input_states_choice
-            input_state_indices = np.unravel_index(
-                input_state_index,
-                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
+            input_state_indices = tuple(
+                np.unravel_index(
+                    input_state_index,
+                    (get_input_states_cardinality_per_qubit(input_choice),)
+                    * num_qubits,
+                )
             )
-            input_state: InputState = self.input_states_rng.choice(
-                target_instance.input_states
-            )
+            input_state: InputState = target_instance.input_states[input_state_index]
+
             # Modify target state to match input state and target gate
             target_state = input_state.target_state(n_reps)  # (Gate |input>=|target>)
 
@@ -186,22 +141,84 @@ class StateReward(Reward):
             input_circuit, input_state_indices = extend_input_state_prep(
                 input_state.circuit, qc, target_instance, input_state_indices
             )
+            input_circuit.metadata["input_indices"] = input_state_indices
             prep_circuit.compose(input_circuit, front=True, inplace=True)
 
-        self._observables, self._pauli_shots = retrieve_observables(
-            target_state,
-            dfe_tuple=dfe_precision,
-            c_factor=execution_config.c_factor,
-            sampling_paulis=execution_config.sampling_paulis,
-            observables_rng=self.observables_rng,
+        # DFE: Retrieve observables for fidelity estimation
+        Chi = target_state.Chi
+        probabilities = Chi**2
+        dim = target_state.dm.dim
+        cutoff = 1e-8
+        non_zero_indices = np.nonzero(probabilities > cutoff)[0]
+        non_zero_probabilities = probabilities[non_zero_indices]
+        non_zero_probabilities /= np.sum(non_zero_probabilities)
+
+        basis = pauli_basis(num_qubits)
+
+        if dfe_precision is not None:
+            eps, delta = dfe_precision
+            pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
+        else:
+            pauli_sampling = execution_config.sampling_paulis
+        self.total_counts = pauli_sampling
+        pauli_indices, counts = np.unique(
+            self.observables_rng.choice(
+                non_zero_indices, pauli_sampling, p=non_zero_probabilities
+            ),
+            return_counts=True,
         )
+        identity_term = np.where(pauli_indices == 0)[0]
+        c_factor = execution_config.c_factor
+        if len(identity_term) > 0:
+            self.id_coeff = c_factor * np.sum(
+                counts[identity_term] / (dim * Chi[pauli_indices[identity_term]])
+            )
+
+        pauli_indices = np.delete(pauli_indices, identity_term)
+        counts = np.delete(counts, identity_term)
+        reward_factor = (
+            execution_config.c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
+        )
+
+        if dfe_precision is not None:
+            eps, delta = dfe_precision
+            pauli_shots = np.ceil(
+                2
+                * np.log(2 / delta)
+                / (eps**2)
+                * dim
+                * Chi[pauli_indices] ** 2
+                * pauli_sampling
+            )
+        else:
+            pauli_shots = execution_config.n_shots * counts
+
+        observables = SparsePauliOp(basis[pauli_indices], reward_factor)
+        observable_indices = observables_to_indices(observables)
+        self._fiducials_indices = [(input_state_indices, observable_indices)]
+        self._fiducials = [
+            (input_circuit, observables.group_commuting(qubit_wise=True))
+        ]
+
+        self._observables = SparsePauliOp("I" * num_qubits, self.id_coeff) + observables
+
+        shots_per_basis = []
+        # Group observables by qubit-wise commuting groups to reduce the number of PUBs
+        for i, commuting_group in enumerate(
+            observables.paulis.group_qubit_wise_commuting()
+        ):
+            max_pauli_shots = 0
+            for pauli in commuting_group:
+                pauli_index = list(basis).index(pauli)
+                ref_index = list(pauli_indices).index(pauli_index)
+                max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
+            shots_per_basis.append(max_pauli_shots)
+        self._pauli_shots = shots_per_basis
+
         if isinstance(target_instance, GateTarget):
-            self._observables = extend_observables(
+            observables = extend_observables(
                 self._observables, prep_circuit, target_instance
             )
-        observable_indices = observables_to_indices(self._observables)
-        self._fiducials_indices = [(input_state_indices, observable_indices)]
-        self._fiducials = [(input_circuit, self._observables)]
 
         prep_circuit = backend_info.custom_transpile(
             prep_circuit, initial_layout=target_instance.layout, scheduling=False
@@ -210,17 +227,15 @@ class StateReward(Reward):
         pubs = [
             (
                 prep_circuit,
-                obs.apply_layout(prep_circuit.layout),
+                observables.apply_layout(prep_circuit.layout),
                 params,
-                shots_to_precision(execution_config.n_shots * pauli_shots),
-            )
-            for obs, pauli_shots in zip(
-                self._observables.group_commuting(qubit_wise=True),
-                self._pauli_shots,
+                shots_to_precision(max(self._pauli_shots)),
             )
         ]
-        self._total_shots = params.shape[0] * sum(
-            self._pauli_shots * execution_config.n_shots
+        self._total_shots = (
+            params.shape[0]
+            * max(self._pauli_shots)
+            * len(observables.group_commuting(True))
         )
 
         return [EstimatorPub.coerce(pub) for pub in pubs]

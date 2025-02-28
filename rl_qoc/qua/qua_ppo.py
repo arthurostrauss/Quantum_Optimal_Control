@@ -97,7 +97,7 @@ class CustomQMPPO(CustomPPO):
 
         super().__init__(agent_config, env, chkpt_dir, chkpt_dir_critic)
 
-    def process_action(self,probs: Normal):
+    def process_action(self, probs: Normal):
         """
         Process the action to be taken by the agent
         :param mean_action: Mean of the action distribution
