@@ -12,7 +12,6 @@ from ..helpers.circuit_utils import (
     extend_input_state_prep,
     extend_observables,
     observables_to_indices,
-    retrieve_observables,
     shots_to_precision,
     precision_to_shots,
     get_input_states_cardinality_per_qubit,

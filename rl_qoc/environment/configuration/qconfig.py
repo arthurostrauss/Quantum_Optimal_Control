@@ -35,7 +35,7 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward_config: Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] = (
+    reward_config: Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward" = (
         "state"
     )
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
@@ -51,6 +51,13 @@ class QEnvConfig:
             from ...rewards import reward_dict
 
             self.reward_config = reward_dict[self.reward_config]()
+        else:
+            from ...rewards import Reward
+            if not isinstance(self.reward_config, Reward):
+                raise ValueError(
+                    "Reward configuration must be a string or a Reward instance"
+                )
+        
 
     @property
     def backend(self) -> Optional[BackendV2]:

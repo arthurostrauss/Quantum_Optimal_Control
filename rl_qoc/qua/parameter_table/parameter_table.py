@@ -233,9 +233,9 @@ class ParameterTable:
             )
         return self.table[parameter_name].index
 
-    def get_value(self, parameter: Union[str, int]):
+    def get_parameter(self, parameter: Union[str, int]) -> Parameter:
         """
-        Get the ParameterValue object of a specific parameter in the parameter table.
+        Get the Parameter object of a specific parameter in the parameter table.
         This object contains the QUA variable corresponding to the parameter, its type,
         its index within the current table.
 
@@ -253,6 +253,12 @@ class ParameterTable:
             for param in self.parameters:
                 if param.index == parameter:
                     return param
+
+            raise IndexError(
+                f"No parameter with index {parameter} in the parameter table."
+            )
+        else:
+            raise ValueError("Invalid parameter name. Please use a string or an int.")
 
     def get_variable(self, parameter: Union[str, int]):
         """

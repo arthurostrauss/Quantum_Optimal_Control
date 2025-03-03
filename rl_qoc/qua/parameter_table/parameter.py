@@ -137,6 +137,7 @@ class Parameter:
     def assign_value(
         self,
         value: Union[
+            "Parameter",
             float,
             int,
             bool,
@@ -149,52 +150,79 @@ class Parameter:
     ):
         """
         Assign value to the QUA variable corresponding to the parameter.
-        Args: value: Value to be assigned to the QUA variable. If the ParameterValue corresponds to a QUA array,
-            the value should be a list or a QUA array of the same length.
-        is_qua_array: Boolean indicating if provided value is a QUA array (True) or a list of values (False).
-            Default is False.
-            If True, the value should be a QUA array of the same length as the parameter. When assigning a QUA array,
-            a QUA loop is created to assign each element of the array to the corresponding element of the QUA array.
-            If False, a Python loop is used instead.
-        condition: Condition to be met for the value to be assigned to the QUA variable.
-        value_cond: Optional value to be assigned to the QUA variable if provided condition is not met.
+
+        Args:
+            value: Value to be assigned to the QUA variable. If the ParameterValue corresponds to a QUA array,
+                   the value should be a list or a QUA array of the same length.
+            is_qua_array: Boolean indicating if provided value is a QUA array (True) or a list of values (False).
+                          Default is False. If True, the value should be a QUA array of the same length as the parameter.
+                          When assigning a QUA array, a QUA loop is created to assign each element of the array to the
+                          corresponding element of the QUA array. If False, a Python loop is used instead.
+            condition: Condition to be met for the value to be assigned to the QUA variable.
+            value_cond: Optional value to be assigned to the QUA variable if provided condition is not met.
+
+        Raises:
+            ValueError: If the variable is not declared, or if the condition and value_cond are not provided together,
+                        or if the value_cond is not of the same type as value, or if the value length does not match
+                        the parameter length, or if the input is invalid.
         """
         if not self.is_declared:
             raise ValueError(
                 "Variable not declared. Declare the variable first through declare_variable method."
             )
-        if condition is not None and value_cond is None:
-            raise ValueError("Condition provided without value to assign.")
-        elif condition is None and value_cond is not None:
-            raise ValueError("2nd Value to assign provided without condition.")
+        if (condition is not None) != (value_cond is not None):
+            raise ValueError("Both condition and value_cond must be provided together.")
 
-        if not self.is_array:
-            if isinstance(value, List):
+        def assign_with_condition(var, val, cond_val):
+            if condition is not None:
+                assign(var, Util.cond(condition, val, cond_val))
+            else:
+                assign(var, val)
+
+        if isinstance(value, Parameter):
+            if not value.is_declared:
                 raise ValueError(
-                    f"Invalid input. {self.name} should be a single value, not a list."
+                    "Variable not declared. Declare the variable first through declare_variable method."
                 )
-            assign(self.var, value)
-        else:
-            if is_qua_array:
+            if value.length != self.length:
+                raise ValueError(
+                    f"Invalid input. {self.name} should be a list of length {self.length}."
+                )
+            if self.is_array:
                 i = self._counter_var
                 with for_(i, 0, i < self.length, i + 1):
-                    if value_cond is not None and condition is not None:
-                        assign(
-                            self.var[i], Util.cond(condition, value[i], value_cond[i])
-                        )
-                    else:
-                        assign(self.var[i], value[i])
-            else:
-                if len(value) != self.length:
-                    raise ValueError(
-                        f"Invalid input. {self.name} should be a list of length {self.length}."
+                    assign_with_condition(
+                        self.var[i],
+                        value.var[i],
+                        value_cond.var[i] if value_cond else None,
                     )
-                for i in range(self.length):
-                    if value_cond is not None and condition is not None:
-                        assign(
-                            self.var[i], Util.cond(condition, value[i], value_cond[i])
+            else:
+                assign_with_condition(
+                    self.var, value.var, value_cond.var if value_cond else None
+                )
+        else:
+            if self.is_array:
+                if is_qua_array:
+                    i = self._counter_var
+                    with for_(i, 0, i < self.length, i + 1):
+                        assign_with_condition(
+                            self.var[i], value[i], value_cond[i] if value_cond else None
                         )
-                    assign(self.var[i], value[i])
+                else:
+                    if len(value) != self.length:
+                        raise ValueError(
+                            f"Invalid input. {self.name} should be a list of length {self.length}."
+                        )
+                    for i in range(self.length):
+                        assign_with_condition(
+                            self.var[i], value[i], value_cond[i] if value_cond else None
+                        )
+            else:
+                if isinstance(value, List):
+                    raise ValueError(
+                        f"Invalid input. {self.name} should be a single value, not a list."
+                    )
+                assign_with_condition(self.var, value, value_cond)
 
     def declare_variable(self, pause_program=False, declare_stream=True):
         """
