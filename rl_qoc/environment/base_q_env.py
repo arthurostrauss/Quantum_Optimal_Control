@@ -763,6 +763,10 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def backend(self) -> Optional[BackendV2]:
         return self._training_config.backend
+    
+    @backend.setter
+    def backend(self, backend: BackendV2):
+        self._training_config.backend = backend
 
     @property
     def estimator(self) -> BaseEstimatorV2:
