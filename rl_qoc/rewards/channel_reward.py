@@ -168,12 +168,12 @@ class ChannelReward(Reward):
             num_qubits=n_qubits
         )  # all n_fold tensor-product single qubit Paulis
 
-        if (
-            dfe_precision is not None
-        ):  # Choose if we want to sample Paulis based on DFE precision guarantee
+        if dfe_precision is not None:
+            # DFE precision guarantee, ϵ additive error, δ failure probability
             eps, delta = dfe_precision
             pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
         else:
+            # User-defined hyperparameter
             pauli_sampling = execution_config.sampling_paulis
 
         # Sample a list of input/observable pairs
@@ -194,10 +194,12 @@ class ChannelReward(Reward):
             dtype=int,
         )
 
-        # Filter out the case where the identity observable is sampled (trivial case)
+        # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
         identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
-        self.id_coeff = c_factor * np.sum(
-            counts[identity_terms] / (dim * Chi[samples[identity_terms]])
+        self.id_coeff = (
+            c_factor
+            * dim
+            * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
         )
         self.id_count = len(identity_terms)
 
