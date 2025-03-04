@@ -4,24 +4,22 @@ quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
-Last updated: 03/11/2024
+Last updated: 25/02/2025
 """
 
 from __future__ import annotations
-
-import time
-
-# For compatibility for options formatting between Estimators.
+from abc import ABC, abstractmethod
 import json
 import signal
-from typing import Callable, Any
-
+from typing import Callable, Any, Optional, List, Literal
+import numpy as np
 from gymnasium import Env
 from gymnasium.core import ObsType
 from qiskit import transpile
 
 # Qiskit imports
 from qiskit.circuit import (
+    QuantumCircuit,
     ParameterVector,
     Parameter,
 )
@@ -31,11 +29,17 @@ from qiskit.primitives import (
     BaseEstimatorV2,
     BaseSamplerV2,
 )
-
-from qiskit.quantum_info import partial_trace
+from qiskit.primitives.containers.estimator_pub import EstimatorPub
+from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 # Qiskit Quantum Information, for fidelity benchmarking
-from qiskit.quantum_info.states import DensityMatrix, Statevector
+from qiskit.quantum_info import (
+    DensityMatrix,
+    Statevector,
+    Operator,
+    SparsePauliOp,
+    partial_trace,
+)
 
 from qiskit.transpiler import (
     Layout,
@@ -43,6 +47,7 @@ from qiskit.transpiler import (
 )
 from qiskit.providers import BackendV2
 from qiskit_aer.noise import NoiseModel
+from qiskit_aer import AerSimulator
 
 # Qiskit dynamics for pulse simulation (& benchmarking)
 from qiskit_dynamics import DynamicsBackend
@@ -53,24 +58,21 @@ from qiskit_ibm_runtime import (
 )
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-from .backend_info import QiskitBackendInfo
+from .backend_info import QiskitBackendInfo, BackendInfo
+from .configuration.qconfig import QEnvConfig, ExecutionConfig
+from .target import GateTarget, StateTarget
 from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
 from ..helpers.helper_functions import (
     retrieve_primitives,
-    handle_session,
     get_hardware_runtime_single_circuit,
     has_noise_model,
 )
-from ..helpers.circuit_utils import substitute_target_gate, retrieve_neighbor_qubits
+from ..helpers.circuit_utils import retrieve_neighbor_qubits
 from ..helpers.pulse_utils import (
     handle_virtual_rotations,
     projected_state,
     qubit_projection,
     rotate_frame,
-)
-from .reward_methods import *
-from .configuration.qconfig import (
-    QEnvConfig,
 )
 
 
@@ -128,9 +130,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self.action_history = []
         self.reward_history = []
         self._pubs, self._ideal_pubs = [], []
-        self._calibration_pubs: List[
-            CalibrationEstimatorPub | CalibrationSamplerPub
-        ] = []
         self._observables, self._pauli_shots = None, None
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -146,6 +145,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._seed = training_config.seed
         super().reset(seed=self._seed)
         self._n_reps_rng = np.random.default_rng(self.np_random.integers(2**32))
+        self.config.reward_config.set_reward_seed(self.np_random.integers(2**32))
 
     @abstractmethod
     def define_target_and_circuits(
@@ -196,9 +196,9 @@ class BaseQuantumEnvironment(ABC, Env):
         fit_function: Optional[Callable] = None,
         inverse_fit_function: Optional[Callable] = None,
         update_fit_params: bool = True,
-        reward_method: Literal[
-            "cafe", "channel", "orbit", "state", "xeb", "fidelity"
-        ] = "cafe",
+        reward_method: Optional[
+            Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity"]
+        ] = None,
     ) -> plt.Figure:
         """
         Method to fit the initial reward function to the first set of actions in the environment
@@ -209,7 +209,8 @@ class BaseQuantumEnvironment(ABC, Env):
         initial_reward_method = self.config.reward_method
         if execution_config is not None:
             self.config.execution_config = execution_config
-        self.config.reward_method = reward_method
+        if reward_method is not None:
+            self.config.reward_method = reward_method
         reward_data = []
         for i in range(len(self.config.execution_config.n_reps)):
             self.config.execution_config.n_reps_index = i
@@ -218,14 +219,14 @@ class BaseQuantumEnvironment(ABC, Env):
         if fit_function is None or inverse_fit_function is None:
 
             def fit_function(n, spam, eps_lin, eps_quad):
-                return 1 - spam - eps_lin * n - eps_quad * n**2
+                return 1 - spam - eps_lin * n - np.sin(n * eps_quad)
 
             def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
                 return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
 
         p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
         lower_bounds = [0.0, 0.0, 0.0]
-        upper_bounds = [1.0, np.inf, np.inf]
+        upper_bounds = [0.2, 0.5, 0.5]
 
         popt, pcov = curve_fit(
             fit_function,
@@ -252,8 +253,10 @@ class BaseQuantumEnvironment(ABC, Env):
         # Print found parameters
         print("Found parameters:", popt)
 
-        self.config.execution_config = initial_execution_config
-        self.config.reward_method = initial_reward_method
+        if execution_config is not None:
+            self.config.execution_config = initial_execution_config
+        if reward_method is not None:
+            self.config.reward_method = initial_reward_method
         if update_fit_params:
             self._fit_function = lambda reward, n: inverse_fit_function(
                 reward, n, *popt
@@ -268,6 +271,10 @@ class BaseQuantumEnvironment(ABC, Env):
         :param update_env_history: Boolean to update the environment history
         :return: Reward table (reward for each action in the batch)
         """
+        if not actions.shape[-1] == self.n_actions:
+            raise ValueError(
+                f"Action shape mismatch: {actions.shape[-1]} != {self.n_actions}"
+            )
         qc = self.circuits[self.trunc_index].copy()
         params, batch_size = np.array(actions), actions.shape[0]
         if len(params.shape) == 1:
@@ -291,81 +298,167 @@ class BaseQuantumEnvironment(ABC, Env):
             if self.config.dfe
             else self.baseline_circuits[self.trunc_index]
         )
-        self._pubs = self.config.reward_config.get_reward_pubs(
-            qc,
-            params,
-            self.target,
-            self.backend_info,
-            self.config.execution_config,
-            last_input,
-        )
-        total_shots = self.config.reward_config.total_shots
-        if update_env_history:
-            self._total_shots.append(total_shots)
-            if self.backend_info.instruction_durations is not None:
-                self._hardware_runtime.append(
-                    get_hardware_runtime_single_circuit(
-                        qc,
-                        self.backend_info.instruction_durations.duration_by_name_qubits,
-                    )
-                    * total_shots
+        if self.config.execution_config.n_reps_mode == "sequential":
+            self._pubs = self.config.reward_config.get_reward_pubs(
+                qc,
+                params,
+                self.target,
+                self.backend_info,
+                self.config.execution_config,
+                last_input,
+            )
+            total_shots = self.config.reward_config.total_shots
+            self.update_env_history(qc, total_shots, update_env_history)
+
+            job_type = (
+                "Estimator"
+                if isinstance(self.primitive, BaseEstimatorV2)
+                else "Sampler"
+            )
+            print(f"Sending {job_type} job...")
+
+            job = self.primitive.run(pubs=self._pubs)
+            pub_results = job.result()
+
+            print(f"Finished {job_type} job")
+
+            if self.config.dfe:
+                reward_table = np.sum(
+                    [pub_result.data.evs for pub_result in pub_results], axis=0
                 )
-                print(
-                    "Hardware runtime taken:",
-                    np.round(sum(self.hardware_runtime) / 3600, 4),
-                    "hours ",
-                    np.round(sum(self.hardware_runtime) / 60, 4),
-                    "min ",
-                    np.round(sum(self.hardware_runtime) % 60, 4),
-                    "seconds",
-                )
+                reward_table += self.config.reward_config.id_coeff
+                reward_table /= self.config.reward_config.total_counts
+                if self.config.reward_method == "channel":
+                    dim = 2**self.target.causal_cone_size
+                    reward_table = (dim * reward_table + 1) / (dim + 1)
 
-        counts = (
-            self._session_counts
-            if isinstance(self.estimator, RuntimeEstimatorV2)
-            else self.trunc_index
-        )
-        self.estimator = handle_session(self.estimator, self.backend, counts)
-        primitive_type = (
-            "Estimator" if isinstance(self.primitive, BaseEstimatorV2) else "Sampler"
-        )
-        print(f"Sending {primitive_type} job...")
-        start = time.time()
-
-        job = self.primitive.run(pubs=self._pubs)
-        pub_results = job.result()
-        print("Time for running", time.time() - start, "seconds")
-
-        if self.config.dfe:
-            reward_table = np.sum(
-                [pub_result.data.evs for pub_result in pub_results], axis=0
-            ) / len(self.config.reward_config.observables)
-        else:
-            if self.config.reward_method == "xeb":
-                # TODO: Implement XEB reward computation using Sampler
-                raise NotImplementedError("XEB reward computation not implemented yet")
             else:
-                pub_data = [
-                    [
-                        pub_result.data.meas[i].postselect(
-                            self.target.causal_cone_qubits_indices,
-                            [0] * self.target.causal_cone_size,
-                        )
-                        for i in range(batch_size)
+                if self.config.reward_method == "xeb":
+                    # TODO: Implement XEB reward computation using Sampler
+                    raise NotImplementedError(
+                        "XEB reward computation not implemented yet"
+                    )
+                else:
+                    pub_data = [
+                        [
+                            pub_result.data.meas[i].postselect(
+                                self.target.causal_cone_qubits_indices,
+                                [0] * self.target.causal_cone_size,
+                            )
+                            for i in range(batch_size)
+                        ]
+                        for pub_result in pub_results
                     ]
-                    for pub_result in pub_results
-                ]
-                survival_probability = [
-                    [bit_array.num_shots / self.n_shots for bit_array in bit_arrays]
-                    for bit_arrays in pub_data
-                ]
+                    survival_probability = [
+                        [bit_array.num_shots / self.n_shots for bit_array in bit_arrays]
+                        for bit_arrays in pub_data
+                    ]
 
-                reward_table = np.mean(survival_probability, axis=0)
+                    reward_table = np.mean(survival_probability, axis=0)
 
-        print(f"Finished {primitive_type} job")
-        print("Reward (avg):", np.mean(reward_table), "Std:", np.std(reward_table))
+            print("Reward (avg):", np.mean(reward_table), "Std:", np.std(reward_table))
 
-        return reward_table  # Shape [batch size]
+            return reward_table  # Shape [batch size]
+        else:
+            reward_list = []
+            reward_fitting = []
+            pubs = []
+            pubs_lengths = []
+            total_shots = 0
+            for i in range(len(self.config.execution_config.n_reps)):
+                self.config.execution_config.n_reps_index = i
+                new_pubs = self.config.reward_config.get_reward_pubs(
+                    qc,
+                    params,
+                    self.target,
+                    self.backend_info,
+                    self.config.execution_config,
+                    last_input,
+                )
+                pubs_lengths.append(len(new_pubs))
+                pubs.extend(new_pubs)
+                total_shots += self.config.reward_config.total_shots
+
+            self.update_env_history(qc, total_shots, update_env_history)
+            job = self.primitive.run(pubs=pubs)
+            pub_results = job.result()
+            separate_results = []
+            for i in range(len(pubs_lengths)):
+                separate_results.append(pub_results[: pubs_lengths[i]])
+                pub_results = pub_results[pubs_lengths[i] :]
+            for i in range(len(self.config.execution_config.n_reps)):
+                if self.config.dfe:
+                    reward_table = np.sum(
+                        [pub_result.data.evs for pub_result in separate_results[i]],
+                        axis=0,
+                    ) / len(self.config.reward_config.observables)
+                    if self.config.reward_method == "channel":
+                        dim = 2**self.target.causal_cone_size
+                        reward_table += (
+                            self.config.reward_config.id_coeff
+                            / self.config.reward_config.id_count
+                        )
+                        reward_table = (dim * reward_table + 1) / (dim + 1)
+                else:
+                    if self.config.reward_method == "xeb":
+                        raise NotImplementedError(
+                            "XEB reward computation not implemented yet"
+                        )
+                    else:
+                        pub_data = [
+                            [
+                                pub_result.data.meas[i].postselect(
+                                    self.target.causal_cone_qubits_indices,
+                                    [0] * self.target.causal_cone_size,
+                                )
+                                for i in range(batch_size)
+                            ]
+                            for pub_result in separate_results[i]
+                        ]
+                        survival_probability = [
+                            [
+                                bit_array.num_shots / self.n_shots
+                                for bit_array in bit_arrays
+                            ]
+                            for bit_arrays in pub_data
+                        ]
+                        reward_table = np.mean(survival_probability, axis=0)
+
+                reward_fitting.append(np.mean(reward_table))
+                reward_list.append(reward_table)
+
+            # Fit the reward function to the data
+
+            self.config.execution_config.n_reps_index = 0
+
+            def fit_function(n, spam, eps_lin, eps_quad):
+                return 1 - spam - eps_lin * n - np.sin(n * eps_quad)
+
+            def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
+                return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
+
+            p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
+            lower_bounds = [0.0, 0.0, 0.0]
+            upper_bounds = [0.2, 0.5, 0.5]
+
+            popt, pcov = curve_fit(
+                fit_function,
+                self.config.execution_config.n_reps,
+                reward_fitting,
+                p0=p0,
+                bounds=(lower_bounds, upper_bounds),
+            )
+
+            # self._fit_function = lambda reward, n: inverse_fit_function(
+            #     reward, n, *popt
+            # )
+            # self._fit_params = popt
+
+            # Apply fit to data
+            for i, n in enumerate(self.config.execution_config.n_reps):
+                reward_list[i] = inverse_fit_function(reward_list[i], n, *popt)
+
+            return np.mean(reward_list, axis=0)
 
     def reset(
         self,
@@ -768,6 +861,10 @@ class BaseQuantumEnvironment(ABC, Env):
     def backend(self, backend: BackendV2):
         self._training_config.backend = backend
 
+    @backend.setter
+    def backend(self, backend: BackendV2):
+        self._training_config.backend = backend
+
     @property
     def estimator(self) -> BaseEstimatorV2:
         return self._estimator
@@ -1152,3 +1249,24 @@ class BaseQuantumEnvironment(ABC, Env):
                 ),
             }
         )
+
+    def update_env_history(self, qc, total_shots, update_env_history):
+        if update_env_history:
+            self._total_shots.append(total_shots)
+            if self.backend_info.instruction_durations is not None:
+                self._hardware_runtime.append(
+                    get_hardware_runtime_single_circuit(
+                        qc,
+                        self.backend_info.instruction_durations.duration_by_name_qubits,
+                    )
+                    * total_shots
+                )
+                print(
+                    "Hardware runtime taken:",
+                    np.round(sum(self.hardware_runtime) / 3600, 4),
+                    "hours ",
+                    np.round(sum(self.hardware_runtime) / 60, 4),
+                    "min ",
+                    np.round(sum(self.hardware_runtime) % 60, 4),
+                    "seconds",
+                )

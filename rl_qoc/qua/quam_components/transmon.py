@@ -100,7 +100,6 @@ class Transmon(Qubit):
             )
         return self.f_12 - self.f_01
 
-    @property
     def sigma(self, operation: Pulse):
         return operation.length / self.sigma_time_factor
 

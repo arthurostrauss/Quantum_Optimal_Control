@@ -5,10 +5,14 @@ Author: Arthur Strauss - Quantum Machines
 Created: 25/11/2024
 """
 
+from __future__ import annotations
+
+import time
 import warnings
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Union, Tuple, Literal
+from typing import Optional, List, Dict, Union, Tuple, Literal, Iterable, Sequence
 import numpy as np
+from qm import QuantumMachine
 from qm.qua import (
     fixed,
     assign,
@@ -26,7 +30,12 @@ from qm.qua import (
     Cast,
     stream_dgx,
     if_,
+    Util,
 )
+from qm.jobs.running_qm_job import RunningQmJob
+from qualang_tools.results import wait_until_job_is_paused
+
+float_to_int_scaling_factor = 1e6
 
 
 def set_type(qua_type: Union[str, type]):
@@ -136,56 +145,84 @@ class Parameter:
             QuaVariableType,
         ],
         is_qua_array: bool = False,
+        condition=None,
+        value_cond: Optional[Union[float, int, bool, QuaVariableType]] = None,
     ):
         """
         Assign value to the QUA variable corresponding to the parameter.
-        Args: value: Value to be assigned to the QUA variable. If the ParameterValue corresponds to a QUA array,
-            the value should be a list or a QUA array of the same length.
-        is_qua_array: Boolean indicating if provided value is a QUA array (True) or a list of values (False).
-            Default is False.
-            If True, the value should be a QUA array of the same length as the parameter. When assigning a QUA array,
-            a QUA loop is created to assign each element of the array to the corresponding element of the QUA array.
-            If False, a Python loop is used instead.
+
+        Args:
+            value: Value to be assigned to the QUA variable. If the ParameterValue corresponds to a QUA array,
+                   the value should be a list or a QUA array of the same length.
+            is_qua_array: Boolean indicating if provided value is a QUA array (True) or a list of values (False).
+                          Default is False. If True, the value should be a QUA array of the same length as the parameter.
+                          When assigning a QUA array, a QUA loop is created to assign each element of the array to the
+                          corresponding element of the QUA array. If False, a Python loop is used instead.
+            condition: Condition to be met for the value to be assigned to the QUA variable.
+            value_cond: Optional value to be assigned to the QUA variable if provided condition is not met.
+
+        Raises:
+            ValueError: If the variable is not declared, or if the condition and value_cond are not provided together,
+                        or if the value_cond is not of the same type as value, or if the value length does not match
+                        the parameter length, or if the input is invalid.
         """
         if not self.is_declared:
             raise ValueError(
                 "Variable not declared. Declare the variable first through declare_variable method."
             )
-        if isinstance(value, Parameter):
-            self.var = value.var
-            self.value = value.value
-            self._type = value.type
-            self._length = value.length
-            self._input_type = value.input_type
-            self._is_declared = value.is_declared
-            self._stream = value.stream
-            self._counter_var = value._counter_var
-            self.units = value.units
-            return
-        if not self.is_array:
-            if isinstance(value, List):
-                raise ValueError(
-                    f"Invalid input. {self.name} should be a single value, not a list."
-                )
-            assign(self.var, value)
-        else:
-            if is_qua_array:
-                assign(self._counter_var, 0)
-                with for_(
-                    self._counter_var,
-                    0,
-                    self._counter_var < self.length,
-                    self._counter_var + 1,
-                ):
-                    assign(self.var[self._counter_var], value[self._counter_var])
-                assign(self._counter_var, 0)
+        if (condition is not None) != (value_cond is not None):
+            raise ValueError("Both condition and value_cond must be provided together.")
+
+        def assign_with_condition(var, val, cond_val):
+            if condition is not None:
+                assign(var, Util.cond(condition, val, cond_val))
             else:
-                if len(value) != self.length:
-                    raise ValueError(
-                        f"Invalid input. {self.name} should be a list of length {self.length}."
+                assign(var, val)
+
+        if isinstance(value, Parameter):
+            if not value.is_declared:
+                raise ValueError(
+                    "Variable not declared. Declare the variable first through declare_variable method."
+                )
+            if value.length != self.length:
+                raise ValueError(
+                    f"Invalid input. {self.name} should be a list of length {self.length}."
+                )
+            if self.is_array:
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
+                    assign_with_condition(
+                        self.var[i],
+                        value.var[i],
+                        value_cond.var[i] if value_cond else None,
                     )
-                for i in range(self.length):
-                    assign(self.var[i], value[i])
+            else:
+                assign_with_condition(
+                    self.var, value.var, value_cond.var if value_cond else None
+                )
+        else:
+            if self.is_array:
+                if is_qua_array:
+                    i = self._counter_var
+                    with for_(i, 0, i < self.length, i + 1):
+                        assign_with_condition(
+                            self.var[i], value[i], value_cond[i] if value_cond else None
+                        )
+                else:
+                    if len(value) != self.length:
+                        raise ValueError(
+                            f"Invalid input. {self.name} should be a list of length {self.length}."
+                        )
+                    for i in range(self.length):
+                        assign_with_condition(
+                            self.var[i], value[i], value_cond[i] if value_cond else None
+                        )
+            else:
+                if isinstance(value, List):
+                    raise ValueError(
+                        f"Invalid input. {self.name} should be a single value, not a list."
+                    )
+                assign_with_condition(self.var, value, value_cond)
 
     def declare_variable(self, pause_program=False, declare_stream=True):
         """
@@ -213,7 +250,7 @@ class Parameter:
             #     self._stream = qua_declare_stream()
             self._stream = qua_declare_stream()
         if self.is_array:
-            self._counter_var = declare(int, value=0)
+            self._counter_var = declare(int)
         if pause_program:
             pause()
         self._is_declared = True
@@ -231,7 +268,12 @@ class Parameter:
 
     @property
     def index(self):
-        """Index of the parameter in the parameter table."""
+        """
+        Index of the parameter in the parameter table.
+        Relevant only if the parameter is part of a parameter table.
+        This index can be used to access the parameter in the parameter table
+        through the usage of a switch statement.
+        """
         return self._index
 
     @index.setter
@@ -280,7 +322,6 @@ class Parameter:
         """Save the QUA variable to the output stream."""
         if self.is_declared and self.stream is not None:
             if self.is_array:
-                assign(self._counter_var, 0)
                 with for_(
                     self._counter_var,
                     0,
@@ -298,23 +339,67 @@ class Parameter:
         Stream the output stream to the DGX.
         """
         if not self.input_type == "dgx":
-            raise ValueError("Invalid input type. Expected dgx.")
+            raise ValueError("Invalid input type for this parameter. Must be dgx.")
+        if self.type == int:
+            output_var = declare(int, value=[-2, -1])
+            assign(output_var[0], self.var)
 
-    def stream_processing(self):
+        elif self.type == fixed:
+            if self.is_array:
+                output_var = declare(int, value=[-2] * self.length + [-1])
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
+                    assign(
+                        output_var[i],
+                        Cast.mul_fixed_by_int(float_to_int_scaling_factor, self.var[i]),
+                    )
+            else:
+                output_var = declare(int, value=[-2, -1])
+                assign(
+                    output_var[0],
+                    Cast.mul_fixed_by_int(float_to_int_scaling_factor, self.var),
+                )
+
+        else:  # bool
+            if self.is_array:
+                output_var = declare(int, value=[-2] * self.length + [-1])
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
+                    assign(
+                        output_var[i],
+                        Cast.to_int(self.var[i]),
+                    )
+            else:
+                output_var = declare(int, value=[-2, -1])
+                assign(output_var[0], Cast.to_int(self.var))
+
+        stream_dgx(output_var)
+
+    def stream_processing(self, mode: Literal["save", "save_all"] = "save_all"):
         """
         Process the output stream associated with the parameter.
         """
         if self.stream is not None:
-            if self.is_array:
-                self.stream.buffer(self.length).save_all(self.name)
+            if mode == "save":
+                if self.is_array:
+                    self.stream.buffer(self.length).save(self.name)
+                else:
+                    self.stream.save(self.name)
+            elif mode == "save_all":
+                if self.is_array:
+                    self.stream.buffer(self.length).save_all(self.name)
+                else:
+                    self.stream.save_all(self.name)
             else:
-                self.stream.save_all(self.name)
+                raise ValueError("Invalid mode. Must be 'save' or 'save_all'.")
+        else:
+            raise ValueError("Output stream not declared.")
 
     def clip(
         self,
         min_val: Optional[Union[int, float, QuaVariableType]] = None,
         max_val: Optional[Union[int, float, QuaVariableType]] = None,
-        is_array: bool = False,
+        is_qua_array: bool = False,
     ):
         """
         Clip the QUA variable to a given range.
@@ -326,7 +411,7 @@ class Parameter:
             raise ValueError(
                 "Variable not declared. Declare the variable first through declare_variable method."
             )
-        if not self.is_array and is_array:
+        if not self.is_array and is_qua_array:
             raise ValueError(
                 "Invalid input. Single value cannot be clipped with array bounds."
             )
@@ -338,18 +423,15 @@ class Parameter:
             raise ValueError(
                 "Invalid range. Minimum value must be less than maximum value."
             )
-        elif min_val is not None and max_val is not None and min_val == max_val:
-            raise ValueError(
-                "Invalid range. Minimum value must be different from maximum value."
-            )
+
         elif min_val is None and max_val is None:
             warnings.warn("No range specified. No clipping performed.")
             return
 
         if self.is_array:
-            i = declare(int)
+            i = self._counter_var
             with for_(i, 0, i < self.length, i + 1):
-                if is_array:
+                if is_qua_array:
                     if min_val is not None:
                         with if_(self.var[i] < min_val[i]):
                             assign(self.var[i], min_val[i])
@@ -371,49 +453,166 @@ class Parameter:
                 with if_(self.var > max_val):
                     assign(self.var, max_val)
 
-    def load_input_value(self):
+    def load_input_value(self, start_with_dummy_packet=False):
         """
         Advance the input stream associated with the parameter.
         The mechanism to advance the input stream depends on the input type.
         For input streams, the stream is advanced.
         For IO1 and IO2, the value is assigned to the QUA variable.
         For dgx, the value is polled.
+        Args: start_with_dummy_packet: Boolean indicating if the query should start with a dummy packet
+            (relevant only for dgx when called after another parameter loading).
 
         """
         if self.input_type is None:
             raise ValueError("No input type specified")
         elif self.input_type == "input_stream":
             qua_advance_input_stream(self.var)
-        elif self.input_type == "IO1":
-            assign(self.var, IO1)
-        elif self.input_type == "IO2":
-            assign(self.var, IO2)
-        elif self.input_type == "dgx":
+        elif self.input_type in ["IO1", "IO2"]:
+            io = IO1 if self.input_type == "IO1" else IO2
             if self.is_array:
-                for i in range(self.length):
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
+                    pause()
+                    assign(self.var[i], io)
+            else:
+                pause()
+                assign(self.var, io)
+        elif self.input_type == "dgx":
+            if start_with_dummy_packet:
+                dummy_packet = declare(int, [-3, -1])
+                stream_dgx(dummy_packet)
+            if self.is_array:
+                i = self._counter_var
+                with for_(i, 0, i < self.length, i + 1):
                     poll_dgx(self._var_int[i])
                     if self.type == fixed:
                         assign(
                             self.var[i],
-                            Cast.mul_fixed_by_int(1 / 1e6, self._var_int[i]),
+                            Cast.mul_fixed_by_int(
+                                1 / float_to_int_scaling_factor, self._var_int[i]
+                            ),
                         )
                     elif self.type == bool:
                         assign(self.var[i], Cast.to_bool(self._var_int[i]))
                     else:
                         assign(self.var[i], self._var_int[i])
-                    if i < self.length - 1:
+                    with if_(i < self.length - 1):
                         dummy_packet = declare(int, [-3, -1])
                         stream_dgx(dummy_packet)
             else:
                 poll_dgx(self._var_int)
                 if self.type == fixed:
-                    assign(self.var, Cast.mul_fixed_by_int(1 / 1e6, self._var_int))
+                    assign(
+                        self.var,
+                        Cast.mul_fixed_by_int(
+                            1 / float_to_int_scaling_factor, self._var_int
+                        ),
+                    )
                 elif self.type == bool:
                     assign(self.var, Cast.to_bool(self._var_int))
-                else:
+                else:  # int
                     assign(self.var, self._var_int)
-
-            # poll_dgx(self.var)
 
         else:
             raise ValueError("Invalid input stream type.")
+
+    def push_to_opx(
+        self,
+        value: Union[int, float, bool, Sequence[Union[int, float, bool]]],
+        job: RunningQmJob,
+        qm: Optional[QuantumMachine] = None,
+        dgx_lib=None,
+        dgx_stream=None,
+        verbosity: int = 0,
+        start_with_dummy_packet: bool = False,
+    ):
+        """
+        To be outside QUA program: pass an input value to the OPX from Python
+        Args:
+            value: Value to be passed to the OPX.
+            job: RunningQmJob object (required if input_type is IO1 or IO2 or input_stream).
+            qm: QuantumMachine object (required if input_type is IO1 or IO2).
+            dgx_lib: DGX library (required if input_type is dgx).
+            dgx_stream: DGX stream (required if input_type is dgx).
+            verbosity: Verbosity level (0, 1, 2).
+            start_with_dummy_packet: Boolean indicating if the query should start with a dummy packet
+                (relevant only for dgx when called after another parameter loading).
+        """
+
+        if self.is_array and len(value) != self.length:
+            raise ValueError(
+                f"Invalid input. {self.name} should be a list of length {self.length}."
+            )
+        elif not self.is_array and not isinstance(value, (int, float, bool)):
+            raise ValueError(
+                f"Invalid input. {self.name} should be a single value (received {type(value)})."
+            )
+
+        if self.is_array:
+            value = list(value)
+
+        if self.input_type == "IO1" or self.input_type == "IO2":
+            io = "set_io1_value" if self.input_type == "IO1" else "set_io2_value"
+            if qm is None:
+                raise ValueError("QuantumMachine object must be provided.")
+            if self.is_array:
+
+                for i in range(self.length):
+                    getattr(qm, io)(value[i])
+                    wait_until_job_is_paused(job)
+                    job.resume()
+            else:
+                if not isinstance(value, (int, float, bool)):
+                    raise ValueError(
+                        f"Invalid input. {self.name} should be a single value (received {type(value)})."
+                    )
+                getattr(qm, io)(value)
+                wait_until_job_is_paused(job)
+                job.resume()
+
+        elif self.input_type == "input_stream":
+            job.push_to_input_stream(self.name, value)
+
+        elif self.input_type == "dgx":
+            if start_with_dummy_packet:
+                dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                if verbosity > 1:
+                    print(f"GH <- dummy ")
+            if self.is_array:
+                if self.type == fixed:
+                    for i in range(self.length):
+                        if verbosity > 1:
+                            print(f"----actions-----")
+                            print(f"GH -> {value[i]}")
+                        dgx_lib.DgxStream_push(
+                            dgx_stream, int(value[i] * float_to_int_scaling_factor)
+                        )
+                        # If not last element, push a dummy packet
+                        if i < self.length - 1:
+                            dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                            if verbosity > 1:
+                                print(f"GH <- dummy ")
+                elif self.type == bool:
+                    for i in range(self.length):
+                        dgx_lib.DgxStream_push(dgx_stream, int(value[i]))
+                        # If not last element, push a dummy packet
+                        if i < self.length - 1:
+                            dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                            if verbosity > 1:
+                                print(f"GH <- dummy ")
+                else:
+                    for i in range(self.length):
+                        dgx_lib.DgxStream_push(dgx_stream, int(value[i]))
+                        # If not last element, push a dummy packet
+                        if i < self.length - 1:
+                            dummy_packet = dgx_lib.DgxStream_pop(dgx_stream)
+                            if verbosity > 1:
+                                print(f"GH <- dummy ")
+            else:
+                if self.type == fixed:
+                    dgx_lib.DgxStream_push(
+                        dgx_stream, int(value * float_to_int_scaling_factor)
+                    )
+                else:  # int or bool
+                    dgx_lib.DgxStream_push(dgx_stream, int(value))

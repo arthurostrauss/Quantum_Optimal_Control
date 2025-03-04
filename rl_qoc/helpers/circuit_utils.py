@@ -16,7 +16,14 @@ from qiskit.circuit import (
 )
 from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 from qiskit.converters import circuit_to_dag, dag_to_circuit
-from qiskit.quantum_info import DensityMatrix, Statevector, Operator
+from qiskit.quantum_info import (
+    DensityMatrix,
+    Statevector,
+    Operator,
+    SparsePauliOp,
+    Pauli,
+    pauli_basis,
+)
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import PassManager, CouplingMap
 from qiskit.providers import BackendV2, Backend
@@ -24,6 +31,11 @@ from qiskit_experiments.framework import BaseAnalysis, BatchExperiment
 from qiskit_experiments.library import ProcessTomography, StateTomography
 
 from typing import Tuple, Optional, Sequence, List, Union, Dict
+
+from qiskit_experiments.library.tomography.basis import (
+    PauliPreparationBasis,
+    Pauli6PreparationBasis,
+)
 
 from .transpiler_passes import CustomGateReplacementPass
 
@@ -46,7 +58,9 @@ def precision_to_shots(precision: float) -> int:
 
 def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flow=True):
     """
-    Handle n_reps for a Quantum Circuit
+    Returns a Quantum Circuit with qc repeated n_reps times
+    Depending on the backend and the control_flow flag,
+    the circuit is repeated using the built-in for_loop method if available
 
     Args:
         qc: Quantum Circuit
@@ -366,3 +380,211 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
         target["gate"], [qc.qubits[i] for i in target["physical_qubits"]]
     )
     return qc.data.count(tgt_instruction)
+
+
+def get_single_qubit_input_states(input_state_choice) -> List[QuantumCircuit]:
+    """
+    Get single qubit input states for a given choice of input states
+    (pauli4, pauli6, 2-design)
+    """
+    if input_state_choice == "pauli4":
+        input_states = [PauliPreparationBasis().circuit([i]) for i in range(4)]
+    elif input_state_choice == "pauli6":
+        input_states = [Pauli6PreparationBasis().circuit([i]) for i in range(6)]
+    elif input_state_choice == "2-design":
+        states = get_2design_input_states(2)
+        input_circuits = [QuantumCircuit(1) for _ in states]
+        for input_circ, state in zip(input_circuits, states):
+            input_circ.prepare_state(state)
+        input_states = input_circuits
+    else:
+        raise ValueError("Invalid input state choice")
+    return input_states
+
+
+def get_input_states_cardinality_per_qubit(input_state_choice: str) -> int:
+    """
+    Get the cardinality of the input states for a given choice of input states
+    (pauli4, pauli6, 2-design)
+    """
+    if input_state_choice == "pauli4":
+        return 4
+    elif input_state_choice == "pauli6":
+        return 6
+    elif input_state_choice == "2-design":
+        return 4
+    else:
+        raise ValueError("Invalid input state choice")
+
+
+def get_2design_input_states(d: int = 4) -> List[Statevector]:
+    """
+    Function that return the 2-design input states (used for CAFE reward scheme)
+    Follows this Reference: https://arxiv.org/pdf/1008.1138 (see equations 2 and 13)
+    """
+    # Define constants
+    golden_ratio = (np.sqrt(5) - 1) / 2
+    omega = np.exp(2 * np.pi * 1j / d)
+
+    # Define computational basis states
+    e0 = np.array([1, 0, 0, 0], dtype=complex)  # |00⟩
+    e1 = np.array([0, 1, 0, 0], dtype=complex)  # |01⟩
+    e2 = np.array([0, 0, 1, 0], dtype=complex)  # |10⟩
+    e3 = np.array([0, 0, 0, 1], dtype=complex)  # |11⟩
+
+    # Create the Z matrix (diagonal matrix with powers of omega)
+    Z = np.diag([omega**r for r in range(d)])
+
+    # Create the X matrix (shift matrix)
+    X = np.zeros((d, d), dtype=complex)
+    for r in range(d - 1):
+        X[r, r + 1] = 1
+    X[d - 1, 0] = 1  # Wrap-around to satisfy the condition for |e_0>
+
+    # Define the fiducial state from Eq. (13)
+    coefficients = (
+        1
+        / (2 * np.sqrt(3 + golden_ratio))
+        * np.array(
+            [
+                1 + np.exp(-1j * np.pi / 4),
+                np.exp(1j * np.pi / 4) + 1j * golden_ratio ** (-3 / 2),
+                1 - np.exp(-1j * np.pi / 4),
+                np.exp(1j * np.pi / 4) - 1j * golden_ratio ** (-3 / 2),
+            ]
+        )
+    )
+
+    fiducial_state = (
+        coefficients[0] * e0
+        + coefficients[1] * e1
+        + coefficients[2] * e2
+        + coefficients[3] * e3
+    ).reshape(d, 1)
+    # Prepare all 16 states
+    states = []
+    for k in range(0, d):
+        for l in range(0, d):
+            # state = apply_hw_group(p1, p2, coefficients)
+            state = (
+                np.linalg.matrix_power(X, k)
+                @ np.linalg.matrix_power(Z, l)
+                @ fiducial_state
+            )
+            states.append(Statevector(state))
+
+    return states
+
+
+def observables_to_indices(observables: List[SparsePauliOp] | SparsePauliOp):
+    """
+    Get single qubit indices of Pauli observables for the reward computation.
+
+    Args:
+        observables: Pauli observables to sample
+    """
+    observable_indices = []
+    observables_grouping = (
+        observables.group_commuting(qubit_wise=True)
+        if isinstance(observables, SparsePauliOp)
+        else observables
+    )
+    for obs_group in observables_grouping:  # Get indices of Pauli observables
+        current_indices = []
+        paulis = obs_group.paulis  # Get Pauli List out of the SparsePauliOp
+        reference_pauli = Pauli(
+            (np.logical_or.reduce(paulis.z), np.logical_or.reduce(paulis.x))
+        )
+        for pauli_term in reversed(
+            reference_pauli.to_label()
+        ):  # Get individual qubit indices for each Pauli term
+            if pauli_term == "I" or pauli_term == "Z":
+                current_indices.append(0)
+            elif pauli_term == "X":
+                current_indices.append(1)
+            elif pauli_term == "Y":
+                current_indices.append(2)
+        observable_indices.append(tuple(current_indices))
+    return observable_indices
+
+
+def pauli_input_to_indices(prep: Pauli | str, inputs):
+    """
+    Convert the input state to single qubit state indices for the reward computation
+
+    Args:
+        prep: Pauli input state
+        inputs: List of qubit indices
+    """
+    prep = prep if isinstance(prep, Pauli) else Pauli(prep)
+    prep_indices = []
+    assert all(input < 2 for input in inputs), "Only single qubit inputs are supported"
+    for i, pauli_op in enumerate(reversed(prep.to_label())):
+        # Build input state in Pauli6 basis from Pauli prep: look at each qubit individually
+        if pauli_op == "X":
+            prep_indices.append(2 + inputs[i])
+        elif pauli_op == "Y":
+            prep_indices.append(4 + inputs[i])
+        else:  # pauli_op == "I" or pauli_op == "Z"
+            prep_indices.append(inputs[i])
+    return prep_indices
+
+
+def extend_input_state_prep(
+    input_circuit: QuantumCircuit, qc: QuantumCircuit, gate_target, indices
+) -> Tuple[QuantumCircuit, Tuple[int]]:
+    """
+    Extend the input state preparation to all qubits in the quantum circuit if necessary
+
+    Args:
+        input_circuit: Input state preparation circuit
+        qc: Quantum circuit to be executed on quantum system
+        gate_target: Target gate to prepare (possibly within a wider circuit context)
+    """
+    if (
+        qc.num_qubits > gate_target.causal_cone_size
+    ):  # Add random input state on all qubits (not part of reward calculation)
+        other_qubits_indices = set(range(qc.num_qubits)) - set(
+            gate_target.causal_cone_qubits_indices
+        )
+        new_indices: List[int] = []
+        other_qubits = [qc.qubits[i] for i in other_qubits_indices]
+        random_input_indices = np.random.randint(0, 6, len(other_qubits)).tolist()
+        random_input_context = Pauli6PreparationBasis().circuit(random_input_indices)
+        for i in range(qc.num_qubits):
+            if i in other_qubits_indices:
+                new_indices.append(random_input_indices.pop(0))
+            else:
+                new_indices.append(indices[i])
+
+        new_circuit: QuantumCircuit = input_circuit.compose(
+            random_input_context, other_qubits, front=True
+        )
+        return new_circuit, tuple(new_indices)
+    return input_circuit, tuple(indices)
+
+
+def extend_observables(
+    observables: SparsePauliOp, qc: QuantumCircuit, gate_target
+) -> SparsePauliOp:
+    """
+    Extend the observables to all qubits in the quantum circuit if necessary
+
+    Args:
+        observables: Pauli observables to sample
+        qc: Quantum circuit to be executed on quantum system
+        gate_target: Target gate to prepare (possibly within a wider circuit context)
+
+    Returns:
+        Extended Pauli observables
+    """
+
+    if qc.num_qubits > gate_target.causal_cone_size:
+        other_qubits_indices = set(range(qc.num_qubits)) - set(
+            gate_target.causal_cone_qubits_indices
+        )
+        observables = observables.apply_layout(None, qc.num_qubits).apply_layout(
+            gate_target.causal_cone_qubits_indices + list(other_qubits_indices)
+        )
+
+    return observables

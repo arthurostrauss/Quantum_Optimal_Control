@@ -4,12 +4,6 @@ from .. import BackendConfig
 from ..environment.configuration.backend_config import PubLike, Pub
 from typing import Any, List, Tuple, Callable, Iterable, Optional, Union
 from ..environment.backend_info import BackendInfo
-from ..environment.calibration_pubs import (
-    CalibrationEstimatorPub,
-    CalibrationEstimatorPubLike,
-    CalibrationSamplerPub,
-    CalibrationSamplerPubLike,
-)
 from qiskit import QuantumCircuit
 from qiskit.transpiler import CouplingMap
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
@@ -47,11 +41,7 @@ class QiboConfig(BackendConfig):
         """
         new_pubs = []
         for pub in pubs:
-            if isinstance(pub, (CalibrationEstimatorPubLike, CalibrationEstimatorPub)):
-                new_pubs.extend(CalibrationEstimatorPub.coerce(pub).to_pub_list())
-            elif isinstance(pub, (CalibrationSamplerPubLike, CalibrationSamplerPub)):
-                new_pubs.extend(CalibrationSamplerPub.coerce(pub).to_pub_list())
-            elif isinstance(pub, (EstimatorPubLike, EstimatorPub)):
+            if isinstance(pub, (EstimatorPubLike, EstimatorPub)):
                 new_pubs.append(EstimatorPub.coerce(pub))
             elif isinstance(pub, (SamplerPubLike, SamplerPub)):
                 new_pubs.append(SamplerPub.coerce(pub))

@@ -6,7 +6,7 @@ from gymnasium.spaces import Box
 from qiskit.providers import BackendV2
 from qiskit.transpiler import InstructionDurations, PassManager
 from .backend_config import BackendConfig
-from ..reward_methods import reward_dict, RewardConfig
+
 from .target_config import GateTargetConfig, StateTargetConfig
 from .execution_config import ExecutionConfig
 from .benchmark_config import BenchmarkConfig
@@ -27,7 +27,7 @@ class QEnvConfig:
         backend_config (rl_qoc.environment.configuration.backend_config.BackendConfig): Backend configuration
         action_space (Space): Action space
         execution_config (ExecutionConfig): Execution configuration
-        reward_config (RewardConfig): Reward configuration
+        reward_config (Reward): Reward configuration
         benchmark_config (BenchmarkConfig): Benchmark configuration
     """
 
@@ -36,7 +36,7 @@ class QEnvConfig:
     action_space: Box
     execution_config: ExecutionConfig
     reward_config: (
-        RewardConfig | Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"]
+        Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward"
     ) = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
@@ -48,7 +48,16 @@ class QEnvConfig:
             else:
                 self.target = StateTargetConfig(**self.target)
         if isinstance(self.reward_config, str):
+            from ...rewards import reward_dict
+
             self.reward_config = reward_dict[self.reward_config]()
+        else:
+            from ...rewards import Reward
+
+            if not isinstance(self.reward_config, Reward):
+                raise ValueError(
+                    "Reward configuration must be a string or a Reward instance"
+                )
 
     @property
     def backend(self) -> Optional[BackendV2]:
@@ -164,6 +173,8 @@ class QEnvConfig:
         self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
     ):
         try:
+            from ...rewards import reward_dict
+
             self.reward_config = reward_dict[value]()
         except KeyError as e:
             raise ValueError(f"Reward method {value} not recognized")

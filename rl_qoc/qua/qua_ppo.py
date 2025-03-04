@@ -97,7 +97,7 @@ class CustomQMPPO(CustomPPO):
 
         super().__init__(agent_config, env, chkpt_dir, chkpt_dir_critic)
 
-    def process_action(self, mean_action, std_action, probs: Normal):
+    def process_action(self, probs: Normal):
         """
         Process the action to be taken by the agent
         :param mean_action: Mean of the action distribution
@@ -105,6 +105,8 @@ class CustomQMPPO(CustomPPO):
         :param probs: Probabilities of the action distribution
         :return: The action to be taken by the agent
         """
+        mean_action = probs.mean
+        std_action = probs.stddev
         batch_size = mean_action.size(0)
         if isinstance(self.env, ActionWrapper):
             self.unwrapped_env.mean_action = self.env.action(
@@ -120,10 +122,10 @@ class CustomQMPPO(CustomPPO):
         action = np.zeros((batch_size, self.n_actions))
         seed = self.seed
         n_lookup = 512
-        ln_array = [
+        cos_array = [
             FixedPoint(np.cos(2 * np.pi * x / n_lookup)) for x in range(n_lookup)
         ]
-        cos_array = [
+        ln_array = [
             FixedPoint(np.sqrt(-2 * np.log(x / (n_lookup + 1))))
             for x in range(1, n_lookup + 1)
         ]
@@ -133,7 +135,9 @@ class CustomQMPPO(CustomPPO):
                 uniform_sample = FixedPoint(uniform_sample)
                 u1 = (uniform_sample >> 19).to_unsafe_int()
                 u2 = uniform_sample.to_unsafe_int() & ((1 << 19) - 1)
-                temp_action1 = μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
+                temp_action1 = (
+                    μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
+                )
                 temp_action2 = (
                     μ_f[j]
                     + σ_f[j]
@@ -141,9 +145,9 @@ class CustomQMPPO(CustomPPO):
                     * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
                 )
                 action[b][j] = temp_action1.to_float()
-                action[b+1][j] = temp_action2.to_float()
+                action[b + 1][j] = temp_action2.to_float()
         torch_action = torch.tensor(action, device=self.device)
-        logprob = probs.log_prob(torch_action)
+        logprob = probs.log_prob(torch_action).sum(1)
 
         return torch_action, logprob
 

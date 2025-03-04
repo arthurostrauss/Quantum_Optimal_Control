@@ -169,7 +169,7 @@ def validate_instruction(instruction: Instruction) -> Callable:
 
 def validate_parameters(
     params, param_table: ParameterTable, param_mapping=None
-) -> None:
+) -> ParameterTable:
     """
     Validate the parameters of the instruction by checking them against the parameter table
     and a possible parameter mapping
@@ -194,6 +194,7 @@ def validate_parameters(
             raise ValueError(
                 f"Parameter {param_name} is not in the provided parameters mapping"
             )
+    return param_table
 
 
 def _instruction_to_qua(
