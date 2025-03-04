@@ -69,7 +69,7 @@ def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Ga
             )
             / d
         )
-        # dms = [target @ basis[k].to_matrix() @ target.adjoint() for k in range(len(basis))]
+        # dms = [target.to_matrix() @ basis[k].to_matrix() @ target.adjoint().to_matrix() for k in range(len(basis))]
         # chi = np.real([np.trace(dms[k_] @ basis[k].to_matrix()) for k_, k in product(range(d**2), repeat=2)])/d
 
     # Real part is taken to convert it in good format,
