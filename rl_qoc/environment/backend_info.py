@@ -160,8 +160,8 @@ class QiskitBackendInfo(BackendInfo):
                     ),
                     translation_method="translator",
                 )
-
-            circuit = self.pass_manager.run(circuit)
+            if self.backend is not None:
+                circuit = self.pass_manager.run(circuit)
         return circuit
 
     @property

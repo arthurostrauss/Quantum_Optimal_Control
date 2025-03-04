@@ -167,7 +167,7 @@ class StateTarget(BaseTarget):
         """
 
         if isinstance(state, DensityMatrix):
-            if state.purity() != 1:
+            if state.purity() - 1 > 1e-6:
                 raise ValueError("Density matrix should be pure")
             self.dm = state
         elif isinstance(state, Statevector):
