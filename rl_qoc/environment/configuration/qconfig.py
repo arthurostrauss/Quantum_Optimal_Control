@@ -63,6 +63,11 @@ class QEnvConfig:
     def backend(self) -> Optional[BackendV2]:
         return self.backend_config.backend
 
+    @backend.setter
+    def backend(self, backend: BackendV2):
+        self.backend_config.backend = backend
+        self.backend_config.parametrized_circuit_kwargs["backend"] = backend
+
     @property
     def parametrized_circuit(self):
         return self.backend_config.parametrized_circuit
