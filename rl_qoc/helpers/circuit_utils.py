@@ -548,6 +548,7 @@ def extend_input_state_prep(
             gate_target.causal_cone_qubits_indices
         )
         new_indices: List[int] = []
+        initial_indices = indices.copy()
         other_qubits = [qc.qubits[i] for i in other_qubits_indices]
         random_input_indices = np.random.randint(0, 6, len(other_qubits)).tolist()
         random_input_context = Pauli6PreparationBasis().circuit(random_input_indices)
@@ -555,7 +556,7 @@ def extend_input_state_prep(
             if i in other_qubits_indices:
                 new_indices.append(random_input_indices.pop(0))
             else:
-                new_indices.append(indices[i])
+                new_indices.append(initial_indices.pop(0))
 
         new_circuit: QuantumCircuit = input_circuit.compose(
             random_input_context, other_qubits, front=True

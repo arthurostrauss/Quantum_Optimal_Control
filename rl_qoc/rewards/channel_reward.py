@@ -310,9 +310,8 @@ class ChannelReward(Reward):
                 )
 
                 obs_ = parity * obs_list
-                pub_obs = extend_observables(obs_, prep_circuit, target).apply_layout(
-                    prep_circuit.layout
-                )
+                pub_obs = extend_observables(obs_, prep_circuit, target)
+                pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 if prep_indices not in used_prep_indices:  # Add new PUB
                     # Add PUB
                     pub = (
@@ -322,7 +321,7 @@ class ChannelReward(Reward):
                         shots_to_precision(dedicated_shots),
                     )
                     used_prep_indices[prep_indices]["input_circuit"] = input_circuit
-                    used_prep_indices[prep_indices]["observables"] = obs_
+                    used_prep_indices[prep_indices]["observables"] = pub_obs
                     used_prep_indices[prep_indices]["shots"] = dedicated_shots
                     used_prep_indices[prep_indices]["pub"] = pub
                 else:  # Update PUB (regroup observables for same input circuit, redundant for I/Z terms)

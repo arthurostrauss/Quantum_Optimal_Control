@@ -212,7 +212,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
     #     else:
     #         pass
 
-    def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
+    def compute_benchmarks(
+        self, qc: QuantumCircuit, params: np.array, update_env_history=True
+    ) -> np.array:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: List of Action vectors to execute on quantum system
@@ -272,9 +274,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     [self.mean_action]
                 )  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":  # Circuit simulation
-                fids = self.simulate_circuit(qc, params)
+                fids = self.simulate_circuit(qc, params, update_env_history)
             else:  # Pulse simulation
-                fids = self.simulate_pulse_circuit(qc, params)
+                fids = self.simulate_pulse_circuit(qc, params, update_env_history)
             if self.target.target_type == "state":
                 print("State fidelity:", self.circuit_fidelity_history[-1])
             else:

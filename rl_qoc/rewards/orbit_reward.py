@@ -9,6 +9,8 @@ from ..environment.configuration.execution_config import ExecutionConfig
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 from qiskit.quantum_info import random_clifford, Operator
 
+from ..helpers import causal_cone_circuit
+
 
 @dataclass
 class ORBITReward(Reward):
@@ -113,12 +115,14 @@ class ORBITReward(Reward):
                         circ.compose(context, inplace=True)
                         circ.barrier()
 
-                reverse_unitary = Operator(ref_qc).adjoint()
+                sim_qc = causal_cone_circuit(
+                    ref_qc.decompose(), target.causal_cone_qubits
+                )[0]
+                reverse_unitary = Operator(sim_qc).adjoint()
                 reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
                 reverse_unitary_qc.unitary(
-                    reverse_unitary, reverse_unitary_qc.qubits, label="U_inv"
+                    reverse_unitary, target.causal_cone_qubits, label="U_inv"
                 )
-                reverse_unitary_qc.measure_all()
 
                 reverse_unitary_qc = backend_info.custom_transpile(
                     reverse_unitary_qc,
@@ -135,6 +139,7 @@ class ORBITReward(Reward):
                     transpiled_circuit.barrier()
                     # Add the inverse unitary + measurement to the circuit
                     transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
+                    transpiled_circuit.measure_all()
                     pubs_.append((transpiled_circuit, params, execution_config.n_shots))
 
                 total_shots += batch_size * execution_config.n_shots

@@ -380,6 +380,7 @@ def noisy_backend(
     circuit_context: QuantumCircuit,
     spillover_rate_matrix: np.ndarray,
     coupling_map: Optional[CouplingMap] = None,
+    seed_simulator: Optional[int] = None,
 ):
     """
     Generate a noisy backend object with spillover noise based on the given circuit and spillover rate matrix
@@ -421,6 +422,8 @@ def noisy_backend(
         simulator=True,
     )
 
-    backend = AerSimulator(noise_model=noise_model, configuration=config)
+    backend = AerSimulator(
+        noise_model=noise_model, configuration=config, seed_simulator=seed_simulator
+    )
 
     return backend

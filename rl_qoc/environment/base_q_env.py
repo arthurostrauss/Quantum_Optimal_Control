@@ -139,6 +139,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.circuit_fidelity_history_nreps = []
         self.avg_fidelity_history_nreps = []
         self._fit_function: Optional[Callable] = None
+        self._action_to_cycle_reward_function: Optional[Callable] = None
         self._fit_params: Optional[np.array] = None
 
         # Call reset of Env class to set seed
@@ -178,7 +179,9 @@ class BaseQuantumEnvironment(ABC, Env):
         pass
 
     @abstractmethod
-    def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
+    def compute_benchmarks(
+        self, qc: QuantumCircuit, params: np.array, update_env_history=True
+    ) -> np.array:
         """
         Benchmark through tomography or through simulation the policy
         Args:
@@ -219,14 +222,14 @@ class BaseQuantumEnvironment(ABC, Env):
         if fit_function is None or inverse_fit_function is None:
 
             def fit_function(n, spam, eps_lin, eps_quad):
-                return 1 - spam - eps_lin * n - np.sin(n * eps_quad)
+                return 1 - spam - eps_lin * n - eps_quad * n**2
 
             def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
                 return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
 
         p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
         lower_bounds = [0.0, 0.0, 0.0]
-        upper_bounds = [0.2, 0.5, 0.5]
+        upper_bounds = [0.1, 0.2, 0.1]
 
         popt, pcov = curve_fit(
             fit_function,
@@ -285,7 +288,7 @@ class BaseQuantumEnvironment(ABC, Env):
         # Get the reward method from the configuration
         reward_method = self.config.reward_method
         if self.do_benchmark():  # Benchmarking or fidelity access
-            fids = self.compute_benchmarks(qc, params)
+            fids = self.compute_benchmarks(qc, params, update_env_history)
             if reward_method == "fidelity":
                 if update_env_history:
                     self._total_shots.append(0)
@@ -476,9 +479,10 @@ class BaseQuantumEnvironment(ABC, Env):
         self._episode_tracker += 1
         self._episode_ended = False
         self.modify_environment_params()
-        self.config.execution_config.n_reps_index = self._n_reps_rng.integers(
-            0, len(self.config.n_reps)
-        )
+        if len(self.config.execution_config.n_reps) > 1:
+            self.config.execution_config.n_reps_index = self._n_reps_rng.integers(
+                0, len(self.config.execution_config.n_reps)
+            )
 
         if isinstance(self.estimator, RuntimeEstimatorV2):
             self.estimator.options.environment.job_tags = [
@@ -506,12 +510,13 @@ class BaseQuantumEnvironment(ABC, Env):
 
         qc_channel = qc.copy(name="qc_channel")
         qc_state = qc.copy(name="qc_state")
-        qc_channel_nreps = qc.repeat(self.n_reps).copy(name="qc_channel_nreps")
-        qc_state_nreps = qc.repeat(self.n_reps).copy(name="qc_state_nreps")
+        qc_channel_nreps = qc.repeat(self.n_reps).decompose()
+        qc_state_nreps = qc.repeat(self.n_reps).decompose()
+        names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
 
         returned_fidelity_type = (
             "gate"
-            if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
+            if isinstance(self.target, GateTarget) and self.target.causal_cone_size <= 3
             else "state"
         )
         returned_fidelities = []
@@ -540,15 +545,20 @@ class BaseQuantumEnvironment(ABC, Env):
             channel_output = "superop"
             state_output = "density_matrix"
 
-        basis_gates = backend.operation_names
-        if noise_model is not None:
-            basis_gates += noise_model.basis_gates
-        qc_channel, qc_channel_nreps, qc_state, qc_state_nreps = transpile(
-            [qc_channel, qc_channel_nreps, qc_state, qc_state_nreps],
-            backend=backend,
-            optimization_level=0,
-            basis_gates=basis_gates,
+        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = (
+            self.backend_info.custom_transpile(
+                [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
+                optimization_level=0,
+                initial_layout=self.target.layout,
+                scheduling=False,
+                remove_final_measurements=False,
+            )
         )
+        for circ, name in zip(
+            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names
+        ):
+            circ.name = name
+
         if isinstance(self.parameters, ParameterVector):
             parameters = [self.parameters]
             n_custom_instructions = 1
@@ -581,6 +591,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 self.circuit_fidelity_history_nreps,
             ]
             methods = [state_output] * 2
+
         for circ, method, fid_array in zip(circuits, methods, fid_arrays):
             # Avoid channel simulation for more than 3 qubits
             if (method == "superop" or method == "unitary") and circ.num_qubits > 3:
@@ -1092,7 +1103,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the target object (GateTarget | StateTarget) of the environment
         """
-        return self._target
+        raise NotImplementedError("Target not implemented")
 
     @property
     def n_qubits(self):

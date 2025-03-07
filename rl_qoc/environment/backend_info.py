@@ -162,6 +162,11 @@ class QiskitBackendInfo(BackendInfo):
                 )
             if self.backend is not None:
                 circuit = self.pass_manager.run(circuit)
+            else:
+                if isinstance(circuit, QuantumCircuit):
+                    circuit = circuit.decompose()
+                else:
+                    circuit = [circ.decompose() for circ in circuit]
         return circuit
 
     @property

@@ -81,7 +81,11 @@ class CAFEReward(Reward):
                 [execution_config.control_flow_enabled, False],
             ):
                 # Bind input states to the circuits
-                circuit.compose(input_state.circuit, inplace=True)
+                circuit.compose(
+                    input_state.circuit,
+                    qubits=target.causal_cone_qubits,
+                    inplace=True,
+                )
                 circuit.barrier()
                 cycle_circuit = handle_n_reps(
                     context,
@@ -96,16 +100,20 @@ class CAFEReward(Reward):
                 0
             ]
             sim_qc.save_unitary()
-            sim_unitary = (
-                AerSimulator(method="unitary").run(sim_qc).result().get_unitary()
-            )
+            if isinstance(backend_info.backend, AerSimulator):
+                sim_unitary = (
+                    backend_info.backend.run(sim_qc, noise_model=None)
+                    .result()
+                    .get_unitary()
+                )
+            else:
+                sim_unitary = AerSimulator(method='unitary').run(sim_qc).result().get_unitary()
             reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
             reverse_unitary_qc.unitary(
                 sim_unitary.adjoint(),  # Inverse unitary
                 target.causal_cone_qubits,
                 label="U_inv",
             )
-            reverse_unitary_qc.measure_all()
             reverse_unitary_qc = backend_info.custom_transpile(
                 reverse_unitary_qc,
                 initial_layout=layout,
@@ -122,6 +130,7 @@ class CAFEReward(Reward):
                 transpiled_circuit.barrier()
                 # Add the inverse unitary + measurement to the circuit
                 transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
+                transpiled_circuit.measure_all()
                 pubs_.append((transpiled_circuit, params, execution_config.n_shots))
             total_shots += batch_size * execution_config.n_shots
 
