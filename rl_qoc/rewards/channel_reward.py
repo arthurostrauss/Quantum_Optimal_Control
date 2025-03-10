@@ -311,7 +311,7 @@ class ChannelReward(Reward):
 
                 obs_ = parity * obs_list
                 pub_obs = extend_observables(obs_, prep_circuit, target)
-                pub_obs = pub_obs.apply_layout(prep_circuit.layout)
+                # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 if prep_indices not in used_prep_indices:  # Add new PUB
                     # Add PUB
                     pub = (

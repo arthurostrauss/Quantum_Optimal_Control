@@ -218,6 +218,8 @@ class StateReward(Reward):
             observables = extend_observables(
                 self._observables, prep_circuit, target_instance
             )
+        else:
+            observables = self._observables.apply_layout(prep_circuit.layout)
 
         prep_circuit = backend_info.custom_transpile(
             prep_circuit, initial_layout=target_instance.layout, scheduling=False
@@ -226,7 +228,7 @@ class StateReward(Reward):
         pubs = [
             (
                 prep_circuit,
-                observables.apply_layout(prep_circuit.layout),
+                observables,
                 params,
                 shots_to_precision(max(self._pauli_shots)),
             )

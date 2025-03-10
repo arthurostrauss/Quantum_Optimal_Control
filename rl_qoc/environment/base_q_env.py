@@ -559,7 +559,7 @@ class BaseQuantumEnvironment(ABC, Env):
         ):
             circ.name = name
 
-        if isinstance(self.parameters, ParameterVector):
+        if isinstance(self.parameters, ParameterVector) or all(isinstance(param, Parameter) for param in self.parameters):
             parameters = [self.parameters]
             n_custom_instructions = 1
         else:  # List of ParameterVectors
@@ -594,7 +594,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         for circ, method, fid_array in zip(circuits, methods, fid_arrays):
             # Avoid channel simulation for more than 3 qubits
-            if (method == "superop" or method == "unitary") and circ.num_qubits > 3:
+            if (method == "superop" or method == "unitary") and self.target.causal_cone_size > 3:
                 fidelities = [0.0] * data_length
                 n_reps = 1
             else:
