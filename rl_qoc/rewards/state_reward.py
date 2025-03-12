@@ -261,7 +261,7 @@ class StateReward(Reward):
             )
         return total_shots
 
-    def get_reward(
+    def get_reward_with_primitive(
         self,
         pubs: List[EstimatorPub],
         estimator: BaseEstimatorV2,

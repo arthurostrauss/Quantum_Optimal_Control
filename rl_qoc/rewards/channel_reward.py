@@ -369,7 +369,7 @@ class ChannelReward(Reward):
         self._total_shots = total_shots
         return [EstimatorPub.coerce(pub) for pub in pubs]
 
-    def get_reward(
+    def get_reward_with_primitive(
         self, pubs: List[EstimatorPub], estimator: BaseEstimatorV2, target: GateTarget
     ) -> np.array:
         """
