@@ -266,6 +266,7 @@ class StateReward(Reward):
         pubs: List[EstimatorPub],
         estimator: BaseEstimatorV2,
         target: Target = None,
+        **kwargs,
     ) -> np.array:
         """
         Retrieve the reward from the PUBs and the primitive

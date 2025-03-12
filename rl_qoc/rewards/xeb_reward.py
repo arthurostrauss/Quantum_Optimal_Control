@@ -6,7 +6,7 @@ from qiskit import QuantumCircuit
 
 from .base_reward import Pub
 from ..environment.configuration.execution_config import ExecutionConfig
-from ..environment.target import StateTarget, GateTarget
+from ..environment.target import GateTarget
 from ..environment.backend_info import BackendInfo
 from ..rewards.base_reward import Reward
 
@@ -25,7 +25,7 @@ class XEBReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.array,
-        target: StateTarget | GateTarget,
+        target: GateTarget,
         backend_info: BackendInfo,
         execution_config: ExecutionConfig,
         *args,

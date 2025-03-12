@@ -143,7 +143,11 @@ class CAFEReward(Reward):
         return [SamplerPub.coerce(pub) for pub in pubs]
 
     def get_reward_with_primitive(
-        self, pubs: List[SamplerPub], primitive: BaseSamplerV2, target: GateTarget
+        self,
+        pubs: List[SamplerPub],
+        primitive: BaseSamplerV2,
+        target: GateTarget,
+        **kwargs
     ) -> np.array:
         """
         Compute the reward based on the input pubs

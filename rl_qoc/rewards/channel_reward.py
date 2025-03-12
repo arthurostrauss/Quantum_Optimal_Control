@@ -370,7 +370,11 @@ class ChannelReward(Reward):
         return [EstimatorPub.coerce(pub) for pub in pubs]
 
     def get_reward_with_primitive(
-        self, pubs: List[EstimatorPub], estimator: BaseEstimatorV2, target: GateTarget
+        self,
+        pubs: List[EstimatorPub],
+        estimator: BaseEstimatorV2,
+        target: GateTarget,
+        **kwargs,
     ) -> np.array:
         """
         Retrieve the reward from the PUBs and the primitive

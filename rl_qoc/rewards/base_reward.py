@@ -76,7 +76,7 @@ class Reward(ABC):
         pass
 
     def get_reward_with_primitive(
-        self, pubs: List[Pub], primitive: Primitive, target: Target
+        self, pubs: List[Pub], primitive: Primitive, target: Target, **kwargs
     ) -> np.array:
         pass
 
