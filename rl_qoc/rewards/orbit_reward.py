@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import List, Optional
 import numpy as np
 from qiskit.circuit import QuantumCircuit
+from qiskit.primitives import BaseSamplerV2
+
 from .base_reward import Reward
 from ..environment.backend_info import BackendInfo
 from ..environment.target import GateTarget
@@ -146,6 +148,40 @@ class ORBITReward(Reward):
         self._total_shots = total_shots
 
         return [SamplerPub.coerce(pub) for pub in pubs]
+
+    def get_reward_with_primitive(
+        self, pubs: List[SamplerPub], primitive: BaseSamplerV2, target: GateTarget
+    ) -> np.array:
+        """
+        Compute the reward based on the input pubs
+        """
+        job = primitive.run(pubs)
+        pub_results = job.result()
+        batch_size = pubs[0].parameter_values.shape[0]
+        n_shots = pubs[0].shots
+        assert all(
+            [pub.shots == n_shots for pub in pubs]
+        ), "All pubs should have the same number of shots"
+        assert all(
+            [pub.parameter_values.shape[0] == batch_size for pub in pubs]
+        ), "All pubs should have the same batch size"
+
+        pub_data = [
+            [
+                pub_result.data.meas[i].postselect(
+                    target.causal_cone_qubits_indices,
+                    [0] * target.causal_cone_size,
+                )
+                for i in range(batch_size)
+            ]
+            for pub_result in pub_results
+        ]
+        survival_probability = [
+            [bit_array.num_shots / n_shots for bit_array in bit_arrays]
+            for bit_arrays in pub_data
+        ]
+        reward = np.mean(survival_probability, axis=0)
+        return reward
 
     def get_shot_budget(self, pubs: List[SamplerPub]) -> int:
         """

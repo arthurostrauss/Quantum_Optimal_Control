@@ -432,7 +432,7 @@ class CustomPPO:
                     "n_reps": u_env.n_reps,
                     "training_constraint": self.training_constraint.constraint_name,
                     "env_ident_str": u_env.ident_str,
-                    "reward_method": u_env.config.reward_config.reward_method,
+                    "reward_method": u_env.config.reward.reward_method,
                 }
                 training_results = {
                     "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],

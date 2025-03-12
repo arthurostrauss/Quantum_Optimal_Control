@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 from typing import List, Tuple, Literal, Optional
 from qiskit.circuit import QuantumCircuit
+from qiskit.primitives import BaseEstimatorV2
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.quantum_info import SparsePauliOp, pauli_basis
 import numpy as np
-from .base_reward import Reward
+from .base_reward import Reward, Target
 from ..environment.backend_info import BackendInfo
 from ..environment.configuration.execution_config import ExecutionConfig
 from ..environment.target import StateTarget, GateTarget, InputState
@@ -259,6 +260,23 @@ class StateReward(Reward):
                 * precision_to_shots(pub.precision)
             )
         return total_shots
+
+    def get_reward(
+        self,
+        pubs: List[EstimatorPub],
+        estimator: BaseEstimatorV2,
+        target: Target = None,
+    ) -> np.array:
+        """
+        Retrieve the reward from the PUBs and the primitive
+        """
+        job = estimator.run(pubs)
+        pub_results = job.result()
+        reward = np.sum([pub_result.data.evs for pub_result in pub_results])
+        reward += self.id_coeff
+        reward /= self.total_counts
+
+        return reward
 
     @property
     def observables(self) -> SparsePauliOp:

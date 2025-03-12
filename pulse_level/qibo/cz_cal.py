@@ -52,7 +52,7 @@ q_env_config = QEnvConfig(
     target=target,
     backend_config=qibo_config,
     action_space=action_space,
-    reward_config=ChannelRewardConfig(),
+    reward=ChannelRewardConfig(),
     benchmark_config=BenchmarkConfig(0),
     execution_config=ExecutionConfig(
         batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1

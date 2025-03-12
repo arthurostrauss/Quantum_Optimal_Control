@@ -1,16 +1,19 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Union
+from typing import List, Union, Optional
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
-
-PubLike = Union[SamplerPubLike, EstimatorPubLike]
-Pub = Union[SamplerPub, EstimatorPub]
+from qiskit.primitives.base import BaseEstimatorV2, BaseSamplerV2
 from ..environment.backend_info import BackendInfo
 from ..environment.target import StateTarget, GateTarget
 from ..environment.configuration.execution_config import ExecutionConfig
 import numpy as np
+
+PubLike = Union[SamplerPubLike, EstimatorPubLike]
+Pub = Union[SamplerPub, EstimatorPub]
+Primitive = Union[BaseEstimatorV2, BaseSamplerV2]
+Target = Union[StateTarget, GateTarget]
 
 
 @dataclass
@@ -51,7 +54,7 @@ class Reward(ABC):
         self,
         qc: QuantumCircuit,
         params: np.array,
-        target: StateTarget | GateTarget,
+        target: Target,
         backend_info: BackendInfo,
         execution_config: ExecutionConfig,
         *args,
@@ -70,6 +73,11 @@ class Reward(ABC):
         Returns:
             List of pubs related to the reward method
         """
+        pass
+
+    def get_reward_with_primitive(
+        self, pubs: List[Pub], primitive: Primitive, target: Target
+    ) -> np.array:
         pass
 
     def get_shot_budget(self, pubs: List[Pub]):

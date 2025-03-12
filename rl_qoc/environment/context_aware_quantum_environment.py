@@ -244,7 +244,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             custom_circ.metadata["baseline_circuit"] = baseline_circ.copy()
 
         input_states_choice = getattr(
-            self.config.reward_config.reward_args, "input_states_choice", "pauli4"
+            self.config.reward.reward_args, "input_states_choice", "pauli4"
         )
         if isinstance(self.backend, BackendV2):
             for op in self.backend.operations:

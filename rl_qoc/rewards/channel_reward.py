@@ -1,5 +1,8 @@
 from collections import defaultdict
 from typing import List, Tuple, Optional
+
+from qiskit.primitives import BaseEstimatorV2
+
 from .base_reward import Reward
 from dataclasses import dataclass
 from qiskit.circuit import QuantumCircuit
@@ -365,6 +368,22 @@ class ChannelReward(Reward):
         self._fiducials = fiducials
         self._total_shots = total_shots
         return [EstimatorPub.coerce(pub) for pub in pubs]
+
+    def get_reward(
+        self, pubs: List[EstimatorPub], estimator: BaseEstimatorV2, target: GateTarget
+    ) -> np.array:
+        """
+        Retrieve the reward from the PUBs and the primitive
+        """
+        job = estimator.run(pubs)
+        pub_results = job.result()
+        reward = np.sum([pub_result.data.evs for pub_result in pub_results])
+        reward += self.id_coeff
+        reward /= self.total_counts
+        dim = 2**target.causal_cone_size
+        reward = (dim * reward + 1) / (dim + 1)
+
+        return reward
 
     def get_shot_budget(self, pubs: List[EstimatorPub]) -> int:
         """

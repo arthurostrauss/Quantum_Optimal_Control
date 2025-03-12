@@ -146,7 +146,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._seed = training_config.seed
         super().reset(seed=self._seed)
         self._n_reps_rng = np.random.default_rng(self.np_random.integers(2**32))
-        self.config.reward_config.set_reward_seed(self.np_random.integers(2**32))
+        self.config.reward.set_reward_seed(self.np_random.integers(2**32))
 
     @abstractmethod
     def define_target_and_circuits(
@@ -286,182 +286,43 @@ class BaseQuantumEnvironment(ABC, Env):
         #     raise ValueError(f"Batch size mismatch: {batch_size} != {self.batch_size} ")
 
         # Get the reward method from the configuration
-        reward_method = self.config.reward_method
+        rewarder = self.config.reward
+
         if self.do_benchmark():  # Benchmarking or fidelity access
             fids = self.compute_benchmarks(qc, params, update_env_history)
-            if reward_method == "fidelity":
+            if rewarder.reward_method == "fidelity":
                 if update_env_history:
                     self._total_shots.append(0)
                     self._hardware_runtime.append(0.0)
                 return fids
 
         # Check if the reward method exists in the dictionary
-        last_input = (
+        additional_input = (
             self.config.execution_config.dfe_precision
             if self.config.dfe
             else self.baseline_circuits[self.trunc_index]
         )
         if self.config.execution_config.n_reps_mode == "sequential":
-            self._pubs = self.config.reward_config.get_reward_pubs(
+            self._pubs = rewarder.get_reward_pubs(
                 qc,
                 params,
                 self.target,
                 self.backend_info,
                 self.config.execution_config,
-                last_input,
+                additional_input,
             )
-            total_shots = self.config.reward_config.total_shots
+            total_shots = self.config.reward.total_shots
             self.update_env_history(qc, total_shots, update_env_history)
 
-            job_type = (
-                "Estimator"
-                if isinstance(self.primitive, BaseEstimatorV2)
-                else "Sampler"
+            reward = rewarder.get_reward_with_primitive(
+                self._pubs, self.primitive, self.target
             )
-            print(f"Sending {job_type} job...")
 
-            job = self.primitive.run(pubs=self._pubs)
-            pub_results = job.result()
+            print("Reward (avg):", np.mean(reward), "Std:", np.std(reward))
 
-            print(f"Finished {job_type} job")
-
-            if self.config.dfe:
-                reward_table = np.sum(
-                    [pub_result.data.evs for pub_result in pub_results], axis=0
-                )
-                reward_table += self.config.reward_config.id_coeff
-                reward_table /= self.config.reward_config.total_counts
-                if self.config.reward_method == "channel":
-                    dim = 2**self.target.causal_cone_size
-                    reward_table = (dim * reward_table + 1) / (dim + 1)
-
-            else:
-                if self.config.reward_method == "xeb":
-                    # TODO: Implement XEB reward computation using Sampler
-                    raise NotImplementedError(
-                        "XEB reward computation not implemented yet"
-                    )
-                else:
-                    pub_data = [
-                        [
-                            pub_result.data.meas[i].postselect(
-                                self.target.causal_cone_qubits_indices,
-                                [0] * self.target.causal_cone_size,
-                            )
-                            for i in range(batch_size)
-                        ]
-                        for pub_result in pub_results
-                    ]
-                    survival_probability = [
-                        [bit_array.num_shots / self.n_shots for bit_array in bit_arrays]
-                        for bit_arrays in pub_data
-                    ]
-
-                    reward_table = np.mean(survival_probability, axis=0)
-
-            print("Reward (avg):", np.mean(reward_table), "Std:", np.std(reward_table))
-
-            return reward_table  # Shape [batch size]
+            return reward  # Shape [batch size]
         else:
-            reward_list = []
-            reward_fitting = []
-            pubs = []
-            pubs_lengths = []
-            total_shots = 0
-            for i in range(len(self.config.execution_config.n_reps)):
-                self.config.execution_config.n_reps_index = i
-                new_pubs = self.config.reward_config.get_reward_pubs(
-                    qc,
-                    params,
-                    self.target,
-                    self.backend_info,
-                    self.config.execution_config,
-                    last_input,
-                )
-                pubs_lengths.append(len(new_pubs))
-                pubs.extend(new_pubs)
-                total_shots += self.config.reward_config.total_shots
-
-            self.update_env_history(qc, total_shots, update_env_history)
-            job = self.primitive.run(pubs=pubs)
-            pub_results = job.result()
-            separate_results = []
-            for i in range(len(pubs_lengths)):
-                separate_results.append(pub_results[: pubs_lengths[i]])
-                pub_results = pub_results[pubs_lengths[i] :]
-            for i in range(len(self.config.execution_config.n_reps)):
-                if self.config.dfe:
-                    reward_table = np.sum(
-                        [pub_result.data.evs for pub_result in separate_results[i]],
-                        axis=0,
-                    ) / len(self.config.reward_config.observables)
-                    if self.config.reward_method == "channel":
-                        dim = 2**self.target.causal_cone_size
-                        reward_table += (
-                            self.config.reward_config.id_coeff
-                            / self.config.reward_config.id_count
-                        )
-                        reward_table = (dim * reward_table + 1) / (dim + 1)
-                else:
-                    if self.config.reward_method == "xeb":
-                        raise NotImplementedError(
-                            "XEB reward computation not implemented yet"
-                        )
-                    else:
-                        pub_data = [
-                            [
-                                pub_result.data.meas[i].postselect(
-                                    self.target.causal_cone_qubits_indices,
-                                    [0] * self.target.causal_cone_size,
-                                )
-                                for i in range(batch_size)
-                            ]
-                            for pub_result in separate_results[i]
-                        ]
-                        survival_probability = [
-                            [
-                                bit_array.num_shots / self.n_shots
-                                for bit_array in bit_arrays
-                            ]
-                            for bit_arrays in pub_data
-                        ]
-                        reward_table = np.mean(survival_probability, axis=0)
-
-                reward_fitting.append(np.mean(reward_table))
-                reward_list.append(reward_table)
-
-            # Fit the reward function to the data
-
-            self.config.execution_config.n_reps_index = 0
-
-            def fit_function(n, spam, eps_lin, eps_quad):
-                return 1 - spam - eps_lin * n - np.sin(n * eps_quad)
-
-            def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
-                return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
-
-            p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
-            lower_bounds = [0.0, 0.0, 0.0]
-            upper_bounds = [0.2, 0.5, 0.5]
-
-            popt, pcov = curve_fit(
-                fit_function,
-                self.config.execution_config.n_reps,
-                reward_fitting,
-                p0=p0,
-                bounds=(lower_bounds, upper_bounds),
-            )
-
-            # self._fit_function = lambda reward, n: inverse_fit_function(
-            #     reward, n, *popt
-            # )
-            # self._fit_params = popt
-
-            # Apply fit to data
-            for i, n in enumerate(self.config.execution_config.n_reps):
-                reward_list[i] = inverse_fit_function(reward_list[i], n, *popt)
-
-            return np.mean(reward_list, axis=0)
+            raise NotImplementedError("Only sequential mode is supported for now")
 
     def reset(
         self,
@@ -492,7 +353,11 @@ class BaseQuantumEnvironment(ABC, Env):
         return self._get_obs(), self._get_info()
 
     def simulate_circuit(
-        self, qc: QuantumCircuit, params: np.array, update_env_history: bool = True
+        self,
+        qc: QuantumCircuit,
+        params: np.array,
+        update_env_history: bool = True,
+        output_fidelity: Literal["cycle", "nreps"] = "cycle",
     ) -> np.array:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
@@ -500,6 +365,8 @@ class BaseQuantumEnvironment(ABC, Env):
         :param qc: QuantumCircuit to execute on quantum system
         :param params: List of Action vectors to execute on quantum system
         :param update_env_history: Boolean to update the environment history
+        :param output_fidelity: Fidelity output to return (cycle fidelity or fidelity for
+            circuit with n_reps repetitions)
         :return: Fidelity metric or array of fidelities for all actions in the batch
         """
 
@@ -559,7 +426,9 @@ class BaseQuantumEnvironment(ABC, Env):
         ):
             circ.name = name
 
-        if isinstance(self.parameters, ParameterVector) or all(isinstance(param, Parameter) for param in self.parameters):
+        if isinstance(self.parameters, ParameterVector) or all(
+            isinstance(param, Parameter) for param in self.parameters
+        ):
             parameters = [self.parameters]
             n_custom_instructions = 1
         else:  # List of ParameterVectors
@@ -594,7 +463,9 @@ class BaseQuantumEnvironment(ABC, Env):
 
         for circ, method, fid_array in zip(circuits, methods, fid_arrays):
             # Avoid channel simulation for more than 3 qubits
-            if (method == "superop" or method == "unitary") and self.target.causal_cone_size > 3:
+            if (
+                method == "superop" or method == "unitary"
+            ) and self.target.causal_cone_size > 3:
                 fidelities = [0.0] * data_length
                 n_reps = 1
             else:
@@ -610,17 +481,19 @@ class BaseQuantumEnvironment(ABC, Env):
                     self.target.fidelity(output, n_reps) for output in outputs
                 ]
             if (
-                (method == "superop" or method == "unitary")
-                and returned_fidelity_type == "gate"
-                and n_reps == 1
-            ):
-                returned_fidelities = fidelities
+                method == "superop" or method == "unitary"
+            ) and returned_fidelity_type == "gate":
+                if output_fidelity == "cycle" and n_reps == 1:
+                    returned_fidelities = fidelities
+                elif output_fidelity == "nreps" and n_reps > 1:
+                    returned_fidelities = fidelities
             elif (
-                (method == "density_matrix" or method == "statevector")
-                and returned_fidelity_type == "state"
-                and n_reps == 1
-            ):
-                returned_fidelities = fidelities
+                method == "density_matrix" or method == "statevector"
+            ) and returned_fidelity_type == "state":
+                if output_fidelity == "cycle" and n_reps == 1:
+                    returned_fidelities = fidelities
+                elif output_fidelity == "nreps" and n_reps > 1:
+                    returned_fidelities = fidelities
             if update_env_history:
                 fid_array.append(np.mean(fidelities))
 
@@ -893,7 +766,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the primitive to use for the environment (estimator or sampler)
         """
-        return self.estimator if self.config.reward_config.dfe else self.sampler
+        return self.estimator if self.config.reward.dfe else self.sampler
 
     @property
     def physical_target_qubits(self):
@@ -1163,8 +1036,8 @@ class BaseQuantumEnvironment(ABC, Env):
         Return set of observables sampled for current epoch of training (relevant only for
         direct fidelity estimation methods, e.g. 'channel' or 'state')
         """
-        if self.config.reward_config.dfe:
-            return self.config.reward_config.observables
+        if self.config.reward.dfe:
+            return self.config.reward.observables
         else:
             raise ValueError(
                 f"Observables not defined for reward method {self.config.reward_method}"

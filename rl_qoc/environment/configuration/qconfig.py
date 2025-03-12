@@ -27,7 +27,7 @@ class QEnvConfig:
         backend_config (rl_qoc.environment.configuration.backend_config.BackendConfig): Backend configuration
         action_space (Space): Action space
         execution_config (ExecutionConfig): Execution configuration
-        reward_config (Reward): Reward configuration
+        reward (Reward): Reward configuration
         benchmark_config (BenchmarkConfig): Benchmark configuration
     """
 
@@ -35,7 +35,7 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward_config: (
+    reward: (
         Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward"
     ) = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
@@ -47,14 +47,14 @@ class QEnvConfig:
                 self.target = GateTargetConfig(**self.target)
             else:
                 self.target = StateTargetConfig(**self.target)
-        if isinstance(self.reward_config, str):
+        if isinstance(self.reward, str):
             from ...rewards import reward_dict
 
-            self.reward_config = reward_dict[self.reward_config]()
+            self.reward = reward_dict[self.reward]()
         else:
             from ...rewards import Reward
 
-            if not isinstance(self.reward_config, Reward):
+            if not isinstance(self.reward, Reward):
                 raise ValueError(
                     "Reward configuration must be a string or a Reward instance"
                 )
@@ -166,7 +166,7 @@ class QEnvConfig:
 
     @property
     def reward_method(self):
-        return self.reward_config.reward_method
+        return self.reward.reward_method
 
     @reward_method.setter
     def reward_method(
@@ -175,7 +175,7 @@ class QEnvConfig:
         try:
             from ...rewards import reward_dict
 
-            self.reward_config = reward_dict[value]()
+            self.reward = reward_dict[value]()
         except KeyError as e:
             raise ValueError(f"Reward method {value} not recognized")
 
@@ -187,7 +187,7 @@ class QEnvConfig:
         Returns: Boolean indicating if DFE is used
 
         """
-        return self.reward_config.dfe
+        return self.reward.dfe
 
     @property
     def n_actions(self):
