@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Literal
 import numpy as np
 from qiskit.circuit import QuantumCircuit
+from qiskit.primitives import BaseSamplerV2
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 from ..environment.target import GateTarget
 from ..environment.backend_info import BackendInfo
