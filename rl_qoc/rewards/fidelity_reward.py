@@ -8,7 +8,7 @@ from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
 
 from .base_reward import Reward, Pub, Primitive, Target, GateTarget
-from .. import ExecutionConfig
+from ..environment.configuration.execution_config import ExecutionConfig
 from ..helpers import has_noise_model, handle_n_reps
 from ..environment.backend_info import BackendInfo
 from qiskit.primitives.containers.sampler_pub import SamplerPub
