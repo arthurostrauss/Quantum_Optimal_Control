@@ -15,7 +15,6 @@ from typing import Callable, Any, Optional, List, Literal
 import numpy as np
 from gymnasium import Env
 from gymnasium.core import ObsType
-from qiskit import transpile
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -290,11 +289,11 @@ class BaseQuantumEnvironment(ABC, Env):
 
         if self.do_benchmark():  # Benchmarking or fidelity access
             fids = self.compute_benchmarks(qc, params, update_env_history)
-            if rewarder.reward_method == "fidelity":
-                if update_env_history:
-                    self._total_shots.append(0)
-                    self._hardware_runtime.append(0.0)
-                return fids
+            # if rewarder.reward_method == "fidelity":
+            #     if update_env_history:
+            #         self._total_shots.append(0)
+            #         self._hardware_runtime.append(0.0)
+            #     return fids
 
         # Check if the reward method exists in the dictionary
         additional_input = (
@@ -303,7 +302,7 @@ class BaseQuantumEnvironment(ABC, Env):
             else self.baseline_circuits[self.trunc_index]
         )
         if self.config.execution_config.n_reps_mode == "sequential":
-            self._pubs = rewarder.get_reward_pubs(
+            pubs = rewarder.get_reward_pubs(
                 qc,
                 params,
                 self.target,
@@ -312,12 +311,17 @@ class BaseQuantumEnvironment(ABC, Env):
                 additional_input,
             )
             total_shots = self.config.reward.total_shots
-            self.update_env_history(qc, total_shots, update_env_history)
-
+            if update_env_history:
+                self.update_env_history(qc, total_shots)
+            self._pubs = pubs
             reward = rewarder.get_reward_with_primitive(
-                self._pubs, self.primitive, self.target
+                pubs,
+                self.primitive,
+                self.target,
+                backend_info=self.backend_info,
+                execution_config=self.config.execution_config,
             )
-
+            
             print("Reward (avg):", np.mean(reward), "Std:", np.std(reward))
 
             return reward  # Shape [batch size]
@@ -864,9 +868,7 @@ class BaseQuantumEnvironment(ABC, Env):
         Check if benchmarking should be performed at current step
         :return:
         """
-        if self.config.reward_method == "fidelity":
-            return True
-        elif self.benchmark_cycle == 0:
+        if self.benchmark_cycle == 0:
             return False
         else:
             return self._episode_tracker % self.benchmark_cycle == 0
@@ -1130,23 +1132,22 @@ class BaseQuantumEnvironment(ABC, Env):
             }
         )
 
-    def update_env_history(self, qc, total_shots, update_env_history):
-        if update_env_history:
-            self._total_shots.append(total_shots)
-            if self.backend_info.instruction_durations is not None:
-                self._hardware_runtime.append(
-                    get_hardware_runtime_single_circuit(
-                        qc,
-                        self.backend_info.instruction_durations.duration_by_name_qubits,
-                    )
-                    * total_shots
+    def update_env_history(self, qc, total_shots):
+        self._total_shots.append(total_shots)
+        if self.backend_info.instruction_durations is not None:
+            self._hardware_runtime.append(
+                get_hardware_runtime_single_circuit(
+                    qc,
+                    self.backend_info.instruction_durations.duration_by_name_qubits,
                 )
-                print(
-                    "Hardware runtime taken:",
-                    np.round(sum(self.hardware_runtime) / 3600, 4),
-                    "hours ",
-                    np.round(sum(self.hardware_runtime) / 60, 4),
-                    "min ",
-                    np.round(sum(self.hardware_runtime) % 60, 4),
-                    "seconds",
-                )
+                * total_shots
+            )
+            print(
+                "Hardware runtime taken:",
+                np.round(sum(self.hardware_runtime) / 3600, 4),
+                "hours ",
+                np.round(sum(self.hardware_runtime) / 60, 4),
+                "min ",
+                np.round(sum(self.hardware_runtime) % 60, 4),
+                "seconds",
+            )

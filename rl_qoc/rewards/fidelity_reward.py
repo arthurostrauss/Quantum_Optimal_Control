@@ -48,10 +48,19 @@ class FidelityReward(Reward):
         """
         new_qc = handle_n_reps(
             qc,
-            execution_config.n_reps,
+            execution_config.current_n_reps,
             backend_info.backend,
             execution_config.control_flow_enabled,
         )
+        new_qc = backend_info.custom_transpile(
+            new_qc,
+            optimization_level=0,
+            initial_layout=target.layout,
+            scheduling=False,
+            remove_final_measurements=False,
+        )
+        new_qc.metadata["n_reps"] = execution_config.current_n_reps
+
         return [SamplerPub.coerce((new_qc, params, execution_config.n_shots))]
 
     def get_reward_with_primitive(
@@ -68,18 +77,27 @@ class FidelityReward(Reward):
         backend_info: BackendInfo = kwargs.get("backend_info")
         if backend_info is None:
             raise ValueError("Backend information is required for computing the reward")
-        if hasattr(primitive, "backend"):
-            backend = primitive.backend
-        elif hasattr(primitive, "_backend"):
-            backend = primitive._backend
-        else:
-            backend = AerSimulator()
 
         fidelities = []
         for pub in pubs:
             qc = pub.circuit
             params = pub.parameter_values.as_array()
-            fidelities.append(self.get_fidelity(qc, params, target, backend))
+            try:
+                n_reps = qc.metadata["n_reps"]
+            except KeyError:
+                raise ValueError(
+                    "Number of repetitions is required for computing the reward"
+                )
+            if qc.calibrations:
+                fidelities.append(
+                    self.get_pulse_fidelity(
+                        qc, params, target, backend_info, n_reps=n_reps
+                    )
+                )
+            else:
+                fidelities.append(
+                    self.get_fidelity(qc, params, target, backend_info, n_reps=n_reps)
+                )
 
         return np.mean(fidelities, axis=0)
 
@@ -103,35 +121,34 @@ class FidelityReward(Reward):
             backend_info: Backend info containing the noise model, and transpiler passes
             n_reps: Number of repetitions to compute the fidelity
         """
-        qc_copy = handle_n_reps(qc, n_reps, backend_info.backend, False)
-
+        qc_copy = qc.copy()
         backend = backend_info.backend
+        is_aer_sim = isinstance(backend, AerSimulator)
         if isinstance(target, GateTarget) and target.causal_cone_size <= 3:
             outputs = ["unitary", "superop"]
         else:
             outputs = ["statevector", "density_matrix"]
 
-        if backend is None or (
-            isinstance(backend, AerSimulator) and not has_noise_model(backend)
-        ):
+        if backend is None or (is_aer_sim and not has_noise_model(backend)):
             # Ideal simulation
             noise_model = None
             # Isolate the output that is present in ideal_sim_methods from outputs
-            output = [
+            output = next(
                 output for output in outputs if output in self._ideal_sim_methods
-            ][0]
-            getattr(qc_copy, f"save_{output}")
+            )
+
         else:
             # Noisy simulation
-            if isinstance(backend, AerSimulator):
-                noise_model = backend.options.noise_model
-            else:
-                noise_model = NoiseModel.from_backend(backend)
-
-            output = [
+            noise_model = (
+                backend.options.noise_model
+                if is_aer_sim
+                else NoiseModel.from_backend(backend)
+            )
+            output = next(
                 output for output in outputs if output in self._noisy_sim_methods
-            ][0]
-            getattr(qc_copy, f"save_{output}")
+            )
+
+        getattr(qc_copy, f"save_{output}")()  # Aer Save method
 
         circuit = backend_info.custom_transpile(
             qc_copy,
@@ -141,10 +158,11 @@ class FidelityReward(Reward):
             remove_final_measurements=False,
         )
         parameters = circuit.parameters
-
         parameter_binds = [
             {parameters[j]: params[:, j] for j in range(len(parameters))}
         ]
+        if backend is None:
+            backend = AerSimulator()
         job = backend.run(
             circuit,
             parameter_binds=parameter_binds,
