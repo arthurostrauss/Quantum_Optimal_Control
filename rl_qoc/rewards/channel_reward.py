@@ -381,7 +381,7 @@ class ChannelReward(Reward):
         """
         job = estimator.run(pubs)
         pub_results = job.result()
-        reward = np.sum([pub_result.data.evs for pub_result in pub_results])
+        reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
         reward += self.id_coeff
         reward /= self.total_counts
         dim = 2**target.causal_cone_size
