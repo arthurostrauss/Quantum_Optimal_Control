@@ -5,7 +5,7 @@ from qiskit import QuantumCircuit
 
 from rl_qoc import ContextAwareQuantumEnvironment, QEnvConfig
 import numpy as np
-from .spillover_effect_on_subsystem import (
+from spillover_effect_on_subsystem import (
     noisy_backend,
     circuit_context,
     LocalSpilloverNoiseAerPass,
