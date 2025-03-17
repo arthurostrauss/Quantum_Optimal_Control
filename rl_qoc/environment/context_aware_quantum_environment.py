@@ -368,8 +368,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             if self._fit_function is not None:
                 reward = self._fit_function(reward, self.n_reps)
             reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
+            # self.reward_history.append(reward)
+            reward = -np.log10(1.0 - reward)
             self.reward_history.append(reward)
-            reward = -np.log(1.0 - reward)
 
             return obs, reward, terminated, False, self._get_info()
 
