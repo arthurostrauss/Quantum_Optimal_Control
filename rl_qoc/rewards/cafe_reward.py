@@ -5,8 +5,7 @@ from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import BaseSamplerV2
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 from ..environment.target import GateTarget
-from ..environment.backend_info import BackendInfo
-from ..environment.configuration.execution_config import ExecutionConfig
+from ..environment.configuration.qconfig import QEnvConfig
 from .base_reward import Reward
 from ..helpers.circuit_utils import handle_n_reps, causal_cone_circuit
 from qiskit_aer import AerSimulator
@@ -37,8 +36,7 @@ class CAFEReward(Reward):
         qc: QuantumCircuit,
         params: np.array,
         target: GateTarget,
-        backend_info: BackendInfo,
-        execution_config: ExecutionConfig,
+        env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
     ) -> List[SamplerPub]:
         """
@@ -48,13 +46,13 @@ class CAFEReward(Reward):
             qc: Quantum circuit to be executed on quantum system
             params: Parameters to feed the parametrized circuit
             target: Target gate or state to prepare
-            backend_info: Backend information
-            execution_config: Execution configuration
+            env_config: QEnvConfig containing the backend information and execution configuration
             baseline_circuit: Ideal circuit that qc should implement
         """
         if not isinstance(target, GateTarget):
             raise ValueError("CAFE reward can only be computed for a target gate")
-
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_info
         pubs, ideal_pubs, total_shots = [], [], 0
         if baseline_circuit is not None:
             circuit_ref = baseline_circuit.copy()
@@ -147,6 +145,7 @@ class CAFEReward(Reward):
         pubs: List[SamplerPub],
         primitive: BaseSamplerV2,
         target: GateTarget,
+        env_config: QEnvConfig,
         **kwargs
     ) -> np.array:
         """

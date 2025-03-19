@@ -86,22 +86,6 @@ class BaseQuantumEnvironment(ABC, Env):
         self._training_config = training_config
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
-        if isinstance(self.backend, BackendV2) or self.backend is None:
-            self._backend_info = QiskitBackendInfo(
-                self.backend,
-                training_config.backend_config.instruction_durations,
-                pass_manager=training_config.backend_config.pass_manager,
-                skip_transpilation=training_config.backend_config.skip_transpilation,
-            )
-        elif training_config.backend_config.config_type == "qibo":
-            from ..qibo.qibo_config import QiboBackendInfo
-
-            self._backend_info = QiboBackendInfo(
-                training_config.backend_config.n_qubits,
-                training_config.backend_config.coupling_map,
-            )
-        else:
-            raise ValueError("Backend should be a BackendV2 object or a string")
         self._physical_target_qubits = training_config.target.get(
             "physical_qubits", None
         )
@@ -306,8 +290,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 qc,
                 params,
                 self.target,
-                self.backend_info,
-                self.config.execution_config,
+                self.config,
                 additional_input,
             )
             total_shots = self.config.reward.total_shots
@@ -318,8 +301,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 pubs,
                 self.primitive,
                 self.target,
-                backend_info=self.backend_info,
-                execution_config=self.config.execution_config,
+                self.config,
             )
             
             print("Reward (avg):", np.mean(reward), "Std:", np.std(reward))
@@ -1023,7 +1005,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the backend information object
         """
-        return self._backend_info
+        return self.config.backend_info
 
     @property
     def pass_manager(self) -> Optional[PassManager]:

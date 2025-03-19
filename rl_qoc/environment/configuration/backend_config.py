@@ -45,22 +45,16 @@ class BackendConfig(ABC):
         ],
         None,
     ]
-    backend: Optional[BackendV2] = None
+    backend: Optional[Any] = None
     parametrized_circuit_kwargs: Dict = field(default_factory=dict)
     skip_transpilation: bool = False
-    pass_manager: Optional[PassManager] = None
+    pass_manager: Optional[Any] = None
     instruction_durations: Optional[InstructionDurations] = None
 
     @property
     @abstractmethod
     def config_type(self):
         return "backend"
-
-    def process_pubs(self, pubs: Iterable[Pub | PubLike]) -> Iterable[Pub]:
-        """
-        Process the pub to the correct type for the backend
-        """
-        return pubs
 
     def as_dict(self):
         return {
@@ -84,28 +78,12 @@ class QiskitConfig(BackendConfig):
         pass_manager
         instruction_durations: Dictionary containing the durations of the instructions in the circuit
     """
+    backend: Optional[BackendV2] = None
+    pass_manager: Optional[PassManager] = None
 
     @property
     def config_type(self):
         return "qiskit"
-
-    def process_pubs(self, pubs: Iterable[Pub | PubLike]) -> List[Pub]:
-        """
-        Process the pub to the correct type for the backend
-        """
-        new_pubs = []
-        for pub in pubs:
-            if isinstance(pub, (CalibrationEstimatorPubLike, CalibrationEstimatorPub)):
-                new_pubs.extend(CalibrationEstimatorPub.coerce(pub).to_pub_list())
-            elif isinstance(pub, (CalibrationSamplerPubLike, CalibrationSamplerPub)):
-                new_pubs.extend(CalibrationSamplerPub.coerce(pub).to_pub_list())
-            elif isinstance(pub, (EstimatorPubLike, EstimatorPub)):
-                new_pubs.append(EstimatorPub.coerce(pub))
-            elif isinstance(pub, (SamplerPubLike, SamplerPub)):
-                new_pubs.append(SamplerPub.coerce(pub))
-            else:
-                raise ValueError(f"Pub type {type(pub)} not recognized")
-        return new_pubs
 
 
 @dataclass

@@ -8,9 +8,9 @@ from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
 
 from .base_reward import Reward, Pub, Primitive, Target, GateTarget
-from ..environment.configuration.execution_config import ExecutionConfig
-from ..helpers import has_noise_model, handle_n_reps
+from ..environment.configuration.qconfig import QEnvConfig
 from ..environment.backend_info import BackendInfo
+from ..helpers import has_noise_model, handle_n_reps
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 
@@ -32,8 +32,7 @@ class FidelityReward(Reward):
         qc: QuantumCircuit,
         params: np.array,
         target: Target,
-        backend_info: BackendInfo,
-        execution_config: ExecutionConfig,
+        env_config: QEnvConfig,
         *args,
     ) -> List[Pub]:
         """
@@ -46,6 +45,8 @@ class FidelityReward(Reward):
             backend_info: Backend information
             execution_config: Execution configuration
         """
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_info
         new_qc = handle_n_reps(
             qc,
             execution_config.current_n_reps,
@@ -64,7 +65,8 @@ class FidelityReward(Reward):
         return [SamplerPub.coerce((new_qc, params, execution_config.n_shots))]
 
     def get_reward_with_primitive(
-        self, pubs: List[Pub], primitive: Primitive, target: Target, **kwargs
+        self, pubs: List[Pub], primitive: Primitive, target: Target,
+            env_config:QEnvConfig, **kwargs
     ) -> np.array:
         """
         Compute the reward based on the primitive and the pubs
@@ -73,10 +75,9 @@ class FidelityReward(Reward):
             pubs: List of pubs related to the reward method
             primitive: Primitive to compute the reward
             target: Target gate or state to prepare
+            env_config: QEnvConfig containing the backend information and execution configuration
         """
-        backend_info: BackendInfo = kwargs.get("backend_info")
-        if backend_info is None:
-            raise ValueError("Backend information is required for computing the reward")
+        backend_info = env_config.backend_info
 
         fidelities = []
         for pub in pubs:

@@ -14,9 +14,8 @@ import numpy as np
 from ..helpers import shots_to_precision
 
 Indices = Tuple[int]
-from ..environment.backend_info import BackendInfo
+from ..environment.configuration.qconfig import QEnvConfig
 from ..environment.target import GateTarget
-from ..environment.configuration.execution_config import ExecutionConfig
 from ..helpers.circuit_utils import (
     handle_n_reps,
     extend_observables,
@@ -108,8 +107,7 @@ class ChannelReward(Reward):
         qc: QuantumCircuit,
         params: np.array,
         target: GateTarget,
-        backend_info: BackendInfo,
-        execution_config: ExecutionConfig,
+        env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
     ) -> List[EstimatorPub]:
         """
@@ -119,8 +117,7 @@ class ChannelReward(Reward):
             qc: Quantum circuit to be executed on quantum system
             params: Parameters to feed the parametrized circuit
             target: Target gate or state to prepare
-            backend_info: Backend information
-            execution_config: Execution configuration
+            env_config: QEnvConfig containing the backend information and execution configuration
             dfe_precision: Tuple (Ɛ, δ) from DFE paper
 
         Returns:
@@ -133,7 +130,8 @@ class ChannelReward(Reward):
             raise ValueError(
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
-
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_info
         n_qubits = target.causal_cone_size
         dim = 2**n_qubits
         nb_states = self.num_eigenstates_per_pauli
@@ -412,8 +410,7 @@ class ChannelReward(Reward):
         self,
         qc: QuantumCircuit,
         target: GateTarget,
-        backend_info: BackendInfo,
-        execution_config: ExecutionConfig,
+        env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
     ) -> List[float]:
         """
@@ -438,7 +435,8 @@ class ChannelReward(Reward):
             raise ValueError(
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
-
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_info
         n_qubits = target.causal_cone_size
         n_reps = execution_config.current_n_reps
         control_flow = execution_config.control_flow_enabled

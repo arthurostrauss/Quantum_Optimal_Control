@@ -5,9 +5,8 @@ from qiskit.circuit import QuantumCircuit
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
 from qiskit.primitives.base import BaseEstimatorV2, BaseSamplerV2
-from ..environment.backend_info import BackendInfo
+from ..environment.configuration.qconfig import QEnvConfig
 from ..environment.target import StateTarget, GateTarget
-from ..environment.configuration.execution_config import ExecutionConfig
 import numpy as np
 
 PubLike = Union[SamplerPubLike, EstimatorPubLike]
@@ -55,8 +54,7 @@ class Reward(ABC):
         qc: QuantumCircuit,
         params: np.array,
         target: Target,
-        backend_info: BackendInfo,
-        execution_config: ExecutionConfig,
+        env_config: QEnvConfig,
         *args,
     ) -> List[Pub]:
         """
@@ -76,7 +74,8 @@ class Reward(ABC):
         pass
 
     def get_reward_with_primitive(
-        self, pubs: List[Pub], primitive: Primitive, target: Target, **kwargs
+        self, pubs: List[Pub], primitive: Primitive, target: Target, env_config: QEnvConfig,
+            **kwargs
     ) -> np.array:
         pass
 

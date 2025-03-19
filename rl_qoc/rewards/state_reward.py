@@ -6,8 +6,7 @@ from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.quantum_info import SparsePauliOp, pauli_basis
 import numpy as np
 from .base_reward import Reward, Target
-from ..environment.backend_info import BackendInfo
-from ..environment.configuration.execution_config import ExecutionConfig
+from ..environment.configuration.qconfig import QEnvConfig
 from ..environment.target import StateTarget, GateTarget, InputState
 from ..helpers.circuit_utils import (
     extend_input_state_prep,
@@ -80,8 +79,7 @@ class StateReward(Reward):
         qc: QuantumCircuit,
         params: np.array,
         target: StateTarget | GateTarget,
-        backend_info: BackendInfo,
-        execution_config: ExecutionConfig,
+        env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
     ) -> List[EstimatorPub]:
         """
@@ -92,13 +90,14 @@ class StateReward(Reward):
             qc: Quantum circuit to be executed on quantum system
             params: Parameters to feed the parametrized circuit
             target: Target gate or state to prepare
-            backend_info: Backend information
-            execution_config: Execution configuration
+            env_config: QEnvConfig containing the backend information and execution configuration
             dfe_precision: Tuple (Ɛ, δ) from DFE paper
 
         Returns:
             List of pubs related to the reward method
         """
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_info
         self._fiducials_indices = [(0, [])]
         input_circuit = qc.copy_empty_like()
         self._fiducials = [(input_circuit, [])]
