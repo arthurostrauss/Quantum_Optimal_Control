@@ -83,7 +83,7 @@ class BaseQuantumEnvironment(ABC, Env):
         Args:
             training_config: QEnvConfig object containing the training configuration
         """
-        self._training_config = training_config
+        self._env_config = training_config
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
         self._physical_target_qubits = training_config.target.get(
@@ -200,6 +200,7 @@ class BaseQuantumEnvironment(ABC, Env):
         reward_data = []
         for i in range(len(self.config.execution_config.n_reps)):
             self.config.execution_config.n_reps_index = i
+            print("Number of repetitions:", self.n_reps)
             reward = self.perform_action(params, update_env_history=False)
             reward_data.append(np.mean(reward))
         if fit_function is None or inverse_fit_function is None:
@@ -303,7 +304,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 self.target,
                 self.config,
             )
-            
+
             print("Reward (avg):", np.mean(reward), "Std:", np.std(reward))
 
             return reward  # Shape [batch size]
@@ -721,15 +722,15 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def config(self) -> QEnvConfig:
-        return self._training_config
+        return self._env_config
 
     @property
     def backend(self) -> Optional[BackendV2]:
-        return self._training_config.backend
+        return self._env_config.backend
 
     @backend.setter
     def backend(self, backend: BackendV2):
-        self._training_config.backend = backend
+        self.config.backend = backend
 
     @property
     def estimator(self) -> BaseEstimatorV2:
@@ -1006,6 +1007,10 @@ class BaseQuantumEnvironment(ABC, Env):
         Return the backend information object
         """
         return self.config.backend_info
+
+    @backend_info.setter
+    def backend_info(self, backend_info: BackendInfo):
+        self.config.backend_info = backend_info
 
     @property
     def pass_manager(self) -> Optional[PassManager]:

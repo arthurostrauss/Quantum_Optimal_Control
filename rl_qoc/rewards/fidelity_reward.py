@@ -65,8 +65,12 @@ class FidelityReward(Reward):
         return [SamplerPub.coerce((new_qc, params, execution_config.n_shots))]
 
     def get_reward_with_primitive(
-        self, pubs: List[Pub], primitive: Primitive, target: Target,
-            env_config:QEnvConfig, **kwargs
+        self,
+        pubs: List[Pub],
+        primitive: Primitive,
+        target: Target,
+        env_config: QEnvConfig,
+        **kwargs,
     ) -> np.array:
         """
         Compute the reward based on the primitive and the pubs

@@ -372,6 +372,7 @@ class ChannelReward(Reward):
         pubs: List[EstimatorPub],
         estimator: BaseEstimatorV2,
         target: GateTarget,
+        env_config: QEnvConfig,
         **kwargs,
     ) -> np.array:
         """

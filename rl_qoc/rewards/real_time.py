@@ -1,7 +1,6 @@
 from typing import List, Optional, Tuple, Literal
 from ..environment.target import GateTarget, StateTarget
-from ..environment.configuration.execution_config import ExecutionConfig
-from ..environment.backend_info import BackendInfo
+from ..environment.configuration.qconfig import QEnvConfig
 from ..helpers.circuit_utils import get_single_qubit_input_states, causal_cone_circuit
 from qiskit.circuit import QuantumCircuit, ClassicalRegister
 from qiskit.circuit.classical.types import Uint
@@ -13,8 +12,7 @@ from qiskit_aer import AerSimulator
 def get_real_time_reward_circuit(
     circuits: QuantumCircuit | List[QuantumCircuit],
     target: List[GateTarget] | GateTarget | StateTarget,
-    backend_info: BackendInfo,
-    execution_config: ExecutionConfig,
+    env_config: QEnvConfig,
     reward_method: Literal["channel", "state", "cafe"] = "state",
     dfe_precision: Optional[Tuple[float, float]] = None,
 ) -> QuantumCircuit:
@@ -30,7 +28,8 @@ def get_real_time_reward_circuit(
         reward_method: Method to compute the reward (channel, state or cafe)
         dfe_precision: Tuple (Ɛ, δ) from DFE paper
     """
-
+    execution_config = env_config.execution_config
+    backend_info = env_config.backend_info
     prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
     target_instances = (
         [target] if isinstance(target, (GateTarget, StateTarget)) else target
@@ -76,6 +75,9 @@ def get_real_time_reward_circuit(
         qc.add_register(meas)
     else:
         meas = qc.clbits
+        assert (
+            len(meas) >= causal_cone_size
+        ), f"ClassicalRegister not matching causal cone size of circuit"
 
     if is_gate_target:  # Declare input states variables
         input_state_vars = [
@@ -93,7 +95,9 @@ def get_real_time_reward_circuit(
             target_instance.input_states_choice
         )
 
-        for q_idx, qubit in enumerate(qc.qubits):  # Input state preparation
+        for q_idx, qubit in enumerate(
+            qc.qubits
+        ):  # Input state preparation (over all qubits)
             with qc.switch(input_state_vars[q_idx]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):

@@ -5,9 +5,8 @@ import numpy as np
 from qiskit import QuantumCircuit
 
 from .base_reward import Pub
-from ..environment.configuration.execution_config import ExecutionConfig
+from ..environment.configuration.qconfig import QEnvConfig
 from ..environment.target import GateTarget
-from ..environment.backend_info import BackendInfo
 from ..rewards.base_reward import Reward
 
 
@@ -26,8 +25,7 @@ class XEBReward(Reward):
         qc: QuantumCircuit,
         params: np.array,
         target: GateTarget,
-        backend_info: BackendInfo,
-        execution_config: ExecutionConfig,
+        env_config: QEnvConfig,
         *args,
     ) -> List[Pub]:
         """

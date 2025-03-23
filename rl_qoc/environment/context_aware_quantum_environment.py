@@ -458,9 +458,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
             fidelity_type = "Gate" if qc.num_qubits <= 3 else "State"
             if len(fids) == 1:
-                print(f"{fidelity_type} Fidelity: ", fids[0])
+                print(f"{fidelity_type} Fidelity (per Cycle): ", fids[0])
             else:
-                print(f"{fidelity_type} Fidelities: ", np.mean(fids))
+                print(f"{fidelity_type} Fidelities (per Cycle): ", np.mean(fids))
             return fids
 
     @property
@@ -628,7 +628,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         if backend is not None:  # Update backend and backend info if provided
             self.backend = backend
-            self._backend_info = QiskitBackendInfo(
+            self.backend_info = QiskitBackendInfo(
                 backend,
                 self.config.backend_config.instruction_durations,
                 self.pass_manager,

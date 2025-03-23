@@ -74,8 +74,12 @@ class Reward(ABC):
         pass
 
     def get_reward_with_primitive(
-        self, pubs: List[Pub], primitive: Primitive, target: Target, env_config: QEnvConfig,
-            **kwargs
+        self,
+        pubs: List[Pub],
+        primitive: Primitive,
+        target: Target,
+        env_config: QEnvConfig,
+        **kwargs,
     ) -> np.array:
         pass
 

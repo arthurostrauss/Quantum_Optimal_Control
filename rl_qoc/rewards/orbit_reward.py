@@ -152,6 +152,7 @@ class ORBITReward(Reward):
         pubs: List[SamplerPub],
         primitive: BaseSamplerV2,
         target: GateTarget,
+        env_config: QEnvConfig,
         **kwargs
     ) -> np.array:
         """

@@ -265,6 +265,7 @@ class StateReward(Reward):
         pubs: List[EstimatorPub],
         estimator: BaseEstimatorV2,
         target: Target = None,
+        env_config: QEnvConfig = None,
         **kwargs,
     ) -> np.array:
         """

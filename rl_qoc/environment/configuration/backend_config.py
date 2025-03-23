@@ -78,6 +78,7 @@ class QiskitConfig(BackendConfig):
         pass_manager
         instruction_durations: Dictionary containing the durations of the instructions in the circuit
     """
+
     backend: Optional[BackendV2] = None
     pass_manager: Optional[PassManager] = None
 
