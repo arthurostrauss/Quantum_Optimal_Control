@@ -108,9 +108,15 @@ class ORBITReward(Reward):
                 )
                 run_qc = QuantumCircuit.copy_empty_like(qc, name="orbit_run_circ")
                 for l in range(execution_config.current_n_reps):
-                    r_cliff = random_clifford(qc.num_qubits, self.clifford_rng)
+                    r_cliff = random_clifford(
+                        target.causal_cone_size, self.clifford_rng
+                    )
                     for circ, context in zip([run_qc, ref_qc], [qc, circuit_ref]):
-                        circ.compose(r_cliff.to_circuit(), inplace=True)
+                        circ.compose(
+                            r_cliff.to_circuit(),
+                            inplace=True,
+                            qubits=target.causal_cone_qubits,
+                        )
                         circ.barrier()
                         circ.compose(context, inplace=True)
                         circ.barrier()
@@ -169,20 +175,34 @@ class ORBITReward(Reward):
             [pub.parameter_values.shape[0] == batch_size for pub in pubs]
         ), "All pubs should have the same batch size"
 
-        pub_data = [
-            [
-                pub_result.data.meas[i].postselect(
-                    target.causal_cone_qubits_indices,
-                    [0] * target.causal_cone_size,
-                )
-                for i in range(batch_size)
+        num_bits = pub_results[0].data.meas[0].num_bits
+        if num_bits == target.causal_cone_size:
+            pub_data = [
+                [pub_result.data.meas[i] for i in range(batch_size)]
+                for pub_result in pub_results
             ]
-            for pub_result in pub_results
-        ]
-        survival_probability = [
-            [bit_array.num_shots / n_shots for bit_array in bit_arrays]
-            for bit_arrays in pub_data
-        ]
+            survival_probability = [
+                [
+                    bit_array.get_int_counts().get(0, 0) / n_shots
+                    for bit_array in bit_arrays
+                ]
+                for bit_arrays in pub_data
+            ]
+        else:
+            pub_data = [
+                [
+                    pub_result.data.meas[i].postselect(
+                        target.causal_cone_qubits_indices,
+                        [0] * target.causal_cone_size,
+                    )
+                    for i in range(batch_size)
+                ]
+                for pub_result in pub_results
+            ]
+            survival_probability = [
+                [bit_array.num_shots / n_shots for bit_array in bit_arrays]
+                for bit_arrays in pub_data
+            ]
         reward = np.mean(survival_probability, axis=0)
         return reward
 

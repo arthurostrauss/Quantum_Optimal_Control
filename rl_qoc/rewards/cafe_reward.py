@@ -99,16 +99,17 @@ class CAFEReward(Reward):
                 0
             ]
             sim_qc.save_unitary()
-            if isinstance(backend_info.backend, AerSimulator):
-                sim_unitary = (
-                    backend_info.backend.run(sim_qc, noise_model=None)
-                    .result()
-                    .get_unitary()
-                )
-            else:
-                sim_unitary = (
-                    AerSimulator(method="unitary").run(sim_qc).result().get_unitary()
-                )
+            backend = (
+                backend_info.backend
+                if isinstance(backend_info.backend, AerSimulator)
+                else AerSimulator()
+            )
+            sim_unitary = (
+                backend.run(sim_qc, noise_model=None, method="unitary")
+                .result()
+                .get_unitary()
+            )
+
             reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
             reverse_unitary_qc.unitary(
                 sim_unitary.adjoint(),  # Inverse unitary
@@ -161,21 +162,36 @@ class CAFEReward(Reward):
         assert all(
             [pub.parameter_values.shape[0] == batch_size for pub in pubs]
         ), "All pubs should have the same batch size"
-
-        pub_data = [
-            [
-                pub_result.data.meas[i].postselect(
-                    target.causal_cone_qubits_indices,
-                    [0] * target.causal_cone_size,
-                )
-                for i in range(batch_size)
+        num_bits = pub_results[0].data.meas[0].num_bits
+        if num_bits == target.causal_cone_size:
+            # No post-selection based on causal cone
+            pub_data = [
+                [pub_result.data.meas[i] for i in range(batch_size)]
+                for pub_result in pub_results
             ]
-            for pub_result in pub_results
-        ]
-        survival_probability = [
-            [bit_array.num_shots / n_shots for bit_array in bit_arrays]
-            for bit_arrays in pub_data
-        ]
+            survival_probability = [
+                [
+                    bit_array.get_int_counts().get(0, 0) / n_shots
+                    for bit_array in bit_arrays
+                ]
+                for bit_arrays in pub_data
+            ]
+        else:
+            # Post-select based on causal cone qubits
+            pub_data = [
+                [
+                    pub_result.data.meas[i].postselect(
+                        target.causal_cone_qubits_indices,
+                        [0] * target.causal_cone_size,
+                    )
+                    for i in range(batch_size)
+                ]
+                for pub_result in pub_results
+            ]
+            survival_probability = [
+                [bit_array.num_shots / n_shots for bit_array in bit_arrays]
+                for bit_arrays in pub_data
+            ]
         reward = np.mean(survival_probability, axis=0)
         return reward
 
