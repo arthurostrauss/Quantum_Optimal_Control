@@ -2,8 +2,9 @@ from typing import Optional, Dict, Any
 
 from gymnasium.spaces import Box
 from qiskit import QuantumCircuit
+from qiskit.transpiler import Layout
 
-from rl_qoc import ContextAwareQuantumEnvironment, QEnvConfig
+from rl_qoc import ContextAwareQuantumEnvironment, QEnvConfig, GateTarget
 import numpy as np
 from .spillover_effect_on_subsystem import (
     noisy_backend,
@@ -45,20 +46,37 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
             dtype=np.float32,
         )
 
-    def define_target_and_circuits(self):
-        """
-        Define the target gate and the circuits to be executed
-        """
-        circuit_context = causal_cone_circuit(
-            self.circuit_context, list(self.config.env_metadata["target_subsystem"])
-        )[0]
-        self._physical_target_qubits = list(range(circuit_context.num_qubits))
-        self._circuit_context = circuit_context
-        target, custom_circuits, baseline_circuits = (
-            super().define_target_and_circuits()
-        )
-
-        return target, custom_circuits, baseline_circuits
+    # def define_target_and_circuits(self):
+    #     """
+    #     Define the target gate and the circuits to be executed
+    #     """
+    #     # original_context = self.circuit_context
+    #     # circuit_context = causal_cone_circuit(
+    #     #     self.circuit_context, list(self.config.env_metadata["target_subsystem"])
+    #     # )[0]
+    #     # self._physical_target_qubits = list(range(circuit_context.num_qubits))
+    #     # self._circuit_context = circuit_context
+    #     _, custom_circuits, baseline_circuits = (
+    #         super().define_target_and_circuits()
+    #     )
+    #     layouts = [Layout({self.circuit_context.qubits[q]: i for i, q in enumerate(self.config.env_metadata["target_subsystem"])})
+    #                for _ in range(len(baseline_circuits))]
+    #     input_states_choice = getattr(
+    #         self.config.reward.reward_args, "input_states_choice", "pauli4"
+    #     )
+    #     target = [
+    #         GateTarget(
+    #             self.config.target.gate,
+    #             [0, 1],
+    #             causal_cone_circuit(baseline_circuit, list(self.config.env_metadata["target_subsystem"]))[0],
+    #             self.circ_tgt_register,
+    #             layout,
+    #             input_states_choice=input_states_choice,
+    #         )
+    #         for baseline_circuit, layout in zip(baseline_circuits, layouts)
+    #     ]
+    #
+    #     return target, custom_circuits, baseline_circuits
 
     def reset(
         self,

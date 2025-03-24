@@ -368,6 +368,20 @@ class BaseQuantumEnvironment(ABC, Env):
         qc_state_nreps = qc.repeat(self.n_reps).decompose()
         names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
 
+        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = (
+            self.backend_info.custom_transpile(
+                [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
+                optimization_level=0,
+                initial_layout=self.target.layout,
+                scheduling=False,
+                remove_final_measurements=False,
+            )
+        )
+        for circ, name in zip(
+            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names
+        ):
+            circ.name = name
+
         returned_fidelity_type = (
             "gate"
             if isinstance(self.target, GateTarget) and self.target.causal_cone_size <= 3
@@ -398,20 +412,6 @@ class BaseQuantumEnvironment(ABC, Env):
             qc_state_nreps.save_density_matrix()
             channel_output = "superop"
             state_output = "density_matrix"
-
-        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = (
-            self.backend_info.custom_transpile(
-                [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
-                optimization_level=0,
-                initial_layout=self.target.layout,
-                scheduling=False,
-                remove_final_measurements=False,
-            )
-        )
-        for circ, name in zip(
-            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names
-        ):
-            circ.name = name
 
         if isinstance(self.parameters, ParameterVector) or all(
             isinstance(param, Parameter) for param in self.parameters

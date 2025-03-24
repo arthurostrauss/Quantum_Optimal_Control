@@ -215,6 +215,7 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
         - Transformed DAG circuit compatible with a Qiskit Aer built spillover noise model
         """
         new_dag = dag.copy_empty_like()
+        subsystem_mapping = {q: i for i, q in enumerate(self.target_subsystem)}
         if (
             self.target_subsystem is None
             or len(self.target_subsystem) == dag.num_qubits()
@@ -259,8 +260,8 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                                 Operator(rotation_gate),
                                 qargs=[0],
                             )
-
-                            gate_label = f"{node.name}({angle:.2f}, {qubit_index})"
+                            label_index = subsystem_mapping[qubit_index]
+                            gate_label = f"{node.name}({angle:.2f}, {label_index})"
                             new_dag.apply_operation_back(
                                 UnitaryGate(gate_op, label=gate_label),
                                 qargs=involved_qubits,
@@ -399,6 +400,7 @@ def noisy_backend(
     circuit_context: QuantumCircuit,
     spillover_rate_matrix: np.ndarray,
     target_subsystem: tuple = None,
+    coupling_map: Optional[CouplingMap] = None,
     seed_simulator: Optional[int] = None,
 ):
     """
@@ -440,11 +442,15 @@ def noisy_backend(
     noise_model = create_spillover_noise_model_from_circuit(
         qc, rotation_angles, rotation_axes, spillover_rate_matrix, target_subsystem
     )
-    cm = [(0, 1), (1, 0)]
+    cm = (
+        coupling_map
+        if coupling_map is not None
+        else list(CouplingMap.from_line(circuit_context.num_qubits, True).get_edges())
+    )
     config = AerBackendConfiguration(
         "custom_spillover_impact_simulator",
         "2",
-        2,
+        circuit_context.num_qubits,
         BASIS_GATES["automatic"],
         [],
         int(1e7),

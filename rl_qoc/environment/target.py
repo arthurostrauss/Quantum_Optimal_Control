@@ -403,9 +403,13 @@ class GateTarget(BaseTarget):
                 raise ValueError("Input could not be converted to channel") from e
         if not isinstance(channel, (Operator, QuantumChannel)):
             raise ValueError("Input should be an Operator object")
-        return average_gate_fidelity(
-            channel, Operator(self._circuit_context).power(n_reps)
-        )
+
+        if channel.num_qubits == self.causal_cone_size:
+            circuit = self.causal_cone_circuit
+        else:
+            circuit = self.target_circuit
+
+        return average_gate_fidelity(channel, Operator(circuit).power(n_reps))
 
     def state_fidelity(
         self, state: QuantumState, n_reps: int = 1, validate: bool = True
@@ -422,9 +426,13 @@ class GateTarget(BaseTarget):
             warnings.warn(
                 f"Input state is not normalized (norm = {np.linalg.norm(state)})"
             )
+        if state.num_qubits == self.causal_cone_size:
+            circuit = self.causal_cone_circuit
+        else:
+            circuit = self.target_circuit
         return state_fidelity(
             state,
-            Statevector(self._circuit_context.power(n_reps, True, True)),
+            Statevector(circuit.power(n_reps, True, True)),
             validate=validate,
         )
 

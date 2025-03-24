@@ -152,8 +152,11 @@ class ChannelReward(Reward):
         # Reset storage variables
         self._fiducials_indices = []
         self._full_fiducials = []
+        self._fiducials = []
         self.id_coeff = 0.0
         self.id_count = 0
+        self.total_counts = 0
+        self._pauli_shots = []
 
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)

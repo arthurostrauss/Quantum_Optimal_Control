@@ -98,7 +98,7 @@ def causal_cone_circuit(
     """
 
     dag = circuit_to_dag(circuit)
-    if isinstance(qubits, List) and all(isinstance(q, int) for q in qubits):
+    if isinstance(qubits, Sequence) and all(isinstance(q, int) for q in qubits):
         qubits = [dag.qubits[q] for q in qubits]
     involved_qubits = [dag.quantum_causal_cone(q) for q in qubits]
     involved_qubits = list(set([q for sublist in involved_qubits for q in sublist]))

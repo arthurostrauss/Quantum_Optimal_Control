@@ -11,11 +11,12 @@ from rl_qoc.environment.context_aware_quantum_environment import ObsType
 from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel, coherent_unitary_error
+
 gate_map = get_standard_gate_name_mapping()
 
 
 def noisy_backend(circuit: QuantumCircuit, γ: float):
-    rotation_angle = 0.
+    rotation_angle = 0.0
     rotation_axis = None
     for inst in circuit.data:
         if inst.operation.name in ["rx", "ry", "rz"]:
@@ -23,8 +24,12 @@ def noisy_backend(circuit: QuantumCircuit, γ: float):
             rotation_axis = inst.operation.name
             break
     noisy_unitary = type(gate_map[rotation_axis])(rotation_angle * γ).to_matrix()
-    noise_model = NoiseModel(basis_gates=["h", "rx", "rz", "t", "s", "sdg", "tdg", "u", "x", "z"])
-    noise_model.add_all_qubit_quantum_error(coherent_unitary_error(noisy_unitary), rotation_axis)
+    noise_model = NoiseModel(
+        basis_gates=["h", "rx", "rz", "t", "s", "sdg", "tdg", "u", "x", "z"]
+    )
+    noise_model.add_all_qubit_quantum_error(
+        coherent_unitary_error(noisy_unitary), rotation_axis
+    )
 
     return AerSimulator(noise_model=noise_model)
 
@@ -58,7 +63,6 @@ class ArbitraryAngleCoherentEnv(ContextAwareQuantumEnvironment):
             high=np.array([2 * np.pi] * len(self.circuit_parameters)),
             dtype=np.float32,
         )
-
 
     def reset(
         self,

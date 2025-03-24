@@ -196,14 +196,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             switch_truncation = False
             for op in moment:
                 baseline_dags[counts].apply_operation_back(op.op, op.qargs, op.cargs)
-                bit_indices = {
-                    q: context_dag.find_bit(q).index for q in context_dag.qubits
-                }
-                if (
-                    target_op_nodes[0].op == op.op
-                    and target_op_nodes[0].qargs == op.qargs
-                    and target_op_nodes[0].cargs == op.cargs
-                ):
+                # if (
+                #     target_op_nodes[0].op == op.op
+                #     and target_op_nodes[0].qargs == op.qargs
+                #     and target_op_nodes[0].cargs == op.cargs
+                # ):
+                if target_op_nodes[0] == op:
                     # if DAGOpNode.semantic_eq(
                     #     target_op_nodes[0], op, bit_indices, bit_indices
                     # ):
@@ -456,7 +454,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 fids = self.simulate_pulse_circuit(qc, params, update_env_history)
             print("Finished simulation benchmark \n")
 
-            fidelity_type = "Gate" if qc.num_qubits <= 3 else "State"
+            fidelity_type = "Gate" if self.target.causal_cone_size <= 3 else "State"
             if len(fids) == 1:
                 print(f"{fidelity_type} Fidelity (per Cycle): ", fids[0])
             else:

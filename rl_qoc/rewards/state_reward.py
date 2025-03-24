@@ -119,14 +119,13 @@ class StateReward(Reward):
             input_state_index = self.input_states_rng.choice(
                 len(target_instance.input_states)
             )
+
             input_choice = target_instance.input_states_choice
-            input_state_indices = tuple(
-                np.unravel_index(
-                    input_state_index,
-                    (get_input_states_cardinality_per_qubit(input_choice),)
-                    * num_qubits,
-                )
+            input_state_indices = np.unravel_index(
+                input_state_index,
+                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
             )
+
             input_state: InputState = target_instance.input_states[input_state_index]
 
             # Modify target state to match input state and target gate
@@ -137,8 +136,11 @@ class StateReward(Reward):
             prep_circuit = handle_n_reps(
                 qc, n_reps, backend_info.backend, execution_config.control_flow_enabled
             )
+            input_circuit = qc.copy_empty_like().compose(
+                input_state.circuit, qubits=target_instance.causal_cone_qubits
+            )
             input_circuit, input_state_indices = extend_input_state_prep(
-                input_state.circuit, qc, target_instance, input_state_indices
+                input_circuit, qc, target_instance, list(input_state_indices)
             )
             input_circuit.metadata["input_indices"] = input_state_indices
             prep_circuit.compose(input_circuit, front=True, inplace=True)
@@ -170,7 +172,8 @@ class StateReward(Reward):
         c_factor = execution_config.c_factor
         if len(identity_term) > 0:
             self.id_coeff = c_factor * np.sum(
-                counts[identity_term] / (dim * Chi[pauli_indices[identity_term]])
+                counts[identity_term]
+                / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
             )
 
         pauli_indices = np.delete(pauli_indices, identity_term)
@@ -214,16 +217,13 @@ class StateReward(Reward):
             shots_per_basis.append(max_pauli_shots)
         self._pauli_shots = shots_per_basis
 
-        if isinstance(target_instance, GateTarget):
-            observables = extend_observables(
-                self._observables, prep_circuit, target_instance
-            )
-        else:
-            observables = self._observables.apply_layout(prep_circuit.layout)
-
         prep_circuit = backend_info.custom_transpile(
             prep_circuit, initial_layout=target_instance.layout, scheduling=False
         )
+        if isinstance(target_instance, GateTarget):
+            observables = extend_observables(observables, prep_circuit, target_instance)
+        else:
+            observables = observables.apply_layout(prep_circuit.layout)
 
         pubs = [
             (
