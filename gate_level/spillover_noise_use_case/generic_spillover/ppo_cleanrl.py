@@ -13,7 +13,35 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
+# from gymnasium import ActionWrapper
+
 from rl_qoc.environment.base_q_env import BaseQuantumEnvironment
+
+
+def process_action(self, probs: Normal):
+    """
+    Decide how actions should be processed before being sent to environment.
+    For certain environments such as QUA, policy parameters should be streamed to the environment directly
+    and actions are sampled within the environment (in real time).
+    """
+
+    # action = torch.clip(
+    #     probs.sample(),
+    #     torch.Tensor(self.min_action),
+    #     torch.Tensor(self.max_action),
+    # )
+    action = probs.sample()
+    logprob = probs.log_prob(action).sum(1)
+    mean_action = probs.mean
+    std_action = probs.stddev
+
+    if isinstance(self.env, ActionWrapper):
+        self.unwrapped_env.mean_action = self.env.action(mean_action[0].cpu().numpy())
+    else:
+        self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
+
+    self.unwrapped_env.std_action = std_action[0].cpu().numpy()
+    return action, logprob
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -22,7 +50,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
- 
+
 def plot_curves(env: BaseQuantumEnvironment):
     """
     Plots the reward history and fidelity history of the environment
@@ -337,6 +365,9 @@ class PPO_CleanRL:
                 #     self.env.action_space.low,
                 #     self.env.action_space.high,
                 # )
+
+                mean_action = np.mean(cpu_action, axis=0)
+                self.env.unwrapped.mean_action = self.env.action(mean_action)
 
                 next_obs, reward, terminations, truncations, infos = self.env.step(
                     cpu_action
