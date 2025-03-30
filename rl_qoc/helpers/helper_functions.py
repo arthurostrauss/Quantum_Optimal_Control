@@ -372,7 +372,7 @@ def load_q_env_from_yaml_file(file_path: str):
                 else {}
             )
         ),
-        "reward_config": reward_dict[env_config["REWARD"]["REWARD_METHOD"]](
+        "reward": reward_dict[env_config["REWARD"]["REWARD_METHOD"]](
             **remove_none_values(
                 get_lower_keys_dict(
                     env_config.get(

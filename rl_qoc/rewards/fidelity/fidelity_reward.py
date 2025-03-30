@@ -7,10 +7,11 @@ from qiskit.quantum_info import Statevector, Operator
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
 
-from .base_reward import Reward, Pub, Primitive, Target, GateTarget
-from ..environment.configuration.qconfig import QEnvConfig
-from ..environment.backend_info import BackendInfo
-from ..helpers import has_noise_model, handle_n_reps
+from ..base_reward import Reward, Pub, Primitive, Target, GateTarget
+from .fidelity_reward_data import FidelityRewardData, FidelityRewardDataList
+from ...environment.configuration.qconfig import QEnvConfig
+from ...environment.backend_info import BackendInfo
+from ...helpers import has_noise_model, handle_n_reps
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
 
@@ -27,14 +28,14 @@ class FidelityReward(Reward):
     def reward_method(self):
         return "fidelity"
 
-    def get_reward_pubs(
+    def get_reward_data(
         self,
         qc: QuantumCircuit,
         params: np.array,
         target: Target,
         env_config: QEnvConfig,
         *args,
-    ) -> List[Pub]:
+    ) -> FidelityRewardDataList:
         """
         Compute pubs related to the reward method
 
@@ -61,16 +62,15 @@ class FidelityReward(Reward):
             remove_final_measurements=False,
         )
         new_qc.metadata["n_reps"] = execution_config.current_n_reps
+        pub = SamplerPub.coerce((new_qc, params, execution_config.n_shots))
+        reward_data = FidelityRewardData(pub)
 
-        return [SamplerPub.coerce((new_qc, params, execution_config.n_shots))]
+        return FidelityRewardDataList([reward_data], env_config, target)
 
     def get_reward_with_primitive(
         self,
-        pubs: List[Pub],
+        reward_data: FidelityRewardDataList,
         primitive: Primitive,
-        target: Target,
-        env_config: QEnvConfig,
-        **kwargs,
     ) -> np.array:
         """
         Compute the reward based on the primitive and the pubs
@@ -81,8 +81,10 @@ class FidelityReward(Reward):
             target: Target gate or state to prepare
             env_config: QEnvConfig containing the backend information and execution configuration
         """
+        env_config = reward_data.env_config
+        target = reward_data.target
         backend_info = env_config.backend_info
-
+        pubs = reward_data.pubs
         fidelities = []
         for pub in pubs:
             qc = pub.circuit
@@ -126,7 +128,7 @@ class FidelityReward(Reward):
             backend_info: Backend info containing the noise model, and transpiler passes
             n_reps: Number of repetitions to compute the fidelity
         """
-        qc_copy = qc.copy()
+        circuit = qc.copy()
         backend = backend_info.backend
         is_aer_sim = isinstance(backend, AerSimulator)
         if isinstance(target, GateTarget) and target.causal_cone_size <= 3:
@@ -153,15 +155,15 @@ class FidelityReward(Reward):
                 output for output in outputs if output in self._noisy_sim_methods
             )
 
-        getattr(qc_copy, f"save_{output}")()  # Aer Save method
+        getattr(circuit, f"save_{output}")()  # Aer Save method
 
-        circuit = backend_info.custom_transpile(
-            qc_copy,
-            optimization_level=0,
-            initial_layout=target.layout,
-            scheduling=False,
-            remove_final_measurements=False,
-        )
+        # circuit = backend_info.custom_transpile(
+        #     qc_copy,
+        #     optimization_level=0,
+        #     initial_layout=target.layout,
+        #     scheduling=False,
+        #     remove_final_measurements=False,
+        # )
         parameters = circuit.parameters
         parameter_binds = [
             {parameters[j]: params[:, j] for j in range(len(parameters))}
@@ -201,7 +203,7 @@ class FidelityReward(Reward):
             n_reps: Number of repetitions to compute the fidelity
         """
         from qiskit_dynamics.backend import DynamicsBackend
-        from ..custom_jax_sim import PulseEstimatorV2
+        from ...custom_jax_sim import PulseEstimatorV2
 
         backend = backend_info.backend
         if not isinstance(backend, DynamicsBackend):

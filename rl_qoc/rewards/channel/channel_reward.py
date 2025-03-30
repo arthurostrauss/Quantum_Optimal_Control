@@ -1,29 +1,26 @@
-from collections import defaultdict
 from typing import List, Tuple, Optional
-
 from qiskit.primitives import BaseEstimatorV2
 
-from .base_reward import Reward
-from dataclasses import dataclass
+from ..base_reward import Reward
+from dataclasses import dataclass, field
 from qiskit.circuit import QuantumCircuit
 from qiskit.quantum_info import Pauli, SparsePauliOp, pauli_basis
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit_experiments.library.tomography.basis import Pauli6PreparationBasis
 import numpy as np
 
-from ..helpers import shots_to_precision
-
-Indices = Tuple[int]
-from ..environment.configuration.qconfig import QEnvConfig
-from ..environment.target import GateTarget
-from ..helpers.circuit_utils import (
+from ...environment.configuration.qconfig import QEnvConfig
+from ...environment.target import GateTarget
+from ...helpers.circuit_utils import (
     handle_n_reps,
     extend_observables,
     extend_input_state_prep,
     observables_to_indices,
     pauli_input_to_indices,
     precision_to_shots,
+    shots_to_precision,
 )
+from .channel_reward_data import ChannelRewardData, ChannelRewardDataList
 
 
 @dataclass
@@ -32,23 +29,16 @@ class ChannelReward(Reward):
     Configuration for computing the reward based on channel fidelity estimation
     """
 
-    print_debug = True
     num_eigenstates_per_pauli: int = 1
     fiducials_seed: int = 2000
     input_states_seed: int = 2001
+    fiducials_rng: np.random.Generator = field(init=False)
+    input_states_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
-        self._observables: Optional[SparsePauliOp] = None
-        self._pauli_shots: Optional[List[int]] = None
-        self._fiducials: List[Tuple[Pauli, SparsePauliOp]] = []
-        self._full_fiducials: List[Tuple[List[QuantumCircuit], SparsePauliOp]] = []
-        self._fiducials_indices: List[Tuple[List[Indices], List[Indices]]] = []
         self.fiducials_rng = np.random.default_rng(self.fiducials_seed)
         self.input_states_rng = np.random.default_rng(self.input_states_seed)
-        self.id_coeff = 0.0
-        self.id_count = 0
-        self.total_counts = 0
 
     def set_reward_seed(self, seed: int):
         """
@@ -74,44 +64,16 @@ class ChannelReward(Reward):
         """
         return self._observables
 
-    @property
-    def pauli_shots(self) -> List[int]:
-        """
-        Number of shots per Pauli for the fidelity estimation
-        """
-        return self._pauli_shots
-
-    @property
-    def fiducials(self) -> List[Tuple[Pauli, SparsePauliOp]]:
-        """
-        Fiducial states and observables to sample
-        """
-        return self._fiducials
-
-    @property
-    def full_fiducials(self) -> List[Tuple[List[QuantumCircuit], SparsePauliOp]]:
-        """
-        Fiducial states and observables to sample
-        """
-        return self._full_fiducials
-
-    @property
-    def fiducials_indices(self) -> List[Tuple[List[Indices], List[Indices]]]:
-        """
-        Indices of the input states and observables to sample
-        """
-        return self._fiducials_indices
-
-    def get_reward_pubs(
+    def get_reward_data(
         self,
         qc: QuantumCircuit,
         params: np.array,
         target: GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
-    ) -> List[EstimatorPub]:
+    ) -> ChannelRewardDataList:
         """
-        Compute pubs related to the reward method
+        Compute reward data related to the reward method
 
         Args:
             qc: Quantum circuit to be executed on quantum system
@@ -148,15 +110,6 @@ class ChannelReward(Reward):
         Chi = target.Chi(
             n_reps
         )  # Characteristic function for cycle circuit repeated n_reps times
-
-        # Reset storage variables
-        self._fiducials_indices = []
-        self._full_fiducials = []
-        self._fiducials = []
-        self.id_coeff = 0.0
-        self.id_count = 0
-        self.total_counts = 0
-        self._pauli_shots = []
 
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
@@ -200,12 +153,18 @@ class ChannelReward(Reward):
 
         # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
         identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
-        self.id_coeff = (
+        id_coeff = (
             c_factor
             * dim
             * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
         )
-        self.id_count = len(identity_terms)
+        # Additional dim factor to account for all eigenstates of identity input state
+        self.id_coeff = (
+            c_factor
+            * dim
+            * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
+        )  # Additional dim factor to account for all eigenstates of identity input state
+        self._id_count = len(identity_terms)
 
         pauli_indices = np.delete(pauli_indices, identity_terms, axis=0)
         samples = np.delete(samples, identity_terms)
@@ -224,6 +183,7 @@ class ChannelReward(Reward):
         )
 
         obs_dict = {}
+        # Regroup observables for same input Pauli
         for i, (prep, obs) in enumerate(fiducials_list):
             label = prep.to_label()
             if label not in obs_dict:
@@ -239,21 +199,12 @@ class ChannelReward(Reward):
         filtered_fiducials_list = [(prep, obs) for prep, obs, _ in obs_dict.values()]
         filtered_pauli_shots = [count for _, _, count in obs_dict.values()]
 
-        self._fiducials = filtered_fiducials_list
-        self._pauli_shots = filtered_pauli_shots
+        fiducials = filtered_fiducials_list
+        pauli_shots = filtered_pauli_shots
 
-        pubs = []
-        total_shots = 0
-        default_factory = lambda: {
-            "input_circuit": None,
-            "observables": None,
-            "shots": None,
-            "pub": None,
-        }
-        used_prep_indices = defaultdict(default_factory)
-        fiducial_indices = {}
-        full_fiducials = {}
-        for (prep, obs_list), shots in zip(self._fiducials, self._pauli_shots):
+        used_prep_indices = {}
+
+        for (prep, obs_list), shots in zip(fiducials, pauli_shots):
             # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis
             # Below, we select at random a subset of pure input states to prepare for each prep
             # If nb_states = 1, we prepare all pure input states for each Pauli prep (no random selection)
@@ -294,11 +245,11 @@ class ChannelReward(Reward):
                     target.causal_cone_qubits,
                     inplace=False,
                 )
-                input_circuit, prep_indices = extend_input_state_prep(
+                input_circuit, extended_prep_indices = extend_input_state_prep(
                     input_circuit, qc, target, prep_indices
                 )  # Add random input state on other qubits
                 prep_indices = tuple(prep_indices)
-                input_circuit.metadata["indices"] = prep_indices
+                input_circuit.metadata["indices"] = extended_prep_indices
                 # Prepend input state to custom circuit with front composition
                 prep_circuit = repeated_circuit.compose(
                     input_circuit,
@@ -324,69 +275,60 @@ class ChannelReward(Reward):
                         params,
                         shots_to_precision(dedicated_shots),
                     )
-                    used_prep_indices[prep_indices]["input_circuit"] = input_circuit
-                    used_prep_indices[prep_indices]["observables"] = pub_obs
-                    used_prep_indices[prep_indices]["shots"] = dedicated_shots
-                    used_prep_indices[prep_indices]["pub"] = pub
-                else:  # Update PUB (regroup observables for same input circuit, redundant for I/Z terms)
-                    used_prep_indices[prep_indices]["observables"] += pub_obs
-                    ref_prep, ref_obs, _, ref_shots = used_prep_indices[prep_indices][
-                        "pub"
-                    ]
-                    used_prep_indices[prep_indices]["pub"] = (
-                        ref_prep,
-                        (ref_obs + pub_obs).simplify(),
-                        params,
-                        ref_shots,
+                    used_prep_indices[prep_indices] = ChannelRewardData(
+                        pub,
+                        input_circuit,
+                        pub_obs,
+                        dedicated_shots,
+                        n_reps,
+                        target.causal_cone_qubits_indices,
+                        prep,
+                        extended_prep_indices,
+                        observables_to_indices(pub_obs),
                     )
 
-        for prep_indices_, items in used_prep_indices.items():
-            pub = items["pub"]
-            obs_list = items["observables"]
-            obs_indices = observables_to_indices(obs_list)
-            input_circ = items["input_circuit"]
-            pubs.append(pub)
-            total_shots += (
-                pub[3] * params.shape[0] * len(pub[1].group_commuting(qubit_wise=True))
-            )
-            fiducial_indices[prep_indices_] = obs_indices
-            full_fiducials[prep_indices_] = (
-                input_circ,
-                obs_list.group_commuting(qubit_wise=True),
-            )
+                else:  # Update PUB (regroup observables for same input circuit, redundant for I/Z terms)
+                    ref_prep = used_prep_indices[prep_indices].pub.circuit
+                    ref_obs = used_prep_indices[prep_indices].observables
+                    ref_precision = used_prep_indices[prep_indices].precision
 
-        self._fiducials_indices = [
-            (prep_indices, obs_indices)
-            for prep_indices, obs_indices in fiducial_indices.items()
-        ]
-        self._full_fiducials = [
-            (input_circ, obs_list) for input_circ, obs_list in full_fiducials.values()
-        ]
-        fiducials = [
-            (prep, obs.group_commuting(qubit_wise=True))
-            for prep, obs in self._fiducials
-        ]
-        self._fiducials = fiducials
-        self._total_shots = total_shots
-        return [EstimatorPub.coerce(pub) for pub in pubs]
+                    ref_shots = precision_to_shots(ref_precision)
+                    new_precision = shots_to_precision(dedicated_shots)
+                    new_obs = (ref_obs + pub_obs).simplify()
+
+                    used_prep_indices[prep_indices].observables = new_obs
+                    used_prep_indices[prep_indices].pub = EstimatorPub.coerce(
+                        (ref_prep, new_obs, params, min(ref_precision, new_precision)),
+                    )
+
+                    used_prep_indices[prep_indices].shots = max(
+                        dedicated_shots, ref_shots
+                    )
+                    used_prep_indices[prep_indices].observables_indices = (
+                        observables_to_indices(new_obs)
+                    )
+
+        reward_data = []
+        for prep_indices_, data in used_prep_indices.items():
+            reward_data.append(data)
+
+        reward_data = ChannelRewardDataList(reward_data, pauli_sampling, id_coeff)
+        return reward_data
 
     def get_reward_with_primitive(
         self,
-        pubs: List[EstimatorPub],
+        reward_data: ChannelRewardDataList,
         estimator: BaseEstimatorV2,
-        target: GateTarget,
-        env_config: QEnvConfig,
-        **kwargs,
     ) -> np.array:
         """
         Retrieve the reward from the PUBs and the primitive
         """
-        job = estimator.run(pubs)
+        job = estimator.run(reward_data.pubs)
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward += self.id_coeff
-        reward /= self.total_counts
-        dim = 2**target.causal_cone_size
+        reward += reward_data.id_coeff
+        reward /= reward_data.pauli_sampling
+        dim = 2**reward_data.num_qubits
         reward = (dim * reward + 1) / (dim + 1)
 
         return reward

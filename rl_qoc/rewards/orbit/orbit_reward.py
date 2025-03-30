@@ -3,14 +3,14 @@ from typing import List, Optional
 import numpy as np
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import BaseSamplerV2
-
-from .base_reward import Reward
-from ..environment.target import GateTarget
-from ..environment.configuration.qconfig import QEnvConfig
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 from qiskit.quantum_info import random_clifford, Operator
 
-from ..helpers import causal_cone_circuit
+from ..base_reward import Reward
+from .orbit_reward_data import ORBITRewardDataList, ORBITRewardData
+from ...environment.target import GateTarget
+from ...environment.configuration.qconfig import QEnvConfig
+from ...helpers import causal_cone_circuit
 
 
 @dataclass
@@ -31,14 +31,14 @@ class ORBITReward(Reward):
     def reward_method(self):
         return "orbit"
 
-    def get_reward_pubs(
+    def get_reward_data(
         self,
         qc: QuantumCircuit,
         params: np.array,
         target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
-    ) -> List[SamplerPub]:
+    ) -> ORBITRewardDataList:
         """
         Compute pubs related to the reward method
 
@@ -61,7 +61,7 @@ class ORBITReward(Reward):
             circuit_ref = baseline_circuit
         else:
             circuit_ref = qc.metadata["baseline_circuit"]
-        pubs, ideal_pubs, total_shots = [], [], 0
+        reward_data = []
         batch_size = params.shape[0]
 
         if self.use_interleaved:
@@ -138,36 +138,51 @@ class ORBITReward(Reward):
                     remove_final_measurements=False,
                 )  # Try to get the smallest possible circuit for the reverse unitary
 
-                for circ, pubs_ in zip([run_qc, ref_qc], [pubs, self._ideal_pubs]):
-                    transpiled_circuit = backend_info.custom_transpile(
-                        circ, initial_layout=layout, scheduling=False
+                transpiled_circuit = backend_info.custom_transpile(
+                    run_qc, initial_layout=layout, scheduling=False
+                )
+                transpiled_circuit.barrier()
+                transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
+                transpiled_circuit.measure_all()
+                pub = SamplerPub.coerce(
+                    (transpiled_circuit, params, execution_config.n_shots)
+                )
+                reward_data.append(
+                    ORBITRewardData(
+                        pub,
+                        target.causal_cone_qubits_indices,
+                        reverse_unitary_qc,
+                        execution_config.current_n_reps,
                     )
-                    transpiled_circuit.barrier()
-                    # Add the inverse unitary + measurement to the circuit
-                    transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-                    transpiled_circuit.measure_all()
-                    pubs_.append((transpiled_circuit, params, execution_config.n_shots))
+                )
+                # for circ, pubs_ in zip([run_qc, ref_qc], [pubs, self._ideal_pubs]):
+                #     transpiled_circuit = backend_info.custom_transpile(
+                #         circ, initial_layout=layout, scheduling=False
+                #     )
+                #     transpiled_circuit.barrier()
+                #     # Add the inverse unitary + measurement to the circuit
+                #     transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
+                #     transpiled_circuit.measure_all()
+                #     pubs_.append((transpiled_circuit, params, execution_config.n_shots))
 
-                total_shots += batch_size * execution_config.n_shots
-        self._total_shots = total_shots
-
-        return [SamplerPub.coerce(pub) for pub in pubs]
+        return ORBITRewardDataList(reward_data)
 
     def get_reward_with_primitive(
         self,
-        pubs: List[SamplerPub],
+        reward_data: ORBITRewardDataList,
         primitive: BaseSamplerV2,
-        target: GateTarget,
-        env_config: QEnvConfig,
-        **kwargs
     ) -> np.array:
         """
         Compute the reward based on the input pubs
         """
+        pubs = reward_data.pubs
         job = primitive.run(pubs)
         pub_results = job.result()
         batch_size = pubs[0].parameter_values.shape[0]
         n_shots = pubs[0].shots
+        causal_cone_qubits_indices = reward_data.causal_cone_qubits_indices
+        causal_cone_size = len(causal_cone_qubits_indices)
+
         assert all(
             [pub.shots == n_shots for pub in pubs]
         ), "All pubs should have the same number of shots"
@@ -176,7 +191,7 @@ class ORBITReward(Reward):
         ), "All pubs should have the same batch size"
 
         num_bits = pub_results[0].data.meas[0].num_bits
-        if num_bits == target.causal_cone_size:
+        if num_bits == causal_cone_size:
             pub_data = [
                 [pub_result.data.meas[i] for i in range(batch_size)]
                 for pub_result in pub_results
@@ -192,8 +207,8 @@ class ORBITReward(Reward):
             pub_data = [
                 [
                     pub_result.data.meas[i].postselect(
-                        target.causal_cone_qubits_indices,
-                        [0] * target.causal_cone_size,
+                        causal_cone_qubits_indices,
+                        [0] * causal_cone_size,
                     )
                     for i in range(batch_size)
                 ]

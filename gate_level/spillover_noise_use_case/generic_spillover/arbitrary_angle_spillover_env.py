@@ -113,7 +113,9 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         :return: Observation
         """
         phi = self._rotation_angles_rng.uniform(
-            0, 2 * np.pi, self.unbound_circuit_context.num_qubits
+            0,
+            2 * np.pi,
+            self.unbound_circuit_context.num_qubits * self.tgt_instruction_counts,
         )
         return phi
 

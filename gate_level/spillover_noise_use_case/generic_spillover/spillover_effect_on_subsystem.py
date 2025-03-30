@@ -8,7 +8,8 @@ from typing import Optional, Literal, List
 
 import numpy as np
 from qiskit import QuantumCircuit
-from qiskit.circuit import Gate, Parameter, ParameterVector
+from qiskit.circuit import Gate, Parameter, ParameterVector, ControlFlowOp
+from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler import CouplingMap, TransformationPass, PassManager
 import qiskit_aer.noise as noise
@@ -270,6 +271,18 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                 #     new_dag.apply_operation_back(node.op, qargs=node.qargs, cargs=node.cargs)
                 #     if node.cargs:
                 #         subsystem_clbits.extend(node.cargs)
+                elif isinstance(node.op, ControlFlowOp):
+                    # Handle control flow operations
+                    new_dag.apply_operation_back(
+                        node.op.replace_blocks(
+                            [
+                                dag_to_circuit(self.run(circuit_to_dag(block)))
+                                for block in node.op.blocks
+                            ]
+                        ),
+                        node.qargs,
+                        node.cargs,
+                    )
                 else:
                     new_dag.apply_operation_back(
                         node.op, qargs=node.qargs, cargs=node.cargs
@@ -392,6 +405,12 @@ def create_spillover_noise_model_from_circuit(
             noisy_operations[q_]["main_op"].label,
             noisy_operations[q_]["qargs"],
         )
+
+    noise_model.add_all_qubit_quantum_error(
+        noise.depolarizing_error(0.01, 1), ["h", "x", "s", "z", "rx", "ry", "rz"]
+    )
+    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [0])
+    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [1])
 
     return noise_model
 

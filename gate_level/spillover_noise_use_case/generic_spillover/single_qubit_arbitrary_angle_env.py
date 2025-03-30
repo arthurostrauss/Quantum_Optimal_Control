@@ -11,6 +11,7 @@ from rl_qoc.environment.context_aware_quantum_environment import ObsType
 from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel, coherent_unitary_error
+from qiskit_aer.backends.backendconfiguration import AerBackendConfiguration
 
 gate_map = get_standard_gate_name_mapping()
 
@@ -30,8 +31,19 @@ def noisy_backend(circuit: QuantumCircuit, γ: float):
     noise_model.add_all_qubit_quantum_error(
         coherent_unitary_error(noisy_unitary), rotation_axis
     )
+    config = AerBackendConfiguration(
+        backend_name="overrotation_backend",
+        backend_version="2",
+        n_qubits=circuit.num_qubits,
+        basis_gates=["h", "rx", "rz", "t", "s", "sdg", "tdg", "u", "x", "z"],
+        custom_instructions=AerSimulator._CUSTOM_INSTR,
+        description="",
+        gates=[],
+        max_shots=int(1e7),
+        coupling_map=[],
+    )
 
-    return AerSimulator(noise_model=noise_model)
+    return AerSimulator(configuration=config, noise_model=noise_model)
 
 
 class ArbitraryAngleCoherentEnv(ContextAwareQuantumEnvironment):
@@ -97,7 +109,9 @@ class ArbitraryAngleCoherentEnv(ContextAwareQuantumEnvironment):
         :return: Observation
         """
         phi = self._rotation_angles_rng.uniform(
-            0, 2 * np.pi, self.unbound_circuit_context.num_qubits
+            0,
+            2 * np.pi,
+            self.unbound_circuit_context.num_qubits * self.tgt_instruction_counts,
         )
         return phi
 

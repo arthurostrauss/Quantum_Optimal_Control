@@ -5,6 +5,8 @@ from qiskit.circuit import QuantumCircuit
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
 from qiskit.primitives.base import BaseEstimatorV2, BaseSamplerV2
+
+from .reward_data import RewardData, RewardDataList
 from ..environment.configuration.qconfig import QEnvConfig
 from ..environment.target import StateTarget, GateTarget
 import numpy as np
@@ -49,14 +51,14 @@ class Reward(ABC):
         """
         return self._total_shots
 
-    def get_reward_pubs(
+    def get_reward_data(
         self,
         qc: QuantumCircuit,
         params: np.array,
         target: Target,
         env_config: QEnvConfig,
         *args,
-    ) -> List[Pub]:
+    ) -> RewardDataList:
         """
         Compute pubs related to the reward method
 
@@ -75,11 +77,8 @@ class Reward(ABC):
 
     def get_reward_with_primitive(
         self,
-        pubs: List[Pub],
+        reward_data: RewardDataList,
         primitive: Primitive,
-        target: Target,
-        env_config: QEnvConfig,
-        **kwargs,
     ) -> np.array:
         pass
 

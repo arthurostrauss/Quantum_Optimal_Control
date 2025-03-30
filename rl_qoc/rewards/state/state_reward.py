@@ -1,14 +1,15 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Literal, Optional
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import BaseEstimatorV2
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.quantum_info import SparsePauliOp, pauli_basis
 import numpy as np
-from .base_reward import Reward, Target
-from ..environment.configuration.qconfig import QEnvConfig
-from ..environment.target import StateTarget, GateTarget, InputState
-from ..helpers.circuit_utils import (
+from ..base_reward import Reward
+from .state_reward_data import StateRewardData, StateRewardDataList
+from ...environment.configuration.qconfig import QEnvConfig
+from ...environment.target import StateTarget, GateTarget, InputState
+from ...helpers.circuit_utils import (
     extend_input_state_prep,
     extend_observables,
     observables_to_indices,
@@ -30,35 +31,17 @@ class StateReward(Reward):
     input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
     input_state_seed: int = 2000
     observables_seed: int = 2001
+    input_states_rng: np.random.Generator = field(init=False)
+    observables_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
-        self._observables: Optional[SparsePauliOp] = None
-        self._pauli_shots: Optional[List[int]] = None
         self.input_states_rng = np.random.default_rng(self.input_state_seed)
         self.observables_rng = np.random.default_rng(self.observables_seed)
-        self._fiducials_indices: List[Tuple[List[Indices], List[Indices]]] = []
-        self._fiducials = []
-        self.id_coeff = 0.0
-        self.total_counts = 0
 
     @property
     def reward_method(self):
         return "state"
-
-    @property
-    def fiducials(self) -> List[Tuple[QuantumCircuit, List[SparsePauliOp]]]:
-        """
-        Fiducials to sample
-        """
-        return self._fiducials
-
-    @property
-    def fiducials_indices(self) -> List[Tuple[List[Indices], List[Indices]]]:
-        """
-        Indices of the input states and observables to sample
-        """
-        return self._fiducials_indices
 
     @property
     def reward_args(self):
@@ -74,14 +57,14 @@ class StateReward(Reward):
             self.input_states_rng = np.random.default_rng(self.input_state_seed)
             self.observables_rng = np.random.default_rng(self.observables_seed)
 
-    def get_reward_pubs(
+    def get_reward_data(
         self,
         qc: QuantumCircuit,
         params: np.array,
         target: StateTarget | GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
-    ) -> List[EstimatorPub]:
+    ) -> StateRewardDataList:
         """
         Compute pubs related to the reward method.
         This is used when real-time action sampling is not enabled on the backend.
@@ -98,9 +81,7 @@ class StateReward(Reward):
         """
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
-        self._fiducials_indices = [(0, [])]
         input_circuit = qc.copy_empty_like()
-        self._fiducials = [(input_circuit, [])]
 
         prep_circuit = qc
         target_instance = target
@@ -161,7 +142,7 @@ class StateReward(Reward):
             pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
         else:
             pauli_sampling = execution_config.sampling_paulis
-        self.total_counts = pauli_sampling
+
         pauli_indices, counts = np.unique(
             self.observables_rng.choice(
                 non_zero_indices, pauli_sampling, p=non_zero_probabilities
@@ -171,10 +152,12 @@ class StateReward(Reward):
         identity_term = np.where(pauli_indices == 0)[0]
         c_factor = execution_config.c_factor
         if len(identity_term) > 0:
-            self.id_coeff = c_factor * np.sum(
+            id_coeff = c_factor * np.sum(
                 counts[identity_term]
                 / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
             )
+        else:
+            id_coeff = 0.0
 
         pauli_indices = np.delete(pauli_indices, identity_term)
         counts = np.delete(counts, identity_term)
@@ -197,12 +180,6 @@ class StateReward(Reward):
 
         observables = SparsePauliOp(basis[pauli_indices], reward_factor)
         observable_indices = observables_to_indices(observables)
-        self._fiducials_indices = [(input_state_indices, observable_indices)]
-        self._fiducials = [
-            (input_circuit, observables.group_commuting(qubit_wise=True))
-        ]
-
-        self._observables = SparsePauliOp("I" * num_qubits, self.id_coeff) + observables
 
         shots_per_basis = []
         # Group observables by qubit-wise commuting groups to reduce the number of PUBs
@@ -215,7 +192,7 @@ class StateReward(Reward):
                 ref_index = list(pauli_indices).index(pauli_index)
                 max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
             shots_per_basis.append(max_pauli_shots)
-        self._pauli_shots = shots_per_basis
+        pauli_shots = shots_per_basis
 
         prep_circuit = backend_info.custom_transpile(
             prep_circuit, initial_layout=target_instance.layout, scheduling=False
@@ -225,21 +202,26 @@ class StateReward(Reward):
         else:
             observables = observables.apply_layout(prep_circuit.layout)
 
-        pubs = [
-            (
-                prep_circuit,
-                observables,
-                params,
-                shots_to_precision(max(self._pauli_shots)),
-            )
-        ]
-        self._total_shots = (
-            params.shape[0]
-            * max(self._pauli_shots)
-            * len(observables.group_commuting(True))
+        pub = (
+            prep_circuit,
+            observables,
+            params,
+            shots_to_precision(max(pauli_shots)),
         )
 
-        return [EstimatorPub.coerce(pub) for pub in pubs]
+        reward_data = StateRewardData(
+            pub=pub,
+            id_coeff=id_coeff,
+            pauli_sampling=pauli_sampling,
+            input_circuit=input_circuit,
+            observables=observables,
+            input_indices=input_state_indices,
+            observables_indices=observable_indices,
+            shots=max(pauli_shots),
+            n_reps=n_reps,
+        )
+
+        return StateRewardDataList([reward_data])
 
     def get_shot_budget(self, pubs: List[EstimatorPub]) -> int:
         """
@@ -262,20 +244,17 @@ class StateReward(Reward):
 
     def get_reward_with_primitive(
         self,
-        pubs: List[EstimatorPub],
+        reward_data: StateRewardDataList,
         estimator: BaseEstimatorV2,
-        target: Target = None,
-        env_config: QEnvConfig = None,
-        **kwargs,
     ) -> np.array:
         """
         Retrieve the reward from the PUBs and the primitive
         """
-        job = estimator.run(pubs)
+        job = estimator.run(reward_data.pubs)
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward += self.id_coeff
-        reward /= self.total_counts
+        reward += reward_data.id_coeff
+        reward /= reward_data.pauli_sampling
 
         return reward
 

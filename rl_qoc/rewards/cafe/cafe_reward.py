@@ -1,13 +1,18 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Literal
 import numpy as np
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import BaseSamplerV2
-from qiskit.primitives.containers.sampler_pub import SamplerPub
-from ..environment.target import GateTarget
-from ..environment.configuration.qconfig import QEnvConfig
-from .base_reward import Reward
-from ..helpers.circuit_utils import handle_n_reps, causal_cone_circuit
+
+from .cafe_reward_data import CAFERewardData, CAFERewardDataList
+from ...environment.target import GateTarget
+from ...environment.configuration.qconfig import QEnvConfig
+from ..base_reward import Reward
+from ...helpers.circuit_utils import (
+    handle_n_reps,
+    causal_cone_circuit,
+    get_input_states_cardinality_per_qubit,
+)
 from qiskit_aer import AerSimulator
 
 
@@ -18,10 +23,12 @@ class CAFEReward(Reward):
     """
 
     input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
+    input_states_seed: int = 2000
+    input_states_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
-        self._ideal_pubs: Optional[List[SamplerPub]] = None
+        self.input_states_rng = np.random.default_rng(self.input_states_seed)
 
     @property
     def reward_args(self):
@@ -31,14 +38,21 @@ class CAFEReward(Reward):
     def reward_method(self):
         return "cafe"
 
-    def get_reward_pubs(
+    def set_reward_seed(self, seed: int):
+        """
+        Set the seed for the random number generator
+        """
+        self.input_states_seed = seed + 357
+        self.input_states_rng = np.random.default_rng(self.input_states_seed)
+
+    def get_reward_data(
         self,
         qc: QuantumCircuit,
         params: np.array,
         target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
-    ) -> List[SamplerPub]:
+    ) -> CAFERewardDataList:
         """
         Compute pubs related to the reward method
 
@@ -53,20 +67,29 @@ class CAFEReward(Reward):
             raise ValueError("CAFE reward can only be computed for a target gate")
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
-        pubs, ideal_pubs, total_shots = [], [], 0
+
         if baseline_circuit is not None:
             circuit_ref = baseline_circuit.copy()
         else:
             circuit_ref = qc.metadata["baseline_circuit"].copy()
         layout = target.layout
         batch_size = params.shape[0]
+        num_qubits = target.causal_cone_size
 
-        # samples, shots = np.unique(
-        #     np.random.choice(len(input_circuits), self.sampling_Pauli_space),
-        #     return_counts=True,
-        # )
-        # for sample, shot in zip(samples, shots):
-        for input_state in target.input_states:
+        input_states_samples = np.unique(
+            self.input_states_rng.choice(
+                len(target.input_states), env_config.sampling_paulis, replace=True
+            ),
+        )
+        input_choice = target.input_states_choice
+        reward_data = []
+        for sample in input_states_samples:
+            # for input_state in target.input_states:
+            input_state_indices = np.unravel_index(
+                sample,
+                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
+            )
+            input_state = target.input_states[sample]
             run_qc = QuantumCircuit.copy_empty_like(
                 qc, name="cafe_circ"
             )  # Circuit with custom target gate
@@ -125,45 +148,58 @@ class CAFEReward(Reward):
             )
 
             # Bind inverse unitary + measurement to run circuit
-            for circ, pubs_ in zip([run_qc, ref_qc], [pubs, ideal_pubs]):
-                transpiled_circuit = backend_info.custom_transpile(
-                    circ, initial_layout=layout, scheduling=False
+            transpiled_circuit = backend_info.custom_transpile(
+                run_qc, initial_layout=layout, scheduling=False
+            )
+            transpiled_circuit.barrier()
+            # Add the inverse unitary + measurement to the circuit
+            transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
+            transpiled_circuit.measure_all()
+            pub = (transpiled_circuit, params, execution_config.n_shots)
+            reward_data.append(
+                CAFERewardData(
+                    pub,
+                    input_state.circuit,
+                    execution_config.current_n_reps,
+                    input_state_indices,
+                    reverse_unitary_qc,
+                    target.causal_cone_qubits_indices,
                 )
-                transpiled_circuit.barrier()
-                # Add the inverse unitary + measurement to the circuit
-                transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-                transpiled_circuit.measure_all()
-                pubs_.append((transpiled_circuit, params, execution_config.n_shots))
-            total_shots += batch_size * execution_config.n_shots
+            )
+            # for circ, pubs_ in zip([run_qc, ref_qc], [pubs, ideal_pubs]):
+            #     transpiled_circuit = backend_info.custom_transpile(
+            #         circ, initial_layout=layout, scheduling=False
+            #     )
+            #     transpiled_circuit.barrier()
+            #     # Add the inverse unitary + measurement to the circuit
+            #     transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
+            #     transpiled_circuit.measure_all()
+            #     pubs_.append((transpiled_circuit, params, execution_config.n_shots))
 
-        self._total_shots = total_shots
-        self._ideal_pubs = ideal_pubs
-
-        return [SamplerPub.coerce(pub) for pub in pubs]
+        return CAFERewardDataList(reward_data)
 
     def get_reward_with_primitive(
         self,
-        pubs: List[SamplerPub],
+        reward_data: CAFERewardDataList,
         primitive: BaseSamplerV2,
-        target: GateTarget,
-        env_config: QEnvConfig,
-        **kwargs
     ) -> np.array:
         """
         Compute the reward based on the input pubs
         """
-        job = primitive.run(pubs)
+        job = primitive.run(reward_data.pubs)
+        causal_cone_qubits_indices = reward_data.causal_cone_qubits_indices
+        causal_cone_size = reward_data.causal_cone_size
         pub_results = job.result()
-        batch_size = pubs[0].parameter_values.shape[0]
-        n_shots = pubs[0].shots
+        batch_size = reward_data.pubs[0].parameter_values.shape[0]
+        n_shots = reward_data.pubs[0].shots
         assert all(
-            [pub.shots == n_shots for pub in pubs]
+            [pub.shots == n_shots for pub in reward_data.pubs]
         ), "All pubs should have the same number of shots"
         assert all(
-            [pub.parameter_values.shape[0] == batch_size for pub in pubs]
+            [pub.parameter_values.shape[0] == batch_size for pub in reward_data.pubs]
         ), "All pubs should have the same batch size"
         num_bits = pub_results[0].data.meas[0].num_bits
-        if num_bits == target.causal_cone_size:
+        if num_bits == causal_cone_size:
             # No post-selection based on causal cone
             pub_data = [
                 [pub_result.data.meas[i] for i in range(batch_size)]
@@ -181,8 +217,8 @@ class CAFEReward(Reward):
             pub_data = [
                 [
                     pub_result.data.meas[i].postselect(
-                        target.causal_cone_qubits_indices,
-                        [0] * target.causal_cone_size,
+                        causal_cone_qubits_indices,
+                        [0] * causal_cone_size,
                     )
                     for i in range(batch_size)
                 ]
@@ -194,9 +230,3 @@ class CAFEReward(Reward):
             ]
         reward = np.mean(survival_probability, axis=0)
         return reward
-
-    def get_shot_budget(self, pubs: List[SamplerPub]) -> int:
-        """
-        Retrieve number of shots associated to the input pub list
-        """
-        return sum([pub.shots * pub.parameter_values.shape[0] for pub in pubs])

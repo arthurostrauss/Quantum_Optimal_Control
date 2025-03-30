@@ -196,12 +196,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             switch_truncation = False
             for op in moment:
                 baseline_dags[counts].apply_operation_back(op.op, op.qargs, op.cargs)
-                # if (
-                #     target_op_nodes[0].op == op.op
-                #     and target_op_nodes[0].qargs == op.qargs
-                #     and target_op_nodes[0].cargs == op.cargs
-                # ):
-                if target_op_nodes[0] == op:
+                if (
+                    target_op_nodes[0].op == op.op
+                    and target_op_nodes[0].qargs == op.qargs
+                    and target_op_nodes[0].cargs == op.cargs
+                ):
                     # if DAGOpNode.semantic_eq(
                     #     target_op_nodes[0], op, bit_indices, bit_indices
                     # ):
@@ -224,7 +223,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         ]
 
         pms = [PassManager(pass_) for pass_ in custom_gate_pass]
-        custom_circuits = [pm.run(circ) for pm, circ in zip(pms, baseline_circuits)]
+        custom_circuits = [
+            pm.run(circ).copy(f"custom_circ_{i}")
+            for i, (pm, circ) in enumerate(zip(pms, baseline_circuits))
+        ]
 
         # Case 2: each truncation concatenates the previous ones:
         # for i in range(tgt_instruction_counts, 0, -1):
@@ -236,10 +238,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         #     baseline_dags[i - 1] = ref_dag
         #     custom_circuits[i - 1] = custom_circ
 
-        baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
-
-        for custom_circ, baseline_circ in zip(custom_circuits, baseline_circuits):
-            custom_circ.metadata["baseline_circuit"] = baseline_circ.copy()
+        for i in range(tgt_instruction_counts):
+            custom_circuits[i].metadata["baseline_circuit"] = baseline_circuits[i].copy(
+                f"baseline_circ_{i}"
+            )
 
         input_states_choice = getattr(
             self.config.reward.reward_args, "input_states_choice", "pauli4"

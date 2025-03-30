@@ -30,6 +30,14 @@ def get_real_time_reward_circuit(
     """
     execution_config = env_config.execution_config
     backend_info = env_config.backend_info
+    reward_method = (
+        reward_method if reward_method is not None else env_config.reward_method
+    )
+    if reward_method not in ["cafe", "channel", "state"]:
+        raise NotImplementedError(
+            f"Selected reward method {reward_method} does not (yet?) "
+            f"support a real-time version of circuit"
+        )
     prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
     target_instances = (
         [target] if isinstance(target, (GateTarget, StateTarget)) else target
@@ -40,12 +48,30 @@ def get_real_time_reward_circuit(
         isinstance(target_instance, (GateTarget, StateTarget))
         for target_instance in target_instances
     ):
-        raise ValueError("All targets must be gate targets")
+        raise ValueError("All targets must be gate or state targets")
+    if not all(
+        target_instance.target_type == target_instances[0].target_type
+        for target_instance in target_instances
+    ):
+        raise ValueError("All targets must be of the same type")
 
-    target_instance = target
-    is_gate_target = isinstance(target_instance, GateTarget)
-    target_state = target_instance if isinstance(target_instance, StateTarget) else None
-
+    is_gate_target = all(
+        target_instance.target_type == "gate" for target_instance in target_instances
+    )
+    if is_gate_target:
+        target_instance = target_instances[0]
+        if not all(
+            target_inst.causal_cone_size == target_instance.causal_cone_size
+            for target_inst in target_instances
+        ):
+            raise ValueError("All targets must have the same causal cone size")
+        if not all(
+            target_inst.causal_cone_qubits == target_instance.causal_cone_qubits
+            for target_inst in target_instances
+        ):
+            raise ValueError("All targets must have the same causal cone qubits")
+    else:
+        target_instance = None
     # Compare qubits of each circuit between each other and ensure they are the same
     qubits = [qc.qubits for qc in prep_circuits]
     if len(qubits) > 1 and not all(
@@ -123,14 +149,10 @@ def get_real_time_reward_circuit(
                         qc.compose(
                             PauliMeasurementBasis()
                             .circuit([i])
-                            .remove_final_measurements(False)
-                            .decompose(),
+                            .remove_final_measurements(False),
                             [qubit],
                             inplace=True,
                         )
-        for qubit, clbit in zip(causal_cone_qubits, meas):
-            qc.measure(qubit, clbit)
-        qc.reset(qc.qubits)
 
     elif reward_method == "cafe":
         for circ in prep_circuits:
@@ -139,12 +161,12 @@ def get_real_time_reward_circuit(
         ref_circuits: List[QuantumCircuit] = [
             circ.metadata["baseline_circuit"].copy() for circ in prep_circuits
         ]
-        layout = target_instance.layout
         cycle_circuit_inverses = [[] for _ in range(len(ref_circuits))]
+        input_state_inverses = [input_circ.inverse() for input_circ in input_circuits]
         for i, ref_circ in enumerate(ref_circuits):
             for n in execution_config.n_reps:
                 cycle_circuit, _ = causal_cone_circuit(
-                    ref_circ.repeat(n), causal_cone_qubits
+                    ref_circ.repeat(n).decompose(), causal_cone_qubits
                 )
                 cycle_circuit.save_unitary()
                 sim_unitary = (
@@ -157,8 +179,44 @@ def get_real_time_reward_circuit(
                 inverse_circuit.unitary(
                     sim_unitary.adjoint(), causal_cone_qubits, label="U_inv"
                 )
-                inverse_circuit.measure(causal_cone_qubits, meas)
+                inverse_circuit = backend_info.custom_transpile(
+                    inverse_circuit,
+                    initial_layout=target_instance.layout,
+                    scheduling=False,
+                    optimization_level=3,
+                )
                 cycle_circuit_inverses[i].append(inverse_circuit)
+        if len(prep_circuits) > 1:
+            with qc.switch(circuit_choice) as circuit_case:
+                for i in range(len(cycle_circuit_inverses)):
+                    with circuit_case(i):
+                        if len(execution_config.n_reps) > 1:
+                            with qc.switch(n_reps_var) as case_reps:
+                                for j, n in enumerate(execution_config.n_reps):
+                                    with case_reps(n):
+                                        qc.compose(
+                                            cycle_circuit_inverses[i][j], inplace=True
+                                        )
+                        else:
+                            qc.compose(cycle_circuit_inverses[i][0], inplace=True)
+        else:
+            if len(execution_config.n_reps) > 1:
+                with qc.switch(n_reps_var) as case_reps:
+                    for j, n in enumerate(execution_config.n_reps):
+                        with case_reps(n):
+                            qc.compose(cycle_circuit_inverses[0][j], inplace=True)
+            else:
+                qc.compose(cycle_circuit_inverses[0][0], inplace=True)
+
+        # Invert input state preparation
+        for q_idx, qubit in enumerate(causal_cone_qubits):
+            with qc.switch(input_state_vars[q_idx]) as case_input_state:
+                for i, input_circuit in enumerate(input_state_inverses):
+                    with case_input_state(i):
+                        qc.compose(input_circuit, [qubit], inplace=True)
+
+    qc.measure(causal_cone_qubits, meas)
+    qc.reset(qc.qubits)
 
     qc = backend_info.custom_transpile(
         qc,

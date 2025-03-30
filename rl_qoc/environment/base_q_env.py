@@ -73,6 +73,7 @@ from ..helpers.pulse_utils import (
     qubit_projection,
     rotate_frame,
 )
+from ..rewards.reward_data import RewardDataList
 
 
 class BaseQuantumEnvironment(ABC, Env):
@@ -113,6 +114,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.action_history = []
         self.reward_history = []
         self._pubs, self._ideal_pubs = [], []
+        self._reward_data = None
         self._observables, self._pauli_shots = None, None
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -287,23 +289,19 @@ class BaseQuantumEnvironment(ABC, Env):
             else self.baseline_circuits[self.trunc_index]
         )
         if self.config.execution_config.n_reps_mode == "sequential":
-            pubs = rewarder.get_reward_pubs(
+            reward_data = rewarder.get_reward_data(
                 qc,
                 params,
                 self.target,
                 self.config,
                 additional_input,
             )
-            total_shots = self.config.reward.total_shots
+            total_shots = reward_data.total_shots
             if update_env_history:
                 self.update_env_history(qc, total_shots)
-            self._pubs = pubs
-            reward = rewarder.get_reward_with_primitive(
-                pubs,
-                self.primitive,
-                self.target,
-                self.config,
-            )
+            self._pubs = reward_data.pubs
+            self._reward_data = reward_data
+            reward = rewarder.get_reward_with_primitive(reward_data, self.primitive)
 
             print("Reward (avg):", np.mean(reward), "Std:", np.std(reward))
 
@@ -1046,6 +1044,13 @@ class BaseQuantumEnvironment(ABC, Env):
         Return the current PUBs used in the environment
         """
         return self._pubs
+
+    @property
+    def reward_data(self) -> RewardDataList:
+        """
+        Return the current reward data used in the environment
+        """
+        return self._reward_data
 
     @property
     def hardware_runtime(self):
