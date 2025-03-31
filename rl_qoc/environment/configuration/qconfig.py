@@ -143,6 +143,9 @@ class QEnvConfig:
 
     @property
     def n_reps(self) -> List[int]:
+        """
+        List of possible number of repetitions / circuit depths for reward computation
+        """
         return self.execution_config.n_reps
 
     @n_reps.setter
@@ -156,11 +159,24 @@ class QEnvConfig:
         self.execution_config.n_reps = [value] if isinstance(value, int) else value
 
     @property
+    def current_n_reps(self) -> int:
+        """
+        Current number of repetitions / circuit depth for reward computation
+        """
+        return self.execution_config.current_n_reps
+
+    @property
     def c_factor(self):
+        """
+        Reward scaling factor
+        """
         return self.execution_config.c_factor
 
     @property
     def seed(self):
+        """
+        Random seed superseding the whole training
+        """
         return self.execution_config.seed
 
     @seed.setter

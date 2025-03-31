@@ -73,7 +73,6 @@ class CAFEReward(Reward):
         else:
             circuit_ref = qc.metadata["baseline_circuit"].copy()
         layout = target.layout
-        batch_size = params.shape[0]
         num_qubits = target.causal_cone_size
 
         input_states_samples = np.unique(
@@ -90,11 +89,11 @@ class CAFEReward(Reward):
                 (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
             )
             input_state = target.input_states[sample]
-            run_qc = QuantumCircuit.copy_empty_like(
-                qc, name="cafe_circ"
+            run_qc = qc.copy_empty_like(
+                name="cafe_circ"
             )  # Circuit with custom target gate
-            ref_qc = QuantumCircuit.copy_empty_like(
-                circuit_ref, name="cafe_ref_circ"
+            ref_qc = circuit_ref.copy_empty_like(
+                name="cafe_ref_circ"
             )  # Circuit with reference gate
 
             for circuit, context, control_flow in zip(

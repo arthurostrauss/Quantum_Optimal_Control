@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from ..reward_data import RewardData, RewardDataList
 from dataclasses import dataclass
 from typing import Optional, Tuple, List

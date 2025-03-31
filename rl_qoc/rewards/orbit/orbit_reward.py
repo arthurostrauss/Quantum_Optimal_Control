@@ -102,11 +102,8 @@ class ORBITReward(Reward):
             pass
         else:
             for seq in range(execution_config.sampling_paulis):
-                ref_qc = QuantumCircuit.copy_empty_like(
-                    circuit_ref,
-                    name="orbit_ref_circ",
-                )
-                run_qc = QuantumCircuit.copy_empty_like(qc, name="orbit_run_circ")
+                ref_qc = circuit_ref.copy_empty_like(name="orbit_ref_circ")
+                run_qc = qc.copy_empty_like(name="orbit_run_circ")
                 for l in range(execution_config.current_n_reps):
                     r_cliff = random_clifford(
                         target.causal_cone_size, self.clifford_rng

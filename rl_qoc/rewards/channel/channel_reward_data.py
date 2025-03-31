@@ -97,7 +97,9 @@ class ChannelRewardData(RewardData):
         """
         state = "|"
         if self.input_pauli is not None and self.input_indices is not None:
-            input_indices = [self.input_indices[i] for i in self.causal_cone_qubits_indices]
+            input_indices = [
+                self.input_indices[i] for i in self.causal_cone_qubits_indices
+            ]
             for i, term in enumerate(reversed(self.input_pauli.to_label())):
                 if term == "Z" or term == "I":
                     if input_indices[i] % 2 == 0:
