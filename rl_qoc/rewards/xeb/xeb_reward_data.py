@@ -14,7 +14,7 @@ import numpy as np
 class XEBRewardData(RewardData):
     pub: SamplerPub | SamplerPubLike
     state: Statevector
-    causal_cone_qubit_indices: List[int]
+    causal_cone_qubits_indices: List[int]
 
     def __post_init__(self):
         self.pub = SamplerPub.coerce(self.pub)
@@ -37,9 +37,9 @@ class XEBRewardDataList(RewardDataList):
     reward_data: List[XEBRewardData]
 
     def __post_init__(self):
-        causal_cone_indices = self.reward_data[0].causal_cone_qubit_indices
+        causal_cone_indices = self.reward_data[0].causal_cone_qubits_indices
         for reward_data in self.reward_data:
-            if reward_data.causal_cone_qubit_indices != causal_cone_indices:
+            if reward_data.causal_cone_qubits_indices != causal_cone_indices:
                 raise ValueError("Causal cone qubit indices must be the same")
 
     @property
@@ -55,5 +55,5 @@ class XEBRewardDataList(RewardDataList):
         return [reward_data.shots for reward_data in self.reward_data]
 
     @property
-    def causal_cone_qubit_indices(self) -> List[int]:
-        return
+    def causal_cone_qubits_indices(self) -> List[int]:
+        return self.reward_data[0].causal_cone_qubits_indices
