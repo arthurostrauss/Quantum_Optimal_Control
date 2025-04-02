@@ -151,7 +151,7 @@ class CustomPPO:
         return action, logprob
 
     def process_std(self, std_action):
-        return std_action
+        return std_action/10
 
     def train(
         self,

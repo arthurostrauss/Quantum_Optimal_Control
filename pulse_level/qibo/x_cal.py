@@ -44,7 +44,7 @@ action_space_low = np.array(
     [0.001], dtype=np.float32
 )  # [amp, phase, phase, duration]
 action_space_high = np.array(
-    [0.1], dtype=np.float32
+    [0.03], dtype=np.float32
 )  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
@@ -61,7 +61,7 @@ q_env_config = QEnvConfig(
     backend_config=qibo_config,
     action_space=action_space,
     reward_config=StateRewardConfig(),
-    benchmark_config=BenchmarkConfig(1, check_on_exp=True, method ="rb"),
+    benchmark_config=BenchmarkConfig(20, check_on_exp=True, method ="rb"),
     execution_config=ExecutionConfig(
         batch_size=32, sampling_paulis=50, n_shots=500, n_reps=1, c_factor = 1,
     ),
