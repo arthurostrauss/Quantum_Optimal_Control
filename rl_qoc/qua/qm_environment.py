@@ -259,10 +259,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         Returns:
 
         """
-        self.job.halt()
+        self.qm_job.halt()
 
     @property
-    def input_type(self) -> Literal["dgx", "input_stream", "IO1", "IO2"]:
+    def input_type(self) -> Literal["DGX", "INPUT_STREAM", "IO1", "IO2"]:
         """
         Get the input type for streaming to OPX
         """
