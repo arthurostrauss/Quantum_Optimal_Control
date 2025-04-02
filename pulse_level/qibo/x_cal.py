@@ -4,20 +4,15 @@ import numpy as np
 from gymnasium.spaces import Box
 from qiskit.quantum_info import Statevector
 
+from rl_qoc import BenchmarkConfig, RescaleAndClipAction
 from rl_qoc.qibo import QiboEnvironment
 from qiskit.circuit import QuantumCircuit, ParameterVector, Gate
 from qiskit.circuit.library import CZGate, RXGate, XGate
 from rl_qoc import (
     QEnvConfig,
     ExecutionConfig,
-    ChannelRewardConfig,
-    BenchmarkConfig,
-    StateRewardConfig,
-    RescaleAndClipAction,
 )
 from rl_qoc.qibo import QiboConfig
-
-from rl_qoc.agent.ppo import CustomPPO
 
 
 def param_circuit(
@@ -43,7 +38,7 @@ def get_backend():
 target = {"state": Statevector.from_label("1"), "physical_qubits": [0]}
 instruction_durations = {}
 action_space_low = np.array([0.001], dtype=np.float32)  # [amp, phase, phase, duration]
-action_space_high = np.array([0.1], dtype=np.float32)  # [amp, phase, phase, duration]
+action_space_high = np.array([0.03], dtype=np.float32)  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
@@ -58,7 +53,7 @@ q_env_config = QEnvConfig(
     target=target,
     backend_config=qibo_config,
     action_space=action_space,
-    reward=StateRewardConfig(),
+    reward="state",
     benchmark_config=BenchmarkConfig(20, check_on_exp=True, method="rb"),
     execution_config=ExecutionConfig(
         batch_size=32,
@@ -73,7 +68,6 @@ q_env_config = QEnvConfig(
 env = QiboEnvironment(
     q_env_config,
 )
-rescaled_env = RescaleAndClipAction(env, -1.0, 1.0)
 # env.circuits[0].draw(output="mpl")
 # # %%
 # env.baseline_circuits[0].draw(output="mpl")
@@ -89,7 +83,7 @@ print(agent_config)
 # %%
 ppo = CustomPPO(
     agent_config,
-    rescaled_env,
+    RescaleAndClipAction(env, -1.0, 1.0),
     save_data=True,
 )
 total_updates = TotalUpdates(500)

@@ -7,6 +7,7 @@ class DGXParameterPool:
     """
     A class to manage unique IDs for parameters.
     """
+
     _counter = itertools.count(1)
     _parameters_dict: Dict[int, Any] = {}
     _patched = False
@@ -81,8 +82,9 @@ class DGXParameterPool:
         return cls._parameters_dict
 
     @classmethod
-    def patch_opnic_wrapper(cls,
-                            path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"):
+    def patch_opnic_wrapper(
+        cls, path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"
+    ):
         """
         Patch the OPNIC wrapper.
 
@@ -90,6 +92,7 @@ class DGXParameterPool:
             path_to_opnic_dev (Optional[str]): The path to the OPNIC development directory
         """
         from .opnic_utils import patch_opnic_wrapper
+
         param_tables = list(cls.get_all_objs())
         patch_opnic_wrapper(param_tables, path_to_opnic_dev)
         cls._patched = True
@@ -99,19 +102,32 @@ class DGXParameterPool:
         # from opnic_python.opnic_wrapper import configure_stream
         # from opnic_python.opnic_wrapper import Direction_INCOMING, Direction_OUTGOING
         if "opnic_wrapper" not in sys.modules:
-            sys.path.append('/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python')
-        from opnic_wrapper import Direction_INCOMING, Direction_OUTGOING, configure_stream
+            sys.path.append(
+                "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
+            )
+        from opnic_wrapper import (
+            Direction_INCOMING,
+            Direction_OUTGOING,
+            configure_stream,
+        )
+
         for obj in cls.get_all_objs():
-            direction = Direction_INCOMING if obj.direction == "INCOMING" else Direction_OUTGOING
+            direction = (
+                Direction_INCOMING
+                if obj.direction == "INCOMING"
+                else Direction_OUTGOING
+            )
             configure_stream(obj.stream_id, direction)
         cls._configured = True
 
     @classmethod
-    def initialize_streams(cls, path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"):
+    def initialize_streams(
+        cls, path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"
+    ):
         """
         Initialize the OPNIC and the necessary streams for the current stage of the ParameterPool.
         Args:
-            path_to_opnic_dev: 
+            path_to_opnic_dev:
 
         Returns:
 
@@ -133,8 +149,11 @@ class DGXParameterPool:
     def close_streams(cls):
         if cls._configured and cls._patched:
             if "opnic_wrapper" not in sys.modules:
-                sys.path.append('/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python')
+                sys.path.append(
+                    "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
+                )
             from opnic_wrapper import close_stream
+
             for obj in cls.get_all_objs():
                 close_stream(obj.stream_id)
             cls._configured = False
