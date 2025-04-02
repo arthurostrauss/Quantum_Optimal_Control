@@ -4,19 +4,16 @@ import numpy as np
 from gymnasium.spaces import Box
 from qiskit.quantum_info import Statevector
 
-from rl_qoc import BenchmarkConfig, StateRewardConfig
+from rl_qoc import BenchmarkConfig, RescaleAndClipAction
 from rl_qoc.qibo import QiboEnvironment
 from qiskit.circuit import QuantumCircuit, ParameterVector, Gate
 from qiskit.circuit.library import CZGate, RXGate, XGate
 from rl_qoc import (
     QEnvConfig,
     ExecutionConfig,
-    ChannelRewardConfig,
 )
 from rl_qoc.qibo import QiboConfig
-from gymnasium.wrappers import ClipAction, RescaleAction
 
-from rl_qoc.agent.ppo import CustomPPO
 
 def param_circuit(
     qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
@@ -40,12 +37,8 @@ def get_backend():
 
 target = {"state": Statevector.from_label("1"), "physical_qubits": [0]}
 instruction_durations = {}
-action_space_low = np.array(
-    [0.001], dtype=np.float32
-)  # [amp, phase, phase, duration]
-action_space_high = np.array(
-    [0.03], dtype=np.float32
-)  # [amp, phase, phase, duration]
+action_space_low = np.array([0.001], dtype=np.float32)  # [amp, phase, phase, duration]
+action_space_high = np.array([0.03], dtype=np.float32)  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
@@ -60,15 +53,21 @@ q_env_config = QEnvConfig(
     target=target,
     backend_config=qibo_config,
     action_space=action_space,
-    reward_config=StateRewardConfig(),
-    benchmark_config=BenchmarkConfig(20, check_on_exp=True, method ="rb"),
+    reward="state",
+    benchmark_config=BenchmarkConfig(20, check_on_exp=True, method="rb"),
     execution_config=ExecutionConfig(
-        batch_size=32, sampling_paulis=50, n_shots=500, n_reps=1, c_factor = 1,
+        batch_size=32,
+        sampling_paulis=50,
+        n_shots=500,
+        n_reps=1,
+        c_factor=1,
     ),
 )
 
 # env = QuantumEnvironment(q_env_config)
-env = QiboEnvironment(q_env_config, )
+env = QiboEnvironment(
+    q_env_config,
+)
 # env.circuits[0].draw(output="mpl")
 # # %%
 # env.baseline_circuits[0].draw(output="mpl")
@@ -84,7 +83,7 @@ print(agent_config)
 # %%
 ppo = CustomPPO(
     agent_config,
-    ClipAction(RescaleAction(env, action_space.low, action_space_high)),
+    RescaleAndClipAction(env, -1.0, 1.0),
     save_data=True,
 )
 total_updates = TotalUpdates(500)

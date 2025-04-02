@@ -71,33 +71,60 @@ def construct_static_hamiltonian(
 
 def get_couplings(
     couplings: Dict[Tuple[int, int], float],
-    static_ham: Operator,
     a_ops: List[Operator],
     adag_ops: List[Operator],
-    channels: Dict[str, float],
     freqs: List[float],
-    ecr_ops: List[Operator],
     drive_ops: List[Operator],
-    num_controls: int,
 ):
     """
-    Processes coupling information to update the static Hamiltonian, control channels, and drive operators with
+    Processes coupling information to build coupling Hamiltonian, control channels, and drive operators with
     cross-resonance terms.
+
+    Parameters:
+    - couplings (Dict): A dictionary where each key is a tuple of two integers representing qubit indices,
+      and each value is a float representing the coupling strength between these qubits.
+    - a_ops (List): A list of annihilation operators for the qubits.
+    - adag_ops (List): A list of creation operators for the qubits.
+    - freqs (List): A list of frequencies for the qubits.
+    - drive_ops (List): A list of drive operators for the qubits.
     """
-    control_channel_map = {}
+
+    ecr_ops = []
+    coupling_ham = Operator(np.empty_like(drive_ops[0].data, dtype=complex))
+    control_channel_map, control_channels_freq = {}, {}
     keys = list(couplings.keys())
     for i, j in keys:
         couplings[(j, i)] = couplings[(i, j)]
-    for (i, j), coupling in couplings.items():
-        static_ham += (
+    for n, (qubits, coupling) in enumerate(couplings.items()):
+        i, j = qubits
+        coupling_ham += (
             2 * np.pi * coupling * ((a_ops[i] + adag_ops[i]) @ (a_ops[j] + adag_ops[j]))
         )
-        channels[f"u{num_controls}"] = freqs[j]
-        control_channel_map[(i, j)] = num_controls
-        num_controls += 1
+        control_channels_freq[f"u{n}"] = freqs[j]
+        control_channel_map[(i, j)] = n
         ecr_ops.append(drive_ops[i])
 
-    return static_ham, channels, ecr_ops, num_controls, control_channel_map
+    return coupling_ham, control_channels_freq, ecr_ops, control_channel_map
+
+
+def get_t1_t2_dissipators(t1s, t2s, a_ops, adag_ops):
+    """
+    Get the dissipators for the dynamics simulation.
+    """
+    dissipator_channels = []
+    static_dissipators = []
+    if t1s is not None:
+        for i, t1 in enumerate(t1s):
+            if t1 is not None:
+                dissipator_channels.append(f"d{i}")
+                static_dissipators.append(1 / t1 * a_ops[i])
+    if t2s is not None:
+        for i, t2 in enumerate(t2s):
+            if t2 is not None:
+                dissipator_channels.append(f"d{i}")
+                static_dissipators.append(1 / t2 * (adag_ops[i] @ a_ops[i]))
+
+    return dissipator_channels, static_dissipators
 
 
 def noise_coupling_sanity_check(qbit, errors, drive_ops_errorfree, drive_ops_error):

@@ -8,7 +8,8 @@ from typing import Optional, Literal, List
 
 import numpy as np
 from qiskit import QuantumCircuit
-from qiskit.circuit import Gate, Parameter, ParameterVector
+from qiskit.circuit import Gate, Parameter, ParameterVector, ControlFlowOp
+from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler import CouplingMap, TransformationPass, PassManager
 import qiskit_aer.noise as noise
@@ -186,13 +187,13 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
             passed as a tuple because of hashing in the Pass (default: None)
         """
         super().__init__()
-
-        assert all(
-            [isinstance(q, int) for q in target_subsystem]
-        ), "target_subsystem must be a tuple of integers"
-        assert all(
-            [q < len(spillover_rate_matrix) for q in target_subsystem]
-        ), "target_subsystem must be within the total number of qubits"
+        if target_subsystem is not None:
+            assert all(
+                [isinstance(q, int) for q in target_subsystem]
+            ), "target_subsystem must be a tuple of integers"
+            assert all(
+                [q < len(spillover_rate_matrix) for q in target_subsystem]
+            ), "target_subsystem must be within the total number of qubits"
         self._spillover_rate_matrix = spillover_rate_matrix
         self._target_subsystem = target_subsystem
 
@@ -215,12 +216,24 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
         - Transformed DAG circuit compatible with a Qiskit Aer built spillover noise model
         """
         new_dag = dag.copy_empty_like()
-        subsystem_qubits = [dag.qubits[q] for q in self.target_subsystem]
+        subsystem_mapping = {q: i for i, q in enumerate(self.target_subsystem)}
+        if (
+            self.target_subsystem is None
+            or len(self.target_subsystem) == dag.num_qubits()
+        ):
+            subsystem_qubits = dag.qubits
+
+        else:
+            subsystem_qubits = [dag.qubits[q] for q in self.target_subsystem]
+        subsystem_clbits = []
         for layer in dag.layers():
             for node in layer["graph"].op_nodes():
                 if node.name in ["rx", "ry", "rz"]:
                     if node.qargs[0] not in subsystem_qubits:
-                        continue
+                        # continue
+                        new_dag.apply_operation_back(
+                            node.op, qargs=node.qargs, cargs=node.cargs
+                        )
                     else:
                         qubit = node.qargs[0]
                         qubit_index = dag.find_bit(qubit).index
@@ -248,18 +261,37 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                                 Operator(rotation_gate),
                                 qargs=[0],
                             )
-
-                            gate_label = f"{node.name}({angle:.2f}, {qubit_index})"
+                            label_index = subsystem_mapping[qubit_index]
+                            gate_label = f"{node.name}({angle:.2f}, {label_index})"
                             new_dag.apply_operation_back(
                                 UnitaryGate(gate_op, label=gate_label),
                                 qargs=involved_qubits,
                             )
-                elif all([q in subsystem_qubits for q in node.qargs]):
-                    new_dag.apply_operation_back(node.op, qargs=node.qargs)
+                # elif all([q in subsystem_qubits for q in node.qargs]):
+                #     new_dag.apply_operation_back(node.op, qargs=node.qargs, cargs=node.cargs)
+                #     if node.cargs:
+                #         subsystem_clbits.extend(node.cargs)
+                elif isinstance(node.op, ControlFlowOp):
+                    # Handle control flow operations
+                    new_dag.apply_operation_back(
+                        node.op.replace_blocks(
+                            [
+                                dag_to_circuit(self.run(circuit_to_dag(block)))
+                                for block in node.op.blocks
+                            ]
+                        ),
+                        node.qargs,
+                        node.cargs,
+                    )
+                else:
+                    new_dag.apply_operation_back(
+                        node.op, qargs=node.qargs, cargs=node.cargs
+                    )
 
-            new_dag.remove_qubits(
-                *[q for q in new_dag.qubits if q not in subsystem_qubits]
-            )
+        # new_dag.remove_qubits(
+        #     *[q for q in new_dag.qubits if q not in subsystem_qubits]
+        # )
+        # new_dag.remove_clbits(*[c for c in new_dag.clbits if c not in subsystem_clbits])
         return new_dag
 
 
@@ -268,13 +300,19 @@ def create_spillover_noise_model_from_circuit(
     rotation_angles: List[float],
     rotation_axes: List[str],
     spillover_rate_matrix,
-    target_subsystem: tuple,
+    target_subsystem: tuple[int, int] = None,
 ):
     """
     Create a spillover noise model based on the given quantum circuit and spillover rate matrix.
     Matrix should be provided such that the element (i, j) represents the spillover rate from qubit i to qubit j.
     The noise model is constructed by applying spillover noise to each gate in the circuit based on the spillover rate matrix
     and the specified rotation angles for each qubit.
+    This noise model is specific to a very local use case, where the circuit that will be simulated will be a truncation
+    of the original layer circuit, that contains only the rotations that are present in the subsystem considered.
+    The noise binded will assume that the qubit indices for those target qubits will be remapped to 0 from the size of the
+    subsystem, as the layer is assumed to be non-entangling with the rest of the qubit. The user should therefore use
+    the right combination of the transpiler pass above, and a causal cone reduction to the circuit of interest to make it work.
+
 
     Parameters:
     - qc: QuantumCircuit object containing the circuit to generate the noise model for
@@ -290,6 +328,8 @@ def create_spillover_noise_model_from_circuit(
         ["unitary", "rzx", "cx", "u", "h", "x", "s", "z", "rx", "ry", "rz"]
     )
     total_num_qubits = len(rotation_angles)
+    if target_subsystem is None:
+        target_subsystem = (0, 1)
     assert all(
         [isinstance(q, int) for q in target_subsystem]
     ), "target_subsystem must be a tuple of integers"
@@ -317,17 +357,25 @@ def create_spillover_noise_model_from_circuit(
     for instruction in qc.data:
         if instruction.operation.label is not None:
             n_qargs = len(instruction.qubits)
-            qubit_index_in_subcircuit = qc.find_bit(
-                instruction.qubits[0]
-            ).index  # Main qubit undergoing rotation
-            noisy_operations[qubit_index_in_subcircuit][
-                "main_op"
-            ] = instruction.operation
+            involved_indices = [qc.find_bit(q).index for q in instruction.qubits]
+            main_qubit = involved_indices[0]  # Main qubit undergoing rotation
+            qubit_index_in_subcircuit = qubit_index_mapping[main_qubit]
+            new_instruction = instruction.operation.copy()
+            instruction_label: str = instruction.operation.label
+
+            new_instruction.label = (
+                instruction_label[: instruction_label.index(" ")]
+                + " "
+                + str(qubit_index_in_subcircuit)
+                + ")"
+            )
+
+            noisy_operations[qubit_index_in_subcircuit]["main_op"] = new_instruction
             noisy_operations[qubit_index_in_subcircuit]["noisy_op"] = (
                 Operator.from_label("I" * n_qargs)
             )
             noisy_operations[qubit_index_in_subcircuit]["qargs"] = [
-                qc.find_bit(q).index for q in instruction.qubits
+                qubit_index_mapping[q] for q in involved_indices
             ]
 
     for q, angle in enumerate(rotation_angles):
@@ -354,9 +402,15 @@ def create_spillover_noise_model_from_circuit(
         q_ = qubit_index_mapping[q]
         noise_model.add_quantum_error(
             noise.coherent_unitary_error(noisy_operations[q_]["noisy_op"]),
-            noisy_operations[q_]["main_op"],
+            noisy_operations[q_]["main_op"].label,
             noisy_operations[q_]["qargs"],
         )
+
+    noise_model.add_all_qubit_quantum_error(
+        noise.depolarizing_error(0.01, 1), ["h", "x", "s", "z", "rx", "ry", "rz"]
+    )
+    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [0])
+    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [1])
 
     return noise_model
 
@@ -364,7 +418,9 @@ def create_spillover_noise_model_from_circuit(
 def noisy_backend(
     circuit_context: QuantumCircuit,
     spillover_rate_matrix: np.ndarray,
-    target_subsystem: tuple,
+    target_subsystem: tuple = None,
+    coupling_map: Optional[CouplingMap] = None,
+    seed_simulator: Optional[int] = None,
 ):
     """
     Generate a noisy backend object with spillover noise based on the given circuit and spillover rate matrix
@@ -378,12 +434,13 @@ def noisy_backend(
     - AerSimulator object with the spillover noise model applied and the specified coupling map
 
     """
-    assert all(
-        [isinstance(q, int) for q in target_subsystem]
-    ), "target_subsystem must be a tuple of integers"
-    assert all(
-        [q < len(spillover_rate_matrix) for q in target_subsystem]
-    ), "target_subsystem must be within the total number of qubits"
+    if target_subsystem is not None:
+        assert all(
+            [isinstance(q, int) for q in target_subsystem]
+        ), "target_subsystem must be a tuple of integers"
+        assert all(
+            [q < len(spillover_rate_matrix) for q in target_subsystem]
+        ), "target_subsystem must be within the total number of qubits"
 
     rotation_angles = []
     rotation_axes = []
@@ -404,19 +461,26 @@ def noisy_backend(
     noise_model = create_spillover_noise_model_from_circuit(
         qc, rotation_angles, rotation_axes, spillover_rate_matrix, target_subsystem
     )
+    cm = (
+        coupling_map
+        if coupling_map is not None
+        else list(CouplingMap.from_line(circuit_context.num_qubits, True).get_edges())
+    )
     config = AerBackendConfiguration(
         "custom_spillover_impact_simulator",
         "2",
-        2,
+        circuit_context.num_qubits,
         BASIS_GATES["automatic"],
         [],
         int(1e7),
-        [(0, 1), (1, 0)],
+        cm,
         description="Custom simulator with spillover noise model",
         custom_instructions=AerSimulator._CUSTOM_INSTR["automatic"],
         simulator=True,
     )
 
-    backend = AerSimulator(noise_model=noise_model, configuration=config)
+    backend = AerSimulator(
+        noise_model=noise_model, configuration=config, seed_simulator=seed_simulator
+    )
 
     return backend

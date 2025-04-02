@@ -104,8 +104,8 @@ class QiskitBackendInfo(BackendInfo):
             pass_manager,
             skip_transpilation,
         )
-        if isinstance(backend, BackendV2) and backend.coupling_map is None:
-            raise QiskitError("Backend does not have a coupling map")
+        # if isinstance(backend, BackendV2) and backend.coupling_map is None:
+        #     raise QiskitError("Coupling map should be provided for the backend")
         self._backend = backend
         self._instruction_durations = custom_instruction_durations
 
@@ -160,8 +160,13 @@ class QiskitBackendInfo(BackendInfo):
                     ),
                     translation_method="translator",
                 )
-
-            circuit = self.pass_manager.run(circuit)
+            if self.backend is not None:
+                circuit = self.pass_manager.run(circuit)
+            else:
+                if isinstance(circuit, QuantumCircuit):
+                    circuit = circuit.decompose()
+                else:
+                    circuit = [circ.decompose() for circ in circuit]
         return circuit
 
     @property
@@ -172,6 +177,7 @@ class QiskitBackendInfo(BackendInfo):
         return (
             self.backend.coupling_map
             if isinstance(self.backend, BackendV2)
+            and self.backend.coupling_map is not None
             else CouplingMap.from_full(self._n_qubits)
         )
 

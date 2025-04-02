@@ -2,7 +2,16 @@ from typing import List, Tuple, Union, Dict, Optional, Sequence, Any
 import numpy as np
 import warnings
 from qiskit import pulse, QiskitError
-from qiskit.circuit import Gate, Parameter, ParameterVector, QuantumCircuit
+from qiskit.circuit import (
+    Gate,
+    Parameter,
+    ParameterVector,
+    QuantumCircuit,
+    SwitchCaseOp,
+    ForLoopOp,
+    IfElseOp,
+    WhileLoopOp,
+)
 from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map, RZGate
 from qiskit.providers import BackendV1, BackendV2
 from qiskit.qobj import QobjExperimentHeader
@@ -41,13 +50,16 @@ PulseInput = Union[pulse.Schedule, pulse.ScheduleBlock]
 
 
 def perform_standard_calibrations(
-    backend: DynamicsBackend, calibration_files: Optional[str] = None
+    backend: DynamicsBackend,
+    calibration_files: Optional[str] = None,
+    control_flow: bool = True,
 ):
     """
     Generate baseline single qubit gates (X, SX, RZ, H) for all qubits using traditional calibration experiments
     :param backend: Dynamics Backend on which calibrations should be run
     :param calibration_files: Optional calibration files containing single qubit gate calibrations for provided
         DynamicsBackend instance (Qiskit Experiments does not support this feature yet)
+    :param control_flow: Include control flow instructions in the backend
 
     """
     if not isinstance(backend, DynamicsBackend):
@@ -224,6 +236,12 @@ def perform_standard_calibrations(
     #     print("Calibrating CR for qubits", qubit_pair, "...")
     #     data_cr = cr_ham_exp.run().block_for_results()
     #     exp_results[qubit_pair] = data_cr
+    if control_flow:
+        for control_flow_op, control_op_name in zip(
+            [SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp],
+            ["switch_case", "for_loop", "if_else", "while_loop"],
+        ):
+            target.add_instruction(control_flow_op, name=control_op_name)
 
     print("Updated Instruction Schedule Map", target.instruction_schedule_map())
 

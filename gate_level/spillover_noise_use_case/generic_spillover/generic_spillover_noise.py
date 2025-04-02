@@ -9,7 +9,7 @@ from typing import Optional, Literal, List, Dict
 
 import numpy as np
 from qiskit import QuantumCircuit
-from qiskit.circuit import Gate
+from qiskit.circuit import Gate, Parameter, ParameterVector
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler import CouplingMap, TransformationPass, PassManager
 import qiskit_aer.noise as noise
@@ -54,7 +54,11 @@ def validate_args(
         )
     if len(rotation_axes) != num_qubits:
         raise ValueError("rotation_axis must have the same length as num_qubits")
-    if not isinstance(rotation_angles, list):
+    if (
+        not isinstance(rotation_angles, list)
+        and not isinstance(rotation_angles, ParameterVector)
+        or not all([isinstance(angle, (float, Parameter)) for angle in rotation_angles])
+    ):
         try:
             rotation_angles = rotation_angles.tolist()
         except AttributeError:
@@ -134,7 +138,7 @@ def get_parallel_gate_combinations(coupling_map: CouplingMap, direction="forward
 def circuit_context(
     num_qubits: int,
     rotation_axes: List[Literal["rx", "ry", "rz"]],
-    rotation_angles: List[float],
+    rotation_angles: List[float | Parameter] | ParameterVector,
     coupling_map: Optional[CouplingMap] = None,
     n_layers: int = 1,
 ):
@@ -156,6 +160,8 @@ def circuit_context(
     qc = QuantumCircuit(num_qubits)
     g_library = gate_map()
     available_combinations = get_parallel_gate_combinations(coupling_map)
+    # Sort out the combinations by applying the longest ones first
+    available_combinations.sort(key=lambda x: len(x), reverse=True)
     combination_count = 0
     for _ in range(n_layers):
         for qubit, axis, angle in zip(qubits, rotation_axes, rotation_angles):
@@ -307,7 +313,7 @@ def create_spillover_noise_model_from_circuit(
     - NoiseModel object containing the spillover noise model for the given circuit
     """
     noise_model = noise.NoiseModel(
-        ["unitary", "rzx", "cx", "u", "h", "x", "s", "z", "rx", "ry", "rz"]
+        ["unitary", "rzx", "cx", "u", "h", "x", "s", "z", "rx", "ry", "rz", "sdg"]
     )
     num_qubits = qc.num_qubits
     custom_instructions_counter = {i: 0 for i in range(num_qubits)}
@@ -374,6 +380,7 @@ def noisy_backend(
     circuit_context: QuantumCircuit,
     spillover_rate_matrix: np.ndarray,
     coupling_map: Optional[CouplingMap] = None,
+    seed_simulator: Optional[int] = None,
 ):
     """
     Generate a noisy backend object with spillover noise based on the given circuit and spillover rate matrix
@@ -415,6 +422,8 @@ def noisy_backend(
         simulator=True,
     )
 
-    backend = AerSimulator(noise_model=noise_model, configuration=config)
+    backend = AerSimulator(
+        noise_model=noise_model, configuration=config, seed_simulator=seed_simulator
+    )
 
     return backend

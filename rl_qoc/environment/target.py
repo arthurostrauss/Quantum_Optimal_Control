@@ -8,7 +8,7 @@ Created: 08/11/2024
 """
 
 from __future__ import annotations
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from qiskit.quantum_info import (
     DensityMatrix,
@@ -17,7 +17,6 @@ from qiskit.quantum_info import (
     pauli_basis,
     state_fidelity,
     average_gate_fidelity,
-    random_unitary,
 )
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
@@ -34,6 +33,7 @@ from ..helpers.circuit_utils import (
     density_matrix_to_statevector,
     get_gate,
     causal_cone_circuit,
+    get_2design_input_states,
 )
 import warnings
 
@@ -64,73 +64,17 @@ def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Ga
             np.real(
                 [
                     dms[k_].expectation_value(basis[k])
-                    for k, k_ in product(range(d**2), repeat=2)
+                    for k_, k in product(range(d**2), repeat=2)
                 ]
             )
             / d
         )
+        # dms = [target.to_matrix() @ basis[k].to_matrix() @ target.adjoint().to_matrix() for k in range(len(basis))]
+        # chi = np.real([np.trace(dms[k_] @ basis[k].to_matrix()) for k_, k in product(range(d**2), repeat=2)])/d
+
     # Real part is taken to convert it in good format,
     # but imaginary part is always 0. as dm is hermitian and Pauli is traceless
     return chi
-
-
-def get_2design_input_states(d: int = 4) -> List[Statevector]:
-    """
-    Function that return the 2-design input states (used for CAFE reward scheme)
-    Follows this Reference: https://arxiv.org/pdf/1008.1138 (see equations 2 and 13)
-    """
-    # Define constants
-    golden_ratio = (np.sqrt(5) - 1) / 2
-    omega = np.exp(2 * np.pi * 1j / d)
-
-    # Define computational basis states
-    e0 = np.array([1, 0, 0, 0], dtype=complex)  # |00⟩
-    e1 = np.array([0, 1, 0, 0], dtype=complex)  # |01⟩
-    e2 = np.array([0, 0, 1, 0], dtype=complex)  # |10⟩
-    e3 = np.array([0, 0, 0, 1], dtype=complex)  # |11⟩
-
-    # Create the Z matrix (diagonal matrix with powers of omega)
-    Z = np.diag([omega**r for r in range(d)])
-
-    # Create the X matrix (shift matrix)
-    X = np.zeros((d, d), dtype=complex)
-    for r in range(d - 1):
-        X[r, r + 1] = 1
-    X[d - 1, 0] = 1  # Wrap-around to satisfy the condition for |e_0>
-
-    # Define the fiducial state from Eq. (13)
-    coefficients = (
-        1
-        / (2 * np.sqrt(3 + golden_ratio))
-        * np.array(
-            [
-                1 + np.exp(-1j * np.pi / 4),
-                np.exp(1j * np.pi / 4) + 1j * golden_ratio ** (-3 / 2),
-                1 - np.exp(-1j * np.pi / 4),
-                np.exp(1j * np.pi / 4) - 1j * golden_ratio ** (-3 / 2),
-            ]
-        )
-    )
-
-    fiducial_state = (
-        coefficients[0] * e0
-        + coefficients[1] * e1
-        + coefficients[2] * e2
-        + coefficients[3] * e3
-    ).reshape(d, 1)
-    # Prepare all 16 states
-    states = []
-    for k in range(0, d):
-        for l in range(0, d):
-            # state = apply_hw_group(p1, p2, coefficients)
-            state = (
-                np.linalg.matrix_power(X, k)
-                @ np.linalg.matrix_power(Z, l)
-                @ fiducial_state
-            )
-            states.append(Statevector(state))
-
-    return states
 
 
 @dataclass
@@ -223,7 +167,7 @@ class StateTarget(BaseTarget):
         """
 
         if isinstance(state, DensityMatrix):
-            if state.purity() != 1:
+            if state.purity() - 1 > 1e-6:
                 raise ValueError("Density matrix should be pure")
             self.dm = state
         elif isinstance(state, Statevector):
@@ -246,7 +190,9 @@ class StateTarget(BaseTarget):
             self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
         )
 
-    def fidelity(self, state: QuantumState | QuantumCircuit, n_reps: int = 1, validate=True):
+    def fidelity(
+        self, state: QuantumState | QuantumCircuit, n_reps: int = 1, validate=True
+    ):
         """
         Compute the fidelity of the state with the target
         :param state: State to compare with the target state
@@ -284,7 +230,7 @@ class InputState(StateTarget):
         """
         super().__init__(circuit=input_circuit)
         self._target_op = target_op
-    
+
     def target_state(self, n_reps: int = 1):
         """
         Get the target state
@@ -294,11 +240,9 @@ class InputState(StateTarget):
             circ.append(self._target_op, self.tgt_register)
         else:
             circ = self._target_op
-        circ.repeat(n_reps).compose(self.circuit, 
-                                    front=True, 
-                                    inplace=True)
+        circ = circ.repeat(n_reps).compose(self.circuit, front=True, inplace=False)
         return StateTarget(circuit=circ)
-        
+
     @property
     def layout(self):
         raise AttributeError("Input state does not have a layout")
@@ -319,14 +263,14 @@ class InputState(StateTarget):
         return self.circuit
 
     @property
-    def target_circuit(self, n_reps:int = 1) -> QuantumCircuit:
+    def target_circuit(self, n_reps: int = 1) -> QuantumCircuit:
         """
         Get the target circuit for the input state
         """
         return self.target_state(n_reps).circuit
 
     @property
-    def target_dm(self, n_reps:int = 1) -> DensityMatrix:
+    def target_dm(self, n_reps: int = 1) -> DensityMatrix:
         """
         Get the target density matrix for the input state
         """
@@ -425,15 +369,17 @@ class GateTarget(BaseTarget):
             )
             for circ in input_circuits
         ]
-    
+
     def Chi(self, n_reps: int = 1):
         """
         Compute the characteristic function of the target gate
         :param n_reps: Number of repetitions of the target gate (default is 1)
         """
         if self.causal_cone_size <= 3:
-            return _calculate_chi_target(self.target_operator.power(n_reps,
-                                                                    assume_unitary=True))
+            if n_reps == 1:
+                return _calculate_chi_target(self.target_operator)
+            else:
+                return _calculate_chi_target(self.target_operator.power(n_reps))
         else:
             warnings.warn("Chi is not computed for more than 3 qubits")
             return None
@@ -457,9 +403,13 @@ class GateTarget(BaseTarget):
                 raise ValueError("Input could not be converted to channel") from e
         if not isinstance(channel, (Operator, QuantumChannel)):
             raise ValueError("Input should be an Operator object")
-        return average_gate_fidelity(
-            channel, Operator(self._circuit_context).power(n_reps)
-        )
+
+        if channel.num_qubits == self.causal_cone_size:
+            circuit = self.causal_cone_circuit
+        else:
+            circuit = self.target_circuit
+
+        return average_gate_fidelity(channel, Operator(circuit).power(n_reps))
 
     def state_fidelity(
         self, state: QuantumState, n_reps: int = 1, validate: bool = True
@@ -476,9 +426,13 @@ class GateTarget(BaseTarget):
             warnings.warn(
                 f"Input state is not normalized (norm = {np.linalg.norm(state)})"
             )
+        if state.num_qubits == self.causal_cone_size:
+            circuit = self.causal_cone_circuit
+        else:
+            circuit = self.target_circuit
         return state_fidelity(
             state,
-            Statevector(self._circuit_context.power(n_reps, True, True)),
+            Statevector(circuit.power(n_reps, True, True)),
             validate=validate,
         )
 
@@ -536,11 +490,37 @@ class GateTarget(BaseTarget):
         """
         Set the target circuit
         """
+        if not isinstance(target_op, QuantumCircuit):
+            raise ValueError("target_op should be a QuantumCircuit object")
+        elif target_op.num_qubits != self.target_circuit.num_qubits:
+            raise ValueError(
+                "Number of qubits in target_op should match the target circuit"
+            )
+
         self._circuit_context = target_op
         self.input_states = [
             InputState(input_state.circuit, target_op, self.tgt_register)
             for input_state in self.input_states
         ]
+
+        if self.has_context:
+            # Filter context to get causal cone of the target gate
+            target_qubits = [
+                self._circuit_context.qubits[i] for i in self.physical_qubits
+            ]
+            filtered_context, filtered_qubits = causal_cone_circuit(
+                self._circuit_context,
+                target_qubits,
+            )
+
+            self._causal_cone_qubits = filtered_qubits
+            self._causal_cone_size = len(filtered_qubits)
+            self._causal_cone_circuit = filtered_context
+
+        else:  # If no context is provided, the causal cone is the target qubits
+            self._causal_cone_qubits = self._circuit_context.qubits
+            self._causal_cone_circuit = self._circuit_context
+            self._causal_cone_size = self.n_qubits
 
     @property
     def has_context(self):

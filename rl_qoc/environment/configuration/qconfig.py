@@ -3,18 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List, Literal
 from gymnasium.spaces import Box
-
 from qiskit.providers import BackendV2
 from qiskit.transpiler import InstructionDurations, PassManager
 from .backend_config import BackendConfig
-from ..reward_methods import reward_dict, RewardConfig
+
 from .target_config import GateTargetConfig, StateTargetConfig
 from .execution_config import ExecutionConfig
 from .benchmark_config import BenchmarkConfig
+from ..backend_info import BackendInfo
 
 
 def default_benchmark_config():
     return BenchmarkConfig()
+
 
 @dataclass
 class QEnvConfig:
@@ -27,7 +28,7 @@ class QEnvConfig:
         backend_config (rl_qoc.environment.configuration.backend_config.BackendConfig): Backend configuration
         action_space (Space): Action space
         execution_config (ExecutionConfig): Execution configuration
-        reward_config (RewardConfig): Reward configuration
+        reward (Reward): Reward configuration
         benchmark_config (BenchmarkConfig): Benchmark configuration
     """
 
@@ -35,11 +36,12 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward_config: (
-        RewardConfig | Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"]
+    reward: (
+        Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward"
     ) = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
+    _backend_info: BackendInfo = None
 
     def __post_init__(self):
         if isinstance(self.target, Dict):
@@ -47,12 +49,51 @@ class QEnvConfig:
                 self.target = GateTargetConfig(**self.target)
             else:
                 self.target = StateTargetConfig(**self.target)
-        if isinstance(self.reward_config, str):
-            self.reward_config = reward_dict[self.reward_config]()
+        if isinstance(self.reward, str):
+            from ...rewards import reward_dict
+
+            self.reward = reward_dict[self.reward]()
+        else:
+            from ...rewards import Reward
+
+            if not isinstance(self.reward, Reward):
+                raise ValueError(
+                    "Reward configuration must be a string or a Reward instance"
+                )
+        if self.backend_config.config_type in ["qiskit", "dynamics", "runtime"]:
+            from ..backend_info import QiskitBackendInfo
+
+            self._backend_info = QiskitBackendInfo(
+                self.backend_config.backend,
+                self.backend_config.instruction_durations,
+                self.backend_config.pass_manager,
+                self.backend_config.skip_transpilation,
+            )
+        elif self.backend_config.config_type == "qibo":
+            from ...qibo.qibo_config import QiboBackendInfo
+
+            self._backend_info = QiboBackendInfo(
+                self.backend_config.n_qubits, self.backend_config.coupling_map
+            )
+        else:
+            raise ValueError("Backend configuration type not recognized")
 
     @property
     def backend(self) -> Optional[BackendV2]:
         return self.backend_config.backend
+
+    @backend.setter
+    def backend(self, backend: BackendV2):
+        self.backend_config.backend = backend
+        self.backend_config.parametrized_circuit_kwargs["backend"] = backend
+
+    @property
+    def backend_info(self) -> BackendInfo:
+        return self._backend_info
+
+    @backend_info.setter
+    def backend_info(self, value: BackendInfo):
+        self._backend_info = value
 
     @property
     def parametrized_circuit(self):
@@ -102,6 +143,9 @@ class QEnvConfig:
 
     @property
     def n_reps(self) -> List[int]:
+        """
+        List of possible number of repetitions / circuit depths for reward computation
+        """
         return self.execution_config.n_reps
 
     @n_reps.setter
@@ -115,11 +159,24 @@ class QEnvConfig:
         self.execution_config.n_reps = [value] if isinstance(value, int) else value
 
     @property
+    def current_n_reps(self) -> int:
+        """
+        Current number of repetitions / circuit depth for reward computation
+        """
+        return self.execution_config.current_n_reps
+
+    @property
     def c_factor(self):
+        """
+        Reward scaling factor
+        """
         return self.execution_config.c_factor
 
     @property
     def seed(self):
+        """
+        Random seed superseding the whole training
+        """
         return self.execution_config.seed
 
     @seed.setter
@@ -152,14 +209,16 @@ class QEnvConfig:
 
     @property
     def reward_method(self):
-        return self.reward_config.reward_method
+        return self.reward.reward_method
 
     @reward_method.setter
     def reward_method(
         self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
     ):
         try:
-            self.reward_config = reward_dict[value]()
+            from ...rewards import reward_dict
+
+            self.reward = reward_dict[value]()
         except KeyError as e:
             raise ValueError(f"Reward method {value} not recognized")
 
@@ -171,7 +230,7 @@ class QEnvConfig:
         Returns: Boolean indicating if DFE is used
 
         """
-        return self.reward_config.dfe
+        return self.reward.dfe
 
     @property
     def n_actions(self):
@@ -205,7 +264,7 @@ class QEnvConfig:
         self.backend_config.pass_manager = value
 
     def as_dict(self, to_json: bool = False):
-        config =  {
+        config = {
             "target": {
                 "physical_qubits": self.physical_qubits,
             },
@@ -237,10 +296,10 @@ class QEnvConfig:
             },
             "metadata": self.env_metadata,
         }
-        
+
         if isinstance(self.target, GateTargetConfig):
             config["target"]["gate"] = self.target.gate.name
         elif isinstance(self.target, StateTargetConfig) and not to_json:
             config["target"]["state"] = self.target.state.data
-            
+
         return config

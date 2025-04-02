@@ -430,3 +430,28 @@ class FilterLocalContext(TransformationPass):
                 current_cargs,
             )
         return list(set(qargs)), list(set(cargs))
+
+
+class CausalConePass(TransformationPass):
+
+    def __init__(self, qubits: Sequence[int | Qubit] | QuantumRegister):
+
+        self._causal_cone_qubits = qubits
+        super().__init__()
+
+    def run(self, dag: DAGCircuit):
+        qubits = self._causal_cone_qubits
+        if isinstance(qubits, Tuple) and all(isinstance(q, int) for q in qubits):
+            qubits = [dag.qubits[q] for q in qubits]
+        involved_qubits = [dag.quantum_causal_cone(q) for q in qubits]
+        involved_qubits = list(set([q for sublist in involved_qubits for q in sublist]))
+        filtered_dag = dag.copy_empty_like()
+        for node in dag.topological_op_nodes():
+            if all(q in involved_qubits for q in node.qargs):
+                filtered_dag.apply_operation_back(node.op, node.qargs)
+
+        filtered_dag.remove_qubits(
+            *[q for q in filtered_dag.qubits if q not in involved_qubits]
+        )
+
+        return filtered_dag

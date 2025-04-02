@@ -1,4 +1,4 @@
 from .parameter_table import ParameterTable
-from .parameter_value import ParameterValue
+from .parameter import Parameter
 
-__all__ = ["ParameterTable", "ParameterValue"]
+__all__ = ["ParameterTable", "Parameter"]

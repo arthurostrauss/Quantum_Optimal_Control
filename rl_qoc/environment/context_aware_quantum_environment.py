@@ -31,6 +31,7 @@ from qiskit.circuit import (
     CircuitInstruction,
     Gate,
     Instruction,
+    Parameter,
 )
 from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -50,6 +51,7 @@ from ..helpers import (
     simulate_pulse_input,
     MomentAnalysisPass,
     CustomGateReplacementPass,
+    retrieve_primitives,
 )
 from ..helpers.circuit_utils import get_instruction_timings, get_gate
 from .configuration.qconfig import QEnvConfig, GateTargetConfig
@@ -143,15 +145,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         )
         self.set_unbound_circuit_context(circuit_context, **context_kwargs)
 
-    def initial_reward_fit(self, params: np.array):
-        """
-        Method to fit the initial reward function to the first set of actions in the environment
-        with respect to the number of repetitions of the cycle circuit
-        """
-        qc = self.circuits[self.trunc_index].copy()
-        for n in range(1, max(self.config.n_reps)):
-            pubs, shots = self._reward_methods[self.config.reward_method](qc, params)
-
     def define_target_and_circuits(self):
         """
         Define target gate and circuits for calibration
@@ -203,9 +196,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             switch_truncation = False
             for op in moment:
                 baseline_dags[counts].apply_operation_back(op.op, op.qargs, op.cargs)
-                bit_indices = {
-                    q: context_dag.find_bit(q).index for q in context_dag.qubits
-                }
                 if (
                     target_op_nodes[0].op == op.op
                     and target_op_nodes[0].qargs == op.qargs
@@ -233,7 +223,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         ]
 
         pms = [PassManager(pass_) for pass_ in custom_gate_pass]
-        custom_circuits = [pm.run(circ) for pm, circ in zip(pms, baseline_circuits)]
+        custom_circuits = [
+            pm.run(circ).copy(f"custom_circ_{i}")
+            for i, (pm, circ) in enumerate(zip(pms, baseline_circuits))
+        ]
 
         # Case 2: each truncation concatenates the previous ones:
         # for i in range(tgt_instruction_counts, 0, -1):
@@ -245,13 +238,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         #     baseline_dags[i - 1] = ref_dag
         #     custom_circuits[i - 1] = custom_circ
 
-        baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
-
-        for custom_circ, baseline_circ in zip(custom_circuits, baseline_circuits):
-            custom_circ.metadata["baseline_circuit"] = baseline_circ.copy()
+        for i in range(tgt_instruction_counts):
+            custom_circuits[i].metadata["baseline_circuit"] = baseline_circuits[i].copy(
+                f"baseline_circ_{i}"
+            )
 
         input_states_choice = getattr(
-            self.config.reward_config.reward_args, "input_states_choice", "pauli4"
+            self.config.reward.reward_args, "input_states_choice", "pauli4"
         )
         if isinstance(self.backend, BackendV2):
             for op in self.backend.operations:
@@ -260,14 +253,15 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     self.custom_instructions.append(op)
                     operations_mapping[op.name] = op
 
-        target = [GateTarget(
-                    self.config.target.gate,
-                    self.physical_target_qubits,
-                    baseline_circuit,
-                    self.circ_tgt_register,
-                    layout,
-                    input_states_choice=input_states_choice,
-                ) 
+        target = [
+            GateTarget(
+                self.config.target.gate,
+                self.physical_target_qubits,
+                baseline_circuit,
+                self.circ_tgt_register,
+                layout,
+                input_states_choice=input_states_choice,
+            )
             for baseline_circuit, layout in zip(baseline_circuits, layouts)
         ]
         return target, custom_circuits, baseline_circuits
@@ -290,7 +284,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     def modify_environment_params(self):
         # self.n_reps = int(np.random.randint(4, 5))
-        print(f"\n Number of repetitions: {self.n_reps}")
+        if len(self.config.execution_config.n_reps) > 1:
+            print(f"\n Number of repetitions: {self.n_reps}")
 
     def step(
         self, action: ActType
@@ -363,7 +358,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             if np.mean(reward) > self._max_return:
                 self._max_return = np.mean(reward)
                 self._optimal_actions[self.trunc_index] = self.mean_action
-            self.reward_history.append(reward)
+
             assert (
                 len(reward) == self.batch_size
             ), f"Reward table size mismatch {len(reward)} != {self.batch_size} "
@@ -372,7 +367,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             ), "Reward table contains NaN or Inf values"
             optimal_error_precision = 1e-6
             max_fidelity = 1.0 - optimal_error_precision
+            if self._fit_function is not None:
+                reward = self._fit_function(reward, self.n_reps)
             reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
+            self.reward_history.append(reward)
             reward = -np.log(1.0 - reward)
 
             return obs, reward, terminated, False, self._get_info()
@@ -389,7 +387,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         else:
             return np.array([0, self.trunc_index])
 
-    def compute_benchmarks(self, qc: QuantumCircuit, params: np.array) -> np.array:
+    def compute_benchmarks(
+        self, qc: QuantumCircuit, params: np.array, update_env_history=True
+    ) -> np.array:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: Batch of actions
@@ -451,15 +451,20 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     [self.mean_action]
                 )  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":
-                fids = self.simulate_circuit(qc, params)
+                fids = self.simulate_circuit(qc, params, update_env_history)
             else:  # Pulse simulation
-                fids = self.simulate_pulse_circuit(qc, params)
+                fids = self.simulate_pulse_circuit(qc, params, update_env_history)
             print("Finished simulation benchmark \n")
-            print("Fidelities: ", np.mean(fids))
+
+            fidelity_type = "Gate" if self.target.causal_cone_size <= 3 else "State"
+            if len(fids) == 1:
+                print(f"{fidelity_type} Fidelity (per Cycle): ", fids[0])
+            else:
+                print(f"{fidelity_type} Fidelities (per Cycle): ", np.mean(fids))
             return fids
 
     @property
-    def parameters(self) -> List[ParameterVector]:
+    def parameters(self) -> List[ParameterVector] | List[List[Parameter]]:
         return self._parameters
 
     @property
@@ -467,7 +472,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         Return number of target instructions present in circuit context
         """
-        return self.circuit_context.data.count(self.target_instruction)
+        # return self.circuit_context.data.count(self.target_instruction)
+        return self.unbound_circuit_context.data.count(self.target_instruction)
 
     @property
     def target(self) -> GateTarget:
@@ -476,9 +482,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         return self._target[self.trunc_index]
 
-    def get_target(
-        self, trunc_index: Optional[int] = None
-    ):
+    def get_target(self, trunc_index: Optional[int] = None):
         """
         Return target to be calibrated at given truncation index.
         If no index is provided, return list of all targets.
@@ -559,6 +563,39 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         """
         self._unbound_circuit_context = new_context
+
+        # Define target register and nearest neighbor register for truncated circuits
+        self.circ_tgt_register = QuantumRegister(
+            bits=[
+                self._unbound_circuit_context.qubits[i]
+                for i in self.physical_target_qubits
+            ],
+            name="tgt",
+        )
+
+        # Adjust target register to match it with circuit context
+        self.target_instruction = CircuitInstruction(
+            get_gate(self.config.target.gate),
+            (qubit for qubit in self.circ_tgt_register),
+        )
+        tgt_instruction_counts = self.tgt_instruction_counts
+        if tgt_instruction_counts == 0:
+            raise ValueError("Target gate not found in circuit context")
+
+        self._parameters = [
+            [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
+            for j in range(tgt_instruction_counts)
+        ]
+
+        self._param_values = create_array(
+            tgt_instruction_counts,
+            self.batch_size,
+            self.action_space.shape[-1],
+        )
+
+        self._optimal_actions = [
+            np.zeros(self.config.n_actions) for _ in range(tgt_instruction_counts)
+        ]
         if not new_context.parameters:
             self.set_circuit_context(new_context.copy(), **kwargs)
 
@@ -583,56 +620,25 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             self.custom_circuit_context = self.circuit_context.copy_empty_like(
                 "custom_context"
             )
-            # Define target register and nearest neighbor register for truncated circuits
-            self.circ_tgt_register = QuantumRegister(
-                bits=[
-                    self._circuit_context.qubits[i] for i in self.physical_target_qubits
-                ],
-                name="tgt",
-            )
-
-            # Adjust target register to match it with circuit context
-            self.target_instruction = CircuitInstruction(
-                get_gate(self.config.target.gate),
-                (qubit for qubit in self.circ_tgt_register),
-            )
-            tgt_instruction_counts = self.tgt_instruction_counts
-            if tgt_instruction_counts == 0:
-                raise ValueError("Target gate not found in circuit context")
-
-            self._parameters = [
-                ParameterVector(f"a_{j}", self.n_actions)
-                for j in range(tgt_instruction_counts)
-            ]
-
-            self._param_values = create_array(
-                tgt_instruction_counts,
-                self.batch_size,
-                self.action_space.shape[-1],
-            )
-
-            self._optimal_actions = [
-                np.zeros(self.config.n_actions) for _ in range(tgt_instruction_counts)
-            ]
 
         else:
-            for param in kwargs:
-                if self._circuit_context.has_parameter(param):
-                    self._circuit_context.assign_parameters(
-                        {param: kwargs[param]}, inplace=True
-                    )
-                else:
-                    raise ValueError(f"Parameter {param} not found in circuit context")
+            self._circuit_context = self._unbound_circuit_context.assign_parameters(
+                kwargs
+            )
 
         if backend is not None:  # Update backend and backend info if provided
             self.backend = backend
-            self._backend_info = QiskitBackendInfo(
+            self.backend_info = QiskitBackendInfo(
                 backend,
                 self.config.backend_config.instruction_durations,
                 self.pass_manager,
                 self.config.backend_config.skip_transpilation,
             )
-
+            self._estimator, self._sampler = retrieve_primitives(
+                self.backend,
+                self.config.backend_config,
+                self.config.backend_config.as_dict().get("primitive_options", None),
+            )
         self._target, self.circuits, self.baseline_circuits = (
             self.define_target_and_circuits()
         )

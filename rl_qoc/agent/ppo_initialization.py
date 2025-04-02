@@ -10,7 +10,7 @@ from .ppo_utils import *
 from ..environment.base_q_env import BaseQuantumEnvironment
 
 
-def initialize_environment(env: BaseQuantumEnvironment | Wrapper) -> tuple:
+def get_environment_specs(env: BaseQuantumEnvironment | Wrapper) -> tuple:
     """
     Initializes the environment by extracting necessary information.
 
@@ -51,7 +51,7 @@ def initialize_networks(
     output_activation_std: nn.Module | str,
     chkpt_dir: str,
     chkpt_dir_critic: str,
-):
+) -> Agent:
     """
     Initializes the actor and critic networks for the Proximal Policy Optimization (PPO) algorithm.
 

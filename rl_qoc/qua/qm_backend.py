@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import inspect
-from abc import ABC, abstractmethod
-from typing import Iterable, List, Sequence, Dict, Optional, Callable, Union, Tuple
+from typing import Iterable, List, Dict, Optional, Callable, Union, Tuple
 
+import numpy as np
 from quam.components import Channel as QuAMChannel, Qubit, QubitPair
 from quam.components import BasicQuAM as QuAM
 
@@ -13,9 +12,9 @@ from qiskit.circuit import (
     ForLoopOp,
     IfElseOp,
     WhileLoopOp,
+    Gate,
 )
 from qiskit.circuit.library.standard_gates import (
-    get_standard_gate_name_mapping as gate_map,
     get_standard_gate_name_mapping,
 )
 from qiskit.providers import BackendV2 as Backend, QubitProperties
@@ -110,7 +109,14 @@ def look_for_standard_op(op: str):
         return "cz"
     elif op == "cnot":
         return "cx"
-
+    elif op == "x/2" or op == "x90":
+        return "sx"
+    elif op == "x180":
+        return "x"
+    elif op == "y180":
+        return "y"
+    elif op == "y90":
+        return "sy"
     return op
 
 
@@ -133,9 +139,11 @@ class QMBackend(Backend):
 
         self.machine = validate_machine(machine)
         self.channel_mapping: Dict[QiskitChannel, QuAMChannel] = channel_mapping
-        self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = {
-            v: k for k, v in channel_mapping.items()
-        }
+        self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = (
+            {v: k for k, v in channel_mapping.items()}
+            if channel_mapping is not None
+            else {}
+        )
         self._qubit_dict = {
             qubit.name: i for i, qubit in enumerate(machine.active_qubits)
         }
@@ -161,8 +169,16 @@ class QMBackend(Backend):
         """
         return {
             i: (channel.name for channel in qubit.channels)
-            for i, qubit in enumerate(self.machine)
+            for i, qubit in enumerate(self.machine.active_qubits)
         }
+
+    @property
+    def qubit_index_dict(self):
+        """
+        Returns a dictionary mapping qubit indices (Qiskit numbering) to corresponding Qubit objects (based on
+        active_qubits attribute of QuAM instance)
+        """
+        return {i: qubit for i, qubit in enumerate(self.machine.active_qubits)}
 
     @property
     def max_circuits(self):
@@ -179,6 +195,17 @@ class QMBackend(Backend):
         Populate the target instructions with the QOP configuration
         """
         gate_map = get_standard_gate_name_mapping()
+
+        class SYGate(Gate):
+            def __init__(self, label=None):
+                super().__init__("sy", 1, [], label=label)
+
+            def _define(self):
+                qc = QuantumCircuit(1)
+                qc.ry(np.pi / 2, 0)
+                self.definition = qc
+
+        gate_map["sy"] = SYGate()
         target = Target(
             "Transmon based QuAM",
             dt=1e-9,
@@ -187,7 +214,7 @@ class QMBackend(Backend):
             min_length=16,
             qubit_properties=[
                 QubitProperties(t1=qubit.T1, t2=qubit.T2ramsey, frequency=qubit.f_01)
-                for qubit in machine.qubits.values()
+                for qubit in machine.active_qubits
             ],
         )
 
@@ -322,7 +349,7 @@ class QMBackend(Backend):
             else:
                 validate_parameters(sched.parameters, param_table)
 
-            involved_parameters = [value.name for value in param_table.values]
+            involved_parameters = [value.name for value in param_table.parameters]
 
         def qua_macro(
             *params,
@@ -335,7 +362,7 @@ class QMBackend(Backend):
                         "Parameter table not declared and no parameters provided"
                     )
                 param_table.declare_variables(pause_program=False)
-                for param, value in zip(param_table.values, params):
+                for param, value in zip(param_table.parameters, params):
                     param.assign_value(value)
 
             time_tracker = {channel: 0 for channel in sched.channels}
@@ -456,7 +483,7 @@ class QMBackend(Backend):
         configuration through QuAM) as it modifies the QuAM configuration.
         """
 
-        qc, param_table = add_parameter_table_to_circuit(qc)
+        param_table = add_parameter_table_to_circuit(qc)
 
         if (
             hasattr(qc, "calibrations") and qc.calibrations
@@ -502,17 +529,10 @@ class QMBackend(Backend):
         Returns:
             Compilation result of the QuantumCircuit to QUA
         """
-        if qc.parameters:
-            if param_table is not None:
-                validate_parameters(qc.parameters, param_table)
-                if "parameter_table" not in qc.metadata:
-                    qc.metadata["parameter_table"] = param_table
-                else:
-                    assert (
-                        qc.metadata["parameter_table"] == param_table
-                    ), "Parameter table provided is different from the one in the QuantumCircuit metadata"
-            else:
-                param_table = qc.metadata.get("parameter_table", None)
+        if qc.parameters and param_table is None:
+            raise ValueError(
+                "QuantumCircuit contains parameters but no parameter table provided"
+            )
 
         open_qasm_code = qasm3_dumps(qc, includes=(), basis_gates=self._oq3_basis_gates)
         open_qasm_code = "\n".join(
@@ -520,6 +540,7 @@ class QMBackend(Backend):
             for line in open_qasm_code.splitlines()
             if not line.strip().startswith(("barrier",))
         )
+
         result = self.compiler.compile(
             open_qasm_code,
             inputs=(param_table.variables_dict if param_table.is_declared else None),
@@ -573,6 +594,18 @@ class QMBackend(Backend):
                 physical_qubits=self.qubit_mapping,
             )
         )
+
+    def connect(self) -> QuantumMachinesManager:
+        """
+        Connect to the Quantum Machines Manager
+        """
+        return self.machine.connect()
+
+    def generate_config(self) -> Dict:
+        """
+        Generate the configuration for the Quantum Machine
+        """
+        return self.machine.generate_config()
 
 
 class FluxTunableTransmonBackend(QMBackend):

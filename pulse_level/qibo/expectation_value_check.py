@@ -53,7 +53,7 @@ q_env_config = QEnvConfig(
     target=target,
     backend_config=qibo_config,
     action_space=action_space,
-    reward_config=StateRewardConfig(),
+    reward=StateRewardConfig(),
     benchmark_config=BenchmarkConfig(0),
     execution_config=ExecutionConfig(
         batch_size=10, sampling_paulis=50, n_shots=1000, n_reps=1
@@ -69,6 +69,6 @@ qc = QuantumCircuit(1)
 qc.x(0)
 
 # for amplitude in np.arange(0,0.09, 0.001):
-amplitude = 0.
-results = env.step(np.array([[amplitude]]*10))
+amplitude = 0.0
+results = env.step(np.array([[amplitude]] * 10))
 print(results)

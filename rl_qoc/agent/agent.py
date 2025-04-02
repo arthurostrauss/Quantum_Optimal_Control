@@ -123,6 +123,13 @@ class ActorNetwork(nn.Module):
     def load_checkpoint(self):
         torch.load(self.checkpoint_dir)
 
+    def to(self, device):
+        self.base_network.to(device)
+        self.mean_action.to(device)
+        self.critic_output.to(device)
+        if self.std_activation is not None:
+            self.std_action.to(device)
+
 
 class CriticNetwork(nn.Module):
     def __init__(
@@ -193,6 +200,9 @@ class CriticNetwork(nn.Module):
     def load_checkpoint(self):
         torch.load(self.checkpoint_dir)
 
+    def to(self, device):
+        self.critic_network.to(device)
+
 
 class Agent(nn.Module):
     def __init__(
@@ -232,3 +242,8 @@ class Agent(nn.Module):
         self.actor_net.save_checkpoint()
         if self.critic_net is not None:
             self.critic_net.save_checkpoint()
+
+    def to(self, device):
+        self.actor_net.to(device)
+        if self.critic_net is not None:
+            self.critic_net.to(device)
