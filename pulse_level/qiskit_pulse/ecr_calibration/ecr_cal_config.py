@@ -12,7 +12,7 @@ from rl_qoc.helpers import (
     to_python_identifier,
     new_params_ecr,
     new_params_sq_gate,
-    get_gate
+    get_gate,
 )
 from qiskit import pulse, QuantumCircuit, QuantumRegister, transpile
 from qiskit.circuit import ParameterVector, Gate, Parameter
@@ -133,7 +133,7 @@ def validate_pulse_kwargs(
     assert isinstance(
         target, dict
     ), "Target should be a dictionary with 'physical_qubits' keys."
-    
+
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
     if gate is not None:
         gate = get_gate(gate)

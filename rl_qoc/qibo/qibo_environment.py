@@ -41,7 +41,7 @@ class QiboEnvironment(QuantumEnvironment):
             if backend_config.config_type != "qibo":
                 raise TypeError("Backend config is not qibo config")
             else:
-                path = "rlqoc" + strftime("%d_%b_%H_%M_%S", gmtime())
+                path = "rlqoc_bis" + strftime("%d_%b_%H_%M_%S", gmtime())
                 with Executor.open(
                     "myexec",
                     path=path,
