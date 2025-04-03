@@ -165,8 +165,12 @@ def perform_standard_calibrations(
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
         # Identity gate
         id_cal = pulse.Schedule(
-            pulse.Delay(20, pulse.DriveChannel(qubit))
+            pulse.Delay(20, pulse.DriveChannel(qubit)),
+            name=f"id{qubit}",
         )  # Wait 20 cycles for identity gate
+        reset_cal = pulse.Schedule(
+            pulse.Delay(1000, pulse.DriveChannel(qubit)), name=f"reset{qubit}"
+        )
 
         delay_param = standard_gates["delay"].params[0]
         with pulse.build(backend, name=f"delay{qubit}") as delay_cal:
