@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import List, Tuple, Union, Dict, Optional, Sequence, Any
 import numpy as np
 import warnings
@@ -69,7 +70,7 @@ def perform_standard_calibrations(
 
     target, qubits, dt = backend.target, range(backend.num_qubits), backend.dt
     num_qubits = len(qubits)
-    single_qubit_properties = {(qubit,): None for qubit in qubits}
+    single_qubit_properties = {(qubit,): InstructionProperties() for qubit in qubits}
     single_qubit_errors = {(qubit,): 0.0 for qubit in qubits}
     two_qubit_properties = None
 
@@ -95,14 +96,21 @@ def perform_standard_calibrations(
             }
         backend.set_options(control_channel_map=control_channel_map)
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
-        two_qubit_properties = {qubits: None for qubits in control_channel_map}
+        two_qubit_properties = {
+            qubits: InstructionProperties() for qubits in control_channel_map
+        }
 
     standard_gates: Dict[str, Gate] = gate_map()  # standard gate library
-    fixed_phase_gates, fixed_phases = ["z", "s", "sdg", "t", "tdg"], np.pi * np.array(
-        [1, 0.5, -0.5, 0.25, -0.25]
-    )
+    fixed_phase_gates = {
+        "z": np.pi,
+        "s": np.pi / 2,
+        "sdg": -np.pi / 2,
+        "t": np.pi / 4,
+        "tdg": -np.pi / 4,
+    }
+
     other_gates = ["rz", "id", "h", "x", "sx", "reset", "delay"]
-    single_qubit_gates = fixed_phase_gates + other_gates
+    single_qubit_gates = list(fixed_phase_gates.keys()) + other_gates
     two_qubit_gates = ["ecr"]
     exp_results = {}
     existing_cals = calibration_files is not None
@@ -130,12 +138,12 @@ def perform_standard_calibrations(
     ):  # Check if instructions have already been added
         for gate in single_qubit_gates:
             target.add_instruction(
-                standard_gates[gate], properties=single_qubit_properties
+                standard_gates[gate], properties=deepcopy(single_qubit_properties)
             )
         if num_qubits > 1:
             for gate in two_qubit_gates:
                 target.add_instruction(
-                    standard_gates[gate], properties=two_qubit_properties
+                    standard_gates[gate], properties=deepcopy(two_qubit_properties)
                 )
             backend._coupling_map = target.build_coupling_map(two_qubit_gates[0])
 
@@ -166,15 +174,15 @@ def perform_standard_calibrations(
 
         # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
         for name, cal, duration in zip(
-            ["rz", "id", "delay", "reset"],
-            [rz_cal, id_cal, delay_cal, id_cal],
-            [0, 20 * dt, None, 1000 * dt],
+            ("rz", "id", "delay", "reset"),
+            (rz_cal, id_cal, delay_cal, id_cal),
+            (0, 20 * dt, None, 1000 * dt),
         ):
-            target.update_instruction_properties(
-                name, (qubit,), InstructionProperties(duration, 0.0, cal)
-            )
 
-        for phase, gate in zip(fixed_phases, fixed_phase_gates):
+            new_prop = InstructionProperties(duration, 0.0, cal)
+            target.update_instruction_properties(name, (qubit,), new_prop)
+
+        for gate, phase in fixed_phase_gates.items():
             gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
             instruction_prop = InstructionProperties(
                 gate_cal.duration * dt, 0.0, gate_cal
