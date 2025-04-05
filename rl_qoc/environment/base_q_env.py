@@ -207,18 +207,22 @@ class BaseQuantumEnvironment(ABC, Env):
             reward_data.append(np.mean(reward))
         if fit_function is None or inverse_fit_function is None:
 
-            def fit_function(n, spam, eps_lin, eps_quad):
-                return 1 - spam - eps_lin * n - eps_quad * n**2
+            # def fit_function(n, spam, eps_lin, eps_quad):
+            #     return 1 - spam - eps_lin * n - eps_quad * n**2
 
-            def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
-                return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
+            # def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
+            #     return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
 
-        p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
-        lower_bounds = [0.0, 0.0, 0.0]
-        upper_bounds = [0.1, 0.2, 0.1]
+            def two_qubit_general_fit(n, phi_1, phi_2):
+                channel_fid = (np.cos(n * phi_1 / 2) * np.cos(n * phi_2 / 2)) ** 2
+                return (4 * channel_fid + 1) / 5
+
+        p0 = [0.01, 0.01]  # Initial guess for the parameters
+        lower_bounds = [0.0, 0.0]
+        upper_bounds = [np.pi, np.pi]
 
         popt, pcov = curve_fit(
-            fit_function,
+            two_qubit_general_fit,
             self.config.execution_config.n_reps,
             reward_data,
             p0=p0,
@@ -232,7 +236,10 @@ class BaseQuantumEnvironment(ABC, Env):
         )
         ax.plot(
             self.config.execution_config.n_reps,
-            [fit_function(n, *popt) for n in self.config.execution_config.n_reps],
+            [
+                two_qubit_general_fit(n, *popt)
+                for n in self.config.execution_config.n_reps
+            ],
             label="Fit",
         )
         ax.set_xlabel("Number of repetitions")
