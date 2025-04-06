@@ -72,6 +72,8 @@ class OneParamAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         self.obs_angles = np.zeros(self.observation_space.shape)
         self.applied_qubit = applied_qubit
 
+        self.obs_raw = np.zeros(self.observation_space.shape)
+
     def define_target_and_circuits(self):
         """
         Define the target gate and the circuits to be executed

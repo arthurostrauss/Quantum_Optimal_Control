@@ -295,6 +295,7 @@ class BaseQuantumEnvironment(ABC, Env):
             if self.config.dfe
             else self.baseline_circuits[self.trunc_index]
         )
+        print(qc)
         if self.config.execution_config.n_reps_mode == "sequential":
             reward_data = rewarder.get_reward_data(
                 qc,
