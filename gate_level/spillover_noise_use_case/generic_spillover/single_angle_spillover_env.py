@@ -74,21 +74,6 @@ class OneParamAngleSpilloverEnv(ContextAwareQuantumEnvironment):
 
         self.obs_raw = np.zeros(self.observation_space.shape)
 
-    def define_target_and_circuits(self):
-        """
-        Define the target gate and the circuits to be executed
-        """
-        circuit_context = causal_cone_circuit(
-            self.circuit_context, list(self.config.env_metadata["target_subsystem"])
-        )[0]
-        self._physical_target_qubits = list(range(circuit_context.num_qubits))
-        self._circuit_context = circuit_context
-        target, custom_circuits, baseline_circuits = (
-            super().define_target_and_circuits()
-        )
-
-        return target, custom_circuits, baseline_circuits
-
     def obs_raw_to_angles(self, obs_raw):
         # Obs raw between -1. and 1.
         # Angles between self.obs_bounds[0] and self.obs_bounds[1]
