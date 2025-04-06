@@ -58,12 +58,12 @@ class DynamicsBackendEstimator(BackendEstimator):
             for i, value in zip(circuits, parameter_values)
         ]
         # Set JaxSolver options for running the circuits with the given parameters
-        self.backend.options.solver_options["parameter_dicts"] = parameter_dicts
-        self.backend.options.solver_options["subsystem_dims"] = (
+        self.backend.options.solver.run_options["parameter_dicts"] = parameter_dicts
+        self.backend.options.solver.run_options["subsystem_dims"] = (
             self.backend.options.subsystem_dims
         )
-        self.backend.options.solver_options["parameter_values"] = parameter_values
-        self.backend.options.solver_options["observables"] = transpile(
+        self.backend.options.solver.run_options["parameter_values"] = parameter_values
+        self.backend.options.solver.run_options["observables"] = transpile(
             self.preprocessed_circuits[0][1], self.backend
         )
         self.backend.set_options(**run_options)
@@ -88,14 +88,7 @@ class DynamicsBackendEstimator(BackendEstimator):
             new_bound_circuits, self._backend, **run_options
         )
 
-        # Reset JaxSolver options to avoid any conflict with the next estimator call / Benchmarking
-        for option in [
-            "parameter_dicts",
-            "subsystem_dims",
-            "parameter_values",
-            "observables",
-        ]:
-            self.backend.options.solver_options.pop(option)
+        # Reset the initial state to the default value for next runs
         self.backend.set_options(initial_state="ground_state")
         return self._postprocessing(result, accum, metadata)
 

@@ -452,6 +452,7 @@ class ParameterManager:
                         out.update(zip(param, value))
                     else:
                         out[param] = value
+<<<<<<< Updated upstream:pulse_level/qiskit_pulse/custom_jax_notebooks/modified_qiskit_scripts/parameter_manager.py
             elif isinstance(parameter, Sequence):
                 for param, val in zip(parameter, value):
                     if isinstance(param, str):
@@ -473,6 +474,23 @@ class ParameterManager:
                         if not self.disable_parameter_validation:
                             _validate_parameter_value(param, val)
                         out[param] = val
+=======
+                    elif (
+                        isinstance(param, ParameterVectorElement)
+                        and param.vector.name == parameter
+                    ):
+                        if not isinstance(value, Sequence):
+                            raise PulseError(
+                                f"ParameterVector '{param.vector.name}' has length {len(param.vector)},"
+                                f" but was assigned to a single value."
+                            )
+                        if len(param.vector) != len(value):
+                            raise PulseError(
+                                f"ParameterVector '{param.vector.name}' has length {len(param.vector)},"
+                                f" but was assigned to {len(value)} values."
+                            )
+                        out[param] = value[param.index]
+>>>>>>> Stashed changes:custom_jax_sim/modified_qiskit_scripts/parameter_manager.py
 
             else:
                 out[parameter] = value

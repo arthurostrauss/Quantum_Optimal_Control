@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from typing import List, Tuple, Union, Dict, Optional, Sequence, Any
 import numpy as np
@@ -15,6 +17,7 @@ from qiskit.circuit import (
 )
 from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map, RZGate
 from qiskit.providers import BackendV1, BackendV2
+from qiskit.pulse.transforms import block_to_schedule
 from qiskit.qobj import QobjExperimentHeader
 from qiskit.qobj.common import QobjHeader
 from qiskit.qobj.utils import MeasLevel, MeasReturnType
@@ -1193,3 +1196,21 @@ def handle_virtual_rotations(operations, fidelities, subsystem_dims, n_reps, tar
     fidelities = [target.fidelity(op, n_reps) for op in rotated_unitaries]
 
     return fidelities
+
+def generate_schedule_macro(sched: pulse.ScheduleBlock|pulse.Schedule):
+    """
+    Generate a new function replacing symbolic Qiskit Parameters by 'to-be-fed' JAX traced values
+    Args:
+        sched: ScheduleBlock or Schedule
+
+    Returns:
+        New function with arguments to be JAX traced values
+
+    """
+    sched = block_to_schedule(sched) if isinstance(sched, pulse.ScheduleBlock) else sched
+    def sched_macro(*args):
+        new_sched = pulse.Schedule()
+        for instruction in sched.instructions:
+            pass
+            
+        

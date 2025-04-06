@@ -93,8 +93,8 @@ def get_couplings(
     coupling_ham = Operator(np.empty_like(drive_ops[0].data, dtype=complex))
     control_channel_map, control_channels_freq = {}, {}
     keys = list(couplings.keys())
-    for i, j in keys:
-        couplings[(j, i)] = couplings[(i, j)]
+    # for i, j in keys:
+    #     couplings[(j, i)] = couplings[(i, j)]
     for n, (qubits, coupling) in enumerate(couplings.items()):
         i, j = qubits
         coupling_ham += (

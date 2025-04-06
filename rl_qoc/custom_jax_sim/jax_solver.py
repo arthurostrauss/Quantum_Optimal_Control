@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from qiskit.circuit import Gate, QuantumCircuit
-from qiskit import QiskitError
+from qiskit import QiskitError, pulse
 from qiskit.quantum_info import Operator, SuperOp, DensityMatrix, Statevector
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
@@ -28,6 +28,31 @@ from qiskit_dynamics import ArrayLike
 from jax import vmap, jit, numpy as jnp
 import numpy as np
 from scipy.integrate._ivp.ivp import OdeResult
+
+pauli_mapping = {"I": 0, "X": 1, "Y": 2, "Z": 3}
+
+
+def pauli_string_to_numbers(pauli_string: str):
+    """
+    This function converts a Pauli string to a list of numbers that represent the Pauli operators
+    """
+    return [pauli_mapping[pauli] for pauli in reversed(pauli_string)]
+
+
+def numbers_to_pauli_string(pauli_numbers: List[int]):
+    """
+    This function converts a list of numbers that represent the Pauli operators to a Pauli string
+    """
+    return "".join(
+        [key for key, value in pauli_mapping.items() if value in pauli_numbers]
+    )
+
+
+def pad_pauli_numbers(pauli_numbers: List[int], n_qubits: int):
+    """
+    This function pads a list of numbers that represent the Pauli operators to the desired number of qubits
+    """
+    return pauli_numbers + [0] * (n_qubits - len(pauli_numbers))
 
 
 def PauliToQuditOperator(qubit_ops: List[Operator], subsystem_dims: List[int]):
@@ -144,6 +169,14 @@ class JaxSolver(Solver):
             rwa_carrier_freqs,
             validate,
         )
+        self.run_options = {
+            "obs_paulis": [],
+            "parameter_bindings": None,
+            "subsystem_dims": None,
+            "h_cal": None,
+            "sdg_cal": None,
+        }
+        self._using_estimator = False
         self._y0 = None
         self.stored_results = []
         self.observables = []
@@ -176,8 +209,30 @@ class JaxSolver(Solver):
         if parametrized_schedule.is_parameterized():
             parametrized_schedule.assign_parameters(
                 {
-                    param_obj: param
-                    for (param_obj, param) in zip(self._param_names, params)
+                    param_name: param
+                    for (param_name, param) in zip(self._param_names, params)
+                }
+            )
+        signals = self._schedule_to_signals(parametrized_schedule)
+        self._set_new_signals(signals)
+        return model_sigs
+
+    def get_signals(self, input_state, params, obs):
+        """
+        This method generates the call to the circuit macro and sets the signals of the model.
+        It also returns the signals of the model before the new signals are set for easy resetting.
+
+        Args:
+            params: The parameters to be assigned to the parametrized schedule
+        """
+
+        parametrized_schedule = self.circuit_macro()
+        model_sigs = self.model.signals
+        if parametrized_schedule.is_parameterized():
+            parametrized_schedule.assign_parameters(
+                {
+                    param_name: param
+                    for (param_name, param) in zip(self._param_names, params)
                 }
             )
         signals = self._schedule_to_signals(parametrized_schedule)
@@ -262,10 +317,10 @@ class JaxSolver(Solver):
         the parameter values and the observables to be measured as solver options
         """
         if (
-            "parameter_dicts" not in kwargs
-            or "parameter_values" not in kwargs
-            or "observables" not in kwargs
-            or "subsystem_dims" not in kwargs
+            "parameter_dicts" not in self.run_options
+            or "parameter_values" not in self.run_options
+            or "observables" not in self.run_options
+            or "subsystem_dims" not in self.run_options
         ):
             # If the user is not using the estimator, then we can just use the original solver method
             return super()._solve_schedule_list_jax(
@@ -273,11 +328,14 @@ class JaxSolver(Solver):
             )
         else:
             estimator_usage = False  # Flag to check if the estimator is being used
-            if "observables" in kwargs and "subsystem_dims" in kwargs:
+            if (
+                "observables" in self.run_options
+                and "subsystem_dims" in self.run_options
+            ):
                 estimator_usage = True
                 observables_circuits: List[QuantumCircuit] = [
                     circ.remove_final_measurements(inplace=False)
-                    for circ in kwargs["observables"]
+                    for circ in self.run_options["observables"]
                 ]
 
                 pauli_rotations = [
@@ -298,17 +356,19 @@ class JaxSolver(Solver):
                         pauli_rotations[i][qubit_counter - 1] = pauli_rotations[i][
                             qubit_counter - 1
                         ].compose(Operator(circuit_instruction.operation))
-                subsystem_dims = self._subsystem_dims = kwargs["subsystem_dims"]
+                subsystem_dims = self._subsystem_dims = self.run_options[
+                    "subsystem_dims"
+                ]
                 observables = [
                     PauliToQuditOperator(pauli_rotations[i], subsystem_dims)
                     for i in range(len(pauli_rotations))
                 ]
                 self.observables = observables
-                kwargs.pop("observables")
-                kwargs.pop("subsystem_dims")
+                self.run_options.pop("observables")
+                self.run_options.pop("subsystem_dims")
 
-            self._param_names = kwargs["parameter_dicts"][0].keys()
-            param_values = self._param_values = kwargs["parameter_values"]
+            self._param_names = self.run_options["parameter_dicts"][0].keys()
+            param_values = self._param_values = self.run_options["parameter_values"]
 
             if self.circuit_macro is None:
                 raise ValueError(
@@ -319,7 +379,7 @@ class JaxSolver(Solver):
                 "parameter_dicts",
                 "parameter_values",
             ]:
-                kwargs.pop(key)
+                self.run_options.pop(key)
             self._kwargs = kwargs
 
             all_results = []
@@ -332,7 +392,6 @@ class JaxSolver(Solver):
                 state_type_wrapper,
             ) = validate_and_format_initial_state(y0_list[0], self.model)
             t_span = self._t_span = t_span_list[0]
-            start_time = time.time()
 
             batch_results_t, batch_results_y = self._jit_func(
                 unp.asarray(t_span),
@@ -341,7 +400,7 @@ class JaxSolver(Solver):
                 unp.asarray(y0_input),
                 y0_cls,
             )
-            print("Time to run simulation: ", time.time() - start_time)
+
             self._batched_sims = batch_results_y
             if estimator_usage:
                 for results_t, results_y in zip(batch_results_t, batch_results_y):
@@ -405,3 +464,92 @@ class JaxSolver(Solver):
         self._param_values = parameter_values
 
         return self._jit_func(t_span, y0, parameter_values, y0_input, y0_cls)
+
+    def _solve_schedule_list_jax(
+        self,
+        t_span_list: List[ArrayLike],
+        y0_list: List[Union[ArrayLike, QuantumState, BaseOperator]],
+        schedule_list: List[Schedule],
+        convert_results: bool = True,
+        **kwargs,
+    ) -> List[OdeResult]:
+        """
+        This method is overriding the one from the original Solver and is used to solve the
+        dynamics of the system using the jax backend for the specific use case of the DynamicsEstimator.
+        It assumes that a DynamicsEstimator job has been run previously and that the user has provided
+        the parameter values and the observables to be measured as solver options
+        """
+        if not self.using_estimator:
+            # If the user is not using the estimator, then we can just use the original solver method
+            return super()._solve_schedule_list_jax(
+                t_span_list, y0_list, schedule_list, convert_results, **kwargs
+            )
+        else:
+            observables = self.run_options["obs_paulis"]
+
+            self._param_names = self.run_options["parameter_dicts"][0].keys()
+            param_values = self._param_values = self.run_options["parameter_values"]
+
+            if self.circuit_macro is None:
+                raise ValueError(
+                    "No circuit macro has been provided, please provide a circuit macro"
+                )
+
+            for key in [
+                "parameter_dicts",
+                "parameter_values",
+            ]:
+                self.run_options.pop(key)
+            self._kwargs = kwargs
+
+            all_results = []
+
+            # setup initial state
+            (
+                y0,
+                y0_input,
+                y0_cls,
+                state_type_wrapper,
+            ) = validate_and_format_initial_state(y0_list[0], self.model)
+            t_span = self._t_span = t_span_list[0]
+
+            batch_results_t, batch_results_y = self._jit_func(
+                unp.asarray(t_span),
+                unp.asarray(y0),
+                unp.asarray(param_values),
+                unp.asarray(y0_input),
+                y0_cls,
+            )
+
+            self._batched_sims = batch_results_y
+            if estimator_usage:
+                for results_t, results_y in zip(batch_results_t, batch_results_y):
+                    for observable in observables:
+                        results = OdeResult(t=results_t, y=results_y)
+                        if y0_cls is not None and convert_results:
+                            results.y = [
+                                y0_cls(np.array(yi), dims=subsystem_dims)
+                                for yi in results.y
+                            ]
+
+                            # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables
+                            results.y[-1] = results.y[-1].evolve(observable)
+                            self.stored_results.append(results.y[-1])
+                        all_results.append(results)
+            else:
+                for results_t, results_y in zip(batch_results_t, batch_results_y):
+                    results = OdeResult(t=results_t, y=results_y)
+                    if y0_cls is not None and convert_results:
+                        results.y = [y0_cls(np.array(yi)) for yi in results.y]
+                    all_results.append(results)
+
+            return all_results
+
+    @property
+    def using_estimator(self):
+        return self._using_estimator
+
+    @using_estimator.setter
+    def using_estimator(self, value: bool):
+        assert isinstance(value, bool), "The value must be a boolean"
+        self._using_estimator = value
