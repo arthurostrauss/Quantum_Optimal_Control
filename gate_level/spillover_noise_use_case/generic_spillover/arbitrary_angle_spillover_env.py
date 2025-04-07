@@ -6,7 +6,7 @@ from qiskit.transpiler import Layout
 
 from rl_qoc import ContextAwareQuantumEnvironment, QEnvConfig, GateTarget
 import numpy as np
-from .spillover_effect_on_subsystem import (
+from spillover_effect_on_subsystem import (
     noisy_backend,
     circuit_context,
     LocalSpilloverNoiseAerPass,
