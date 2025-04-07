@@ -661,3 +661,20 @@ def extend_observables(
         )
 
     return observables
+
+def pauli_weight(pauli_obj: Union[Pauli, SparsePauliOp, PauliList]) -> Union[int, List[int]]:
+    """
+    Return the weight(s) of a Pauli object:
+    - For Pauli: returns a single int (number of non-identity terms).
+    - For SparsePauliOp: returns a list of ints (one per Pauli term).
+    - For PauliList: returns a list of ints (one per Pauli term).
+    """
+
+    if isinstance(pauli_obj, Pauli):
+        return pauli_obj.x|pauli_obj.z
+    elif isinstance(pauli_obj, SparsePauliOp):
+        return np.sum(pauli_obj.paulis.x | pauli_obj.paulis.z, axis=1).tolist()
+    elif isinstance(pauli_obj, PauliList):
+        return np.sum(pauli_obj.x|pauli_obj.z, axis=1).tolist()
+    else:
+        raise TypeError("Input must be a Pauli or SparsePauliOp.")

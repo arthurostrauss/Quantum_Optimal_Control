@@ -155,8 +155,6 @@ class ChannelReward(Reward):
         # Sample a list of input/observable pairs
         # If one pair is sampled repeatedly, it increases number of shots used to estimate its expectation value
 
-        self.total_counts = pauli_sampling
-
         samples, counts = np.unique(
             self.fiducials_rng.choice(
                 non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
@@ -180,6 +178,8 @@ class ChannelReward(Reward):
         pauli_indices = np.delete(pauli_indices, identity_terms, axis=0)
         samples = np.delete(samples, identity_terms)
         counts = np.delete(counts, identity_terms)
+        
+        basis = pauli_basis(num_qubits=n_qubits)
 
         reward_factor = c_factor * counts / (dim * Chi[samples])  # Based on DFE estimator
         fiducials_list = [
