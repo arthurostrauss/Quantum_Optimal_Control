@@ -136,3 +136,13 @@ pulse_level/qiskit_pulse/CustomDynamicsBackend.json
 gate_level/spillover_noise_use_case/runs/
 
 gate_level/spillover_noise_use_case/use_case_x_gate/runs/
+
+pulse_level/qibo/runs/
+
+pulse_level/qibo/wandb/
+
+gate_level/standard/wandb/
+
+gate_level/standard/runs/
+
+gate_level/spillover_noise_use_case/generic_spillover/wandb/
