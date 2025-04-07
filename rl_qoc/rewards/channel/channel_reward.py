@@ -122,12 +122,27 @@ class ChannelReward(Reward):
         prep_basis = Pauli6PreparationBasis()
 
         probabilities = Chi**2 / (dim**2)
-        cutoff = 1e-8
+        cutoff = 1e-4
         non_zero_indices = np.nonzero(probabilities > cutoff)[0]
         non_zero_probabilities = probabilities[non_zero_indices]
         non_zero_probabilities /= np.sum(non_zero_probabilities)
+        # Sort in descending order
+        non_zero_indices = np.argsort(non_zero_probabilities)[::-1]
+        non_zero_probabilities = non_zero_probabilities[non_zero_indices]
 
         basis = pauli_basis(num_qubits=n_qubits)  # all n_fold tensor-product single qubit Paulis
+
+        pauli_indices = np.array([np.unravel_index(sample, (dim**2, dim**2)) for sample in non_zero_indices], dtype=int)
+        # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
+        identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
+        id_coeff = (
+            c_factor
+            * dim
+            * np.sum(non_zero_probabilities[identity_terms] / (dim * Chi[non_zero_indices[identity_terms]]))
+        )
+        # Additional dim factor to account for all eigenstates of identity input state
+        
+        
 
         if dfe_precision is not None:
             # DFE precision guarantee, ϵ additive error, δ failure probability
@@ -161,10 +176,6 @@ class ChannelReward(Reward):
             c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
         )
         # Additional dim factor to account for all eigenstates of identity input state
-        self.id_coeff = (
-            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
-        )  # Additional dim factor to account for all eigenstates of identity input state
-        self._id_count = len(identity_terms)
 
         pauli_indices = np.delete(pauli_indices, identity_terms, axis=0)
         samples = np.delete(samples, identity_terms)
