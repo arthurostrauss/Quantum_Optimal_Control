@@ -83,7 +83,7 @@ def plot_curves(env: BaseQuantumEnvironment):
     plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
 
     ax[2].errorbar(
-        env.discrete_obs_vals,
+        env.discrete_obs_vals_angles,
         np.mean(env.discrete_reward_history, axis=0),
         yerr=np.std(env.discrete_reward_history, axis=0),
         label="Reward History",
@@ -93,7 +93,7 @@ def plot_curves(env: BaseQuantumEnvironment):
     ax[2].set_ylabel("Reward")
 
     ax[3].scatter(
-        env.discrete_obs_vals,
+        env.discrete_obs_vals_angles,
         env.prob_weights,
         label="Probability Distribution Weights",
     )
