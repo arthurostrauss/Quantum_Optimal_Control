@@ -172,6 +172,13 @@ class StateRewardDataList(RewardDataList):
         Return the fiducials.
         """
         return [reward_data.fiducials for reward_data in self.reward_data]
+    
+    @property
+    def total_shots(self) -> int:
+        """
+        Return the total number of shots.
+        """
+        return sum([reward_data.total_shots for reward_data in self.reward_data])
 
     def __repr__(self):
         """
