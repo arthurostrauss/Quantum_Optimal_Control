@@ -136,6 +136,7 @@ def circuit_context(
     rotation_axes: List[Literal["rx", "ry", "rz"]],
     rotation_angles: List[float | Parameter] | ParameterVector,
     coupling_map: Optional[CouplingMap] = None,
+    direction: Literal["forward", "reverse"] = "forward",
 ):
     """
     Generate a circuit containing a layer of single qubit rotations specified by the user
@@ -158,7 +159,7 @@ def circuit_context(
         rotation_gate = type(g_library[axis])(angle)
         qc.append(rotation_gate, [qubit])
 
-    for edge in get_parallel_gate_combinations(coupling_map)[0]:
+    for edge in get_parallel_gate_combinations(coupling_map, direction)[0]:
         qc.cx(*edge)
 
     return qc
@@ -245,6 +246,10 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                             new_dag.apply_operation_back(
                                 UnitaryGate(op, label=gate_label),
                                 qargs=[qubit],
+                            )
+                        else:
+                            new_dag.apply_operation_back(
+                                node.op, qargs=node.qargs, cargs=node.cargs
                             )
                         
                 # elif all([q in subsystem_qubits for q in node.qargs]):

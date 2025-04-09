@@ -777,6 +777,17 @@ class BaseQuantumEnvironment(ABC, Env):
             self.backend_info.coupling_map,
             self.physical_target_qubits + self.physical_neighbor_qubits,
         )
+    
+    @property
+    def transpiled_circuits(self):
+        """
+        Return the transpiled circuits
+        """
+        return self.backend_info.custom_transpile(self.circuits,
+                                                  initial_layout = self.target.layout,
+                                                  optimization_level=0,
+                                                  remove_final_measurements=False,
+                                                  )
 
     @property
     @abstractmethod
