@@ -158,13 +158,25 @@ class StateTarget(BaseTarget):
         state: Optional[DensityMatrix | Statevector] = None,
         circuit: Optional[QuantumCircuit] = None,
         physical_qubits: Optional[List[int]] = None,
+        tgt_register: Optional[QuantumRegister] = None,
+        layout: Optional[Layout] = None,
     ):
         """
         Initialize the state target for the quantum environment
         :param state: State to be calibrated (either DensityMatrix or Statevector)
         :param circuit: Circuit generating the target state (optional)
         :param physical_qubits: Physical qubits forming the target state
+        :param tgt_register: Specify target QuantumRegister if already declared
+        :param layout: Specify layout if already declared
         """
+        if (
+            circuit is not None
+            and tgt_register is not None
+            and tgt_register not in circuit.qregs
+        ):
+            raise ValueError("tgt_register should be part of the circuit if provided")
+        if circuit is not None and tgt_register is None:
+            tgt_register = circuit.qregs[0]
 
         if isinstance(state, DensityMatrix):
             if state.purity() - 1 > 1e-6:
@@ -179,7 +191,7 @@ class StateTarget(BaseTarget):
             self.dm = DensityMatrix(circuit)
             self.circuit = circuit if isinstance(circuit, QuantumCircuit) else None
         if circuit is None:
-            qc = QuantumCircuit(self.dm.num_qubits)
+            qc = QuantumCircuit(tgt_register)
             if not isinstance(state, Statevector):
                 state = density_matrix_to_statevector(state)
             qc.prepare_state(state)
@@ -187,7 +199,10 @@ class StateTarget(BaseTarget):
 
         self.Chi = _calculate_chi_target(self.dm)
         super().__init__(
-            self.dm.num_qubits if physical_qubits is None else physical_qubits, "state"
+            self.dm.num_qubits if physical_qubits is None else physical_qubits,
+            "state",
+            tgt_register=self.circuit.qregs[0],
+            layout=layout,
         )
 
     def fidelity(

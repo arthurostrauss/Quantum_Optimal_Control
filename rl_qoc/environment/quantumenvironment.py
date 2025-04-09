@@ -113,7 +113,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             )
 
         else:
-            target = StateTarget(**asdict(self.config.target))
+            target = StateTarget(**asdict(self.config.target), tgt_register=q_reg)
 
         custom_circuit = QuantumCircuit(q_reg, name="custom_circuit")
 

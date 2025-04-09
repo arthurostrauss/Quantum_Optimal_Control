@@ -172,7 +172,7 @@ class StateRewardDataList(RewardDataList):
         Return the fiducials.
         """
         return [reward_data.fiducials for reward_data in self.reward_data]
-    
+
     @property
     def total_shots(self) -> int:
         """
