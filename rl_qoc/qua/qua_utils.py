@@ -9,7 +9,6 @@ from qiskit.circuit.parametervector import (
 from qiskit.pulse import Schedule, ScheduleBlock
 
 from qm.qua import *
-from qm.qua._expressions import QuaArrayType
 
 from .parameter_table import ParameterTable, Parameter as QuaParameter
 import numpy as np
@@ -144,7 +143,7 @@ def clip_qua(param: QuaParameter, min_value, max_value):
                 assign(param.var[i], max_value)
 
 
-def clip_qua_var(param: QuaExpressionType, min_value, max_value):
+def clip_qua_var(param, min_value, max_value):
     """
     Clip the QUA variable between the min_value and the max_value
     :param param: The QUA variable
@@ -158,7 +157,7 @@ def clip_qua_var(param: QuaExpressionType, min_value, max_value):
         assign(param, max_value)
 
 
-def clip_qua_array(param: QuaArrayType, min_value, max_value):
+def clip_qua_array(param, min_value, max_value):
     """
     Clip the QUA array between the min_value and the max_value
     :param param: The QUA array

@@ -22,7 +22,7 @@ from qiskit.quantum_info import (
     Operator,
     SparsePauliOp,
     Pauli,
-    pauli_basis,
+    pauli_basis, PauliList,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import PassManager, CouplingMap
@@ -476,17 +476,21 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
     return states
 
 
-def observables_to_indices(observables: List[SparsePauliOp] | SparsePauliOp):
+def observables_to_indices(observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str):
     """
     Get single qubit indices of Pauli observables for the reward computation.
 
     Args:
         observables: Pauli observables to sample
     """
+    if isinstance(observables, (str, Pauli)):
+        observables = PauliList(Pauli(observables) if isinstance(observables, str) else observables)    
+    elif isinstance(observables, List) and all(isinstance(obs, (str, Pauli)) for obs in observables):
+        observables = PauliList([Pauli(obs) if isinstance(obs, str) else obs for obs in observables])
     observable_indices = []
     observables_grouping = (
         observables.group_commuting(qubit_wise=True)
-        if isinstance(observables, SparsePauliOp)
+        if isinstance(observables, (SparsePauliOp, PauliList))
         else observables
     )
     for obs_group in observables_grouping:  # Get indices of Pauli observables
@@ -498,12 +502,14 @@ def observables_to_indices(observables: List[SparsePauliOp] | SparsePauliOp):
         for pauli_term in reversed(
             reference_pauli.to_label()
         ):  # Get individual qubit indices for each Pauli term
-            if pauli_term == "I" or pauli_term == "Z":
+            if pauli_term == "I":
                 current_indices.append(0)
             elif pauli_term == "X":
                 current_indices.append(1)
             elif pauli_term == "Y":
                 current_indices.append(2)
+            elif pauli_term == "Z":
+                current_indices.append(3)
         observable_indices.append(tuple(current_indices))
     return observable_indices
 
