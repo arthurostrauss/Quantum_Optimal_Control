@@ -4,7 +4,7 @@ from typing import Iterable, List, Dict, Optional, Callable, Union, Tuple
 
 import numpy as np
 from quam.components import Channel as QuAMChannel, Qubit, QubitPair
-from quam.components import BasicQuAM as QuAM
+from quam.components import BasicQuam as QuAM
 
 from qiskit.circuit import (
     QuantumCircuit,

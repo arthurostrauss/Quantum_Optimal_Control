@@ -22,7 +22,8 @@ from qiskit.quantum_info import (
     Operator,
     SparsePauliOp,
     Pauli,
-    pauli_basis, PauliList,
+    pauli_basis,
+    PauliList,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import PassManager, CouplingMap
@@ -476,7 +477,11 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
     return states
 
 
-def observables_to_indices(observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str):
+def observables_to_indices(
+    observables: (
+        List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str
+    )
+):
     """
     Get single qubit indices of Pauli observables for the reward computation.
 
@@ -484,9 +489,15 @@ def observables_to_indices(observables: List[SparsePauliOp, Pauli, str] | Sparse
         observables: Pauli observables to sample
     """
     if isinstance(observables, (str, Pauli)):
-        observables = PauliList(Pauli(observables) if isinstance(observables, str) else observables)    
-    elif isinstance(observables, List) and all(isinstance(obs, (str, Pauli)) for obs in observables):
-        observables = PauliList([Pauli(obs) if isinstance(obs, str) else obs for obs in observables])
+        observables = PauliList(
+            Pauli(observables) if isinstance(observables, str) else observables
+        )
+    elif isinstance(observables, List) and all(
+        isinstance(obs, (str, Pauli)) for obs in observables
+    ):
+        observables = PauliList(
+            [Pauli(obs) if isinstance(obs, str) else obs for obs in observables]
+        )
     observable_indices = []
     observables_grouping = (
         observables.group_commuting(qubit_wise=True)
@@ -495,7 +506,7 @@ def observables_to_indices(observables: List[SparsePauliOp, Pauli, str] | Sparse
     )
     for obs_group in observables_grouping:  # Get indices of Pauli observables
         current_indices = []
-        paulis = obs_group.paulis  # Get Pauli List out of the SparsePauliOp
+        paulis = obs_group.paulis if isinstance(obs_group, SparsePauliOp) else obs_group
         reference_pauli = Pauli(
             (np.logical_or.reduce(paulis.z), np.logical_or.reduce(paulis.x))
         )

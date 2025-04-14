@@ -20,5 +20,5 @@ class LocalSpilloverEnvironment(ContextAwareQuantumEnvironment):
     #     target, custom_circuits, baseline_circuits = (
     #         super().define_target_and_circuits()
     #     )
-    # 
+    #
     #     return target, custom_circuits, baseline_circuits
