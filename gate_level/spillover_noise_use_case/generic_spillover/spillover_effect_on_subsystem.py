@@ -136,6 +136,7 @@ def circuit_context(
     rotation_axes: List[Literal["rx", "ry", "rz"]],
     rotation_angles: List[float | Parameter] | ParameterVector,
     coupling_map: Optional[CouplingMap] = None,
+    direction: Literal["forward", "reverse"] = "forward",
 ):
     """
     Generate a circuit containing a layer of single qubit rotations specified by the user
@@ -158,7 +159,7 @@ def circuit_context(
         rotation_gate = type(g_library[axis])(angle)
         qc.append(rotation_gate, [qubit])
 
-    for edge in get_parallel_gate_combinations(coupling_map)[0]:
+    for edge in get_parallel_gate_combinations(coupling_map, direction)[0]:
         qc.cx(*edge)
 
     return qc
@@ -166,8 +167,8 @@ def circuit_context(
 
 class LocalSpilloverNoiseAerPass(TransformationPass):
     """
-    A pass to transform the circuit to make it compatible with a Qiskit Aer built spillover noise model
-    This pass essentially looks at every local rotation gate such as rx, ry, rz, and transforms it in a generic n qubit
+    A pass to transform the circuit to make it compatible with a Qiskit Aer built classical microwave crosstalk model.
+    This pass looks at every local rotation gate (rx, ry, rz), and transforms it into a custom unitary
     operation on which arbitrary spillover noise from any qubit can be applied. To make this transformation more efficient,
     the user can pass in advance the spillover rate matrix which represents the spillover rate between qubits. If one
     contribution of spillover noise is to be applied to a qubit, the corresponding element in the matrix should be non-zero.
@@ -239,34 +240,18 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                         qubit_index = dag.find_bit(qubit).index
                         angle = node.op.params[0]
                         rotation_gate = type(node.op)(angle)
-                        if self.spillover_rate_matrix is not None:
-                            involved_qubits_indices = [qubit_index]
-                            other_qubits = [
-                                qubit_ for qubit_ in subsystem_qubits if qubit_ != qubit
-                            ]
-                            for other_subsystem_qubit in other_qubits:
-                                other_index = dag.find_bit(other_subsystem_qubit).index
-                                if (
-                                    self.spillover_rate_matrix[qubit_index, other_index]
-                                    != 0.0
-                                ):
-                                    involved_qubits_indices.append(other_index)
-
-                            involved_qubits = [
-                                dag.qubits[i] for i in involved_qubits_indices
-                            ]
-
-                            gate_op = Operator.from_label("I" * len(involved_qubits))
-                            gate_op = gate_op.compose(
-                                Operator(rotation_gate),
-                                qargs=[0],
-                            )
-                            label_index = subsystem_mapping[qubit_index]
-                            gate_label = f"{node.name}({angle:.2f}, {label_index})"
+                        op = Operator(rotation_gate)
+                        if self.spillover_rate_matrix is not None and np.any(self.spillover_rate_matrix[:, qubit_index] != 0.0):
+                            gate_label = f"{node.name}({angle:.2f}, {subsystem_mapping[qubit_index]})"
                             new_dag.apply_operation_back(
-                                UnitaryGate(gate_op, label=gate_label),
-                                qargs=involved_qubits,
+                                UnitaryGate(op, label=gate_label),
+                                qargs=[qubit],
                             )
+                        else:
+                            new_dag.apply_operation_back(
+                                node.op, qargs=node.qargs, cargs=node.cargs
+                            )
+                        
                 # elif all([q in subsystem_qubits for q in node.qargs]):
                 #     new_dag.apply_operation_back(node.op, qargs=node.qargs, cargs=node.cargs)
                 #     if node.cargs:
@@ -345,72 +330,52 @@ def create_spillover_noise_model_from_circuit(
     ), "spillover_rate_matrix must be a square matrix"
 
     qubit_index_mapping = {q: i for i, q in enumerate(target_subsystem)}
-    noisy_operations = {
-        qubit_index_mapping[q]: {
-            "main_op": None,
-            "noisy_op": Operator.from_label("I"),
-            "qargs": [qubit_index_mapping[q]],
-        }
+    
+    noisy_ops = {
+        qubit_index_mapping[q]: {"noise_op": Operator.from_label("I"),
+        "label": ""}
         for q in target_subsystem
     }
 
     for instruction in qc.data:
         if instruction.operation.label is not None:
-            n_qargs = len(instruction.qubits)
-            involved_indices = [qc.find_bit(q).index for q in instruction.qubits]
-            main_qubit = involved_indices[0]  # Main qubit undergoing rotation
+            assert len(instruction.qubits) == 1, "Only single qubit operations are supported"
+            main_qubit = qc.find_bit(instruction.qubits[0]).index  # Main qubit undergoing rotation
             qubit_index_in_subcircuit = qubit_index_mapping[main_qubit]
-            new_instruction = instruction.operation.copy()
+            
             instruction_label: str = instruction.operation.label
+            new_instruction_label = instruction_label[: instruction_label.index(" ")]
+            new_instruction_label += " "
+            new_instruction_label += str(qubit_index_in_subcircuit)
+            new_instruction_label += ')'
+            noisy_ops[qubit_index_in_subcircuit]["label"] = new_instruction_label
 
-            new_instruction.label = (
-                instruction_label[: instruction_label.index(" ")]
-                + " "
-                + str(qubit_index_in_subcircuit)
-                + ")"
-            )
-
-            noisy_operations[qubit_index_in_subcircuit]["main_op"] = new_instruction
-            noisy_operations[qubit_index_in_subcircuit]["noisy_op"] = (
-                Operator.from_label("I" * n_qargs)
-            )
-            noisy_operations[qubit_index_in_subcircuit]["qargs"] = [
-                qubit_index_mapping[q] for q in involved_indices
-            ]
-
-    for q, angle in enumerate(rotation_angles):
-        for target_q in target_subsystem:
-            gamma = spillover_rate_matrix[q, target_q]
-            if gamma != 0.0 and angle != 0.0:
-                noisy_unitary = Operator(
-                    type(gate_map()[rotation_axes[q]])(gamma * angle)
-                )
-                noisy_op = noisy_operations[qubit_index_mapping[target_q]]["noisy_op"]
-
-                noisy_operations[qubit_index_mapping[target_q]]["noisy_op"] = (
-                    noisy_op.compose(
-                        noisy_unitary,
-                        qargs=(
-                            [qubit_index_mapping[target_q]]
-                            if noisy_op.num_qubits > 1
-                            else None
-                        ),
+            noise_op = Operator.from_label('I')
+            for q, angle in enumerate(rotation_angles):
+                gamma = spillover_rate_matrix[q, main_qubit]
+                if np.abs(gamma * angle) > 1e-8:
+                    noisy_unitary = Operator(
+                        type(gate_map()[rotation_axes[q]])(gamma * angle)
                     )
-                )
+                    noise_op = noise_op.compose(
+                        noisy_unitary)
+            
+            noisy_ops[qubit_index_in_subcircuit]["noise_op"] = noise_op
+                
 
     for q in target_subsystem:
         q_ = qubit_index_mapping[q]
         noise_model.add_quantum_error(
-            noise.coherent_unitary_error(noisy_operations[q_]["noisy_op"]),
-            noisy_operations[q_]["main_op"].label,
-            noisy_operations[q_]["qargs"],
+            noise.coherent_unitary_error(noisy_ops[q_]["noise_op"]),
+            noisy_ops[q_]["label"],
+            [q_],
         )
 
-    noise_model.add_all_qubit_quantum_error(
-        noise.depolarizing_error(0.01, 1), ["h", "x", "s", "z", "rx", "ry", "rz"]
-    )
-    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [0])
-    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [1])
+    # noise_model.add_all_qubit_quantum_error(
+    #     noise.depolarizing_error(0.01, 1), ["h", "x", "s", "z", "rx", "ry", "rz"]
+    # )
+    # noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [0])
+    # noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [1])
 
     return noise_model
 

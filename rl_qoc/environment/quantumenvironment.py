@@ -184,7 +184,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         optimal_error_precision = 1e-6
         max_fidelity = 1.0 - optimal_error_precision
         reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
-        reward = -np.log(1.0 - reward)
+        reward = -np.log10(1.0 - reward)
         return self._get_obs(), reward, terminated, False, self._get_info()
 
     # def check_reward(self):
