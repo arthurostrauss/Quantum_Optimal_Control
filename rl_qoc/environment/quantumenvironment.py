@@ -22,6 +22,7 @@ from qiskit import schedule, pulse, QuantumRegister
 from qiskit.circuit import (
     QuantumCircuit,
     ParameterVector,
+    Parameter,
 )
 
 # Qiskit Quantum Information, for fidelity benchmarking
@@ -51,7 +52,10 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         Args:
             training_config: QEnvConfig object containing the training configuration
         """
-        self._parameters = ParameterVector("θ", training_config.n_actions)
+        # self._parameters = ParameterVector("θ", training_config.n_actions)
+        self._parameters = [
+            Parameter(f"a_{i}") for i in range(training_config.n_actions)
+        ]
 
         super().__init__(training_config)
 

@@ -187,7 +187,14 @@ class CustomGateReplacementPass(TransformationPass):
                 dag.substitute_node_with_dag(
                     node, circuit_to_dag(qc), wires=args if args else None
                 )
-
+        for gate_name, cal_info in qc.calibrations.items():
+            for (qubits, parameters), schedule in cal_info.items():
+                dag.add_calibration(
+                    gate_name,
+                    qubits,
+                    schedule,
+                    params=parameters,
+                )
         return dag
 
 

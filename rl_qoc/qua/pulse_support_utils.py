@@ -1,26 +1,24 @@
+from __future__ import annotations
+
 from qiskit.circuit import Parameter
 from qiskit.circuit.parametervector import ParameterVectorElement
-from qm.qua import Math, amp as qua_amp, reset_phase, QuaVariableType, assign, if_
+from qm.qua import Math, amp as qua_amp
 from qiskit.pulse.library.pulse import Pulse as QiskitPulse
 from quam.components import Channel as QuAMChannel
+from qiskit.pulse.channels import Channel as QiskitChannel
 from qiskit.pulse import (
     Play,
     Instruction,
     Schedule,
     ScheduleBlock,
     Acquire,
-    ShiftPhase,
-    ShiftFrequency,
-    SetFrequency,
-    SetPhase,
-    Delay,
 )
 from .sympy_to_qua import sympy_to_qua
 from qiskit.circuit.parameterexpression import ParameterExpression
 from .parameter_table import ParameterTable, Parameter as QuaParameter
-from typing import Dict, List, Optional, Callable, Union, Type
-from functools import partial
+from typing import Dict, Optional, Type
 from qiskit.pulse.transforms import block_to_schedule
+from .pulse_to_qua import *
 
 # TODO: Add duration to the list of real-time parameters (need ScheduleBlock to QUA compiler)
 _real_time_parameters = {
@@ -28,49 +26,14 @@ _real_time_parameters = {
     "angle",
     "frequency",
     "phase",
+    "duration",
 }  # Parameters that can be used in real-time
-_ref_amp = 0.5
-_ref_phase = 0.0
-
-_qiskit_to_qua_instructions: Dict[Type, Dict[str, Union[Callable, List[str]]]] = {
-    ShiftPhase: {
-        "macro": lambda channel, phase: channel.frame_rotation(phase),
-        "params": ["phase"],
-    },
-    ShiftFrequency: {
-        "macro": lambda channel, frequency: channel.update_frequency(
-            frequency + channel.intermediate_frequency
-        ),
-        "params": ["frequency"],
-    },
-    SetFrequency: {
-        "macro": lambda channel, frequency: channel.update_frequency(frequency),
-        "params": ["frequency"],
-    },
-    SetPhase: {
-        "macro": lambda channel, phase: (
-            reset_phase(channel.name),
-            channel.frame_rotation(phase),
-        ),
-        "params": ["phase"],
-    },
-    Delay: {
-        "macro": lambda channel, duration: channel.wait(duration),
-        "params": ["duration"],
-    },
-    Play: {
-        "macro": lambda channel, pulse, amp=None, angle=None, duration=None: channel.play(
-            pulse.name, amplitude_scale=get_amp_matrix(amp, angle), duration=duration
-        ),
-        "params": ["pulse"],
-    },
-}
 
 
 def get_real_time_pulse_parameters(pulse: QiskitPulse):
     """
     Get the real-time parameters of a Qiskit Pulse, that is parameters of the pulse that are
-    not known at compile time and need to be calculated at runtime (i.e. ParameterExpressions)
+    not known at compile time and need to be calculated at runtime (i.e., ParameterExpressions)
     """
     real_time_params = {}
     for param in _real_time_parameters:
@@ -84,22 +47,25 @@ def get_real_time_pulse_parameters(pulse: QiskitPulse):
 def _handle_parameterized_instruction(
     instruction: Instruction,
     param_table: ParameterTable,
+    qua_pulse_macro: QuaPulseMacro,
 ):
     """
     Handle the conversion of a parameterized instruction to QUA by creating a dictionary of parameter values
     and assigning them to the corresponding QUA variables
     """
+    if not type(instruction) in qiskit_to_qua_instructions:
+        raise ValueError(f"Instruction {instruction} not supported on QM backend")
     value_dict = {}
-    involved_parameter_values = {}  # Store ParameterValues for involved parameters
+    involved_parameters = {}  # Store involved Parameters
     validate_parameters(instruction.parameters, param_table)
     for param in instruction.parameters:
-        involved_parameter_values[param.name] = param_table.get_value(param.name)
+        involved_parameters[param.name] = param_table.get_parameter(param.name)
 
-    for attribute in _qiskit_to_qua_instructions[type(instruction)]["params"]:
+    for attribute in qua_pulse_macro.params:
         attribute_value = getattr(instruction, attribute)
         if isinstance(attribute_value, ParameterExpression):
             value_dict[attribute] = sympy_to_qua(
-                getattr(instruction, attribute).sympify(), involved_parameter_values
+                getattr(instruction, attribute).sympify(), involved_parameters
             )
         elif attribute == "pulse":
             pulse = getattr(instruction, attribute)
@@ -108,7 +74,7 @@ def _handle_parameterized_instruction(
             ).items():
                 value_dict[pulse_param_name] = sympy_to_qua(
                     pulse_param.sympify(),
-                    involved_parameter_values,
+                    involved_parameters,
                 )
             break
         # else:  # TODO: Check if this is necessary
@@ -117,30 +83,6 @@ def _handle_parameterized_instruction(
         #     )  # Assign the value of the attribute
 
     return value_dict
-
-
-def frame_rotation_matrix(angle, amp=1.0):
-    return [
-        amp * Math.cos(angle),
-        -amp * Math.sin(angle),
-        amp * Math.sin(angle),
-        amp * Math.cos(angle),
-    ]
-
-
-def get_amp_matrix(amp=None, angle=None):
-    new_ref = (
-        1.0 / _ref_amp
-    )  # Recover the reference amplitude from the reference value of 0.1
-    if amp is not None and angle is not None:
-        amp_matrix = qua_amp(*frame_rotation_matrix(angle, amp * new_ref))
-    elif amp is not None:
-        amp_matrix = qua_amp(new_ref * amp)
-    elif angle is not None:
-        amp_matrix = qua_amp(*frame_rotation_matrix(angle))
-    else:
-        amp_matrix = None
-    return amp_matrix
 
 
 def validate_pulse(pulse: QiskitPulse, channel: QuAMChannel) -> QiskitPulse:
@@ -155,12 +97,18 @@ def validate_pulse(pulse: QiskitPulse, channel: QuAMChannel) -> QiskitPulse:
     return pulse
 
 
-def validate_instruction(instruction: Instruction) -> Callable:
+def validate_instruction(
+    instruction: Instruction, quam_channel: QuAMChannel
+) -> QuaPulseMacro:
     """
     Validate the instruction before converting it to QUA and return the corresponding QUA macro
     """
-    if type(instruction) in _qiskit_to_qua_instructions:
-        return _qiskit_to_qua_instructions[type(instruction)]["macro"]
+    kwargs: Dict[str, QuAMChannel | QiskitPulse] = {"channel": quam_channel}
+    if isinstance(instruction, Play):
+        pulse = instruction.pulse
+        kwargs["pulse"] = pulse
+    if type(instruction) in qiskit_to_qua_instructions:
+        return qiskit_to_qua_instructions[type(instruction)](**kwargs)
     elif isinstance(instruction, Acquire):
         raise NotImplementedError("Acquire instructions are not yet supported.")
     else:
@@ -211,23 +159,19 @@ def _instruction_to_qua(
         param_table:  Parameter table to use for the conversion (contains the reference QUA variables for parameters)
     """
 
-    action = validate_instruction(instruction)
-
-    if isinstance(instruction, Play):
-        pulse = validate_pulse(instruction.pulse, quam_channel)
-        action = partial(action, pulse=pulse)
+    action = validate_instruction(instruction, quam_channel)
 
     if instruction.is_parameterized():
         assert param_table is not None, "Parameter table must be provided"
-        values = _handle_parameterized_instruction(instruction, param_table)
+        values = _handle_parameterized_instruction(instruction, param_table, action)
 
     else:
         values = {}
         if not isinstance(instruction, Play):
-            for attribute in _qiskit_to_qua_instructions[type(instruction)]["params"]:
+            for attribute in action.params:
                 values[attribute] = getattr(instruction, attribute)
 
-    action(quam_channel, **values)
+    action.macro(**values)
 
 
 def validate_schedule(schedule: Schedule | ScheduleBlock) -> Schedule:
@@ -263,7 +207,8 @@ def handle_parameterized_channel(
                 )
             ch_param = ch_params[0]
             if ch_param.name in param_table:
-                param_table.table[ch_param.name].type = int
+                param_table.get_parameter(ch_param.name).type = int
+                param_table.get_parameter(ch_param.name).value = 0
             else:
                 ch_parameter_value = QuaParameter(ch_param.name, 0, int)
                 param_table.table[ch_param.name] = ch_parameter_value

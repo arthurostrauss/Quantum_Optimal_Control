@@ -2,17 +2,14 @@ from copy import deepcopy
 
 import numpy as np
 from qiskit.circuit import ParameterExpression
-from qiskit.pulse.channels import DriveChannel, Channel as QiskitChannel
+from qiskit.pulse.channels import PulseChannel as QiskitChannel
 from qiskit.pulse import SymbolicPulse, Waveform, Play, Schedule, PulseError, Constant
 from typing import List, Tuple, Union, Optional
-from .pulse_support_utils import _ref_amp, _ref_phase
+from .pulse_to_qua import real_time_parameters_dict
 from .sympy_to_qua import sympy_to_qua
 from quam.components.pulses import Pulse as QuAMPulse
 from quam import quam_dataclass
 from .pulse_support_utils import _real_time_parameters
-
-
-_real_time_parameters_dict = {"amp": _ref_amp, "angle": _ref_phase}
 
 
 def register_pulse_features(pulse: SymbolicPulse):
@@ -86,10 +83,10 @@ class QuAMQiskitPulse(QuAMPulse):
             new_pulse_parameters = self.pulse.parameters.copy()
 
             for param_name, param_value in self.pulse.parameters.items():
-                if param_name in _real_time_parameters_dict and isinstance(
+                if param_name in real_time_parameters_dict and isinstance(
                     param_value, ParameterExpression
                 ):
-                    new_pulse_parameters[param_name] = _real_time_parameters_dict[
+                    new_pulse_parameters[param_name] = real_time_parameters_dict[
                         param_name
                     ]
 

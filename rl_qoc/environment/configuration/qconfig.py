@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, List, Literal
+from typing import Dict, Optional, List, Literal, Callable, Any
 from gymnasium.spaces import Box
+from qiskit import QuantumCircuit, QuantumRegister
+from qiskit.circuit import ParameterVector, Parameter
 from qiskit.providers import BackendV2
 from qiskit.transpiler import InstructionDurations, PassManager
-from .backend_config import BackendConfig
+from qiskit_dynamics import DynamicsBackend
+from qiskit_ibm_runtime import IBMBackend
+
+from .backend_config import (
+    BackendConfig,
+    QiskitRuntimeConfig,
+    DynamicsConfig,
+    QiskitConfig,
+)
 
 from .target_config import GateTargetConfig, StateTargetConfig
 from .execution_config import ExecutionConfig
 from .benchmark_config import BenchmarkConfig
 from ..backend_info import BackendInfo
+from ...helpers import load_q_env_from_yaml_file, select_backend
 
 
 def default_benchmark_config():
@@ -303,3 +314,74 @@ class QEnvConfig:
             config["target"]["state"] = self.target.state.data
 
         return config
+
+    @classmethod
+    def from_yaml(
+        cls,
+        config_file_path: str,
+        parametrized_circ_func: Callable[
+            [
+                QuantumCircuit,
+                ParameterVector | List[Parameter],
+                QuantumRegister,
+                Dict[str, Any],
+            ],
+            None,
+        ],
+        backend: Optional[BackendV2 | Callable[[Any], BackendV2]] = None,
+        pass_manager: Optional[PassManager] = None,
+        instruction_durations: Optional[InstructionDurations] = None,
+        **backend_callback_kwargs: Any,
+    ) -> QEnvConfig:
+        """
+        Get Quantum Environment configuration from a YAML file and additional parameters.
+
+        Args:
+            config_file_path (str): Path to the YAML configuration file
+            parametrized_circ_func (Callable): Function to create the parametrized circuit
+            backend (BackendV2 or Callable): Optional custom backend or function to create a backend (if None,
+                                              backend will be created from the backend_config in the YAML file)
+            pass_manager (PassManager): Pass manager instance for custom transpilation
+            instruction_durations (InstructionDurations): Instruction durations to specify durations for custom gates
+            **backend_callback_kwargs: Additional keyword arguments to pass to the backend callback function
+
+        Returns:
+            QEnvConfig: Quantum Environment configuration object
+        """
+
+        params, backend_params, runtime_options = load_q_env_from_yaml_file(
+            config_file_path
+        )
+
+        if isinstance(backend, Callable):
+            backend = backend(**backend_callback_kwargs)
+        elif backend is None:
+            backend = select_backend(**backend_params)
+
+        if isinstance(backend, DynamicsBackend):
+            backend_config = DynamicsConfig(
+                parametrized_circ_func,
+                backend,
+                pass_manager=pass_manager,
+                instruction_durations=instruction_durations,
+            )
+        elif isinstance(backend, IBMBackend):
+            backend_config = QiskitRuntimeConfig(
+                parametrized_circ_func,
+                backend,
+                pass_manager=pass_manager,
+                instruction_durations=instruction_durations,
+                primitive_options=runtime_options,
+            )
+        elif isinstance(backend, BackendV2):
+            backend_config = QiskitConfig(
+                parametrized_circ_func,
+                backend,
+                pass_manager=pass_manager,
+                instruction_durations=instruction_durations,
+            )
+
+        else:
+            raise ValueError("Backend type not recognized")
+
+        return cls(backend_config=backend_config, **params)

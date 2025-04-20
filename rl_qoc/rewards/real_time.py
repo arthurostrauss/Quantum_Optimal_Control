@@ -117,13 +117,16 @@ def get_real_time_reward_circuit(
     ]
 
     if is_gate_target:
-        input_circuits = get_single_qubit_input_states(
-            target_instance.input_states_choice
-        )
+        if reward_method == "channel":
+            input_circuits = get_single_qubit_input_states("pauli6")
+        else:
+            input_circuits = get_single_qubit_input_states(
+                target_instance.input_states_choice
+            )
 
         for q_idx, qubit in enumerate(
             qc.qubits
-        ):  # Input state preparation (over all qubits)
+        ):  # Input state preparation (over all qubits of the circuit context)
             with qc.switch(input_state_vars[q_idx]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):

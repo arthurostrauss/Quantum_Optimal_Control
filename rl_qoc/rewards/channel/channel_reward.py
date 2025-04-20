@@ -265,7 +265,9 @@ class ChannelReward(Reward):
                 )
 
                 obs_ = parity * obs_list
-                pub_obs = extend_observables(obs_, prep_circuit, target)
+                pub_obs = extend_observables(
+                    obs_, prep_circuit, target.causal_cone_qubits_indices
+                )
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 if prep_indices not in used_prep_indices:  # Add new PUB
                     # Add PUB
@@ -278,13 +280,13 @@ class ChannelReward(Reward):
                     used_prep_indices[prep_indices] = ChannelRewardData(
                         pub,
                         input_circuit,
-                        pub_obs,
+                        obs_,
                         dedicated_shots,
                         n_reps,
                         target.causal_cone_qubits_indices,
                         prep,
                         extended_prep_indices,
-                        observables_to_indices(pub_obs),
+                        observables_to_indices(obs_),
                     )
 
                 else:  # Update PUB (regroup observables for same input circuit, redundant for I/Z terms)
@@ -294,11 +296,18 @@ class ChannelReward(Reward):
 
                     ref_shots = precision_to_shots(ref_precision)
                     new_precision = shots_to_precision(dedicated_shots)
-                    new_obs = (ref_obs + pub_obs).simplify()
+                    new_obs = (ref_obs + obs_).simplify()
 
                     used_prep_indices[prep_indices].observables = new_obs
                     used_prep_indices[prep_indices].pub = EstimatorPub.coerce(
-                        (ref_prep, new_obs, params, min(ref_precision, new_precision)),
+                        (
+                            ref_prep,
+                            extend_observables(
+                                new_obs, prep_circuit, target.causal_cone_qubits_indices
+                            ),
+                            params,
+                            min(ref_precision, new_precision),
+                        ),
                     )
 
                     used_prep_indices[prep_indices].shots = max(
@@ -309,7 +318,7 @@ class ChannelReward(Reward):
                     )
 
         reward_data = []
-        for prep_indices_, data in used_prep_indices.items():
+        for data in used_prep_indices.values():
             reward_data.append(data)
 
         reward_data = ChannelRewardDataList(reward_data, pauli_sampling, id_coeff)

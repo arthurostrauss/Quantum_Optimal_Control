@@ -525,13 +525,13 @@ def observables_to_indices(
     return observable_indices
 
 
-def pauli_input_to_indices(prep: Pauli | str, inputs):
+def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]):
     """
     Convert the input state to single qubit state indices for the reward computation
 
     Args:
         prep: Pauli input state
-        inputs: List of qubit indices
+        inputs: List of binary numbers indicating which eigenstate is selected (0 -> +1 eigenstate, 1 -> -1 eigenstate)
     """
     prep = prep if isinstance(prep, Pauli) else Pauli(prep)
     prep_indices = []
@@ -583,7 +583,7 @@ def extend_input_state_prep(
 
 
 def extend_observables(
-    observables: SparsePauliOp, qc: QuantumCircuit, gate_target
+    observables: SparsePauliOp, qc: QuantumCircuit, target_qubit_indices: List[int]
 ) -> SparsePauliOp:
     """
     Extend the observables to all qubits in the quantum circuit if necessary
@@ -591,18 +591,17 @@ def extend_observables(
     Args:
         observables: Pauli observables to sample
         qc: Quantum circuit to be executed on quantum system
-        gate_target: Target gate to prepare (possibly within a wider circuit context)
+        target_qubit_indices: Target qubit indices for the observables
 
     Returns:
         Extended Pauli observables
     """
 
-    if qc.num_qubits > gate_target.causal_cone_size:
-        other_qubits_indices = set(range(qc.num_qubits)) - set(
-            gate_target.causal_cone_qubits_indices
-        )
+    size = len(target_qubit_indices)
+    if qc.num_qubits > size:
+        other_qubits_indices = set(range(qc.num_qubits)) - set(target_qubit_indices)
         observables = observables.apply_layout(None, qc.num_qubits).apply_layout(
-            gate_target.causal_cone_qubits_indices + list(other_qubits_indices)
+            target_qubit_indices + list(other_qubits_indices)
         )
 
     return observables

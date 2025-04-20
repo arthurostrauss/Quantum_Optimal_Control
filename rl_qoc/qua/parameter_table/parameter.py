@@ -12,6 +12,8 @@ import warnings
 from itertools import chain
 import sys
 
+from qm.qua._dsl import _ResultSource
+
 from .parameter_pool import DGXParameterPool
 from .input_type import Direction, InputType
 from typing import Optional, List, Union, Tuple, Literal, Sequence
@@ -35,13 +37,13 @@ from qm.qua import (
     qua_struct,
     QuaArray,
     declare_external_stream,
-    QuaStreamDirection,
-    external_stream_send,
-    external_stream_receive,
-    
+    send_to_external_stream as external_stream_send,
+    fetch_from_external_stream as external_stream_receive,
 )
+from qm.qua.type_hints import Scalar, Vector, VectorOfAnyType, ScalarOfAnyType
 from qm.jobs.running_qm_job import RunningQmJob
 from qualang_tools.results import wait_until_job_is_paused, fetching_tool
+from quam.utils.qua_types import QuaVariable
 
 
 def set_type(qua_type: Union[str, type]):
@@ -109,7 +111,9 @@ class Parameter:
         name: str,
         value: Optional[Union[int, float, List, np.ndarray]] = None,
         qua_type: Optional[Union[str, type]] = None,
-        input_type: Optional[Union[Literal["DGX", "INPUT_STREAM", "IO1", "IO2"], InputType]] = None,
+        input_type: Optional[
+            Union[Literal["DGX", "INPUT_STREAM", "IO1", "IO2"], InputType]
+        ] = None,
         direction: Optional[Union[Literal["INCOMING", "OUTGOING"], Direction]] = None,
         units: str = "",
     ):
@@ -132,7 +136,7 @@ class Parameter:
         self._name = name
         self.units = units
         self.value = value
-        self._index = -1 # Default value for parameters not part of a parameter table
+        self._index = -1  # Default value for parameters not part of a parameter table
         self._var = None
         self._is_declared = False
         self._stream = None
@@ -140,41 +144,47 @@ class Parameter:
         self._type = set_type(qua_type) if qua_type is not None else infer_type(value)
         self._length = 0 if not isinstance(value, (List, np.ndarray)) else len(value)
         self._counter_var = None
-        
+
         self._external_stream_incoming = None
         self._external_stream_outgoing = None
-        
+
         if input_type is not None:
-            input_type = InputType(input_type) if isinstance(input_type, str) else input_type
+            input_type = (
+                InputType(input_type) if isinstance(input_type, str) else input_type
+            )
         self._input_type: Optional[InputType] = input_type
         self._dgx_struct = None
         if direction is not None:
-            direction = Direction(direction) if isinstance(direction, str) else direction
+            direction = (
+                Direction(direction) if isinstance(direction, str) else direction
+            )
         self._direction = direction
-        
+
         if self._input_type == InputType.DGX and self.direction is None:
             raise ValueError("Direction must be provided for DGX input type.")
-        
+
     def get_name(self):
         return f"{self.name} [{self.units}]"
 
     def __repr__(self):
-        return f"{self.get_name()}: ({self.value}, {self.type}) \n"
+        """
+        Returns:
+            str: String representation of the parameter.
+        """
+        return (
+            f"Parameter(name={self.name}, value={self.value}, type={self.type}, "
+            f"length={self.length}, input_type={self.input_type}, "
+            f"direction={self._direction}, units={self.units})"
+        )
 
     def assign_value(
-            self,
-            value: Union[
-                "Parameter",
-                float,
-                int,
-                bool,
-                List[Union[float, int, bool]],
-                
-            ],
-            is_qua_array: bool = False,
-            condition=None,
-            value_cond: Optional[Union[float, int, bool, List[Union[float, int, bool]],
-            Parameter]] = None,
+        self,
+        value: Union["Parameter", ScalarOfAnyType, VectorOfAnyType],
+        is_qua_array: bool = False,
+        condition=None,
+        value_cond: Optional[
+            Union["Parameter", ScalarOfAnyType, VectorOfAnyType]
+        ] = None,
     ):
         """
         Assign value to the QUA variable corresponding to the parameter.
@@ -195,7 +205,9 @@ class Parameter:
                         the parameter length, or if the input is invalid.
         """
         if not self.is_declared:
-            raise ValueError("Variable not declared. Declare the variable first through declare_variable method.")
+            raise ValueError(
+                "Variable not declared. Declare the variable first through declare_variable method."
+            )
         if (condition is not None) != (value_cond is not None):
             raise ValueError("Both condition and value_cond must be provided together.")
 
@@ -207,31 +219,53 @@ class Parameter:
 
         if isinstance(value, Parameter):
             if not value.is_declared:
-                raise ValueError("Variable not declared. Declare the variable first through declare_variable method.")
+                raise ValueError(
+                    "Variable not declared. Declare the variable first through declare_variable method."
+                )
             if value.length != self.length:
-                raise ValueError(f"Invalid input. {self.name} should be a list of length {self.length}.")
+                raise ValueError(
+                    f"Invalid input. {self.name} should be a list of length {self.length}."
+                )
             if value_cond is not None and not isinstance(value_cond, Parameter):
-                raise ValueError("Invalid input. value_cond should be of same type as value.")
+                raise ValueError(
+                    "Invalid input. value_cond should be of same type as value."
+                )
             if self.is_array:
                 i = self._counter_var
                 with for_(i, 0, i < self.length, i + 1):
-                    assign_with_condition(self.var[i], value.var[i], value_cond.var[i] if value_cond else None)
+                    assign_with_condition(
+                        self.var[i],
+                        value.var[i],
+                        value_cond.var[i] if value_cond else None,
+                    )
             else:
-                assign_with_condition(self.var, value.var, value_cond.var if value_cond else None)
+                assign_with_condition(
+                    self.var, value.var, value_cond.var if value_cond else None
+                )
         else:
             if self.is_array:
                 if is_qua_array:
                     i = self._counter_var
                     with for_(i, 0, i < self.length, i + 1):
-                        assign_with_condition(self.var[i], value[i], value_cond[i] if value_cond is not None else None)
+                        assign_with_condition(
+                            self.var[i],
+                            value[i],
+                            value_cond[i] if value_cond is not None else None,
+                        )
                 else:
                     if len(value) != self.length:
-                        raise ValueError(f"Invalid input. {self.name} should be a list of length {self.length}.")
+                        raise ValueError(
+                            f"Invalid input. {self.name} should be a list of length {self.length}."
+                        )
                     for i in range(self.length):
-                        assign_with_condition(self.var[i], value[i], value_cond[i] if value_cond else None)
+                        assign_with_condition(
+                            self.var[i], value[i], value_cond[i] if value_cond else None
+                        )
             else:
                 if isinstance(value, List):
-                    raise ValueError(f"Invalid input. {self.name} should be a single value, not a list.")
+                    raise ValueError(
+                        f"Invalid input. {self.name} should be a single value, not a list."
+                    )
                 assign_with_condition(self.var, value, value_cond)
 
     def declare_variable(self, pause_program=False, declare_stream=True):
@@ -250,18 +284,20 @@ class Parameter:
                 # Parameter not part of a parameter table
                 dgx_struct = self.dgx_struct
                 self._var = declare_struct(dgx_struct)
-                
+
                 if self.direction == Direction.INCOMING:
-                    self._external_stream_outgoing = declare_external_stream(dgx_struct,
-                                                                         self.stream_id, 
-                                                                         QuaStreamDirection.OUTGOING)
+                    self._external_stream_outgoing = declare_external_stream(
+                        dgx_struct, self.stream_id, "OUTGOING"
+                    )
                 else:
-                    self._external_stream_incoming = declare_external_stream(dgx_struct,
-                                                                         self.stream_id, 
-                                                                         QuaStreamDirection.INCOMING)
+                    self._external_stream_incoming = declare_external_stream(
+                        dgx_struct, self.stream_id, "INCOMING"
+                    )
             else:
-                raise ValueError("This method should be called from a ParameterTable object "
-                                 "as this parameter was associated with a bigger packet.")
+                raise ValueError(
+                    "This method should be called from a ParameterTable object "
+                    "as this parameter was associated with a bigger packet."
+                )
 
         else:
             self._var = declare(t=self.type, value=self.value)
@@ -273,7 +309,7 @@ class Parameter:
             pause()
         self._is_declared = True
         return self._var
-    
+
     def declare_stream(self):
         """
         Declare the output stream associated with the parameter.
@@ -291,19 +327,19 @@ class Parameter:
     def name(self):
         """Name of the parameter."""
         return self._name
-       
+
     @property
     def direction(self):
         if self.input_type != InputType.DGX:
             warnings.warn("This parameter is not associated with a DGX stream.")
             raise ValueError("This parameter is not associated with a DGX stream.")
         return self._direction
-    
+
     @property
     def dgx_struct(self):
         """
         DGX struct associated with the parameter.
-        Can be a reference to a bigger struct describing a ParameterTable (automatically set by the 
+        Can be a reference to a bigger struct describing a ParameterTable (automatically set by the
         ParameterTable class) or a standalone struct created on the fly.
         Returns:
 
@@ -313,19 +349,24 @@ class Parameter:
                 raise ValueError("Invalid input type for this parameter. Must be dgx.")
             length = 1 if not self.is_array else self.length
             cls_name = f"{self.name}_struct"
-            DgxStruct = qua_struct(type(cls_name, (object,), {"__annotations__":{self.name: QuaArray[self.type, length]}}))
-        
+            DgxStruct = qua_struct(
+                type(
+                    cls_name,
+                    (object,),
+                    {"__annotations__": {self.name: QuaArray[self.type, length]}},
+                )
+            )
+
             return DgxStruct
         else:
             return self._dgx_struct
-    
+
     @dgx_struct.setter
     def dgx_struct(self, value):
         self._dgx_struct = value
-            
-    
+
     @property
-    def stream_id(self)->int:
+    def stream_id(self) -> int:
         """
         ID of the external stream associated with the parameter (Relevant only for DGX).
         If the Parameter is part of a ParameterTable, returns the stream_id of the table.
@@ -333,16 +374,16 @@ class Parameter:
             Unique ID integer of the external stream.
 
         """
-        if self._index == -1: # Not in a ParameterTable
+        if self._index == -1:  # Not in a ParameterTable
             self._stream_id = DGXParameterPool.get_id(self)
-            self._index = -2 # To avoid reassigning the stream ID    
-            
+            self._index = -2  # To avoid reassigning the stream ID
+
         return self._stream_id
-    
+
     @stream_id.setter
     def stream_id(self, value: int):
         self._stream_id = value
-            
+
     @property
     def var(self):
         """
@@ -350,7 +391,9 @@ class Parameter:
             QUA variable associated with the parameter.
         """
         if not self.is_declared:
-            raise ValueError("Variable not declared. Declare the variable first through declare_variable method.")
+            raise ValueError(
+                "Variable not declared. Declare the variable first through declare_variable method."
+            )
         if self.input_type == InputType.DGX:
             var = getattr(self._var, self.name)
             return var if self.is_array else var[0]
@@ -404,7 +447,7 @@ class Parameter:
         return self.length > 0
 
     @property
-    def stream(self):
+    def stream(self) -> _ResultSource:
         """Output stream associated with the parameter."""
         if self._stream is None or not self.is_declared:
             raise ValueError("Output stream not declared.")
@@ -421,7 +464,7 @@ class Parameter:
                 save(self.var, self.stream)
         else:
             raise ValueError("Output stream not declared.")
-        
+
     def stream_processing(self, mode: Literal["save", "save_all"] = "save_all"):
         """
         Process the output stream associated with the parameter.
@@ -444,8 +487,12 @@ class Parameter:
 
     def clip(
         self,
-        min_val: Optional[Union[int, float]] = None,
-        max_val: Optional[Union[int, float]] = None,
+        min_val: Optional[
+            Scalar[int], Scalar[float], Vector[int], Vector[float]
+        ] = None,
+        max_val: Optional[
+            Scalar[int], Scalar[float], Vector[int], Vector[float]
+        ] = None,
         is_qua_array: bool = False,
     ):
         """
@@ -512,14 +559,16 @@ class Parameter:
             raise ValueError("No input type specified")
         elif self.input_type == InputType.INPUT_STREAM:
             qua_advance_input_stream(self.var)
-            
+
         elif self.input_type == InputType.DGX:
             if self._dgx_struct is None:
                 external_stream_receive(self._external_stream_incoming, self._var)
             else:
-                raise ValueError("This method should be called from a ParameterTable object "
-                                 "as this parameter was associated with a bigger packet.")
-            
+                raise ValueError(
+                    "This method should be called from a ParameterTable object "
+                    "as this parameter was associated with a bigger packet."
+                )
+
         elif self.input_type in [InputType.IO1, InputType.IO2]:
             io = IO1 if self.input_type == InputType.IO1 else IO2
             if self.is_array:
@@ -530,7 +579,6 @@ class Parameter:
             else:
                 pause()
                 assign(self.var, io)
-        
 
         else:
             raise ValueError("Invalid input stream type.")
@@ -581,7 +629,9 @@ class Parameter:
             value = list(value)
 
         if self.input_type in [InputType.IO1, InputType.IO2]:
-            io = "set_io1_value" if self.input_type == InputType.IO1 else "set_io2_value"
+            io = (
+                "set_io1_value" if self.input_type == InputType.IO1 else "set_io2_value"
+            )
             if qm is None:
                 raise ValueError("QuantumMachine object must be provided.")
             if self.is_array:
@@ -603,19 +653,27 @@ class Parameter:
 
         elif self.input_type == InputType.DGX:
             if self.index < 0:
-                raise ValueError("Cannot push value to a standalone parameter,"
-                                 "Please push through the parameter table instead.")
+                raise ValueError(
+                    "Cannot push value to a standalone parameter,"
+                    "Please push through the parameter table instead."
+                )
             if self.direction == Direction.INCOMING:
                 raise ValueError("Cannot push value to Incoming stream.")
             # Prepare the packet to be sent
             param_dict = {self.name: [value] if not self.is_array else value}
-            param_dict = {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in param_dict.items()}
-            
+            param_dict = {
+                k: v.tolist() if isinstance(v, np.ndarray) else v
+                for k, v in param_dict.items()
+            }
+
             if DGXParameterPool.configured and DGXParameterPool.patched:
                 # from opnic_python.opnic_wrapper import OutgoingPacket, send_packet
-                if 'opnic_wrapper' not in sys.path:
-                    sys.path.append('/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python')
+                if "opnic_wrapper" not in sys.path:
+                    sys.path.append(
+                        "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
+                    )
                 from opnic_wrapper import OutgoingPacket, send_packet
+
                 flattened_values = list(chain(*param_dict.values()))
                 packet = OutgoingPacket(flattened_values)
                 for k, v in param_dict.items():
@@ -623,10 +681,10 @@ class Parameter:
                 send_packet(self.stream_id, packet)
             else:
                 raise ValueError("OPNIC not configured or patched.")
-            
+
             if verbosity > 1:
                 print(f"Sent packet: {packet}")
-            
+
     def send_to_python(self):
         """
         QUA macro designed to send the value of the parameter to Python.
@@ -647,23 +705,31 @@ class Parameter:
         elif self.input_type == InputType.INPUT_STREAM:
             self.save_to_stream()
         elif self.input_type == InputType.DGX:
-            if self.index >= 0: # Part of a parameter table
-                raise ValueError("Cannot send value to a standalone parameter,"
-                                 "Please use this method through the parameter table instead.")
+            if self.index >= 0:  # Part of a parameter table
+                raise ValueError(
+                    "Cannot send value to a standalone parameter,"
+                    "Please use this method through the parameter table instead."
+                )
             if self.direction == Direction.OUTGOING:
                 raise ValueError("Cannot send value to outgoing stream.")
 
             external_stream_send(self._external_stream_outgoing, self._var)
-            
-    def fetch_from_opx(self, job: RunningQmJob, qm: Optional[QuantumMachine] = None,
-                       verbosity: int = 1,):
+
+    def fetch_from_opx(
+        self,
+        job: RunningQmJob,
+        qm: Optional[QuantumMachine] = None,
+        verbosity: int = 1,
+    ):
         """
         To be outside QUA program: fetch an output value from the OPX to Python.
         Returns:
             Value fetched from the OPX.
         """
         if self.input_type in [InputType.IO1, InputType.IO2]:
-            io = "get_io1_value" if self.input_type == InputType.IO1 else "get_io2_value"
+            io = (
+                "get_io1_value" if self.input_type == InputType.IO1 else "get_io2_value"
+            )
             if qm is None:
                 raise ValueError("QuantumMachine object must be provided.")
             if not self.is_array:
@@ -682,24 +748,26 @@ class Parameter:
                 value = value.fetch_all()
         elif self.input_type == InputType.DGX:
             if self.index < 0:
-                raise ValueError("Cannot fetch value from a standalone parameter,"
-                                 "Please fetch through the parameter table instead.")
+                raise ValueError(
+                    "Cannot fetch value from a standalone parameter,"
+                    "Please fetch through the parameter table instead."
+                )
             if self.direction == Direction.OUTGOING:
                 raise ValueError("Cannot fetch value from outgoing stream.")
-            if DGXParameterPool.configured and DGXParameterPool.patched:
-                if "opnic_wrapper" not in sys.modules:
-                    sys.path.append('/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python')
-                from opnic_wrapper import wait_for_packets, read_packet
-                wait_for_packets(self.stream_id, 1)
-                packet = read_packet(self.stream_id, 0)
-                value = getattr(packet, self.name)
-            else:
+            elif not DGXParameterPool.configured or not DGXParameterPool.patched:
                 raise ValueError("OPNIC not configured or patched.")
-        
+            if "opnic_wrapper" not in sys.modules:
+                sys.path.append(
+                    "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
+                )
+            from opnic_wrapper import wait_for_packets, read_packet
+
+            wait_for_packets(self.stream_id, 1)
+            packet = read_packet(self.stream_id, 0)
+            value = getattr(packet, self.name)
+
         else:
             raise ValueError("Invalid input type.")
         if verbosity > 1:
             print(f"Fetched value: {value}")
         return value
-            
-           

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import List, Tuple, Literal, Optional
 from qiskit.circuit import QuantumCircuit
@@ -198,7 +200,9 @@ class StateReward(Reward):
             prep_circuit, initial_layout=target_instance.layout, scheduling=False
         )
         if isinstance(target_instance, GateTarget):
-            observables = extend_observables(observables, prep_circuit, target_instance)
+            observables = extend_observables(
+                observables, prep_circuit, target_instance.causal_cone_qubits_indices
+            )
         else:
             observables = observables.apply_layout(prep_circuit.layout)
 
@@ -257,17 +261,3 @@ class StateReward(Reward):
         reward /= reward_data.pauli_sampling
 
         return reward
-
-    @property
-    def observables(self) -> SparsePauliOp:
-        """
-        Pauli observables to sample
-        """
-        return self._observables
-
-    @property
-    def pauli_shots(self) -> List[int]:
-        """
-        Number of shots per Pauli for the fidelity estimation
-        """
-        return self._pauli_shots

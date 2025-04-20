@@ -29,8 +29,6 @@ from typing import List
 from qm.qua import *
 from qm import QuantumMachinesManager, QuantumMachine, QmJob, Program
 
-from rl_qoc.qua.qua_utils import add_parameter_table_to_circuit
-
 pauli_mapping = {"I": 0, "X": 1, "Y": 2, "Z": 3}
 
 
@@ -142,7 +140,6 @@ class QMEstimator(BaseEstimatorV2):
                     f"The {i}-th pub has precision less than or equal to 0 ({pub.precision}). ",
                     "But precision should be larger than 0.",
                 )
-            pub._circuit, _ = add_parameter_table_to_circuit(pub.circuit)
             self.backend.update_calibrations(pub.circuit)
 
     def estimator_qua_program(

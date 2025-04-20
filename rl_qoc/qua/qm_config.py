@@ -35,7 +35,11 @@ class QMConfig(BackendConfig):
         return "qua"
 
     def __post_init__(self):
-        self.input_type = InputType(self.input_type) if isinstance(self.input_type, str) else self.input_type
+        self.input_type = (
+            InputType(self.input_type)
+            if isinstance(self.input_type, str)
+            else self.input_type
+        )
 
 
 @dataclass
@@ -48,10 +52,9 @@ class DGXConfig(QMConfig):
         backend: Quantum Machine backend
         hardware_config: Hardware configuration
     """
+
     opnic_dev_path: str = "/home/dpoulos/aps_demo"
     verbosity: int = 1
-    MAX_VARIABLE_TRANSFERS: int = 100
-    STREAM_TYPE_CPU: int = 1
 
     def __post_init__(self):
         super().__post_init__()

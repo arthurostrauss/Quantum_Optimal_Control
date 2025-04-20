@@ -171,8 +171,5 @@ class Transmon(Qubit):
                 "qubit_target={other.name}"
             )
 
-    def align(self):
-        align(self.xy.name, self.z.name, self.resonator.name)
-
     def wait(self, duration):
         wait(duration, self.xy.name, self.z.name, self.resonator.name)

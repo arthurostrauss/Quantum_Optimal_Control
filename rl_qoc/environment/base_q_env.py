@@ -771,18 +771,19 @@ class BaseQuantumEnvironment(ABC, Env):
         )
 
     @property
-    def transpiled_circuits(self)->Optional[List[QuantumCircuit]]:
+    def transpiled_circuits(self) -> Optional[List[QuantumCircuit]]:
         """
         Return the transpiled circuits
         """
         if self.circuits:
-            return self.backend_info.custom_transpile(self.circuits,
-                                                      initial_layout=self.target.layout,
-                                                      optimization_level=0,
-                                                      remove_final_measurements=False,
-                                                      )
+            return self.backend_info.custom_transpile(
+                self.circuits,
+                initial_layout=self.target.layout,
+                optimization_level=0,
+                remove_final_measurements=False,
+            )
         return None
-    
+
     @property
     @abstractmethod
     def tgt_instruction_counts(self) -> int:

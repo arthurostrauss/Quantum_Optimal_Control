@@ -1,9 +1,11 @@
 """
-Class to generate a RL environment suitable for usage with Gym and PyTorch, leveraging Qiskit modules to simulate
-quantum system (could also include QUA code in the future)
+Class to generate a RL environment suitable for usage with Gym and PyTorch, leveraging Qiskit modules to simulate/
+execute quantum circuits. The environment is designed to be context-aware, meaning it can focus on a specific
+target gate within a larger quantum circuit. This workflow could be extended to multiple target gates in the future.
 
 Author: Arthur Strauss
 Created on 26/06/2023
+Last modified on 28/04/2025
 """
 
 from __future__ import annotations
@@ -108,7 +110,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
     def __init__(
         self,
         training_config: QEnvConfig,
-        circuit_context: QuantumCircuit,
+        circuit_context: Optional[QuantumCircuit] = None,
         training_steps_per_gate: Union[List[int], int] = 1500,
         intermediate_rewards: bool = False,
         **context_kwargs,
@@ -122,7 +124,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         Args:
             training_config: The configuration of the training environment
-            circuit_context: The circuit context containing the target gate to be calibrated
+            circuit_context: The circuit context containing the target gate to be calibrated. If None, a new circuit
+                context will be created with the target gate appended to it on the target qubits.
             training_steps_per_gate: The number of training steps per gate instance
             intermediate_rewards: Whether to provide intermediate rewards during the training
             context_kwargs: Additional keyword arguments to be passed to the context-aware environment (e.g.
@@ -130,6 +133,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
 
         super().__init__(training_config)
+        if not isinstance(self.config.target, GateTargetConfig):
+            raise ValueError(
+                "Target should be a GateTargetConfig, not a custom instruction"
+            )
         self._optimal_actions = None
         self._param_values = None
         self.circ_tgt_register = None
@@ -143,6 +150,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.observation_space = Box(
             low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
         )
+        if circuit_context is None:
+            q_reg = QuantumRegister(len(self.config.target.physical_qubits), name="tgt")
+            circuit_context = QuantumCircuit(q_reg)
+            circuit_context.append(self.config.target.gate, q_reg)
         self.set_unbound_circuit_context(circuit_context, **context_kwargs)
 
     def define_target_and_circuits(self):
@@ -249,7 +260,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if isinstance(self.backend, BackendV2):
             for op in self.backend.operations:
                 if hasattr(op, "name") and op.name not in operations_mapping:
-                    # If new custom instruction was added, store it and update operations mapping
+                    # If a new custom instruction was added, store it and update operation mapping
                     self.custom_instructions.append(op)
                     operations_mapping[op.name] = op
 
@@ -292,7 +303,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
     ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         # trunc_index tells us which circuit truncation should be trained
         # Dependent on global_step and method select_trunc_index
-        trunc_index = self.trunc_index
         # Figure out if in middle of param loading or should compute the final reward (step_status < trunc_index or ==)
         step_status = self._inside_trunc_tracker
         self._step_tracker += 1
@@ -307,7 +317,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 self._get_info(),
             )
 
-        if trunc_index >= self.tgt_instruction_counts:
+        if self.trunc_index >= self.tgt_instruction_counts:
             # raise IndexError(f"Circuit does contain only {self.tgt_instruction_counts} target gates and step"
             #                  f" function tries to access gate nb {trunc_index} ")
             truncated = True
@@ -324,12 +334,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             raise ValueError(
                 f"Action batch size {batch_size} does not match environment batch size {self.batch_size}"
             )
-        self._param_values[trunc_index][step_status] = params
+        self._param_values[self.trunc_index][step_status] = params
         params = np.reshape(
-            np.vstack([param_set for param_set in self._param_values[trunc_index]]),
-            (self.batch_size, (trunc_index + 1) * self.action_space.shape[-1]),
+            np.vstack(
+                [param_set for param_set in self._param_values[self.trunc_index]]
+            ),
+            (self.batch_size, (self.trunc_index + 1) * self.action_space.shape[-1]),
         )
-        if step_status < trunc_index:  # Intermediate step within the circuit truncation
+        if (
+            step_status < self.trunc_index
+        ):  # Intermediate step within the circuit truncation
             self._inside_trunc_tracker += 1
             terminated = False
 
@@ -605,6 +619,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         Return the current circuit context
         """
         return self._circuit_context
+
+    @property
+    def has_context(self) -> bool:
+        """
+        Check if the environment has a circuit context (i.e., different from circuit containing only the target gate).
+        :return: Boolean indicating if the environment has a circuit context
+        """
+        return self.target.has_context
 
     def set_circuit_context(
         self,

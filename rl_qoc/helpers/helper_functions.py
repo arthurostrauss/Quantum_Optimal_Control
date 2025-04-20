@@ -92,13 +92,12 @@ Sampler_type = Union[
     BackendSamplerV2,
     StatevectorSampler,
 ]
-Backend_type = Optional[Union[BackendV1, BackendV2]]
 QuantumInput = Union[QuantumCircuit, pulse.Schedule, pulse.ScheduleBlock]
 PulseInput = Union[pulse.Schedule, pulse.ScheduleBlock]
 
 
 def retrieve_primitives(
-    backend: Backend_type,
+    backend: BackendV2,
     config,
     estimator_options: Optional[
         Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
@@ -170,7 +169,7 @@ def retrieve_primitives(
 
 def handle_session(
     estimator: BaseEstimatorV1 | BaseEstimatorV2,
-    backend: Backend_type,
+    backend: BackendV2,
     counter: Optional[int] = None,
 ):
     """
@@ -452,12 +451,18 @@ def get_lower_keys_dict(dictionary: Dict[str, Any]):
 def get_q_env_config(
     config_file_path: str,
     parametrized_circ_func: Callable[
-        [QuantumCircuit, ParameterVector, QuantumRegister, Dict[str, Any]], None
+        [
+            QuantumCircuit,
+            ParameterVector | List[Parameter],
+            QuantumRegister,
+            Dict[str, Any],
+        ],
+        None,
     ],
-    backend: Optional[Backend_type | Callable[[Any], Backend_type]] = None,
+    backend: Optional[BackendV2 | Callable[[Any], BackendV2]] = None,
     pass_manager: Optional[PassManager] = None,
     instruction_durations: Optional[InstructionDurations] = None,
-    **backend_callable_args,
+    **backend_callable_kwargs,
 ):
     """
     Get Qiskit Quantum Environment configuration from yaml file
@@ -479,7 +484,7 @@ def get_q_env_config(
         config_file_path
     )
     if isinstance(backend, Callable):
-        backend = backend(**backend_callable_args)
+        backend = backend(**backend_callable_kwargs)
     elif backend is None:
         backend = select_backend(**backend_params)
 

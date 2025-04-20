@@ -11,7 +11,6 @@ from qiskit_experiments.calibration_management import (
 
 from rl_qoc.environment.target import BaseTarget
 from rl_qoc.helpers import (
-    to_python_identifier,
     new_params_ecr,
     new_params_sq_gate,
 )
@@ -148,10 +147,13 @@ def validate_pulse_kwargs(
 
 
 def apply_parametrized_circuit(
-    qc: QuantumCircuit, params: ParameterVector, tgt_register: QuantumRegister, **kwargs
+    qc: QuantumCircuit, params: List[Parameter], tgt_register: QuantumRegister, **kwargs
 ) -> None:
     """
-    Define ansatz circuit to be played on Quantum Computer. Should be parametrized with Qiskit ParameterVector
+    Define ansatz circuit to be played on Quantum Computer. Should be parametrized with a list of
+     Qiskit Parameters and a Quantum Register.
+     Note: We don't use the Qiskit ParameterVector here as it is not compatible with the editing of the
+     Target object in the backend.
     This function is used to run the QuantumCircuit instance on a Runtime backend
     :param qc: Quantum Circuit instance to add the gate on
     :param params: Parameters of the custom Gate
@@ -163,17 +165,19 @@ def apply_parametrized_circuit(
     gate, physical_qubits, backend = validate_pulse_kwargs(**kwargs)
     parametrized_gate_name = f"{gate.name if gate is not None else 'G'}_cal"
 
-    param_vec_name = params.name
+    param_vec_name = (
+        params.name if isinstance(params, ParameterVector) else params[0].name[0]
+    )
     if param_vec_name[-1].isdigit():
         parametrized_gate_name += param_vec_name[-1]
 
     # Create a custom gate with the same name as the original gate
     # Create new set of parameters that are valid Python identifiers (no brackets from the ParameterVector)
-    params2 = [Parameter(to_python_identifier(p.name)) for p in params]
+
     parametrized_gate = Gate(
         parametrized_gate_name,
         len(physical_qubits),
-        params=params2,
+        params=params,
     )
 
     # Create custom schedule with original parameters
@@ -186,7 +190,7 @@ def apply_parametrized_circuit(
     # Add the custom calibration to the circuit with current parameters
     qc.append(parametrized_gate, tgt_register)
     qc.add_calibration(
-        parametrized_gate_name, physical_qubits, parametrized_schedule, params.params
+        parametrized_gate_name, physical_qubits, parametrized_schedule, params
     )
 
     # Add the custom calibration to the backend for enabling transpilation with the custom gate
@@ -194,9 +198,7 @@ def apply_parametrized_circuit(
         target: Target = backend.target
         properties = InstructionProperties(
             duration=parametrized_schedule.duration * backend.dt,
-            calibration=parametrized_schedule.assign_parameters(
-                {params: params2}, inplace=False
-            ),
+            calibration=parametrized_schedule,
         )
         target.add_instruction(parametrized_gate, {tuple(physical_qubits): properties})
 
