@@ -568,9 +568,7 @@ class QMBackend(Backend):
                         )
                     ] = self.schedule_to_qua_macro(schedule, param_table)
 
-                    self.add_pulse_operations(
-                        schedule, name=gate_name + f"_cal_{qubits}"
-                    )
+                    self.add_pulse_operations(schedule, name=schedule.name)
 
     def quantum_circuit_to_qua(
         self,

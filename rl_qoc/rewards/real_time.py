@@ -130,7 +130,7 @@ def get_real_time_reward_circuit(
             with qc.switch(input_state_vars[q_idx]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):
-                        qc.compose(input_circuit, [qubit], inplace=True)
+                        qc.compose(input_circuit.decompose(), [qubit], inplace=True)
 
     if len(prep_circuits) > 1:  # Switch over possible circuit contexts
         circuit_choice = qc.add_input("circuit_choice", Uint(8))
@@ -152,6 +152,7 @@ def get_real_time_reward_circuit(
                         qc.compose(
                             PauliMeasurementBasis()
                             .circuit([i])
+                            .decompose()
                             .remove_final_measurements(False),
                             [qubit],
                             inplace=True,
@@ -223,6 +224,7 @@ def get_real_time_reward_circuit(
 
     qc = backend_info.custom_transpile(
         qc,
+        optimization_level=1,
         initial_layout=target_instance.layout,
         scheduling=False,
         remove_final_measurements=False,
