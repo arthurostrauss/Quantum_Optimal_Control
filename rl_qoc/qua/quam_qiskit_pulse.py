@@ -27,6 +27,24 @@ def register_pulse_features(pulse: SymbolicPulse):
     return stored_parameter_expressions
 
 
+def return_samples_output(pulse: SymbolicPulse):
+    """
+    Return the samples of a SymbolicPulse to be used in the QUA compiler
+    """
+    if np.abs(pulse.angle) < 1e-10:
+        return (
+            pulse.amp
+            if isinstance(pulse, Constant)
+            else pulse.get_waveform().samples.real
+        )
+    else:
+        return (
+            pulse.amp * np.exp(1j * pulse.angle)
+            if isinstance(pulse, Constant)
+            else pulse.get_waveform().samples
+        )
+
+
 class FluxChannel(QiskitChannel):
     prefix = "f"
 
@@ -77,40 +95,31 @@ class QuAMQiskitPulse(QuAMPulse):
         if isinstance(self.pulse, Waveform):
             return self.pulse.samples.tolist()
 
-        elif isinstance(self.pulse, SymbolicPulse) and self.pulse.is_parameterized():
-            # Assign reference values to the parameters
-            # Real-time parameters to be binded to temporary reference values
-            new_pulse_parameters = self.pulse.parameters.copy()
+        if isinstance(self.pulse, SymbolicPulse) and self.pulse.is_parameterized():
+            new_pulse_parameters = {
+                param_name: (
+                    real_time_parameters_dict[param_name]
+                    if param_name in real_time_parameters_dict
+                    and isinstance(param_value, ParameterExpression)
+                    else param_value
+                )
+                for param_name, param_value in self.pulse.parameters.items()
+            }
 
-            for param_name, param_value in self.pulse.parameters.items():
-                if param_name in real_time_parameters_dict and isinstance(
-                    param_value, ParameterExpression
-                ):
-                    new_pulse_parameters[param_name] = real_time_parameters_dict[
-                        param_name
-                    ]
+            if "duration" in new_pulse_parameters and isinstance(
+                new_pulse_parameters["duration"], ParameterExpression
+            ):
+                raise NotImplementedError(
+                    "Duration parameter cannot be parametrized (currently not supported)"
+                )
 
-                elif param_name == "duration" and isinstance(
-                    param_value, ParameterExpression
-                ):
-                    raise NotImplementedError(
-                        "Duration parameter cannot be parametrized (currently not supported)"
-                    )
             pulse = deepcopy(self.pulse)
             pulse._params.update(new_pulse_parameters)
 
-            return (
-                pulse.amp * np.exp(1j * pulse.angle)
-                if isinstance(pulse, Constant)
-                else pulse.get_waveform().samples
-            )
+            return return_samples_output(pulse)
 
         try:
-            return (
-                self.pulse.amp * np.exp(1j * self.pulse.angle)
-                if isinstance(self.pulse, Constant)
-                else self.pulse.get_waveform().samples
-            )
+            return_samples_output(self.pulse)
         except (AttributeError, PulseError) as e:
             raise PulseError(
                 "Pulse waveform could not be retrieved from the given pulse"

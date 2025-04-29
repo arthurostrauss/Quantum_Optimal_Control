@@ -654,13 +654,11 @@ class ParameterTable:
                     self.table[parameter].push_to_opx(value, job, qm, verbosity)
                 elif isinstance(parameter, Parameter):
                     if parameter not in self.parameters:
-                        raise KeyError(
-                            "Provided ParameterValue not in this ParameterTable."
-                        )
+                        raise KeyError("Provided Parameter not in this ParameterTable.")
                     parameter.push_to_opx(value, job, qm, verbosity)
                 else:
                     raise ValueError(
-                        "Invalid parameter name. Please use a string or a ParameterValue object."
+                        "Invalid parameter name. Please use a string or a Parameter object."
                     )
         else:
             if self.direction == Direction.INCOMING:

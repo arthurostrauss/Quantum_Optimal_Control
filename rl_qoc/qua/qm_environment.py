@@ -77,6 +77,15 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             input_type=self.input_type,
             filter_function=lambda x: "observable" in x.name,
         )
+        if self.real_time_circuit.get_var("n_reps", None) is not None:
+            self.n_reps_var = ParameterTable.from_qiskit(
+                self.real_time_circuit,
+                input_type=self.input_type,
+                filter_function=lambda x: "n_reps" in x.name,
+            )
+        else:
+            self.n_reps_var = None
+
         self.real_time_circuit_parameters = ParameterTable.from_qiskit(
             self.real_time_circuit,
             input_type=self.input_type,
@@ -148,6 +157,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.reward.declare_variable(pause_program=False)
             if isinstance(self.circuit_choice_var, ParameterTable):
                 self.circuit_choice_var.declare_variables(pause_program=False)
+            if self.n_reps_var is not None:
+                self.n_reps_var.declare_variables(pause_program=False)
             μ = self.policy.get_variable("mu")
             σ = self.policy.get_variable("sigma")
             counts = declare(int, value=[0] * dim)
@@ -180,6 +191,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
                 if isinstance(self.circuit_choice_var, ParameterTable):
                     self.circuit_choice_var.load_input_values()
+
+                if isinstance(self.n_reps_var, ParameterTable):
+                    self.n_reps_var.load_input_values()
 
                 with while_(input_state_count < max_input_state.var):
                     assign(input_state_count, input_state_count + 1)
@@ -240,6 +254,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                                         self.circuit_choice_var, ParameterTable
                                     ):
                                         param_inputs.append(self.circuit_choice_var)
+                                    if isinstance(self.n_reps_var, ParameterTable):
+                                        param_inputs.append(self.n_reps_var)
 
                                     compilation_result = (
                                         self.backend.quantum_circuit_to_qua(

@@ -242,6 +242,7 @@ def apply_real_time_n_reps(
         qc: Quantum circuit to add the repetitions to
         prep_circuit: Circuit to be repeated
     """
+
     if n_reps_int > 1:
         with qc.for_loop(range(n_reps_int)):
             qc.compose(prep_circuit, inplace=True)
@@ -267,11 +268,18 @@ def handle_real_time_n_reps(
     if isinstance(n_reps_var, int):
         apply_real_time_n_reps(n_reps_var, qc, prep_circuit)
     elif isinstance(n_reps_var, Var):
-        # TODO: When Qiskit will support variable range in for loop, replace
-        # this with a for loop with appropriate range object
-        with qc.switch(n_reps_var) as case_reps:
-            for n in n_reps:
-                with case_reps(n):
-                    apply_real_time_n_reps(n, qc, prep_circuit)
-        # with qc.for_loop([n_reps_var]):
-        #     qc.compose(prep_circuit, inplace=True)
+        try:
+            from qiskit.circuit.controlflow.for_loop import DynamicRange
+
+            n_reps_var_range = DynamicRange(n_reps_var)
+            with qc.for_loop(n_reps_var_range):
+                qc.compose(prep_circuit, inplace=True)
+        except ImportError:
+            # TODO: When Qiskit will support variable range in for loop, replace
+            # this with a for loop with appropriate range object
+            with qc.switch(n_reps_var) as case_reps:
+                for n in n_reps:
+                    with case_reps(n):
+                        apply_real_time_n_reps(n, qc, prep_circuit)
+            # with qc.for_loop([n_reps_var]):
+            #     qc.compose(prep_circuit, inplace=True)
