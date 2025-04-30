@@ -3,4 +3,4 @@ from .parameter import Parameter
 from .input_type import Direction, InputType
 from .parameter_pool import DGXParameterPool
 
-__all__ = ["ParameterTable", "Parameter"]
+__all__ = ["ParameterTable", "Parameter", "InputType", "Direction", "DGXParameterPool"]

@@ -181,7 +181,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             uniform_r = declare(fixed)
             u1, u2 = declare(int), declare(int)
             # Infinite loop to run the training
-            with for_(num_updates, 0, num_updates < self.qm_backend_config.num_updates):
+            with for_(num_updates, 0, num_updates < self.qm_backend_config.num_updates, num_updates + 1):
                 self.policy.load_input_values()
                 max_input_state.load_input_value()
                 max_observables.load_input_value()
