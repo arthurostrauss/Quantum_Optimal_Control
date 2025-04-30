@@ -52,13 +52,15 @@ class DynamicRange:
     def __repr__(self):
         return (
             f"r({self.start if isinstance(self.start, int) else self.start.name},"
-            f" {self.stop if isinstance(self.stop, int) else self.stop.name}, {self.step if isinstance(self.step, int) else self.step.name})"
+            f" {self.stop if isinstance(self.stop, int) else self.stop.name}, "
+            f"{self.step if isinstance(self.step, int) else self.step.name})"
         )
 
     def __str__(self):
         return (
             f"r({self.start if isinstance(self.start, int) else self.start.name},"
-            f" {self.stop if isinstance(self.stop, int) else self.stop.name}, {self.step if isinstance(self.step, int) else self.step.name})"
+            f" {self.stop if isinstance(self.stop, int) else self.stop.name},"
+            f" {self.step if isinstance(self.step, int) else self.step.name})"
         )
 
 

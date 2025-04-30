@@ -97,6 +97,7 @@ class QEnvConfig:
     def backend(self, backend: BackendV2):
         self.backend_config.backend = backend
         self.backend_config.parametrized_circuit_kwargs["backend"] = backend
+        self._backend_info._backend = backend
 
     @property
     def backend_info(self) -> BackendInfo:

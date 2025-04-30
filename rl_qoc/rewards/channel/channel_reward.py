@@ -36,7 +36,6 @@ class ChannelReward(Reward):
     input_states_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
-        super().__post_init__()
         self.fiducials_rng = np.random.default_rng(self.fiducials_seed)
         self.input_states_rng = np.random.default_rng(self.input_states_seed)
 

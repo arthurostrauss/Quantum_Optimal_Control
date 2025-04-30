@@ -13,8 +13,7 @@ def get_real_time_reward_circuit(
     circuits: QuantumCircuit | List[QuantumCircuit],
     target: List[GateTarget] | GateTarget | StateTarget,
     env_config: QEnvConfig,
-    reward_method: Literal["channel", "state", "cafe"] = "state",
-    dfe_precision: Optional[Tuple[float, float]] = None,
+    reward_method: Optional[Literal["channel", "state", "cafe"]] = None,
 ) -> QuantumCircuit:
     """
     Compute the quantum circuit for real-time reward computation
@@ -91,9 +90,11 @@ def get_real_time_reward_circuit(
     if is_gate_target:
         causal_cone_size = target_instance.causal_cone_size
         causal_cone_qubits = target_instance.causal_cone_qubits
+        causal_cone_qubits_indices = target_instance.causal_cone_qubits_indices
     else:
         causal_cone_size = num_qubits
         causal_cone_qubits = qc.qubits
+        causal_cone_qubits_indices = list(range(num_qubits))
 
     # Add classical register for measurements
     if not qc.clbits:
@@ -112,17 +113,21 @@ def get_real_time_reward_circuit(
     else:
         input_state_vars = None
 
-    observables_vars = [
-        qc.add_input(f"observable_{i}", Uint(4)) for i in range(causal_cone_size)
-    ]
+    if reward_method in ["state", "channel"]:
+        observables_vars = [
+            qc.add_input(f"observable_{i}", Uint(4)) for i in range(causal_cone_size)
+        ]
 
     if is_gate_target:
-        if reward_method == "channel":
-            input_circuits = get_single_qubit_input_states("pauli6")
-        else:
-            input_circuits = get_single_qubit_input_states(
-                target_instance.input_states_choice
-            )
+        input_choice = (
+            target_instance.input_states_choice
+            if reward_method != "channel"
+            else "pauli6"
+        )
+        input_circuits = [
+            circ.decompose() if input_choice in ["pauli4", "pauli6"] else circ
+            for circ in get_single_qubit_input_states(input_choice)
+        ]
 
         for q_idx, qubit in enumerate(
             qc.qubits
@@ -130,7 +135,7 @@ def get_real_time_reward_circuit(
             with qc.switch(input_state_vars[q_idx]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):
-                        qc.compose(input_circuit.decompose(), [qubit], inplace=True)
+                        qc.compose(input_circuit, [qubit], inplace=True)
 
     if len(prep_circuits) > 1:  # Switch over possible circuit contexts
         circuit_choice = qc.add_input("circuit_choice", Uint(8))
@@ -189,6 +194,9 @@ def get_real_time_reward_circuit(
                     scheduling=False,
                     optimization_level=3,
                 )
+                inverse_circuit = causal_cone_circuit(
+                    inverse_circuit, causal_cone_qubits_indices
+                )[0]
                 cycle_circuit_inverses[i].append(inverse_circuit)
         if len(prep_circuits) > 1:
             with qc.switch(circuit_choice) as circuit_case:
@@ -199,18 +207,32 @@ def get_real_time_reward_circuit(
                                 for j, n in enumerate(execution_config.n_reps):
                                     with case_reps(n):
                                         qc.compose(
-                                            cycle_circuit_inverses[i][j], inplace=True
+                                            cycle_circuit_inverses[i][j],
+                                            causal_cone_qubits,
+                                            inplace=True,
                                         )
                         else:
-                            qc.compose(cycle_circuit_inverses[i][0], inplace=True)
+                            qc.compose(
+                                cycle_circuit_inverses[i][0],
+                                causal_cone_qubits,
+                                inplace=True,
+                            )
         else:
             if len(execution_config.n_reps) > 1:
                 with qc.switch(n_reps_var) as case_reps:
                     for j, n in enumerate(execution_config.n_reps):
                         with case_reps(n):
-                            qc.compose(cycle_circuit_inverses[0][j], inplace=True)
+                            qc.compose(
+                                cycle_circuit_inverses[0][j],
+                                causal_cone_qubits,
+                                inplace=True,
+                            )
             else:
-                qc.compose(cycle_circuit_inverses[0][0], inplace=True)
+                qc.compose(
+                    cycle_circuit_inverses[0][0],
+                    target_instance.causal_cone_qubits,
+                    inplace=True,
+                )
 
         # Invert input state preparation
         for q_idx, qubit in enumerate(causal_cone_qubits):

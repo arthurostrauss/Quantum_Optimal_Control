@@ -1146,7 +1146,7 @@
                 "decouple_offset": -0.01,
                 "__class__": "quam_builder.architecture.superconducting.components.tunable_coupler.TunableCoupler"
             },
-            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmons.FluxTunableTransmonPair"
+            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmon_pair.FluxTunableTransmonPair"
         },
         "coupler_q2_q3": {
             "id": "coupler_q2_q3",
@@ -1182,7 +1182,7 @@
                 "decouple_offset": -0.03,
                 "__class__": "quam_builder.architecture.superconducting.components.tunable_coupler.TunableCoupler"
             },
-            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmons.FluxTunableTransmonPair"
+            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmon_pair.FluxTunableTransmonPair"
         },
         "coupler_q3_q4": {
             "id": "coupler_q3_q4",
@@ -1218,7 +1218,7 @@
                 "decouple_offset": -0.053,
                 "__class__": "quam_builder.architecture.superconducting.components.tunable_coupler.TunableCoupler"
             },
-            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmons.FluxTunableTransmonPair"
+            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmon_pair.FluxTunableTransmonPair"
         },
         "coupler_q4_q5": {
             "id": "coupler_q4_q5",
@@ -1254,7 +1254,7 @@
                 "decouple_offset": -0.051,
                 "__class__": "quam_builder.architecture.superconducting.components.tunable_coupler.TunableCoupler"
             },
-            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmons.FluxTunableTransmonPair"
+            "__class__": "quam_builder.architecture.superconducting.qubit_pair.flux_tunable_transmon_pair.FluxTunableTransmonPair"
         }
     },
     "active_qubit_names": [
@@ -1441,5 +1441,5 @@
         },
         "__class__": "quam.components.ports.ports_containers.FEMPortsContainer"
     },
-    "__class__": "quam_builder.architecture.superconducting.qpu.flux_tunable_qpu.FluxTunableQuam"
+    "__class__": "quam_builder.architecture.superconducting.qpu.flux_tunable_quam.FluxTunableQuam"
 }

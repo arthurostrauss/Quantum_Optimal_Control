@@ -24,13 +24,7 @@ class Reward(ABC):
     """
 
     print_debug = False
-
-    def __post_init__(self):
-        if self.reward_method == "channel" or self.reward_method == "state":
-            self.dfe = True
-        else:
-            self.dfe = False
-        self._total_shots = 0
+    _total_shots: int = 0
 
     @property
     def reward_args(self):
@@ -50,6 +44,13 @@ class Reward(ABC):
         Total number of shots involved for the last call of the reward computation
         """
         return self._total_shots
+
+    @property
+    def dfe(self) -> bool:
+        """
+        Whether the reward method is a direct fidelity estimation scheme
+        """
+        return self.reward_method in ["state", "channel"]
 
     def get_reward_data(
         self,

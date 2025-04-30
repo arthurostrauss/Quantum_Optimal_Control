@@ -37,7 +37,6 @@ class StateReward(Reward):
     observables_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
-        super().__post_init__()
         self.input_states_rng = np.random.default_rng(self.input_state_seed)
         self.observables_rng = np.random.default_rng(self.observables_seed)
 

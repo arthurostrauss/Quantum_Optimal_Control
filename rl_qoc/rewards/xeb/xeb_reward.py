@@ -27,7 +27,6 @@ class XEBReward(Reward):
     gate_set_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
-        super().__post_init__()
         self.gate_set_rng = np.random.default_rng(self.gate_set_seed)
         if isinstance(self.gate_set_choice, str):
             sy = RYGate(np.pi / 2)

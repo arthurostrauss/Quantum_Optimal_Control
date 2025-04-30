@@ -23,7 +23,6 @@ class ORBITReward(Reward):
     clifford_seed: int = 2000
 
     def __post_init__(self):
-        super().__post_init__()
         self._ideal_pubs: [List[SamplerPub]] = []
         self.clifford_rng = np.random.default_rng(self.clifford_seed)
 

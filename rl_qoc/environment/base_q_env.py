@@ -1,10 +1,10 @@
 """
 Class to generate a RL environment suitable for usage with PyTorch, leveraging Qiskit modules to simulate
-quantum system (could also include QUA code in the future)
+a quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
-Last updated: 25/02/2025
+Last updated: 30/04/2025
 """
 
 from __future__ import annotations
@@ -264,7 +264,7 @@ class BaseQuantumEnvironment(ABC, Env):
             raise ValueError(
                 f"Action shape mismatch: {actions.shape[-1]} != {self.n_actions}"
             )
-        qc = self.circuits[self.trunc_index].copy()
+        qc = self.circuit.copy()
         params, batch_size = np.array(actions), actions.shape[0]
         if len(params.shape) == 1:
             params = np.expand_dims(params, axis=0)
@@ -286,7 +286,7 @@ class BaseQuantumEnvironment(ABC, Env):
         additional_input = (
             self.config.execution_config.dfe_precision
             if self.config.dfe
-            else self.baseline_circuits[self.trunc_index]
+            else self.baseline_circuit
         )
         if self.config.execution_config.n_reps_mode == "sequential":
             reward_data = rewarder.get_reward_data(
@@ -899,7 +899,7 @@ class BaseQuantumEnvironment(ABC, Env):
             }
         return info
 
-    def _ident_str(self):
+    def __str__(self):
         """This is a one-line description of the environment with some key parameters."""
         if isinstance(self.target, GateTarget):
             ident_str = f"gate_calibration_{self.target.gate.name}-gate_physical_qubits_{'-'.join(map(str, self.target.physical_qubits))}"
@@ -950,6 +950,10 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def n_reps(self) -> int:
+        """
+        Number of repetitions of the cycle circuit
+        :return: Number of repetitions
+        """
         return self.config.execution_config.current_n_reps
 
     @property
@@ -1053,6 +1057,20 @@ class BaseQuantumEnvironment(ABC, Env):
         return self._total_shots
 
     @property
+    def circuit(self):
+        """
+        Return the circuit used in the environment
+        """
+        return self.circuits[self.trunc_index]
+
+    @property
+    def baseline_circuit(self):
+        """
+        Return the baseline circuit used in the environment
+        """
+        return self.baseline_circuits[self.trunc_index]
+
+    @property
     def pubs(self) -> List[EstimatorPub | SamplerPub]:
         """
         Return the current PUBs used in the environment
@@ -1100,7 +1118,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def ident_str(self):
-        return self._ident_str()
+        return self.__str__()
 
     @property
     @abstractmethod

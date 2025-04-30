@@ -27,7 +27,6 @@ class CAFEReward(Reward):
     input_states_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
-        super().__post_init__()
         self.input_states_rng = np.random.default_rng(self.input_states_seed)
 
     @property
@@ -154,6 +153,7 @@ class CAFEReward(Reward):
             # Add the inverse unitary + measurement to the circuit
             transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
             transpiled_circuit.measure_all()
+
             pub = (transpiled_circuit, params, execution_config.n_shots)
             reward_data.append(
                 CAFERewardData(
@@ -161,7 +161,9 @@ class CAFEReward(Reward):
                     input_state.circuit,
                     execution_config.current_n_reps,
                     input_state_indices,
-                    reverse_unitary_qc,
+                    causal_cone_circuit(
+                        reverse_unitary_qc, target.causal_cone_qubits_indices
+                    )[0],
                     target.causal_cone_qubits_indices,
                 )
             )
