@@ -406,11 +406,11 @@ def create_spillover_noise_model_from_circuit(
             noisy_operations[q_]["qargs"],
         )
 
-    noise_model.add_all_qubit_quantum_error(
-        noise.depolarizing_error(0.01, 1), ["h", "x", "s", "z", "rx", "ry", "rz"]
-    )
-    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [0])
-    noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [1])
+    # noise_model.add_all_qubit_quantum_error(
+    #     noise.depolarizing_error(0.01, 1), ["h", "x", "s", "z", "rx", "ry", "rz"]
+    # )
+    # noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [0])
+    # noise_model.add_readout_error(noise.ReadoutError([[0.97, 0.03], [0.03, 0.97]]), [1])
 
     return noise_model
 
