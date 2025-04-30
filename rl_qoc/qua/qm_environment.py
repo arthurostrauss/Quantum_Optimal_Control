@@ -183,7 +183,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.pauli_shots.declare_variable(pause_program=False)
             num_updates = declare(int)
             input_state_count = declare(int)
-
+            
+            if self.qm_backend_config.init_macro is not None:
+                self.qm_backend_config.init_macro()
             # Infinite loop to run the training
             with for_(
                 num_updates,

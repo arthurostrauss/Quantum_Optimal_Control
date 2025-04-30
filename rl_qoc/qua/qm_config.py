@@ -25,7 +25,6 @@ class QMConfig(BackendConfig):
 
     backend: QMBackend = None
     init_macro: Callable = None
-    reset_type: Literal["active", "thermalize"] = "active"
     input_type: InputType = "INPUT_STREAM"
     num_updates: int = 500
 
