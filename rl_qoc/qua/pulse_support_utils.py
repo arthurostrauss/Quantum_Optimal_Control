@@ -180,18 +180,15 @@ def handle_parameterized_channel(schedule: Schedule, param_table: ParameterTable
     """
     Modify type of parameters (-> int) in the Table that refer to channel parameters (they refer to integers)
     """
-    for (
-        channel
-    ) in schedule.channels:  # Check if channels are parametrized to change param type (->int)
-        if channel.is_parameterized():
-            ch_params = list(channel.parameters)
-            if len(ch_params) > 1:
-                raise NotImplementedError("Only single parameterized channels are supported")
-            ch_param = ch_params[0]
-            if ch_param.name in param_table:
-                param_table.get_parameter(ch_param.name).type = int
-                param_table.get_parameter(ch_param.name).value = 0
-            else:
-                ch_parameter_value = QuaParameter(ch_param.name, 0, int)
-                param_table.table[ch_param.name] = ch_parameter_value
+    for channel in list(filter(lambda ch: ch.is_parameterized(), schedule.channels)):
+        ch_params = list(channel.parameters)
+        if len(ch_params) > 1:
+            raise NotImplementedError("Only single parameterized channels are supported")
+        ch_param = ch_params[0]
+        if ch_param.name in param_table:
+            param_table.get_parameter(ch_param.name).type = int
+            param_table.get_parameter(ch_param.name).value = 0
+        else:
+            ch_parameter_value = QuaParameter(ch_param.name, 0, int)
+            param_table.table[ch_param.name] = ch_parameter_value
     return param_table

@@ -39,7 +39,7 @@ from qm.qua import declare, fixed, declare_stream
 from qm import QuantumMachinesManager, Program, DictQuaConfig
 from qualang_tools.addons.variables import assign_variables_to_element
 
-from .parameter_table import ParameterTable, InputType
+from .parameter_table import ParameterTable, InputType, Parameter
 
 from .pulse_support_utils import (
     _instruction_to_qua,
@@ -65,6 +65,13 @@ __all__ = [
     "look_for_standard_op",
 ]
 RunInput = Union[QuantumCircuit, Schedule, ScheduleBlock]
+
+control_flow_name_mapping = {
+    "if_else": IfElseOp,
+    "while_loop": WhileLoopOp,
+    "for_loop": ForLoopOp,
+    "switch_case": SwitchCaseOp,
+}
 
 
 class QMInstructionProperties(InstructionProperties):
@@ -205,7 +212,7 @@ class QMBackend(Backend):
         Should be of the form {qubit_index: (quantum_element1, quantum_element2, ...)}
         """
         return {
-            i: (channel.name for channel in qubit.channels)
+            i: tuple(channel.name for channel in qubit.channels)
             for i, qubit in enumerate(self.machine.active_qubits)
         }
 
@@ -285,11 +292,8 @@ class QMBackend(Backend):
         for op, properties in operations_dict.items():
             target.add_instruction(gate_map[op], properties=properties)
 
-        for control_flow_op, control_op_name in zip(
-            [SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp],
-            ["switch_case", "for_loop", "if_else", "while_loop"],
-        ):
-            target.add_instruction(control_flow_op, name=control_op_name)
+        for flow_op_name, control_flow_op in control_flow_name_mapping.items():
+            target.add_instruction(control_flow_op, name=flow_op_name)
 
         return target, operations_qua_dict
 
@@ -388,7 +392,10 @@ class QMBackend(Backend):
         raise NotImplementedError("Running on the QOP backend is not supported yet")
 
     def schedule_to_qua_macro(
-        self, sched: Schedule, param_table: Optional[ParameterTable] = None
+        self,
+        sched: Schedule,
+        param_table: Optional[ParameterTable] = None,
+        input_type: Optional[InputType] = None,
     ) -> Callable:
         """
         Convert a Qiskit Pulse Schedule to a QUA macro
@@ -403,23 +410,12 @@ class QMBackend(Backend):
         sig = Signature()
         if sched.is_parameterized():
             if param_table is None:
-                param_dict = {}
-                for channel in list(filter(lambda ch: ch.is_parameterized(), sched.channels)):
-                    ch_params = list(channel.parameters)
-                    if len(ch_params) > 1:
-                        raise NotImplementedError(
-                            "Only single parameterized channels are supported"
-                        )
-                    ch_param = ch_params[0]
-                    if ch_param.name not in param_dict:
-                        param_dict[ch_param.name] = 0
-                for param in sched.parameters:
-                    if param.name not in param_dict:
-                        param_dict[param.name] = 0.0
-                param_table = ParameterTable(param_dict)
-
+                param_table = ParameterTable.from_qiskit(
+                    sched, name=sched.name + "_param_table", input_type=input_type
+                )
+                param_table = handle_parameterized_channel(sched, param_table)
             else:
-                validate_parameters(sched.parameters, param_table)
+                param_table = validate_parameters(sched.parameters, param_table)
 
             involved_parameters = [value.name for value in sched.parameters]
             params = [
@@ -597,6 +593,7 @@ class QMBackend(Backend):
                             param_table = ParameterTable.from_qiskit(
                                 sched,
                                 input_type=input_type,
+                                name=sched.name + "_param_table",
                             )
                             sched.metadata["parameter_table"] = param_table
                         else:
@@ -617,7 +614,9 @@ class QMBackend(Backend):
             if qc.parameters or qc.iter_input_vars():
                 param_table = qc.metadata.get(
                     "parameter_table",
-                    ParameterTable.from_qiskit(qc, input_type=input_type),
+                    ParameterTable.from_qiskit(
+                        qc, input_type=input_type, name=qc.name + "_param_table"
+                    ),
                 )
             else:
                 param_table = None
