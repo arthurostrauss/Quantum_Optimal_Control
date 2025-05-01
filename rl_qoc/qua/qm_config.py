@@ -19,8 +19,6 @@ class QMConfig(BackendConfig):
     Args:
         parametrized_circuit: Function applying parametrized transformation to a QUA program
         backend: Quantum Machine backend
-        hardware_config: Hardware configuration
-        channel_mapping: Dictionary mapping channels to quantum elements
     """
 
     backend: QMBackend = None

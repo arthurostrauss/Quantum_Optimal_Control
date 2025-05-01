@@ -17,6 +17,7 @@ from qiskit.circuit import (
 from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping,
 )
+from qiskit.circuit.controlflow import CONTROL_FLOW_OP_NAMES
 from qiskit.providers import BackendV2 as Backend, QubitProperties, Options
 from qiskit.pulse import (
     ScheduleBlock,
@@ -25,14 +26,11 @@ from qiskit.pulse import (
     MeasureChannel,
     AcquireChannel,
     Play,
-    UnassignedDurationError,
-    PulseError,
 )
 from qiskit.pulse.library.pulse import Pulse as QiskitPulse
 
-from qiskit.transpiler import Target
+from qiskit.transpiler import Target, InstructionProperties
 from qiskit.qasm3 import Exporter
-from qiskit.pulse.transforms import block_to_schedule
 from qiskit.pulse.channels import Channel as QiskitChannel, ControlChannel
 from qiskit.pulse.library import SymbolicPulse
 from qiskit.pulse.library.waveform import Waveform
@@ -40,7 +38,8 @@ from qm.qua import switch_, case_, program
 from qm.qua import declare, fixed, declare_stream
 from qm import QuantumMachinesManager, Program, DictQuaConfig
 from qualang_tools.addons.variables import assign_variables_to_element
-from .parameter_table import ParameterTable, InputType
+
+from .parameter_table import ParameterTable, InputType, Direction
 
 from .pulse_support_utils import (
     _instruction_to_qua,
@@ -58,7 +57,47 @@ from oqc import (
     CompilationResult,
 )
 
+__all__ = [
+    "QMBackend",
+    "QMProvider",
+    "QMInstructionProperties",
+    "validate_machine",
+    "look_for_standard_op",
+]
 RunInput = Union[QuantumCircuit, Schedule, ScheduleBlock]
+
+
+class QMInstructionProperties(InstructionProperties):
+    def __init__(
+        self,
+        duration: float | None = None,
+        error: float | None = None,
+        qua_pulse_macro: Callable | None = None,
+    ):
+        super().__init__(duration=duration, error=error)
+        self._qua_pulse_macro = qua_pulse_macro
+
+    @property
+    def qua_pulse_macro(self) -> Callable | None:
+        return self._qua_pulse_macro
+
+    @qua_pulse_macro.setter
+    def qua_pulse_macro(self, value: Callable | None):
+        self._qua_pulse_macro = value
+
+    def __repr__(self):
+        return (
+            f"QMInstructionProperties(duration={self.duration}, "
+            f"error={self.error}, "
+            f"qua_pulse_macro={self.qua_pulse_macro})"
+        )
+
+    def __getstate__(self):
+        return (super().__getstate__(), self.qua_pulse_macro)
+
+    def __setstate__(self, state: tuple):
+        super().__setstate__(state[0])
+        self.qua_pulse_macro = state[1]
 
 
 class QMProvider:
@@ -126,6 +165,7 @@ class QMBackend(Backend):
         self,
         machine: QuAM,
         channel_mapping: Optional[Dict[QiskitChannel, QuAMChannel]] = None,
+        init_macro: Optional[Callable] = None,
     ):
         """
         Initialize the QM backend
@@ -133,6 +173,7 @@ class QMBackend(Backend):
             machine: The QuAM instance
             channel_mapping: Optional mapping of Qiskit Pulse Channels to QuAM Channels.
                              This mapping enables the conversion of Qiskit schedules into parametric QUA macros.
+            init_macro: Optional macro to be called at the beginning of the QUA program
 
         """
 
@@ -149,7 +190,8 @@ class QMBackend(Backend):
             qubit.name: i for i, qubit in enumerate(machine.active_qubits)
         }
         self._target, self._operation_mapping_QUA = self._populate_target(machine)
-        self._oq3_basis_gates = list(self.target.operation_names)
+        self._oq3_custom_gates = []
+        self._init_macro = init_macro
 
     @property
     def target(self):
@@ -404,9 +446,9 @@ class QMBackend(Backend):
             bound_params = sig.bind(*args, **kwargs)
             bound_params.apply_defaults()
             if param_table is not None:
-                if not param_table.is_declared:
-                    param_table.declare_variables(pause_program=False)
                 for param_name, value in bound_params.arguments.items():
+                    if not param_table.get_parameter(param_name).is_declared:
+                        param_table.get_parameter(param_name).declare_variable()
                     param_table.get_parameter(param_name).assign_value(value)
 
             time_tracker = {channel: 0 for channel in sched.channels}
@@ -526,49 +568,112 @@ class QMBackend(Backend):
                     pulse
                 )
 
-    def update_calibrations(self, qc: QuantumCircuit):
+    def update_calibrations(
+        self,
+        qc: Optional[QuantumCircuit] = None,
+        input_type: Optional[InputType] = None,
+    ):
         """
         This method updates the QuAM with the custom calibrations of the QuantumCircuit (if any)
         and adds the corresponding operations to the QUA operations mapping for the OQC compiler.
         This method should be called before opening the QuantumMachine instance (i.e. before generating the
         configuration through QuAM) as it modifies the QuAM configuration.
+        It also looks at the Target object and checks if new operations are added to the target. If
+        so, it adds them to the QUA operations mapping for the OQC compiler.
         """
-        if qc.parameters or qc.iter_input_vars():
-            param_table = qc.metadata.get(
-                "parameter_table", ParameterTable.from_qiskit(qc)
-            )
-        else:
-            param_table = None
-
-        if (
-            hasattr(qc, "calibrations") and qc.calibrations
-        ):  # Check for custom calibrations
-            for gate_name, cal_info in qc.calibrations.items():
-                if (
-                    gate_name not in self._oq3_basis_gates
-                ):  # Make it a basis gate for OQ compiler
-                    self._oq3_basis_gates.append(gate_name)
-                for (qubits, parameters), schedule in cal_info.items():
-                    schedule = validate_schedule(
-                        schedule
-                    )  # Check that schedule has fixed duration
-
-                    # Convert type of parameters to int if required (for switch case over channels)
-                    if param_table is not None:
-                        param_table = handle_parameterized_channel(
-                            schedule, param_table
+        # Check the target object for new operations
+        for op_name, op_properties in self.target.items():
+            gate_set = list(
+                set(key.name for key in self._operation_mapping_QUA.keys())
+            ) + list(CONTROL_FLOW_OP_NAMES)
+            if op_name not in gate_set:
+                for qubits, properties in op_properties.items():
+                    if properties is None:
+                        raise ValueError(
+                            f"Operation {op_name} has no properties defined in the target,"
+                            f"hence cannot be added to the QUA operations mapping"
                         )
-                        qc.metadata["parameter_table"] = param_table
+                    elif isinstance(properties, QMInstructionProperties):
+                        if properties.qua_pulse_macro is None:
+                            raise ValueError(
+                                f"Operation {op_name} has no QUA macro defined in the target,"
+                                f"hence cannot be added to the QUA operations mapping"
+                            )
+                        sched = properties.qua_pulse_macro
+                        num_params = len(sched.__signature__.parameters)
+                        self._operation_mapping_QUA[
+                            OperationIdentifier(
+                                op_name,
+                                num_params,
+                                qubits,
+                            )
+                        ] = sched
+                    elif isinstance(properties, InstructionProperties):
+                        if properties.calibration is None:
+                            raise ValueError(
+                                f"Operation {op_name} has no calibration defined in the target,"
+                                f"hence cannot be added to the QUA operations mapping"
+                            )
+                        sched = validate_schedule(properties.calibration)
+                        num_params = len(sched.parameters)
+                        if num_params > 0:
+                            param_table = ParameterTable.from_qiskit(
+                                sched,
+                                input_type=input_type,
+                            )
+                            sched.metadata["parameter_table"] = param_table
+                        else:
+                            param_table = None
+                        self._operation_mapping_QUA[
+                            OperationIdentifier(
+                                op_name,
+                                num_params,
+                                qubits,
+                            )
+                        ] = self.schedule_to_qua_macro(sched, param_table)
 
-                    self._operation_mapping_QUA[
-                        OperationIdentifier(
-                            gate_name,
-                            len(parameters),
-                            qubits,
-                        )
-                    ] = self.schedule_to_qua_macro(schedule, param_table)
+        if qc is not None:
+            if not isinstance(qc, QuantumCircuit):
+                raise ValueError("qc should be a QuantumCircuit")
+            if not hasattr(qc, "calibrations"):
+                raise ValueError("qc should have calibrations")
+            if qc.parameters or qc.iter_input_vars():
+                param_table = qc.metadata.get(
+                    "parameter_table",
+                    ParameterTable.from_qiskit(qc, input_type=input_type),
+                )
+            else:
+                param_table = None
 
-                    self.add_pulse_operations(schedule, name=schedule.name)
+            if (
+                hasattr(qc, "calibrations") and qc.calibrations
+            ):  # Check for custom calibrations
+                for gate_name, cal_info in qc.calibrations.items():
+                    if (
+                        gate_name not in self._oq3_custom_gates
+                    ):  # Make it a basis gate for OQ compiler
+                        self._oq3_custom_gates.append(gate_name)
+                    for (qubits, parameters), schedule in cal_info.items():
+                        schedule = validate_schedule(
+                            schedule
+                        )  # Check that schedule has fixed duration
+
+                        # Convert type of parameters to int if required (for switch case over channels)
+                        if param_table is not None:
+                            param_table = handle_parameterized_channel(
+                                schedule, param_table
+                            )
+                            qc.metadata["parameter_table"] = param_table
+
+                        self._operation_mapping_QUA[
+                            OperationIdentifier(
+                                gate_name,
+                                len(parameters),
+                                qubits,
+                            )
+                        ] = self.schedule_to_qua_macro(schedule, param_table)
+
+                        self.add_pulse_operations(schedule, name=schedule.name)
 
     def quantum_circuit_to_qua(
         self,
@@ -594,7 +699,12 @@ class QMBackend(Backend):
         #         "QuantumCircuit contains parameters but no parameter table provided"
         #     )
         basis_gates = [
-            gate for gate in self._oq3_basis_gates if gate not in ["measure", "reset"]
+            gate for gate in self._oq3_custom_gates if gate not in ["measure", "reset"]
+        ]
+        basis_gates += [
+            gate
+            for gate in self.target.operation_names
+            if gate not in basis_gates and gate not in ["measure", "reset"]
         ]
         # Check if all custom calibrations are in the oq3 basis gates
         for gate_name in qc.calibrations.keys():
@@ -646,16 +756,8 @@ class QMBackend(Backend):
         if isinstance(qc, QuantumCircuit):
             return self.quantum_circuit_to_qua(qc, parameter_table)
         elif isinstance(qc, (ScheduleBlock, Schedule)):  # Convert to Schedule first
-            schedule = qc
-            if isinstance(qc, ScheduleBlock):
-                try:
-                    schedule = block_to_schedule(qc)
-                except (UnassignedDurationError, PulseError) as e:
-                    # TODO: Build ScheduleBlock to QUA compiler
-                    raise RuntimeError(
-                        "ScheduleBlock could not be converted to Schedule (required"
-                        "for converting it to QUA program"
-                    ) from e
+            schedule = validate_schedule(qc)
+
             return self.schedule_to_qua_macro(schedule, parameter_table)
         else:
             raise ValueError(f"Unsupported input {qc}")
@@ -683,6 +785,13 @@ class QMBackend(Backend):
         Generate the configuration for the Quantum Machine
         """
         return self.machine.generate_config()
+
+    @property
+    def init_macro(self) -> Optional[Callable]:
+        """
+        The macro to be called at the beginning of the QUA program
+        """
+        return self._init_macro
 
 
 class FluxTunableTransmonBackend(QMBackend):
@@ -723,7 +832,11 @@ class FluxTunableTransmonBackend(QMBackend):
             **control_channel_mapping,
             **readout_channel_mapping,
         }
-        super().__init__(machine, channel_mapping=channel_mapping)
+        super().__init__(
+            machine,
+            channel_mapping=channel_mapping,
+            init_macro=machine.apply_all_flux_to_joint_idle,
+        )
 
     @property
     def qubit_mapping(self) -> QubitsMapping:

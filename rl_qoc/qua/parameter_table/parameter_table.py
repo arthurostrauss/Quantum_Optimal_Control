@@ -26,7 +26,7 @@ from quam.utils.qua_types import QuaVariable
 
 from qiskit.circuit import QuantumCircuit, Parameter as QiskitParameter
 from qiskit.circuit.parametervector import ParameterVector, ParameterVectorElement
-from .parameter_pool import DGXParameterPool
+from .parameter_pool import ParameterPool
 from .parameter import Parameter
 from .input_type import InputType, Direction
 
@@ -87,13 +87,13 @@ class ParameterTable:
 
 
         """
-        self.table = {}
+        self.table: Dict[str, Parameter] = {}
         if name is not None:
             self.name = name
         else:  # Generate a unique name
             self.name = f"ParameterTable_{id(self)}"
         self._input_type = None
-        self._id = None
+        self._id = ParameterPool.get_id(self)
         self._qua_external_stream = None
         self._packet = None
         self._packet_type = None
@@ -152,20 +152,21 @@ class ParameterTable:
                         input_type,
                         direction,
                     )
-                    self.table[parameter_name].index = index
+                    self.table[parameter_name].set_index(self, index)
+
                 else:
                     assert isinstance(
                         parameter, (int, float, bool, List, np.ndarray)
                     ), "Invalid format for parameter value. Please use (initial_value, qua_type) or initial_value."
                     self.table[parameter_name] = Parameter(parameter_name, parameter)
-                    self.table[parameter_name].index = index
+                    self.table[parameter_name].set_index(self, index)
         elif isinstance(parameters_dict, List):
             for index, parameter in enumerate(parameters_dict):
                 assert isinstance(
                     parameter, Parameter
                 ), "Invalid format for parameter value. Please use Parameter object."
                 self.table[parameter.name] = parameter
-                parameter.index = index
+                self.table[parameter.name].set_index(self, index)
                 if self._input_type is None:
                     self._input_type = parameter.input_type
                 elif self._input_type != parameter.input_type:
@@ -191,7 +192,6 @@ class ParameterTable:
                 type("Struct", (object,), {"__annotations__": attributes})
             )
             self._packet_type = struct
-            self._id = DGXParameterPool.get_id(self)
             for parameter in self.parameters:
                 parameter.dgx_struct = struct
                 parameter.stream_id = self._id
@@ -243,6 +243,9 @@ class ParameterTable:
 
         else:
             for parameter in self.parameters:
+                if parameter.is_declared:
+                    warnings.warn(f"Variable {parameter.name} already declared.")
+                    continue
                 parameter.declare_variable(declare_stream=declare_streams)
             if pause_program:
                 pause()
@@ -352,7 +355,7 @@ class ParameterTable:
             return self.table[parameter].type
         elif isinstance(parameter, int):
             for param in self.parameters:
-                if param.index == parameter:
+                if param.get_index(self) == parameter:
                     return param.type
             raise IndexError(
                 f"No parameter with index {parameter} in the parameter table."
@@ -367,12 +370,16 @@ class ParameterTable:
         Returns: Index of the parameter in the parameter table.
         """
         if isinstance(parameter_name, Parameter):
-            return parameter_name.index if parameter_name in self.parameters else None
+            return (
+                parameter_name.get_index(self)
+                if parameter_name in self.parameters
+                else None
+            )
         if parameter_name not in self.table.keys():
             raise KeyError(
                 f"No parameter named {parameter_name} in the parameter table."
             )
-        return self.table[parameter_name].index
+        return self.table[parameter_name].get_index(self)
 
     def get_parameter(self, parameter: Union[str, int]) -> Parameter:
         """
@@ -392,7 +399,7 @@ class ParameterTable:
             return self.table[parameter]
         elif isinstance(parameter, int):
             for param in self.parameters:
-                if param.index == parameter:
+                if param.get_index(self) == parameter:
                     return param
 
             raise IndexError(
@@ -420,7 +427,7 @@ class ParameterTable:
 
         if isinstance(parameter, int):
             for param in self.parameters:
-                if param.index == parameter:
+                if param.get_index(self) == parameter:
                     return param.var
             raise IndexError(
                 f"No parameter with index {parameter} in the parameter table."
@@ -448,8 +455,8 @@ class ParameterTable:
                     raise KeyError(
                         f"Parameter {parameter.name} already exists in the parameter table."
                     )
-                max_index = max([param.index for param in self.parameters])
-                parameter.index = max_index + 1
+                max_index = max([param.get_index(self) for param in self.parameters])
+                parameter.set_index(self, max_index + 1)
                 if parameter.input_type != self.input_type:
                     raise ValueError(
                         "All parameters in the table must have the same input type."
@@ -543,7 +550,7 @@ class ParameterTable:
                 )
         elif isinstance(item, int):
             for parameter in self.table.values():
-                if parameter.index == item:
+                if parameter.get_index(self) == item:
                     if parameter.is_declared:
                         return parameter.var
                     else:
@@ -687,7 +694,7 @@ class ParameterTable:
                 for key, value in packet_dict.items()
             }
 
-            if DGXParameterPool.configured and DGXParameterPool.patched:
+            if ParameterPool.configured and ParameterPool.patched:
                 if "opnic_wrapper" not in sys.modules:
                     sys.path.append(
                         "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
@@ -749,7 +756,7 @@ class ParameterTable:
                 raise ValueError(
                     "Cannot fetch values from outgoing DGX parameter tables."
                 )
-            elif not DGXParameterPool.configured or not DGXParameterPool.patched:
+            elif not ParameterPool.configured or not ParameterPool.patched:
                 raise ValueError("OPNIC wrapper not configured or patched. ")
 
             if "opnic_wrapper" not in sys.modules:
@@ -840,3 +847,13 @@ class ParameterTable:
                     )
 
         return cls(param_list)
+
+    def reset(self):
+        """
+        Reset the parameter table to its initial state.
+        """
+        if self.input_type == InputType.DGX:
+            raise ValueError("Cannot reset DGX parameter tables.")
+
+        for parameter in self.parameters:
+            parameter.reset()

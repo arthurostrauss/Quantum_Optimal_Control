@@ -14,9 +14,9 @@ import sys
 
 from qm.qua._dsl import _ResultSource
 
-from .parameter_pool import DGXParameterPool
+from .parameter_pool import ParameterPool
 from .input_type import Direction, InputType
-from typing import Optional, List, Union, Tuple, Literal, Sequence
+from typing import Optional, List, Union, Tuple, Literal, Sequence, TYPE_CHECKING, Dict
 import numpy as np
 from qm import QuantumMachine
 from qm.qua import (
@@ -44,6 +44,9 @@ from qm.qua.type_hints import Scalar, Vector, VectorOfAnyType, ScalarOfAnyType
 from qm.jobs.running_qm_job import RunningQmJob
 from qualang_tools.results import wait_until_job_is_paused, fetching_tool
 from quam.utils.qua_types import QuaVariable
+
+if TYPE_CHECKING:
+    from .parameter_table import ParameterTable
 
 
 def set_type(qua_type: Union[str, type]):
@@ -94,6 +97,10 @@ def infer_type(value: Union[int, float, List, np.ndarray] = None):
             return int
         elif isinstance(value[0], float):
             return fixed
+        else:
+            raise ValueError(
+                "Invalid parameter type. Please use float, int or bool or list."
+            )
     else:
         raise ValueError(
             "Invalid parameter type. Please use float, int or bool or list."
@@ -105,6 +112,30 @@ class Parameter:
     Class enabling the mapping of a parameter to a QUA variable to be updated. The type of the QUA variable to be
     adjusted can be declared explicitly or either be automatically inferred from the type of provided initial value.
     """
+
+    def __new__(
+        cls, name, value=None, qua_type=None, input_type=None, direction=None, units=""
+    ):
+        """
+        Create a new instance of the Parameter class.
+        """
+        for obj in ParameterPool.get_all_objs():
+            if hasattr(obj, "parameters"):
+                for param in obj.parameters:
+                    if param.name == name:
+                        warnings.warn(
+                            f"Parameter with name {name} already exists in parameter table {obj.name}."
+                        )
+                        return param
+            else:
+                if obj.name == name:
+                    warnings.warn(
+                        f"Parameter with name {name} already exists in the parameter pool."
+                    )
+                    return obj
+        # TODO: Handle the case where the parameter is part of a parameter table with indexing
+        obj = super().__new__(cls)
+        return obj
 
     def __init__(
         self,
@@ -133,6 +164,9 @@ class Parameter:
             units: Units of the parameter. Default is "".
 
         """
+        if hasattr(self, "_initialized") and self._initialized:
+            print(self.is_declared)
+            return
         self._name = name
         self.units = units
         self.value = value
@@ -159,9 +193,12 @@ class Parameter:
                 Direction(direction) if isinstance(direction, str) else direction
             )
         self._direction = direction
+        self._table_indices: Dict[str, int] = {}
 
         if self._input_type == InputType.DGX and self.direction is None:
             raise ValueError("Direction must be provided for DGX input type.")
+
+        self._initialized = True
 
     def get_name(self):
         return f"{self.name} [{self.units}]"
@@ -176,6 +213,46 @@ class Parameter:
             f"length={self.length}, input_type={self.input_type}, "
             f"direction={self._direction}, units={self.units})"
         )
+
+    def get_index(self, param_table: ParameterTable) -> int:
+        """
+        Get the index of the parameter in the parameter table.
+        Args:
+            param_table: ParameterTable object to get the index from.
+        Returns:
+            int: Index of the parameter in the parameter table.
+        """
+        if self._index == -1:
+            raise ValueError(
+                "This parameter is not part of a parameter table. "
+                "Please use this method through the parameter table instead."
+            )
+        if param_table.name not in self._table_indices:
+            raise ValueError(
+                f"Parameter {self.name} is not part of the parameter table {param_table.name}."
+            )
+        return self._table_indices[param_table.name]
+
+    def set_index(self, param_table: ParameterTable, index: int):
+        """
+        Set the index of the parameter in the parameter table.
+        Args:
+            param_table: ParameterTable object to set the index for.
+            index: Index of the parameter in the parameter table.
+        """
+        if self._index == -1:
+            self._index = -2
+        if self.input_type == InputType.DGX and not len(self._table_indices) <= 1:
+            raise ValueError(
+                "This parameter is already part of a parameter table. In DGX mode, "
+                "you cannot assign the same parameter to multiple tables."
+            )
+        if param_table.name not in self._table_indices:
+            self._table_indices[param_table.name] = index
+        else:
+            raise ValueError(
+                f"Parameter {self.name} is already part of the parameter table {param_table.name}."
+            )
 
     def assign_value(
         self,
@@ -275,12 +352,14 @@ class Parameter:
             Default is False.
         declare_stream: Boolean indicating if an output stream should be declared to save the QUA variable.
         """
+        if self.is_declared:
+            raise ValueError("Variable already declared. Cannot declare again.")
         if self.input_type == InputType.INPUT_STREAM:
             self._var = declare_input_stream(
                 t=self.type, name=self.name, value=self.value
             )
         elif self.input_type == InputType.DGX:
-            if self.index < 0:
+            if not self._table_indices:
                 # Parameter not part of a parameter table
                 dgx_struct = self.dgx_struct
                 self._var = declare_struct(dgx_struct)
@@ -344,12 +423,12 @@ class Parameter:
         Returns:
 
         """
-        if self.index < 0:
+        if self._index < 0:
             if self.input_type != InputType.DGX:
                 raise ValueError("Invalid input type for this parameter. Must be dgx.")
             length = 1 if not self.is_array else self.length
             cls_name = f"{self.name}_struct"
-            DgxStruct = qua_struct(
+            dgxStruct = qua_struct(
                 type(
                     cls_name,
                     (object,),
@@ -357,7 +436,7 @@ class Parameter:
                 )
             )
 
-            return DgxStruct
+            return dgxStruct
         else:
             return self._dgx_struct
 
@@ -375,13 +454,17 @@ class Parameter:
 
         """
         if self._index == -1:  # Not in a ParameterTable
-            self._stream_id = DGXParameterPool.get_id(self)
+            self._stream_id = ParameterPool.get_id(self)
             self._index = -2  # To avoid reassigning the stream ID
 
         return self._stream_id
 
     @stream_id.setter
     def stream_id(self, value: int):
+        if self._index != -1:
+            raise ValueError(
+                "Cannot set stream ID for a parameter that is part of a ParameterTable."
+            )
         self._stream_id = value
 
     @property
@@ -402,20 +485,12 @@ class Parameter:
             return self._var
 
     @property
-    def index(self):
+    def tables(self) -> List[ParameterTable]:
         """
-        Index of the parameter in the parameter table.
-        Relevant only if the parameter is part of a parameter table.
-        This index can be used to access the parameter in the parameter table
-        through the usage of a switch statement.
+        Returns:
+            List of ParameterTable objects associated with the parameter.
         """
-        return self._index
-
-    @index.setter
-    def index(self, value: int):
-        if value < 0:
-            raise ValueError("Index must be a positive integer.")
-        self._index = value
+        return list(self._table_indices.keys())
 
     @property
     def type(self):
@@ -666,7 +741,7 @@ class Parameter:
                 for k, v in param_dict.items()
             }
 
-            if DGXParameterPool.configured and DGXParameterPool.patched:
+            if ParameterPool.configured and ParameterPool.patched:
                 # from opnic_python.opnic_wrapper import OutgoingPacket, send_packet
                 if "opnic_wrapper" not in sys.path:
                     sys.path.append(
@@ -754,7 +829,7 @@ class Parameter:
                 )
             if self.direction == Direction.OUTGOING:
                 raise ValueError("Cannot fetch value from outgoing stream.")
-            elif not DGXParameterPool.configured or not DGXParameterPool.patched:
+            elif not ParameterPool.configured or not ParameterPool.patched:
                 raise ValueError("OPNIC not configured or patched.")
             if "opnic_wrapper" not in sys.modules:
                 sys.path.append(
@@ -771,3 +846,17 @@ class Parameter:
         if verbosity > 1:
             print(f"Fetched value: {value}")
         return value
+
+    def reset(self):
+        """
+        Reset the parameter to its initial state.
+        """
+        self._is_declared = False
+        self._var = None
+        self._stream = None
+        self._stream_id = None
+        self._counter_var = None
+        self._dgx_struct = None
+        self._external_stream_incoming = None
+        self._external_stream_outgoing = None
+        self._index = -1
