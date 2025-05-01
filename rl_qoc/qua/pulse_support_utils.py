@@ -37,9 +37,7 @@ def get_real_time_pulse_parameters(pulse: QiskitPulse):
     """
     real_time_params = {}
     for param in _real_time_parameters:
-        if hasattr(pulse, param) and isinstance(
-            getattr(pulse, param), ParameterExpression
-        ):
+        if hasattr(pulse, param) and isinstance(getattr(pulse, param), ParameterExpression):
             real_time_params[param] = getattr(pulse, param)
     return real_time_params
 
@@ -69,9 +67,7 @@ def _handle_parameterized_instruction(
             )
         elif attribute == "pulse":
             pulse = getattr(instruction, attribute)
-            for pulse_param_name, pulse_param in get_real_time_pulse_parameters(
-                pulse
-            ).items():
+            for pulse_param_name, pulse_param in get_real_time_pulse_parameters(pulse).items():
                 value_dict[pulse_param_name] = sympy_to_qua(
                     pulse_param.sympify(),
                     involved_parameters,
@@ -90,16 +86,12 @@ def validate_pulse(pulse: QiskitPulse, channel: QuAMChannel) -> QiskitPulse:
     Validate the pulse on the QuAM channel
     """
     if not pulse.name in channel.operations:
-        raise ValueError(
-            f"Pulse {pulse.name} is not in the operations of the QuAM channel"
-        )
+        raise ValueError(f"Pulse {pulse.name} is not in the operations of the QuAM channel")
 
     return pulse
 
 
-def validate_instruction(
-    instruction: Instruction, quam_channel: QuAMChannel
-) -> QuaPulseMacro:
+def validate_instruction(instruction: Instruction, quam_channel: QuAMChannel) -> QuaPulseMacro:
     """
     Validate the instruction before converting it to QUA and return the corresponding QUA macro
     """
@@ -115,9 +107,7 @@ def validate_instruction(
         raise ValueError(f"Instruction {instruction} not supported on QM backend")
 
 
-def validate_parameters(
-    params, param_table: ParameterTable, param_mapping=None
-) -> ParameterTable:
+def validate_parameters(params, param_table: ParameterTable, param_mapping=None) -> ParameterTable:
     """
     Validate the parameters of the instruction by checking them against the parameter table
     and a possible parameter mapping
@@ -139,9 +129,7 @@ def validate_parameters(
         if param_name not in param_table:
             raise ValueError(f"Parameter {param_name} is not in the parameter table")
         if param_mapping is not None and param_name not in param_mapping:
-            raise ValueError(
-                f"Parameter {param_name} is not in the provided parameters mapping"
-            )
+            raise ValueError(f"Parameter {param_name} is not in the provided parameters mapping")
     return param_table
 
 
@@ -188,23 +176,17 @@ def validate_schedule(schedule: Schedule | ScheduleBlock) -> Schedule:
     return schedule
 
 
-def handle_parameterized_channel(
-    schedule: Schedule, param_table: ParameterTable
-) -> ParameterTable:
+def handle_parameterized_channel(schedule: Schedule, param_table: ParameterTable) -> ParameterTable:
     """
     Modify type of parameters (-> int) in the Table that refer to channel parameters (they refer to integers)
     """
     for (
         channel
-    ) in (
-        schedule.channels
-    ):  # Check if channels are parametrized to change param type (->int)
+    ) in schedule.channels:  # Check if channels are parametrized to change param type (->int)
         if channel.is_parameterized():
             ch_params = list(channel.parameters)
             if len(ch_params) > 1:
-                raise NotImplementedError(
-                    "Only single parameterized channels are supported"
-                )
+                raise NotImplementedError("Only single parameterized channels are supported")
             ch_param = ch_params[0]
             if ch_param.name in param_table:
                 param_table.get_parameter(ch_param.name).type = int

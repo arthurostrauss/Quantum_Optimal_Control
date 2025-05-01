@@ -39,9 +39,7 @@ class ParameterPool:
             if hasattr(obj, "parameters"):
                 for obj_param in obj.parameters:
                     if obj_param.name in names:
-                        raise ValueError(
-                            f"Parameter with name {obj_param.name} already exists."
-                        )
+                        raise ValueError(f"Parameter with name {obj_param.name} already exists.")
             cls._parameters_dict[next_id] = obj
         return next_id
 
@@ -181,9 +179,7 @@ class ParameterPool:
         return f"ParameterPool({self._parameters_dict})"
 
     @classmethod
-    def patch_opnic_wrapper(
-        cls, path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"
-    ):
+    def patch_opnic_wrapper(cls, path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"):
         """
         Patch the OPNIC wrapper.
 
@@ -214,18 +210,12 @@ class ParameterPool:
         )
 
         for obj in cls.get_all_objs():
-            direction = (
-                Direction_INCOMING
-                if obj.direction == "INCOMING"
-                else Direction_OUTGOING
-            )
+            direction = Direction_INCOMING if obj.direction == "INCOMING" else Direction_OUTGOING
             configure_stream(obj.stream_id, direction)
         cls._configured = True
 
     @classmethod
-    def initialize_streams(
-        cls, path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"
-    ):
+    def initialize_streams(cls, path_to_opnic_dev: Optional[str] = "/home/dpoulos/opnic-dev"):
         """
         Initialize the OPNIC and the necessary streams for the current stage of the ParameterPool.
         Args:
@@ -251,9 +241,7 @@ class ParameterPool:
     def close_streams(cls):
         if cls._configured and cls._patched:
             if "opnic_wrapper" not in sys.modules:
-                sys.path.append(
-                    "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
-                )
+                sys.path.append("/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python")
             from opnic_wrapper import close_stream
 
             for obj in cls.get_all_objs():

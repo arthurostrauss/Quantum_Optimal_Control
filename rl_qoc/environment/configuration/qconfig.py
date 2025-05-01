@@ -47,9 +47,7 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward: (
-        Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward"
-    ) = "state"
+    reward: Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward" = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
     _backend_info: BackendInfo = None
@@ -68,9 +66,7 @@ class QEnvConfig:
             from ...rewards import Reward
 
             if not isinstance(self.reward, Reward):
-                raise ValueError(
-                    "Reward configuration must be a string or a Reward instance"
-                )
+                raise ValueError("Reward configuration must be a string or a Reward instance")
         if self.backend_config.config_type in ["qiskit", "dynamics", "runtime"]:
             from ..backend_info import QiskitBackendInfo
 
@@ -165,9 +161,7 @@ class QEnvConfig:
         if isinstance(value, int):
             assert value > 0, "Number of repetitions must be greater than 0"
         else:
-            assert all(
-                v > 0 for v in value
-            ), "Number of repetitions must be greater than 0"
+            assert all(v > 0 for v in value), "Number of repetitions must be greater than 0"
         self.execution_config.n_reps = [value] if isinstance(value, int) else value
 
     @property
@@ -224,9 +218,7 @@ class QEnvConfig:
         return self.reward.reward_method
 
     @reward_method.setter
-    def reward_method(
-        self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
-    ):
+    def reward_method(self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]):
         try:
             from ...rewards import reward_dict
 
@@ -282,9 +274,7 @@ class QEnvConfig:
             },
             "backend_config": {
                 "backend": (
-                    self.backend.name
-                    if isinstance(self.backend, BackendV2)
-                    else self.backend
+                    self.backend.name if isinstance(self.backend, BackendV2) else self.backend
                 ),
             },
             "action_space": {
@@ -350,9 +340,7 @@ class QEnvConfig:
             QEnvConfig: Quantum Environment configuration object
         """
 
-        params, backend_params, runtime_options = load_q_env_from_yaml_file(
-            config_file_path
-        )
+        params, backend_params, runtime_options = load_q_env_from_yaml_file(config_file_path)
 
         if isinstance(backend, Callable):
             backend = backend(**backend_callback_kwargs)

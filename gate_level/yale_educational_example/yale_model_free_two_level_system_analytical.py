@@ -40,9 +40,7 @@ def perform_action(amp, shots=1):
 
     reward_table = np.zeros(np.shape(amp))
     for j, angle in enumerate(amp):
-        qc.rx(
-            2 * np.pi * angle, 0
-        )  # Add parametrized gate for each amplitude in the batch
+        qc.rx(2 * np.pi * angle, 0)  # Add parametrized gate for each amplitude in the batch
         qc.measure(0, 0)  # Measure the qubit
         job = qasm.run(qc, shots=shots)
         result = job.result()
@@ -127,9 +125,7 @@ def plot_examples(colormaps, ax, reward_table):
     Helper function to plot data with associated colormap, used for plotting the reward per each epoch and each episode
     """
 
-    ax.pcolormesh(
-        reward_table.transpose(), cmap=colormaps, rasterized=True, vmin=-1, vmax=1
-    )
+    ax.pcolormesh(reward_table.transpose(), cmap=colormaps, rasterized=True, vmin=-1, vmax=1)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Episode")
     plt.show()

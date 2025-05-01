@@ -50,9 +50,7 @@ class ORBIT:
         self.num_sequences = num_sequences
         self.seed = q_env.seed
         self.q_env = q_env
-        assert isinstance(
-            q_env.target, GateTarget
-        ), "Target should be a GateTarget object"
+        assert isinstance(q_env.target, GateTarget), "Target should be a GateTarget object"
 
         if use_interleaved:
             self.exp = InterleavedRB(
@@ -79,8 +77,7 @@ class ORBIT:
         else:
             self.run_circuits, self.ref_circuits = self.orbit_circuits()
         self.transpiled_circuits = [
-            transpile(circuit, q_env.backend, optimization_level=0)
-            for circuit in self.run_circuits
+            transpile(circuit, q_env.backend, optimization_level=0) for circuit in self.run_circuits
         ]
         self.fidelities = []
 
@@ -120,16 +117,12 @@ class ORBIT:
             counts = [result.data.meas.get_counts() for result in results]
             for count in counts:
                 for key in [
-                    bin(i)[2:].zfill(self.q_env.n_qubits)
-                    for i in range(2**self.q_env.n_qubits)
+                    bin(i)[2:].zfill(self.q_env.n_qubits) for i in range(2**self.q_env.n_qubits)
                 ]:
                     if key not in count.keys():
                         count[key] = 0
             fidelity = np.mean(
-                [
-                    count["0" * self.q_env.n_qubits] / self.q_env.n_shots
-                    for count in counts
-                ]
+                [count["0" * self.q_env.n_qubits] / self.q_env.n_shots for count in counts]
             )
 
         else:
@@ -138,9 +131,7 @@ class ORBIT:
                 [parameter_values] * len(self.transpiled_circuits),
                 shots=self.q_env.n_shots,
             ).result()
-            counts = [
-                results.quasi_dists[i] for i in range(len(self.transpiled_circuits))
-            ]
+            counts = [results.quasi_dists[i] for i in range(len(self.transpiled_circuits))]
             # fidelity = np.mean([count[0] for count in counts])
 
             zero_state_key = int(0)

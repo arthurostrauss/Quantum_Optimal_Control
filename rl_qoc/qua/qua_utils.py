@@ -39,9 +39,7 @@ def validate_parameter_table(qc: QuantumCircuit):
                 )
         elif isinstance(parameter, Parameter):
             if parameter.name not in qc.metadata["parameter_table"].table:
-                raise ValueError(
-                    f"Parameter {parameter.name} not found in the parameter table"
-                )
+                raise ValueError(f"Parameter {parameter.name} not found in the parameter table")
             elif qc.metadata["parameter_table"].table[parameter.name].length != 0:
                 raise ValueError(
                     f"Parameter {parameter.name} is not a scalar in the parameter table"
@@ -60,10 +58,7 @@ def get_gaussian_sampling_input():
     )
     ln_array = declare(
         fixed,
-        value=[
-            (np.sqrt(-2 * np.log(x / (n_lookup + 1))).tolist())
-            for x in range(1, n_lookup + 1)
-        ],
+        value=[(np.sqrt(-2 * np.log(x / (n_lookup + 1))).tolist()) for x in range(1, n_lookup + 1)],
     )
     return n_lookup, cos_array, ln_array
 
@@ -80,10 +75,7 @@ def rand_gauss_moller_box(z1, z2, mean, std, rand):
     )
     ln_array = declare(
         fixed,
-        value=[
-            (np.sqrt(-2 * np.log(x / (n_lookup + 1))).tolist())
-            for x in range(1, n_lookup + 1)
-        ],
+        value=[(np.sqrt(-2 * np.log(x / (n_lookup + 1))).tolist()) for x in range(1, n_lookup + 1)],
     )
 
     tmp = declare(fixed)
@@ -93,9 +85,7 @@ def rand_gauss_moller_box(z1, z2, mean, std, rand):
     assign(u1, Cast.unsafe_cast_int(tmp >> 19))
     assign(u2, Cast.unsafe_cast_int(tmp) & ((1 << 19) - 1))
     assign(z1, mean + std * ln_array[u1] * cos_array[u2 & (n_lookup - 1)])
-    assign(
-        z2, mean + std * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
-    )
+    assign(z2, mean + std * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)])
     return z1, z2
 
 
@@ -136,11 +126,7 @@ def reset_qubit(method: str, qubit: Qubit, **kwargs):
             raise Exception("'threshold' must be specified for active reset.")
         # Check max_tries
         max_tries = kwargs.get("max_tries", 1)
-        if (
-            (max_tries is None)
-            or (not float(max_tries).is_integer())
-            or (max_tries < 1)
-        ):
+        if (max_tries is None) or (not float(max_tries).is_integer()) or (max_tries < 1):
             raise Exception("'max_tries' must be an integer > 0.")
         # Check Ig
         Ig = kwargs.get("Ig", None)

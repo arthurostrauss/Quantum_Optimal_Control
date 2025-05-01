@@ -63,9 +63,7 @@ current_dir = os.getcwd()
 config_file_name = "q_env_pulse_config.yml"
 config_file_address = os.path.join(current_dir, config_file_name)
 
-q_env_config = get_q_env_config(
-    config_file_address, apply_parametrized_circuit, backend
-)
+q_env_config = get_q_env_config(config_file_address, apply_parametrized_circuit, backend)
 
 # Set the parametrized circuit kwargs to be used in the parametrized circuit function
 q_env_config.backend_config.parametrized_circuit_kwargs = {
@@ -97,9 +95,7 @@ else:
 # This step is dependent on the output layer of the agent for the mean of the policy
 # If the output layer is a tanh layer (default), then rescaling is necessary
 
-rescaled_env = ClipAction(
-    RescaleAction(q_env, q_env.action_space.low, q_env.action_space.high)
-)
+rescaled_env = ClipAction(RescaleAction(q_env, q_env.action_space.low, q_env.action_space.high))
 
 print("Circuit subject to calibration:")
 fig
@@ -155,9 +151,7 @@ train_function_settings = TrainFunctionSettings(
 # %%
 ppo_agent.agent_config.ent_coef = 0.01
 # %%
-ppo_agent.train(
-    training_config=training_config, train_function_settings=train_function_settings
-)
+ppo_agent.train(training_config=training_config, train_function_settings=train_function_settings)
 # %%
 import matplotlib.pyplot as plt
 
@@ -197,9 +191,7 @@ plt.show()
 print("Optimal action", q_env.optimal_action)
 print("Best fidelity:", np.max(q_env.fidelity_history))
 # %%
-initial_amp = (
-    q_env.backend.target.get_calibration("x", (0,)).instructions[0][1].pulse.amp
-)
+initial_amp = q_env.backend.target.get_calibration("x", (0,)).instructions[0][1].pulse.amp
 initial_amp
 # %%
 # Update calibration in the backend target and retrieve the calibration
@@ -251,18 +243,14 @@ pulse_circ = transpile(qc, q_env.backend)
 q_env.backend.options.shots = 1000
 pulse_results = q_env.backend.run(pulse_circ).result()
 
-plot_histogram(
-    [basic_result.get_counts(), pulse_results.get_counts()], legend=["Ideal", "Pulse"]
-)
+plot_histogram([basic_result.get_counts(), pulse_results.get_counts()], legend=["Ideal", "Pulse"])
 # %%
 pulse_circ.draw("mpl")
 # %%
 # Testing the pulse schedule
 from qiskit import schedule
 
-pulse_schedule = schedule(
-    pulse_circ.remove_final_measurements(inplace=False), q_env.backend
-)
+pulse_schedule = schedule(pulse_circ.remove_final_measurements(inplace=False), q_env.backend)
 pulse_schedule.draw()
 # %%
 # Testing the pulse schedule

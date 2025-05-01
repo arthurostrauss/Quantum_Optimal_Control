@@ -88,9 +88,7 @@ class CAFEReward(Reward):
                 (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
             )
             input_state = target.input_states[sample]
-            run_qc = qc.copy_empty_like(
-                name="cafe_circ"
-            )  # Circuit with custom target gate
+            run_qc = qc.copy_empty_like(name="cafe_circ")  # Circuit with custom target gate
             ref_qc = circuit_ref.copy_empty_like(
                 name="cafe_ref_circ"
             )  # Circuit with reference gate
@@ -116,9 +114,7 @@ class CAFEReward(Reward):
                 circuit.compose(cycle_circuit, inplace=True)
 
             # Compute inverse unitary for reference circuit
-            sim_qc = causal_cone_circuit(ref_qc.decompose(), target.causal_cone_qubits)[
-                0
-            ]
+            sim_qc = causal_cone_circuit(ref_qc.decompose(), target.causal_cone_qubits)[0]
             sim_qc.save_unitary()
             backend = (
                 backend_info.backend
@@ -126,9 +122,7 @@ class CAFEReward(Reward):
                 else AerSimulator()
             )
             sim_unitary = (
-                backend.run(sim_qc, noise_model=None, method="unitary")
-                .result()
-                .get_unitary()
+                backend.run(sim_qc, noise_model=None, method="unitary").result().get_unitary()
             )
 
             reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
@@ -161,9 +155,7 @@ class CAFEReward(Reward):
                     input_state.circuit,
                     execution_config.current_n_reps,
                     input_state_indices,
-                    causal_cone_circuit(
-                        reverse_unitary_qc, target.causal_cone_qubits_indices
-                    )[0],
+                    causal_cone_circuit(reverse_unitary_qc, target.causal_cone_qubits_indices)[0],
                     target.causal_cone_qubits_indices,
                 )
             )
@@ -203,14 +195,10 @@ class CAFEReward(Reward):
         if num_bits == causal_cone_size:
             # No post-selection based on causal cone
             pub_data = [
-                [pub_result.data.meas[i] for i in range(batch_size)]
-                for pub_result in pub_results
+                [pub_result.data.meas[i] for i in range(batch_size)] for pub_result in pub_results
             ]
             survival_probability = [
-                [
-                    bit_array.get_int_counts().get(0, 0) / n_shots
-                    for bit_array in bit_arrays
-                ]
+                [bit_array.get_int_counts().get(0, 0) / n_shots for bit_array in bit_arrays]
                 for bit_arrays in pub_data
             ]
         else:

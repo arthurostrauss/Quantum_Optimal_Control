@@ -86,9 +86,7 @@ class StateReward(Reward):
 
         prep_circuit = qc
         target_instance = target
-        target_state = (
-            target_instance if isinstance(target_instance, StateTarget) else None
-        )
+        target_state = target_instance if isinstance(target_instance, StateTarget) else None
         n_reps = execution_config.current_n_reps
 
         if isinstance(target_instance, GateTarget):
@@ -98,9 +96,7 @@ class StateReward(Reward):
         input_state_indices = (0,) * num_qubits
         if isinstance(target_instance, GateTarget):
             # State reward: sample a random input state for target gate
-            input_state_index = self.input_states_rng.choice(
-                len(target_instance.input_states)
-            )
+            input_state_index = self.input_states_rng.choice(len(target_instance.input_states))
 
             input_choice = target_instance.input_states_choice
             input_state_indices = np.unravel_index(
@@ -145,36 +141,26 @@ class StateReward(Reward):
             pauli_sampling = execution_config.sampling_paulis
 
         pauli_indices, counts = np.unique(
-            self.observables_rng.choice(
-                non_zero_indices, pauli_sampling, p=non_zero_probabilities
-            ),
+            self.observables_rng.choice(non_zero_indices, pauli_sampling, p=non_zero_probabilities),
             return_counts=True,
         )
         identity_term = np.where(pauli_indices == 0)[0]
         c_factor = execution_config.c_factor
         if len(identity_term) > 0:
             id_coeff = c_factor * np.sum(
-                counts[identity_term]
-                / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
+                counts[identity_term] / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
             )
         else:
             id_coeff = 0.0
 
         pauli_indices = np.delete(pauli_indices, identity_term)
         counts = np.delete(counts, identity_term)
-        reward_factor = (
-            execution_config.c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
-        )
+        reward_factor = execution_config.c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
 
         if dfe_precision is not None:
             eps, delta = dfe_precision
             pauli_shots = np.ceil(
-                2
-                * np.log(2 / delta)
-                / (eps**2)
-                * dim
-                * Chi[pauli_indices] ** 2
-                * pauli_sampling
+                2 * np.log(2 / delta) / (eps**2) * dim * Chi[pauli_indices] ** 2 * pauli_sampling
             )
         else:
             pauli_shots = execution_config.n_shots * counts
@@ -184,9 +170,7 @@ class StateReward(Reward):
 
         shots_per_basis = []
         # Group observables by qubit-wise commuting groups to reduce the number of PUBs
-        for i, commuting_group in enumerate(
-            observables.paulis.group_qubit_wise_commuting()
-        ):
+        for i, commuting_group in enumerate(observables.paulis.group_qubit_wise_commuting()):
             max_pauli_shots = 0
             for pauli in commuting_group:
                 pauli_index = list(basis).index(pauli)

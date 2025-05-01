@@ -32,9 +32,7 @@ class RescaleAndClipAction(
             max_action: The maximum action value in the environment.
         """
         assert isinstance(env.action_space, Box)
-        RecordConstructorArgs.__init__(
-            self, min_action=min_action, max_action=max_action
-        )
+        RecordConstructorArgs.__init__(self, min_action=min_action, max_action=max_action)
 
         def rescale_and_clip(action: np.ndarray) -> np.ndarray:
             # Rescale the action to the desired range

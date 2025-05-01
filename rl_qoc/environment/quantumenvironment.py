@@ -53,23 +53,17 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             training_config: QEnvConfig object containing the training configuration
         """
         # self._parameters = ParameterVector("θ", training_config.n_actions)
-        self._parameters = [
-            Parameter(f"a_{i}") for i in range(training_config.n_actions)
-        ]
+        self._parameters = [Parameter(f"a_{i}") for i in range(training_config.n_actions)]
 
         super().__init__(training_config)
 
-        self._target, self.circuits, self.baseline_circuits = (
-            self.define_target_and_circuits()
-        )
+        self._target, self.circuits, self.baseline_circuits = self.define_target_and_circuits()
         # self.observation_space = Box(
         #     low=np.array([0, 0] + [-5] * (2 ** self.n_qubits) ** 2),
         #     high=np.array([1, 1] + [5] * (2 ** self.n_qubits) ** 2),
         #     dtype=np.float32,
         # )
-        self.observation_space = Box(
-            low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
-        )
+        self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
 
     @property
     def parameters(self):
@@ -151,9 +145,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
     def modify_environment_params(self, **kwargs):
         print(f"\n Number of repetitions: {self.n_reps}")
 
-    def step(
-        self, action: ActType
-    ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+    def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         self._step_tracker += 1
         if self._episode_ended:
             print("Resetting environment")
@@ -274,9 +266,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
             print("Starting simulation benchmark...")
             if not self.config.reward_method == "fidelity":
-                params = np.array(
-                    [self.mean_action]
-                )  # Benchmark policy only through mean action
+                params = np.array([self.mean_action])  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":  # Circuit simulation
                 fids = self.simulate_circuit(qc, params, update_env_history)
             else:  # Pulse simulation
@@ -328,10 +318,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     rz_cal = self.backend.target.get_calibration("rz", (i,))
                     pulse.call(
                         rz_cal,
-                        value_dict={
-                            parameter: optimal_rots[i]
-                            for parameter in rz_cal.parameters
-                        },
+                        value_dict={parameter: optimal_rots[i] for parameter in rz_cal.parameters},
                     )
                 pulse.call(schedule_)
                 for i in range(self.n_qubits):
@@ -339,8 +326,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     pulse.call(
                         rz_cal,
                         value_dict={
-                            parameter: optimal_rots[-1 - i]
-                            for parameter in rz_cal.parameters
+                            parameter: optimal_rots[-1 - i] for parameter in rz_cal.parameters
                         },
                     )
 
@@ -366,6 +352,4 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 gate_name, tuple(self.physical_target_qubits)
             )
         else:
-            return self.circuits[0].assign_parameters(
-                {self.parameters[0]: self.optimal_action}
-            )
+            return self.circuits[0].assign_parameters({self.parameters[0]: self.optimal_action})

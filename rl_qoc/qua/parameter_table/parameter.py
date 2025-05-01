@@ -98,13 +98,9 @@ def infer_type(value: Union[int, float, List, np.ndarray] = None):
         elif isinstance(value[0], float):
             return fixed
         else:
-            raise ValueError(
-                "Invalid parameter type. Please use float, int or bool or list."
-            )
+            raise ValueError("Invalid parameter type. Please use float, int or bool or list.")
     else:
-        raise ValueError(
-            "Invalid parameter type. Please use float, int or bool or list."
-        )
+        raise ValueError("Invalid parameter type. Please use float, int or bool or list.")
 
 
 class Parameter:
@@ -113,9 +109,7 @@ class Parameter:
     adjusted can be declared explicitly or either be automatically inferred from the type of provided initial value.
     """
 
-    def __new__(
-        cls, name, value=None, qua_type=None, input_type=None, direction=None, units=""
-    ):
+    def __new__(cls, name, value=None, qua_type=None, input_type=None, direction=None, units=""):
         """
         Create a new instance of the Parameter class.
         """
@@ -142,9 +136,7 @@ class Parameter:
         name: str,
         value: Optional[Union[int, float, List, np.ndarray]] = None,
         qua_type: Optional[Union[str, type]] = None,
-        input_type: Optional[
-            Union[Literal["DGX", "INPUT_STREAM", "IO1", "IO2"], InputType]
-        ] = None,
+        input_type: Optional[Union[Literal["DGX", "INPUT_STREAM", "IO1", "IO2"], InputType]] = None,
         direction: Optional[Union[Literal["INCOMING", "OUTGOING"], Direction]] = None,
         units: str = "",
     ):
@@ -165,7 +157,6 @@ class Parameter:
 
         """
         if hasattr(self, "_initialized") and self._initialized:
-            print(self.is_declared)
             return
         self._name = name
         self.units = units
@@ -183,15 +174,11 @@ class Parameter:
         self._external_stream_outgoing = None
 
         if input_type is not None:
-            input_type = (
-                InputType(input_type) if isinstance(input_type, str) else input_type
-            )
+            input_type = InputType(input_type) if isinstance(input_type, str) else input_type
         self._input_type: Optional[InputType] = input_type
         self._dgx_struct = None
         if direction is not None:
-            direction = (
-                Direction(direction) if isinstance(direction, str) else direction
-            )
+            direction = Direction(direction) if isinstance(direction, str) else direction
         self._direction = direction
         self._table_indices: Dict[str, int] = {}
 
@@ -259,9 +246,7 @@ class Parameter:
         value: Union["Parameter", ScalarOfAnyType, VectorOfAnyType],
         is_qua_array: bool = False,
         condition=None,
-        value_cond: Optional[
-            Union["Parameter", ScalarOfAnyType, VectorOfAnyType]
-        ] = None,
+        value_cond: Optional[Union["Parameter", ScalarOfAnyType, VectorOfAnyType]] = None,
     ):
         """
         Assign value to the QUA variable corresponding to the parameter.
@@ -304,9 +289,7 @@ class Parameter:
                     f"Invalid input. {self.name} should be a list of length {self.length}."
                 )
             if value_cond is not None and not isinstance(value_cond, Parameter):
-                raise ValueError(
-                    "Invalid input. value_cond should be of same type as value."
-                )
+                raise ValueError("Invalid input. value_cond should be of same type as value.")
             if self.is_array:
                 i = self._counter_var
                 with for_(i, 0, i < self.length, i + 1):
@@ -316,9 +299,7 @@ class Parameter:
                         value_cond.var[i] if value_cond else None,
                     )
             else:
-                assign_with_condition(
-                    self.var, value.var, value_cond.var if value_cond else None
-                )
+                assign_with_condition(self.var, value.var, value_cond.var if value_cond else None)
         else:
             if self.is_array:
                 if is_qua_array:
@@ -355,9 +336,7 @@ class Parameter:
         if self.is_declared:
             raise ValueError("Variable already declared. Cannot declare again.")
         if self.input_type == InputType.INPUT_STREAM:
-            self._var = declare_input_stream(
-                t=self.type, name=self.name, value=self.value
-            )
+            self._var = declare_input_stream(t=self.type, name=self.name, value=self.value)
         elif self.input_type == InputType.DGX:
             if not self._table_indices:
                 # Parameter not part of a parameter table
@@ -562,12 +541,8 @@ class Parameter:
 
     def clip(
         self,
-        min_val: Optional[
-            Scalar[int], Scalar[float], Vector[int], Vector[float]
-        ] = None,
-        max_val: Optional[
-            Scalar[int], Scalar[float], Vector[int], Vector[float]
-        ] = None,
+        min_val: Optional[Scalar[int], Scalar[float], Vector[int], Vector[float]] = None,
+        max_val: Optional[Scalar[int], Scalar[float], Vector[int], Vector[float]] = None,
         is_qua_array: bool = False,
     ):
         """
@@ -581,17 +556,13 @@ class Parameter:
                 "Variable not declared. Declare the variable first through declare_variable method."
             )
         if not self.is_array and is_qua_array:
-            raise ValueError(
-                "Invalid input. Single value cannot be clipped with array bounds."
-            )
+            raise ValueError("Invalid input. Single value cannot be clipped with array bounds.")
         elif (
             isinstance(min_val, (int, float))
             and isinstance(max_val, (int, float))
             and min_val > max_val
         ):
-            raise ValueError(
-                "Invalid range. Minimum value must be less than maximum value."
-            )
+            raise ValueError("Invalid range. Minimum value must be less than maximum value.")
 
         elif min_val is None and max_val is None:
             warnings.warn("No range specified. No clipping performed.")
@@ -689,9 +660,7 @@ class Parameter:
             try:
                 value = [param_type(x) for x in value]
             except ValueError:
-                raise ValueError(
-                    f"Invalid input. {self.name} should be a list of {param_type}."
-                )
+                raise ValueError(f"Invalid input. {self.name} should be a list of {param_type}.")
         elif not self.is_array and not isinstance(value, param_type):
             try:
                 value = param_type(value)
@@ -704,9 +673,7 @@ class Parameter:
             value = list(value)
 
         if self.input_type in [InputType.IO1, InputType.IO2]:
-            io = (
-                "set_io1_value" if self.input_type == InputType.IO1 else "set_io2_value"
-            )
+            io = "set_io1_value" if self.input_type == InputType.IO1 else "set_io2_value"
             if qm is None:
                 raise ValueError("QuantumMachine object must be provided.")
             if self.is_array:
@@ -737,16 +704,13 @@ class Parameter:
             # Prepare the packet to be sent
             param_dict = {self.name: [value] if not self.is_array else value}
             param_dict = {
-                k: v.tolist() if isinstance(v, np.ndarray) else v
-                for k, v in param_dict.items()
+                k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in param_dict.items()
             }
 
             if ParameterPool.configured and ParameterPool.patched:
                 # from opnic_python.opnic_wrapper import OutgoingPacket, send_packet
                 if "opnic_wrapper" not in sys.path:
-                    sys.path.append(
-                        "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
-                    )
+                    sys.path.append("/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python")
                 from opnic_wrapper import OutgoingPacket, send_packet
 
                 flattened_values = list(chain(*param_dict.values()))
@@ -802,9 +766,7 @@ class Parameter:
             Value fetched from the OPX.
         """
         if self.input_type in [InputType.IO1, InputType.IO2]:
-            io = (
-                "get_io1_value" if self.input_type == InputType.IO1 else "get_io2_value"
-            )
+            io = "get_io1_value" if self.input_type == InputType.IO1 else "get_io2_value"
             if qm is None:
                 raise ValueError("QuantumMachine object must be provided.")
             if not self.is_array:
@@ -832,9 +794,7 @@ class Parameter:
             elif not ParameterPool.configured or not ParameterPool.patched:
                 raise ValueError("OPNIC not configured or patched.")
             if "opnic_wrapper" not in sys.modules:
-                sys.path.append(
-                    "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
-                )
+                sys.path.append("/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python")
             from opnic_wrapper import wait_for_packets, read_packet
 
             wait_for_packets(self.stream_id, 1)

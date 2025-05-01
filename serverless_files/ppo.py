@@ -44,9 +44,7 @@ def get_module_from_str(module_str):
         "gelu": nn.GELU,
     }
     if module_str not in module_dict:
-        raise ValueError(
-            f"Agent Config `ACTIVATION` needs to be one of {module_dict.keys()}"
-        )
+        raise ValueError(f"Agent Config `ACTIVATION` needs to be one of {module_dict.keys()}")
     return module_dict[module_str]
 
 
@@ -63,9 +61,7 @@ def get_optimizer_from_str(optim_str):
         "sgd": optim.SGD,
     }
     if optim_str not in optim_dict:
-        raise ValueError(
-            f"Agent Config `OPTIMIZER` needs to be one of {optim_dict.keys()}"
-        )
+        raise ValueError(f"Agent Config `OPTIMIZER` needs to be one of {optim_dict.keys()}")
 
     return optim_dict[optim_str]
 
@@ -106,8 +102,7 @@ class CustomPPO:
         self.hidden_units = agent_config["N_UNITS"]
         self.activation_fn = agent_config["ACTIVATION"]
         self.activation_functions = [
-            get_module_from_str(self.activation_fn)()
-            for _ in range(len(self.hidden_units) + 1)
+            get_module_from_str(self.activation_fn)() for _ in range(len(self.hidden_units) + 1)
         ]
         self.include_critic = agent_config["INCLUDE_CRITIC"]
         self.minibatch_size = agent_config["MINIBATCH_SIZE"]
@@ -207,12 +202,8 @@ class CustomPPO:
         if plot_real_time:
             plt.ion()
 
-        obs = torch.zeros(
-            (self.num_time_steps, self.batchsize) + self.env.observation_space.shape
-        )
-        actions = torch.zeros(
-            (self.num_time_steps, self.batchsize) + self.env.action_space.shape
-        )
+        obs = torch.zeros((self.num_time_steps, self.batchsize) + self.env.observation_space.shape)
+        actions = torch.zeros((self.num_time_steps, self.batchsize) + self.env.action_space.shape)
         logprobs = torch.zeros((self.num_time_steps, self.batchsize))
         rewards = torch.zeros((self.num_time_steps, self.batchsize))
         dones = torch.zeros((self.num_time_steps, self.batchsize))
@@ -248,9 +239,7 @@ class CustomPPO:
                 actions[step] = action
                 logprobs[step] = logprob
                 start_time = time.time()
-                next_obs, reward, terminated, truncated, infos = self.env.step(
-                    action.cpu().numpy()
-                )
+                next_obs, reward, terminated, truncated, infos = self.env.step(action.cpu().numpy())
                 print("Time taken", time.time() - start_time)
                 next_obs = torch.Tensor(next_obs)
                 done = int(np.logical_or(terminated, truncated))
@@ -280,14 +269,9 @@ class CustomPPO:
                     else:
                         nextnonterminal = 1.0 - dones[t + 1]
                         nextvalues = values[t + 1]
-                    delta = (
-                        rewards[t]
-                        + self.gamma * nextvalues * nextnonterminal
-                        - values[t]
-                    )
+                    delta = rewards[t] + self.gamma * nextvalues * nextnonterminal - values[t]
                     advantages[t] = lastgaelam = (
-                        delta
-                        + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
+                        delta + self.gamma * self.gae_lambda * nextnonterminal * lastgaelam
                     )
                 returns = advantages + values
 
@@ -320,10 +304,7 @@ class CustomPPO:
                         old_approx_kl = (-logratio).mean()
                         approx_kl = ((ratio - 1) - logratio).mean()
                         clipfracs += [
-                            ((ratio - 1.0).abs() > self.ppo_epsilon)
-                            .float()
-                            .mean()
-                            .item()
+                            ((ratio - 1.0).abs() > self.ppo_epsilon).float().mean().item()
                         ]
 
                     mb_advantages = b_advantages[mb_inds]
@@ -356,11 +337,7 @@ class CustomPPO:
                         v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                     entropy_loss = entropy.mean()
-                    loss = (
-                        pg_loss
-                        - self.ent_coef * entropy_loss
-                        + v_loss * self.critic_loss_coef
-                    )
+                    loss = pg_loss - self.ent_coef * entropy_loss + v_loss * self.critic_loss_coef
 
                     self.optimizer.zero_grad()
                     loss.backward()
@@ -369,9 +346,7 @@ class CustomPPO:
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
-            explained_var = (
-                np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-            )
+            explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
             if print_debug:
                 print("mean", mean_action[0])
                 print("sigma", std_action[0])
@@ -525,9 +500,7 @@ def make_train_ppo(
 
     optim_name = agent_config["OPTIMIZER"]
     optim_eps = 1e-5
-    optimizer = get_optimizer_from_str(optim_name)(
-        agent.parameters(), lr=lr, eps=optim_eps
-    )
+    optimizer = get_optimizer_from_str(optim_name)(agent.parameters(), lr=lr, eps=optim_eps)
 
     def train(
         total_updates: int,
@@ -587,9 +560,7 @@ def make_train_ppo(
                     actions[step] = action
                     logprobs[step] = logprob
 
-                    next_obs, reward, terminated, truncated, infos = env.step(
-                        action.cpu().numpy()
-                    )
+                    next_obs, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
                     next_obs = torch.Tensor(next_obs)
                     done = int(np.logical_or(terminated, truncated))
                     reward = torch.Tensor(reward)
@@ -618,11 +589,7 @@ def make_train_ppo(
                         else:
                             nextnonterminal = 1.0 - dones[t + 1]
                             nextvalues = values[t + 1]
-                        delta = (
-                            rewards[t]
-                            + gamma * nextvalues * nextnonterminal
-                            - values[t]
-                        )
+                        delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
                         advantages[t] = lastgaelam = (
                             delta + gamma * gae_lambda * nextnonterminal * lastgaelam
                         )
@@ -646,9 +613,9 @@ def make_train_ppo(
                         mb_inds = b_inds[start:end]
                         new_mean, new_sigma, new_value = agent(b_obs[mb_inds])
                         new_dist = Normal(new_mean, new_sigma)
-                        new_logprob, entropy = new_dist.log_prob(
-                            b_actions[mb_inds]
-                        ).sum(1), new_dist.entropy().sum(1)
+                        new_logprob, entropy = new_dist.log_prob(b_actions[mb_inds]).sum(
+                            1
+                        ), new_dist.entropy().sum(1)
                         logratio = new_logprob - b_logprobs[mb_inds]
                         ratio = logratio.exp()
 
@@ -656,12 +623,7 @@ def make_train_ppo(
                             # calculate approx_kl http://joschu.net/blog/kl-approx.html
                             old_approx_kl = (-logratio).mean()
                             approx_kl = ((ratio - 1) - logratio).mean()
-                            clipfracs += [
-                                ((ratio - 1.0).abs() > ppo_epsilon)
-                                .float()
-                                .mean()
-                                .item()
-                            ]
+                            clipfracs += [((ratio - 1.0).abs() > ppo_epsilon).float().mean().item()]
 
                         mb_advantages = b_advantages[mb_inds]
                         if normalize_advantage:  # Normalize advantage
@@ -692,11 +654,7 @@ def make_train_ppo(
                             v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                         entropy_loss = entropy.mean()
-                        loss = (
-                            pg_loss
-                            - ent_coef * entropy_loss
-                            + v_loss * critic_loss_coef
-                        )
+                        loss = pg_loss - ent_coef * entropy_loss + v_loss * critic_loss_coef
 
                         optimizer.zero_grad()
                         loss.backward()
@@ -705,9 +663,7 @@ def make_train_ppo(
 
                 y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
                 var_y = np.var(y_true)
-                explained_var = (
-                    np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-                )
+                explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
                 if print_debug:
                     print("mean", mean_action[0])
                     print("sigma", std_action[0])
@@ -743,14 +699,10 @@ def make_train_ppo(
                 # writer.add_scalar("losses/circuit_fidelity", env.unwrapped.circuit_fidelity_history[-1], global_step)
                 writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
                 writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-                writer.add_scalar(
-                    "losses/old_approx_kl", old_approx_kl.item(), global_step
-                )
+                writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
                 writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
                 writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-                writer.add_scalar(
-                    "losses/explained_variance", explained_var, global_step
-                )
+                writer.add_scalar("losses/explained_variance", explained_var, global_step)
 
                 # Collect results
                 avg_reward.append(np.mean(env.unwrapped.reward_history, axis=1)[-1])

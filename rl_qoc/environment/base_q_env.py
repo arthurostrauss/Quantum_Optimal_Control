@@ -87,9 +87,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._env_config = training_config
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
-        self._physical_target_qubits = training_config.target.get(
-            "physical_qubits", None
-        )
+        self._physical_target_qubits = training_config.target.get("physical_qubits", None)
 
         self._estimator, self._sampler = retrieve_primitives(
             self.backend,
@@ -227,9 +225,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         # Create a figure and return it to the user
         fig, ax = plt.subplots()
-        ax.plot(
-            self.config.execution_config.n_reps, reward_data, label="Data", marker="o"
-        )
+        ax.plot(self.config.execution_config.n_reps, reward_data, label="Data", marker="o")
         ax.plot(
             self.config.execution_config.n_reps,
             [fit_function(n, *popt) for n in self.config.execution_config.n_reps],
@@ -247,9 +243,7 @@ class BaseQuantumEnvironment(ABC, Env):
         if reward_method is not None:
             self.config.reward_method = initial_reward_method
         if update_fit_params:
-            self._fit_function = lambda reward, n: inverse_fit_function(
-                reward, n, *popt
-            )
+            self._fit_function = lambda reward, n: inverse_fit_function(reward, n, *popt)
             self._fit_params = popt
         return fig
 
@@ -261,9 +255,7 @@ class BaseQuantumEnvironment(ABC, Env):
         :return: Reward table (reward for each action in the batch)
         """
         if not actions.shape[-1] == self.n_actions:
-            raise ValueError(
-                f"Action shape mismatch: {actions.shape[-1]} != {self.n_actions}"
-            )
+            raise ValueError(f"Action shape mismatch: {actions.shape[-1]} != {self.n_actions}")
         qc = self.circuit.copy()
         params, batch_size = np.array(actions), actions.shape[0]
         if len(params.shape) == 1:
@@ -284,9 +276,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         # Check if the reward method exists in the dictionary
         additional_input = (
-            self.config.execution_config.dfe_precision
-            if self.config.dfe
-            else self.baseline_circuit
+            self.config.execution_config.dfe_precision if self.config.dfe else self.baseline_circuit
         )
         if self.config.execution_config.n_reps_mode == "sequential":
             reward_data = rewarder.get_reward_data(
@@ -331,9 +321,7 @@ class BaseQuantumEnvironment(ABC, Env):
             )
 
         if isinstance(self.estimator, RuntimeEstimatorV2):
-            self.estimator.options.environment.job_tags = [
-                f"rl_qoc_step{self._step_tracker}"
-            ]
+            self.estimator.options.environment.job_tags = [f"rl_qoc_step{self._step_tracker}"]
 
         return self._get_obs(), self._get_info()
 
@@ -366,18 +354,14 @@ class BaseQuantumEnvironment(ABC, Env):
         qc_state_nreps = qc.repeat(self.n_reps).decompose()
         names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
 
-        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = (
-            self.backend_info.custom_transpile(
-                [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
-                optimization_level=0,
-                initial_layout=self.target.layout,
-                scheduling=False,
-                remove_final_measurements=False,
-            )
+        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = self.backend_info.custom_transpile(
+            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
+            optimization_level=0,
+            initial_layout=self.target.layout,
+            scheduling=False,
+            remove_final_measurements=False,
         )
-        for circ, name in zip(
-            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names
-        ):
+        for circ, name in zip([qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names):
             circ.name = name
 
         returned_fidelity_type = (
@@ -448,9 +432,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         for circ, method, fid_array in zip(circuits, methods, fid_arrays):
             # Avoid channel simulation for more than 3 qubits
-            if (
-                method == "superop" or method == "unitary"
-            ) and self.target.causal_cone_size > 3:
+            if (method == "superop" or method == "unitary") and self.target.causal_cone_size > 3:
                 fidelities = [0.0] * data_length
                 n_reps = 1
             else:
@@ -462,12 +444,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 ).result()
                 outputs = [result.data(i)[method] for i in range(data_length)]
                 n_reps = self.n_reps if "nreps" in circ.name else 1
-                fidelities = [
-                    self.target.fidelity(output, n_reps) for output in outputs
-                ]
-            if (
-                method == "superop" or method == "unitary"
-            ) and returned_fidelity_type == "gate":
+                fidelities = [self.target.fidelity(output, n_reps) for output in outputs]
+            if (method == "superop" or method == "unitary") and returned_fidelity_type == "gate":
                 if output_fidelity == "cycle" and n_reps == 1:
                     returned_fidelities = fidelities
                 elif output_fidelity == "nreps" and n_reps > 1:
@@ -520,13 +498,9 @@ class BaseQuantumEnvironment(ABC, Env):
                 "This method should only be called when the abstraction level is 'pulse'"
             )
         if not isinstance(self.backend, DynamicsBackend):
-            raise ValueError(
-                f"Pulse simulation requires a DynamicsBackend; got {self.backend}"
-            )
+            raise ValueError(f"Pulse simulation requires a DynamicsBackend; got {self.backend}")
         returned_fidelity_type = (
-            "gate"
-            if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
-            else "state"
+            "gate" if isinstance(self.target, GateTarget) and qc.num_qubits <= 3 else "state"
         )  # Fidelity type to return (gate or state fidelity metric)
         returned_fidelities = []
         subsystem_dims = list(
@@ -559,9 +533,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 params = np.expand_dims(params, axis=0)
             circuits = [qc.assign_parameters(p) for p in params]
             circuits_n_reps = (
-                [qc_nreps.assign_parameters(p) for p in params]
-                if qc_nreps is not None
-                else []
+                [qc_nreps.assign_parameters(p) for p in params] if qc_nreps is not None else []
             )
             data_length = len(params)
         circuits_list = circuits + circuits_n_reps
@@ -590,8 +562,7 @@ class BaseQuantumEnvironment(ABC, Env):
             # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
 
             output_data = [
-                output_data[i * data_length : (i + 1) * data_length]
-                for i in range(n_benchmarks)
+                output_data[i * data_length : (i + 1) * data_length] for i in range(n_benchmarks)
             ]
             # Reorder data to match the order of the circuits
             qc_data_mapping = {"qc_state": output_data[0], "qc_channel": output_data[1]}
@@ -606,26 +577,20 @@ class BaseQuantumEnvironment(ABC, Env):
                 "qc_channel_nreps",
             ]
             new_output_data = [
-                qc_data_mapping.get(name, None)
-                for name in circuit_order
-                if name in qc_data_mapping
+                qc_data_mapping.get(name, None) for name in circuit_order if name in qc_data_mapping
             ]
             output_data = new_output_data
 
         else:  # Standard Dynamics simulation
 
-            y0_list = (
-                [y0_state] * n_benchmarks * data_length
-            )  # Initial state for each benchmark
+            y0_list = [y0_state] * n_benchmarks * data_length  # Initial state for each benchmark
 
             if qc.num_qubits < 3 and isinstance(
                 self.target, GateTarget
             ):  # Benchmark channel only for 1-2 qubits
                 y0_list += [y0_gate] * n_benchmarks * data_length
                 circuits_list += circuits + circuits_n_reps
-                n_benchmarks *= (
-                    2  # Double the number of benchmarks to include channel fidelity
-                )
+                n_benchmarks *= 2  # Double the number of benchmarks to include channel fidelity
             # Simulate all circuits
             output_data = []
             results = self.backend.solve(circuits_list, y0=y0_list)
@@ -638,8 +603,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
                 # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
             output_data = [
-                output_data[i * data_length : (i + 1) * data_length]
-                for i in range(n_benchmarks)
+                output_data[i * data_length : (i + 1) * data_length] for i in range(n_benchmarks)
             ]
 
         if self.n_reps > 1:  # Benchmark both qc and qc_nreps
@@ -708,9 +672,7 @@ class BaseQuantumEnvironment(ABC, Env):
         :param gate_name: Name of custom gate to add to target (if None,
          use target gate and update its attached calibration)
         """
-        raise NotImplementedError(
-            "Gate calibration not implemented for this environment"
-        )
+        raise NotImplementedError("Gate calibration not implemented for this environment")
 
     def modify_environment_params(self, **kwargs):
         """
@@ -759,9 +721,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def physical_neighbor_qubits(self):
-        return retrieve_neighbor_qubits(
-            self.backend_info.coupling_map, self.physical_target_qubits
-        )
+        return retrieve_neighbor_qubits(self.backend_info.coupling_map, self.physical_target_qubits)
 
     @property
     def physical_next_neighbor_qubits(self):
@@ -796,8 +756,7 @@ class BaseQuantumEnvironment(ABC, Env):
     def fidelity_history(self):
         return (
             self.avg_fidelity_history
-            if self.target.target_type == "gate"
-            and self.target.target_circuit.num_qubits <= 3
+            if self.target.target_type == "gate" and self.target.target_circuit.num_qubits <= 3
             else self.circuit_fidelity_history
         )
 
@@ -985,9 +944,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @n_qubits.setter
     def n_qubits(self, n_qubits):
-        assert (
-            isinstance(n_qubits, int) and n_qubits > 0
-        ), "n_qubits must be a positive integer"
+        assert isinstance(n_qubits, int) and n_qubits > 0, "n_qubits must be a positive integer"
         self.target.n_qubits = n_qubits
 
     @property

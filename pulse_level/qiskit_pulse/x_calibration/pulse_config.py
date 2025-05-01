@@ -47,11 +47,13 @@ def custom_schedule(
     ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
     sq_pulse_features = ["amp"]  # For single qubit gates
     sq_name = "x"  # Name of the single qubit gate baseline to pick ("x" or "sx")
-    keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
-    include_baseline = False  # Choose if original calibration shall be included as baseline in parametrization
-    include_duration = (
-        False  # Choose if pulse duration shall be included in parametrization
+    keep_symmetry = (
+        True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
     )
+    include_baseline = (
+        False  # Choose if original calibration shall be included as baseline in parametrization
+    )
+    include_duration = False  # Choose if pulse duration shall be included in parametrization
     duration_window = 1  # Duration window for the pulse duration
     if include_duration:
         ecr_pulse_features.append("duration")
@@ -99,9 +101,7 @@ def custom_schedule(
 
     basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
-    if isinstance(
-        backend, BackendV1
-    ):  # Convert to BackendV2 if needed (to access Target)
+    if isinstance(backend, BackendV1):  # Convert to BackendV2 if needed (to access Target)
         backend = BackendV2Converter(backend)
 
     # Choose which gate to build here
@@ -136,9 +136,7 @@ def validate_pulse_kwargs(
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
     if gate is not None:
         assert isinstance(gate, Gate), "Gate should be a valid Qiskit Gate instance"
-    assert isinstance(
-        physical_qubits, list
-    ), "Physical qubits should be a list of integers"
+    assert isinstance(physical_qubits, list), "Physical qubits should be a list of integers"
     assert all(
         isinstance(qubit, int) for qubit in physical_qubits
     ), "Physical qubits should be a list of integers"
@@ -165,9 +163,7 @@ def apply_parametrized_circuit(
     gate, physical_qubits, backend = validate_pulse_kwargs(**kwargs)
     parametrized_gate_name = f"{gate.name if gate is not None else 'G'}_cal"
 
-    param_vec_name = (
-        params.name if isinstance(params, ParameterVector) else params[0].name[0]
-    )
+    param_vec_name = params.name if isinstance(params, ParameterVector) else params[0].name[0]
     if param_vec_name[-1].isdigit():
         parametrized_gate_name += param_vec_name[-1]
 
@@ -189,9 +185,7 @@ def apply_parametrized_circuit(
 
     # Add the custom calibration to the circuit with current parameters
     qc.append(parametrized_gate, tgt_register)
-    qc.add_calibration(
-        parametrized_gate_name, physical_qubits, parametrized_schedule, params
-    )
+    qc.add_calibration(parametrized_gate_name, physical_qubits, parametrized_schedule, params)
 
     # Add the custom calibration to the backend for enabling transpilation with the custom gate
     if parametrized_gate_name not in backend.operation_names:

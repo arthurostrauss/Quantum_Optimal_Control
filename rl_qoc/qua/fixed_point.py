@@ -26,9 +26,7 @@ class FixedPoint:
                     type(other).__name__
                 )
             )
-        return FixedPoint(
-            self._saturate(result) / self.scale, self.fractional_bits, self.bit_width
-        )
+        return FixedPoint(self._saturate(result) / self.scale, self.fractional_bits, self.bit_width)
 
     def __sub__(self, other):
         if isinstance(other, FixedPoint):
@@ -41,9 +39,7 @@ class FixedPoint:
                     type(other).__name__
                 )
             )
-        return FixedPoint(
-            self._saturate(result) / self.scale, self.fractional_bits, self.bit_width
-        )
+        return FixedPoint(self._saturate(result) / self.scale, self.fractional_bits, self.bit_width)
 
     def __mul__(self, other):
         if isinstance(other, FixedPoint):
@@ -56,9 +52,7 @@ class FixedPoint:
                     type(other).__name__
                 )
             )
-        return FixedPoint(
-            self._saturate(result) / self.scale, self.fractional_bits, self.bit_width
-        )
+        return FixedPoint(self._saturate(result) / self.scale, self.fractional_bits, self.bit_width)
 
     def __truediv__(self, other):
         if isinstance(other, FixedPoint):
@@ -71,21 +65,15 @@ class FixedPoint:
                     type(other).__name__
                 )
             )
-        return FixedPoint(
-            self._saturate(result) / self.scale, self.fractional_bits, self.bit_width
-        )
+        return FixedPoint(self._saturate(result) / self.scale, self.fractional_bits, self.bit_width)
 
     def __lshift__(self, other):
         result = self.value << other
-        return FixedPoint(
-            self._saturate(result) / self.scale, self.fractional_bits, self.bit_width
-        )
+        return FixedPoint(self._saturate(result) / self.scale, self.fractional_bits, self.bit_width)
 
     def __rshift__(self, other):
         result = self.value >> other
-        return FixedPoint(
-            self._saturate(result) / self.scale, self.fractional_bits, self.bit_width
-        )
+        return FixedPoint(self._saturate(result) / self.scale, self.fractional_bits, self.bit_width)
 
     def __and__(self, other):
         if isinstance(other, FixedPoint):

@@ -82,9 +82,7 @@ class HyperparameterOptimizer:
             direction="minimize",
             study_name=f'{self._get_study_name()}_{datetime.now().strftime("%d-%m-%Y_%H:%M:%S")}',
         )
-        self.q_env.unwrapped.modify_environment_params(
-            target_fidelities=self.target_fidelities
-        )
+        self.q_env.unwrapped.modify_environment_params(target_fidelities=self.target_fidelities)
 
         self._log_training_parameters()
         time.sleep(4)
@@ -258,17 +256,13 @@ class HyperparameterOptimizer:
             logging.warning(f"Folder '{self.save_results_path}' created.")
         if self.best_trial is not None:
             best_config = {
-                "training_results": self.best_trial.user_attrs.get(
-                    "training_results", {}
-                ),
+                "training_results": self.best_trial.user_attrs.get("training_results", {}),
                 "runtime": self.best_trial.user_attrs.get("runtime", 0),
                 "hyper_params": self.best_trial.params,
                 "custom_cost_value": self.best_trial.values[0],
                 "penalty_weights": self.hardware_penalty_weights,
             }
-            pickle_file_name = os.path.join(
-                self.save_results_path, self._generate_filename()
-            )
+            pickle_file_name = os.path.join(self.save_results_path, self._generate_filename())
             # Only save if best_config not empty
             if len(best_config) != 0:
                 if self.saving_mode == "all":
@@ -298,9 +292,7 @@ class HyperparameterOptimizer:
         """
         logging.warning("---------------- FINISHED HPO ----------------")
         logging.warning(
-            "HPO completed in {} minutes.".format(
-                round((time.time() - start_time) / 60, 2)
-            )
+            "HPO completed in {} minutes.".format(round((time.time() - start_time) / 60, 2))
         )
 
         logging.warning("Best trial:")

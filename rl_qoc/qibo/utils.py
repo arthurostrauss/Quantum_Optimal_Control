@@ -72,9 +72,7 @@ def resolve_gate_rule(gate_rule: str | Tuple[str, Callable]):
         if not isinstance(gate_rule[0], (Gate, str)):
             raise ValueError("Invalid gate identifier for gate rule")
         if isinstance(gate_rule[0], str):
-            for gate_name, gate in zip(
-                ["x", "rx", "cz"], [gates.GPI2, gates.GPI2, gates.CZ]
-            ):
+            for gate_name, gate in zip(["x", "rx", "cz"], [gates.GPI2, gates.GPI2, gates.CZ]):
                 if gate_rule[0] == gate_name:
                     return gate, gate_rule[1]
     elif isinstance(gate_rule, str):

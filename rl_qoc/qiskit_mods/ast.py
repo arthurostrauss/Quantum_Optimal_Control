@@ -440,9 +440,7 @@ class QuantumGateModifier(ASTNode):
 
     __slots__ = ("modifier", "argument")
 
-    def __init__(
-        self, modifier: QuantumGateModifierName, argument: Optional[Expression] = None
-    ):
+    def __init__(self, modifier: QuantumGateModifierName, argument: Optional[Expression] = None):
         self.modifier = modifier
         self.argument = argument
 
@@ -512,9 +510,7 @@ class ProgramBlock(ASTNode):
         self.statements = statements
 
 
-class ReturnStatement(
-    ASTNode
-):  # TODO probably should be a subclass of ControlDirective
+class ReturnStatement(ASTNode):  # TODO probably should be a subclass of ControlDirective
     """
     returnStatement
         : 'return' ( expression | quantumMeasurement )? SEMICOLON;
@@ -698,9 +694,7 @@ class IODeclaration(ClassicalDeclaration):
 
     __slots__ = ("modifier",)
 
-    def __init__(
-        self, modifier: IOModifier, type_: ClassicalType, identifier: Identifier
-    ):
+    def __init__(self, modifier: IOModifier, type_: ClassicalType, identifier: Identifier):
         super().__init__(type_, identifier)
         self.modifier = modifier
 

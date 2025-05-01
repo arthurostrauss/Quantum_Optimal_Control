@@ -66,9 +66,7 @@ def get_module(module: str | nn.Module) -> nn.Module:
     """
 
     if isinstance(module, str) and module not in module_dict:
-        raise ValueError(
-            f"Agent Config `ACTIVATION` needs to be one of {module_dict.keys()}"
-        )
+        raise ValueError(f"Agent Config `ACTIVATION` needs to be one of {module_dict.keys()}")
     elif not isinstance(module, (nn.Module, str)):
         raise ValueError("Activation function must be a string or a torch.nn.Module")
 
@@ -90,8 +88,6 @@ def get_optimizer(optimizer: str):
     """
 
     if isinstance(optimizer, str) and optimizer not in optim_dict:
-        raise ValueError(
-            f"Agent Config `OPTIMIZER` needs to be one of {optim_dict.keys()}"
-        )
+        raise ValueError(f"Agent Config `OPTIMIZER` needs to be one of {optim_dict.keys()}")
 
     return optim_dict[optimizer]

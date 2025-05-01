@@ -114,9 +114,7 @@ def retrieve_primitives(
     if isinstance(backend, DynamicsBackend):
         from ..environment.configuration.backend_config import DynamicsConfig
 
-        assert isinstance(
-            config, DynamicsConfig
-        ), "Configuration must be a DynamicsConfig"
+        assert isinstance(config, DynamicsConfig), "Configuration must be a DynamicsConfig"
         dummy_param = Parameter("dummy")
         if hasattr(dummy_param, "jax_compat"):
             estimator = PulseEstimatorV2(backend=backend, options=estimator_options)
@@ -182,10 +180,7 @@ def handle_session(
     Returns:
         Updated Estimator instance
     """
-    if (
-        isinstance(estimator, RuntimeEstimatorV2)
-        and estimator.mode.status() == "Closed"
-    ):
+    if isinstance(estimator, RuntimeEstimatorV2) and estimator.mode.status() == "Closed":
         old_session = estimator.mode
         counter += 1
         print(f"New Session opened (#{counter})")
@@ -246,9 +241,7 @@ def select_backend(
                         backend_name if backend_name is not None else "fake_jakarta"
                     )
             except QiskitBackendNotFoundError:
-                raise QiskitError(
-                    "Backend not found. Please check the backend name and try again."
-                )
+                raise QiskitError("Backend not found. Please check the backend name and try again.")
 
     if backend is not None:
         if use_dynamics:
@@ -261,14 +254,10 @@ def select_backend(
                 subsystem_list=list(physical_qubits),
                 solver_options=solver_options,
             )
-            _, _ = perform_standard_calibrations(
-                backend, calibration_files=calibration_files
-            )
+            _, _ = perform_standard_calibrations(backend, calibration_files=calibration_files)
 
     if backend is None:
-        warnings.warn(
-            "No backend selected. Training will be performed on Statevector simulator"
-        )
+        warnings.warn("No backend selected. Training will be performed on Statevector simulator")
     return backend
 
 
@@ -336,24 +325,18 @@ def load_q_env_from_yaml_file(file_path: str):
         raise KeyError("LOW and HIGH must be present in the ACTION_SPACE section")
     if not all(isinstance(val, (int, float)) for val in action_space_config["LOW"]):
         try:
-            action_space_config["LOW"] = [
-                float(val) for val in action_space_config["LOW"]
-            ]
+            action_space_config["LOW"] = [float(val) for val in action_space_config["LOW"]]
         except ValueError:
             raise ValueError("LOW values in action space must be numeric")
     if not all(isinstance(val, (int, float)) for val in action_space_config["HIGH"]):
         try:
-            action_space_config["HIGH"] = [
-                float(val) for val in action_space_config["HIGH"]
-            ]
+            action_space_config["HIGH"] = [float(val) for val in action_space_config["HIGH"]]
         except ValueError:
             raise ValueError("HIGH values in action space must be numeric")
     low = np.array(action_space_config["LOW"], dtype=np.float32)
     high = np.array(action_space_config["HIGH"], dtype=np.float32)
     if low.shape != high.shape:
-        raise ValueError(
-            "Low and high arrays in action space should have the same shape"
-        )
+        raise ValueError("Low and high arrays in action space should have the same shape")
     action_shape = low.shape
 
     try:
@@ -374,9 +357,7 @@ def load_q_env_from_yaml_file(file_path: str):
         "reward": reward_dict[env_config["REWARD"]["REWARD_METHOD"]](
             **remove_none_values(
                 get_lower_keys_dict(
-                    env_config.get(
-                        "REWARD_PARAMS", env_config["REWARD"].get("REWARD_PARAMS", {})
-                    )
+                    env_config.get("REWARD_PARAMS", env_config["REWARD"].get("REWARD_PARAMS", {}))
                 )
             )
         ),
@@ -391,13 +372,9 @@ def load_q_env_from_yaml_file(file_path: str):
             raise KeyError("Specified gate not found in standard gate set of Qiskit")
     else:
         try:
-            params["target"]["state"] = Statevector.from_label(
-                config["TARGET"]["STATE"]
-            )
+            params["target"]["state"] = Statevector.from_label(config["TARGET"]["STATE"])
         except KeyError:
-            raise KeyError(
-                "Target gate or state must be specified in the configuration"
-            )
+            raise KeyError("Target gate or state must be specified in the configuration")
 
     backend_config = config.get("BACKEND", {})
     dynamics_config = backend_config.get(
@@ -480,9 +457,7 @@ def get_q_env_config(
     """
     from ..environment.configuration import QEnvConfig
 
-    params, backend_params, runtime_options = load_q_env_from_yaml_file(
-        config_file_path
-    )
+    params, backend_params, runtime_options = load_q_env_from_yaml_file(config_file_path)
     if isinstance(backend, Callable):
         backend = backend(**backend_callable_kwargs)
     elif backend is None:
@@ -505,9 +480,7 @@ def get_q_env_config(
             backend,
             pass_manager=pass_manager,
             instruction_durations=instruction_durations,
-            primitive_options=(
-                runtime_options if isinstance(backend, RuntimeBackend) else None
-            ),
+            primitive_options=(runtime_options if isinstance(backend, RuntimeBackend) else None),
         )
 
     q_env_config = QEnvConfig(backend_config=backend_config, **params)
@@ -594,9 +567,7 @@ def create_hpo_agent_config(trial: optuna.trial.Trial, hpo_config: Dict):
                             param, values[0], values[1], log=True
                         )
                     else:
-                        hyper_params[param] = trial.suggest_float(
-                            param, values[0], values[1]
-                        )
+                        hyper_params[param] = trial.suggest_float(param, values[0], values[1])
                 hyperparams_in_scope.append(param)
             elif (
                 len(values) > 2
@@ -618,9 +589,7 @@ def create_hpo_agent_config(trial: optuna.trial.Trial, hpo_config: Dict):
     print("Hyperparameters considered for HPO:", hyperparams_in_scope)
 
     # Print hyperparameters NOT considered for HPO
-    hyperparams_not_in_scope = [
-        param for param in hpo_config if param not in hyperparams_in_scope
-    ]
+    hyperparams_not_in_scope = [param for param in hpo_config if param not in hyperparams_in_scope]
     print("Hyperparameters NOT in scope of HPO:", hyperparams_not_in_scope)
 
     # Take over attributes from agent_config and populate hyper_params
@@ -681,8 +650,7 @@ def get_hardware_runtime_cumsum(
     qc: QuantumCircuit, circuit_gate_times: Dict, total_shots: List[int]
 ) -> np.array:
     return np.cumsum(
-        get_hardware_runtime_single_circuit(qc, circuit_gate_times)
-        * np.array(total_shots)
+        get_hardware_runtime_single_circuit(qc, circuit_gate_times) * np.array(total_shots)
     )
 
 

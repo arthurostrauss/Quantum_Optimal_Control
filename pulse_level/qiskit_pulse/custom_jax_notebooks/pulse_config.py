@@ -57,9 +57,9 @@ def custom_schedule(
                 if feature != "duration":
                     new_params[(feature, qubits, sched)] += params[i]
                 else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(duration_window * params[i])
+                    new_params[(feature, qubits, sched)] += pulse.builder.seconds_to_samples(
+                        duration_window * params[i]
+                    )
     else:
         num_features = len(pulse_features)
         for i, sched in enumerate(["cr45p", "cr45m"]):
@@ -67,9 +67,7 @@ def custom_schedule(
                 if feature != "duration":
                     new_params[(feature, qubits, sched)] += params[i * num_features + j]
                 else:
-                    new_params[
-                        (feature, qubits, sched)
-                    ] += pulse.builder.seconds_to_samples(
+                    new_params[(feature, qubits, sched)] += pulse.builder.seconds_to_samples(
                         duration_window * params[i * num_features + j]
                     )
 

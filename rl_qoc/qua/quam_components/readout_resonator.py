@@ -29,9 +29,7 @@ class ReadoutResonatorBase:
     gef_confusion_matrix: list = None
 
     @staticmethod
-    def calculate_voltage_scaling_factor(
-        fixed_power_dBm: float, target_power_dBm: float
-    ):
+    def calculate_voltage_scaling_factor(fixed_power_dBm: float, target_power_dBm: float):
         """
         Calculate the voltage scaling factor required to scale fixed power to target power.
 
@@ -96,9 +94,7 @@ class ReadoutResonatorIQ(InOutIQChannel, ReadoutResonatorBase):
             amplitude = u.dBm2volts(power_in_dbm - self.frequency_converter_up.gain)
 
         if not -20 <= gain <= 20:
-            raise ValueError(
-                f"Expected Octave gain within [-20:0.5:20] dB, got {gain} dB."
-            )
+            raise ValueError(f"Expected Octave gain within [-20:0.5:20] dB, got {gain} dB.")
 
         if not -0.5 <= max_amplitude < 0.5:
             raise ValueError("The OPX+ pulse amplitude must be within [-0.5, 0.5) V.")
@@ -164,9 +160,7 @@ class ReadoutResonatorMW(InOutMWChannel, ReadoutResonatorBase):
             self.opx_output.full_scale_power_dbm = full_scale_power_dbm
 
         if power_in_dbm > 10:
-            raise ValueError(
-                f"Expected `power_in_dbm` to be <10 dBm, got {power_in_dbm}"
-            )
+            raise ValueError(f"Expected `power_in_dbm` to be <10 dBm, got {power_in_dbm}")
 
         while (
             self.calculate_voltage_scaling_factor(
@@ -175,14 +169,9 @@ class ReadoutResonatorMW(InOutMWChannel, ReadoutResonatorBase):
             )
             > max_amplitude
         ):
-            self.opx_output.full_scale_power_dbm = (
-                self.opx_output.full_scale_power_dbm + 3
-            )
+            self.opx_output.full_scale_power_dbm = self.opx_output.full_scale_power_dbm + 3
 
-        if (
-            self.opx_output.full_scale_power_dbm
-            not in allowed_full_scale_power_in_dbm_values
-        ):
+        if self.opx_output.full_scale_power_dbm not in allowed_full_scale_power_in_dbm_values:
             raise ValueError(
                 f"Expected full_scale_power_dbm to be in range [-41, 10] "
                 f"in steps of 3 dB, got {full_scale_power_dbm}."

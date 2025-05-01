@@ -72,11 +72,7 @@ def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flo
     # Repeat the circuit n_reps times and prepend the input state preparation
     if n_reps == 1:
         return qc.copy()
-    if (
-        isinstance(backend, BackendV2)
-        and "for_loop" in backend.operation_names
-        and control_flow
-    ):
+    if isinstance(backend, BackendV2) and "for_loop" in backend.operation_names and control_flow:
         prep_circuit = qc.copy_empty_like()
 
         with prep_circuit.for_loop(range(n_reps)) as i:
@@ -108,9 +104,7 @@ def causal_cone_circuit(
         if all(q in involved_qubits for q in node.qargs):
             filtered_dag.apply_operation_back(node.op, node.qargs)
 
-    filtered_dag.remove_qubits(
-        *[q for q in filtered_dag.qubits if q not in involved_qubits]
-    )
+    filtered_dag.remove_qubits(*[q for q in filtered_dag.qubits if q not in involved_qubits])
     return dag_to_circuit(filtered_dag, False), involved_qubits
 
 
@@ -254,9 +248,7 @@ def fidelity_from_tomography(
             fids.append("process_fidelity")
         elif isinstance(tgt, QuantumState):
             exps.append(
-                StateTomography(
-                    qc, physical_qubits=physical_qubits, analysis=analysis, target=tgt
-                )
+                StateTomography(qc, physical_qubits=physical_qubits, analysis=analysis, target=tgt)
             )
             fids.append("state_fidelity")
         else:
@@ -325,11 +317,7 @@ def substitute_target_gate(
             )
 
     pass_manager = PassManager(
-        [
-            CustomGateReplacementPass(
-                (target_gate, qubits), custom_gate, parameters=parameters
-            )
-        ]
+        [CustomGateReplacementPass((target_gate, qubits), custom_gate, parameters=parameters)]
     )
 
     return pass_manager.run(circuit)
@@ -361,9 +349,7 @@ def isolate_qubit_instructions(circuit: QuantumCircuit, physical_qubits: list[in
     """
     qubits_to_index = {qubit: circuit.find_bit(qubit).index for qubit in circuit.qubits}
     instructions = filter(
-        lambda instr: all(
-            qubits_to_index[qubit] in physical_qubits for qubit in instr.qubits
-        ),
+        lambda instr: all(qubits_to_index[qubit] in physical_qubits for qubit in instr.qubits),
         circuit.data,
     )
     return list(instructions)
@@ -457,30 +443,21 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
     )
 
     fiducial_state = (
-        coefficients[0] * e0
-        + coefficients[1] * e1
-        + coefficients[2] * e2
-        + coefficients[3] * e3
+        coefficients[0] * e0 + coefficients[1] * e1 + coefficients[2] * e2 + coefficients[3] * e3
     ).reshape(d, 1)
     # Prepare all 16 states
     states = []
     for k in range(0, d):
         for l in range(0, d):
             # state = apply_hw_group(p1, p2, coefficients)
-            state = (
-                np.linalg.matrix_power(X, k)
-                @ np.linalg.matrix_power(Z, l)
-                @ fiducial_state
-            )
+            state = np.linalg.matrix_power(X, k) @ np.linalg.matrix_power(Z, l) @ fiducial_state
             states.append(Statevector(state))
 
     return states
 
 
 def observables_to_indices(
-    observables: (
-        List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str
-    )
+    observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str
 ):
     """
     Get single qubit indices of Pauli observables for the reward computation.
@@ -489,9 +466,7 @@ def observables_to_indices(
         observables: Pauli observables to sample
     """
     if isinstance(observables, (str, Pauli)):
-        observables = PauliList(
-            Pauli(observables) if isinstance(observables, str) else observables
-        )
+        observables = PauliList(Pauli(observables) if isinstance(observables, str) else observables)
     elif isinstance(observables, List) and all(
         isinstance(obs, (str, Pauli)) for obs in observables
     ):
@@ -507,9 +482,7 @@ def observables_to_indices(
     for obs_group in observables_grouping:  # Get indices of Pauli observables
         current_indices = []
         paulis = obs_group.paulis if isinstance(obs_group, SparsePauliOp) else obs_group
-        reference_pauli = Pauli(
-            (np.logical_or.reduce(paulis.z), np.logical_or.reduce(paulis.x))
-        )
+        reference_pauli = Pauli((np.logical_or.reduce(paulis.z), np.logical_or.reduce(paulis.x)))
         for pauli_term in reversed(
             reference_pauli.to_label()
         ):  # Get individual qubit indices for each Pauli term

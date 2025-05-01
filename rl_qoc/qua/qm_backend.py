@@ -39,7 +39,7 @@ from qm.qua import declare, fixed, declare_stream
 from qm import QuantumMachinesManager, Program, DictQuaConfig
 from qualang_tools.addons.variables import assign_variables_to_element
 
-from .parameter_table import ParameterTable, InputType, Direction
+from .parameter_table import ParameterTable, InputType
 
 from .pulse_support_utils import (
     _instruction_to_qua,
@@ -135,9 +135,7 @@ def validate_machine(machine) -> QuAM:
         )
     if not all(isinstance(qubit, Qubit) for qubit in machine.qubits.values()):
         raise ValueError("All qubits should be of type Qubit")
-    if not all(
-        isinstance(qubit_pair, QubitPair) for qubit_pair in machine.qubit_pairs.values()
-    ):
+    if not all(isinstance(qubit_pair, QubitPair) for qubit_pair in machine.qubit_pairs.values()):
         raise ValueError("All qubit pairs should be of type QubitPair")
 
     return machine
@@ -182,13 +180,9 @@ class QMBackend(Backend):
         self.machine = validate_machine(machine)
         self.channel_mapping: Dict[QiskitChannel, QuAMChannel] = channel_mapping
         self.reverse_channel_mapping: Dict[QuAMChannel, QiskitChannel] = (
-            {v: k for k, v in channel_mapping.items()}
-            if channel_mapping is not None
-            else {}
+            {v: k for k, v in channel_mapping.items()} if channel_mapping is not None else {}
         )
-        self._qubit_dict = {
-            qubit.name: i for i, qubit in enumerate(machine.active_qubits)
-        }
+        self._qubit_dict = {qubit.name: i for i, qubit in enumerate(machine.active_qubits)}
         self._target, self._operation_mapping_QUA = self._populate_target(machine)
         self._oq3_custom_gates = []
         self._init_macro = init_macro
@@ -233,9 +227,7 @@ class QMBackend(Backend):
             shots=1024,
         )
 
-    def _populate_target(
-        self, machine: QuAM
-    ) -> Tuple[Target, Dict[OperationIdentifier, Callable]]:
+    def _populate_target(self, machine: QuAM) -> Tuple[Target, Dict[OperationIdentifier, Callable]]:
         """
         Populate the target instructions with the QOP configuration
         """
@@ -276,9 +268,7 @@ class QMBackend(Backend):
                     num_params = len(gate_op.params)
 
                     operations_dict.setdefault(op_, {})[(q,)] = None
-                    operations_qua_dict[OperationIdentifier(op_, num_params, (q,))] = (
-                        func.apply
-                    )
+                    operations_qua_dict[OperationIdentifier(op_, num_params, (q,))] = func.apply
         for qubit_pair in machine.active_qubit_pairs:
             q_ctrl = self.qubit_dict[qubit_pair.qubit_control.name]
             q_tgt = self.qubit_dict[qubit_pair.qubit_target.name]
@@ -288,9 +278,9 @@ class QMBackend(Backend):
                     gate_op = gate_map[op_]
                     num_params = len(gate_op.params)
                     operations_dict.setdefault(op_, {})[(q_ctrl, q_tgt)] = None
-                    operations_qua_dict[
-                        OperationIdentifier(op_, num_params, (q_ctrl, q_tgt))
-                    ] = func.apply
+                    operations_qua_dict[OperationIdentifier(op_, num_params, (q_ctrl, q_tgt))] = (
+                        func.apply
+                    )
 
         for op, properties in operations_dict.items():
             target.add_instruction(gate_map[op], properties=properties)
@@ -414,9 +404,7 @@ class QMBackend(Backend):
         if sched.is_parameterized():
             if param_table is None:
                 param_dict = {}
-                for channel in list(
-                    filter(lambda ch: ch.is_parameterized(), sched.channels)
-                ):
+                for channel in list(filter(lambda ch: ch.is_parameterized(), sched.channels)):
                     ch_params = list(channel.parameters)
                     if len(ch_params) > 1:
                         raise NotImplementedError(
@@ -435,8 +423,7 @@ class QMBackend(Backend):
 
             involved_parameters = [value.name for value in sched.parameters]
             params = [
-                sigParam(param, sigParam.POSITIONAL_OR_KEYWORD)
-                for param in involved_parameters
+                sigParam(param, sigParam.POSITIONAL_OR_KEYWORD) for param in involved_parameters
             ]
             sig = Signature(params)
 
@@ -455,14 +442,10 @@ class QMBackend(Backend):
 
             for time, instruction in sched.instructions:
                 if len(instruction.channels) > 1:
-                    raise NotImplementedError(
-                        "Only single channel instructions are supported"
-                    )
+                    raise NotImplementedError("Only single channel instructions are supported")
                 qiskit_channel = instruction.channels[0]
 
-                if (
-                    qiskit_channel.is_parameterized()
-                ):  # Basic support for parameterized channels
+                if qiskit_channel.is_parameterized():  # Basic support for parameterized channels
                     # Filter dictionary of pulses based on provided ChannelType
                     channel_dict = {
                         channel.index: quam_channel
@@ -481,9 +464,7 @@ class QMBackend(Backend):
                             with case_(i):
                                 qiskit_channel = self.get_pulse_channel(quam_channel)
                                 if time_tracker[qiskit_channel] < time:
-                                    quam_channel.wait(
-                                        (time - time_tracker[qiskit_channel])
-                                    )
+                                    quam_channel.wait((time - time_tracker[qiskit_channel]))
                                     time_tracker[qiskit_channel] = time
                                 _instruction_to_qua(
                                     instruction,
@@ -560,13 +541,9 @@ class QMBackend(Backend):
                     lambda x: isinstance(x, type(channel)),
                     self.channel_mapping.keys(),
                 ):
-                    self.get_quam_channel(ch).operations[pulse.name] = QuAMQiskitPulse(
-                        pulse
-                    )
+                    self.get_quam_channel(ch).operations[pulse.name] = QuAMQiskitPulse(pulse)
             else:
-                self.get_quam_channel(channel).operations[pulse.name] = QuAMQiskitPulse(
-                    pulse
-                )
+                self.get_quam_channel(channel).operations[pulse.name] = QuAMQiskitPulse(pulse)
 
     def update_calibrations(
         self,
@@ -583,9 +560,9 @@ class QMBackend(Backend):
         """
         # Check the target object for new operations
         for op_name, op_properties in self.target.items():
-            gate_set = list(
-                set(key.name for key in self._operation_mapping_QUA.keys())
-            ) + list(CONTROL_FLOW_OP_NAMES)
+            gate_set = list(set(key.name for key in self._operation_mapping_QUA.keys())) + list(
+                CONTROL_FLOW_OP_NAMES
+            )
             if op_name not in gate_set:
                 for qubits, properties in op_properties.items():
                     if properties is None:
@@ -645,9 +622,7 @@ class QMBackend(Backend):
             else:
                 param_table = None
 
-            if (
-                hasattr(qc, "calibrations") and qc.calibrations
-            ):  # Check for custom calibrations
+            if hasattr(qc, "calibrations") and qc.calibrations:  # Check for custom calibrations
                 for gate_name, cal_info in qc.calibrations.items():
                     if (
                         gate_name not in self._oq3_custom_gates
@@ -660,9 +635,7 @@ class QMBackend(Backend):
 
                         # Convert type of parameters to int if required (for switch case over channels)
                         if param_table is not None:
-                            param_table = handle_parameterized_channel(
-                                schedule, param_table
-                            )
+                            param_table = handle_parameterized_channel(schedule, param_table)
                             qc.metadata["parameter_table"] = param_table
 
                         self._operation_mapping_QUA[
@@ -678,7 +651,7 @@ class QMBackend(Backend):
     def quantum_circuit_to_qua(
         self,
         qc: QuantumCircuit,
-        param_table: Optional[ParameterTable | List[ParameterTable]] = None,
+        param_table: Optional[ParameterTable | List[ParameterTable | Parameter]] = None,
     ):
         """
         Convert a QuantumCircuit to a QUA program (can be called within an existing QUA program or to generate a
@@ -698,9 +671,7 @@ class QMBackend(Backend):
         #     raise ValueError(
         #         "QuantumCircuit contains parameters but no parameter table provided"
         #     )
-        basis_gates = [
-            gate for gate in self._oq3_custom_gates if gate not in ["measure", "reset"]
-        ]
+        basis_gates = [gate for gate in self._oq3_custom_gates if gate not in ["measure", "reset"]]
         basis_gates += [
             gate
             for gate in self.target.operation_names
@@ -713,9 +684,7 @@ class QMBackend(Backend):
                     f"Custom calibration {gate_name} not in basis gates {basis_gates}",
                     f"Run update_calibrations() before compiling the circuit",
                 )
-        exporter = Exporter(
-            includes=(), basis_gates=basis_gates, disable_constants=True
-        )
+        exporter = Exporter(includes=(), basis_gates=basis_gates, disable_constants=True)
         open_qasm_code = exporter.dumps(qc)
         open_qasm_code = "\n".join(
             line
@@ -725,12 +694,20 @@ class QMBackend(Backend):
         inputs = None
         if param_table is not None:
             inputs = {}
-            if isinstance(param_table, ParameterTable):
+            if isinstance(param_table, (ParameterTable, Parameter)):
                 param_table = [param_table]
             for table in param_table:
                 if not table.is_declared:
-                    table.declare_variables(pause_program=False)
-                inputs.update(table.variables_dict)
+                    if isinstance(table, ParameterTable):
+                        table.declare_variables(pause_program=False)
+                    else:
+                        table.declare_variable(pause_program=False)
+                variables = (
+                    table.variables_dict
+                    if isinstance(table, ParameterTable)
+                    else {table.name: table.var}
+                )
+                inputs.update(variables)
 
         result = self.compiler.compile(
             open_qasm_code,
@@ -819,8 +796,7 @@ class FluxTunableTransmonBackend(QMBackend):
             FluxChannel(i): qubit.z for i, qubit in enumerate(machine.qubits.values())
         }
         readout_channel_mapping = {
-            MeasureChannel(i): qubit.resonator
-            for i, qubit in enumerate(machine.qubits.values())
+            MeasureChannel(i): qubit.resonator for i, qubit in enumerate(machine.qubits.values())
         }
         control_channel_mapping = {
             ControlChannel(i): qubit_pair.coupler

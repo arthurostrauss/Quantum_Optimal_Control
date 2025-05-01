@@ -134,9 +134,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         super().__init__(training_config)
         if not isinstance(self.config.target, GateTargetConfig):
-            raise ValueError(
-                "Target should be a GateTargetConfig, not a custom instruction"
-            )
+            raise ValueError("Target should be a GateTargetConfig, not a custom instruction")
         self._optimal_actions = None
         self._param_values = None
         self.circ_tgt_register = None
@@ -147,9 +145,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.custom_instructions: List[Instruction] = []
         self.new_gates: List[Gate] = []
 
-        self.observation_space = Box(
-            low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
-        )
+        self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
         if circuit_context is None:
             q_reg = QuantumRegister(len(self.config.target.physical_qubits), name="tgt")
             circuit_context = QuantumCircuit(q_reg)
@@ -162,9 +158,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         if self.circuit_context.parameters:
             raise ValueError("Circuit context still contains unassigned parameters")
-        assert isinstance(
-            self.config.target, GateTargetConfig
-        ), "Target should be a gate"
+        assert isinstance(self.config.target, GateTargetConfig), "Target should be a gate"
 
         if self.backend_info.coupling_map.size() == 0 and self.backend is None:
             # Build a fully connected coupling map if no backend is provided
@@ -179,13 +173,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             for _ in range(tgt_instruction_counts)
         ]
         context_dag = circuit_to_dag(self.circuit_context)
-        baseline_dags = [
-            context_dag.copy_empty_like() for _ in range(tgt_instruction_counts)
-        ]
+        baseline_dags = [context_dag.copy_empty_like() for _ in range(tgt_instruction_counts)]
 
-        target_op_nodes = context_dag.named_nodes(
-            self.target_instruction.operation.name
-        )
+        target_op_nodes = context_dag.named_nodes(self.target_instruction.operation.name)
         target_op_nodes: List[DAGOpNode] = list(
             filter(
                 lambda node: node.qargs == self.target_instruction.qubits
@@ -298,9 +288,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if len(self.config.execution_config.n_reps) > 1:
             print(f"\n Number of repetitions: {self.n_reps}")
 
-    def step(
-        self, action: ActType
-    ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+    def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         # trunc_index tells us which circuit truncation should be trained
         # Dependent on global_step and method select_trunc_index
         # Figure out if in middle of param loading or should compute the final reward (step_status < trunc_index or ==)
@@ -336,14 +324,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             )
         self._param_values[self.trunc_index][step_status] = params
         params = np.reshape(
-            np.vstack(
-                [param_set for param_set in self._param_values[self.trunc_index]]
-            ),
+            np.vstack([param_set for param_set in self._param_values[self.trunc_index]]),
             (self.batch_size, (self.trunc_index + 1) * self.action_space.shape[-1]),
         )
-        if (
-            step_status < self.trunc_index
-        ):  # Intermediate step within the circuit truncation
+        if step_status < self.trunc_index:  # Intermediate step within the circuit truncation
             self._inside_trunc_tracker += 1
             terminated = False
 
@@ -461,9 +445,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         else:  # Perform simulation at circuit or pulse level
             print("Starting simulation benchmark...")
             if not self.config.reward_method == "fidelity":
-                params = np.array(
-                    [self.mean_action]
-                )  # Benchmark policy only through mean action
+                params = np.array([self.mean_action])  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":
                 fids = self.simulate_circuit(qc, params, update_env_history)
             else:  # Pulse simulation
@@ -580,10 +562,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         # Define target register and nearest neighbor register for truncated circuits
         self.circ_tgt_register = QuantumRegister(
-            bits=[
-                self._unbound_circuit_context.qubits[i]
-                for i in self.physical_target_qubits
-            ],
+            bits=[self._unbound_circuit_context.qubits[i] for i in self.physical_target_qubits],
             name="tgt",
         )
 
@@ -639,14 +618,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         if new_context is not None:  # Update circuit context from scratch
             self._circuit_context = new_context
-            self.custom_circuit_context = self.circuit_context.copy_empty_like(
-                "custom_context"
-            )
+            self.custom_circuit_context = self.circuit_context.copy_empty_like("custom_context")
 
         else:
-            self._circuit_context = self._unbound_circuit_context.assign_parameters(
-                kwargs
-            )
+            self._circuit_context = self._unbound_circuit_context.assign_parameters(kwargs)
 
         if backend is not None:  # Update backend and backend info if provided
             self.backend = backend
@@ -661,9 +636,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 self.config.backend_config,
                 self.config.backend_config.as_dict().get("primitive_options", None),
             )
-        self._target, self.circuits, self.baseline_circuits = (
-            self.define_target_and_circuits()
-        )
+        self._target, self.circuits, self.baseline_circuits = self.define_target_and_circuits()
 
     def update_gate_calibration(self, gate_names: Optional[List[str]] = None):
         """
@@ -673,16 +646,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             gate_names: Names of the custom gates to be created
         """
         if self.abstraction_level == "pulse":
-            if gate_names is not None and len(gate_names) != len(
-                self.custom_instructions
-            ):
+            if gate_names is not None and len(gate_names) != len(self.custom_instructions):
                 raise ValueError(
                     "Number of gate names does not match number of custom instructions"
                 )
             else:
                 gate_names = [
-                    f"{gate.name}_{i}_opt"
-                    for i, gate in enumerate(self.custom_instructions)
+                    f"{gate.name}_{i}_opt" for i, gate in enumerate(self.custom_instructions)
                 ]
 
             value_dicts = [{} for _ in range(self.tgt_instruction_counts)]
@@ -694,31 +664,24 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     ):
                         vector_index = self.parameters.index(param.vector)
                         param_index = param.index
-                        value_dicts[i][param] = self.optimal_actions(vector_index)[
-                            param_index
-                        ]
+                        value_dicts[i][param] = self.optimal_actions(vector_index)[param_index]
 
                     elif param.name.startswith("a_"):
                         vector_index = int(param.name.split("_")[1])
                         param_index = int(param.name.split("_")[2])
-                        value_dicts[i][param] = self.optimal_actions(vector_index)[
-                            param_index
-                        ]
+                        value_dicts[i][param] = self.optimal_actions(vector_index)[param_index]
 
             # context_qc = self.custom_circuit_context.assign_parameters(
             #     value_dicts[-1], inplace=False)
             contextual_schedules = schedule(self.circuits, self.backend)
 
             gate_qc = [
-                QuantumCircuit(self.circ_tgt_register)
-                for _ in range(self.tgt_instruction_counts)
+                QuantumCircuit(self.circ_tgt_register) for _ in range(self.tgt_instruction_counts)
             ]
             schedules, durations = [], []
             for i, gate in enumerate(self.custom_instructions):
                 baseline_circ = self.baseline_circuits[i]
-                custom_circ = self.circuits[i].assign_parameters(
-                    value_dicts[i], inplace=False
-                )
+                custom_circ = self.circuits[i].assign_parameters(value_dicts[i], inplace=False)
 
                 gate_qc[i].append(gate, self.circ_tgt_register)
                 gate_qc[i].assign_parameters(self.optimal_actions(i), inplace=True)
@@ -728,9 +691,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     # Sort the qubits to ensure the gate is applied on the correct qubits ordering
                     sorted_indices = sorted(self.physical_target_qubits)
                     index_map = {value: i for i, value in enumerate(sorted_indices)}
-                    new_indices = [
-                        index_map[value] for value in self.physical_target_qubits
-                    ]
+                    new_indices = [index_map[value] for value in self.physical_target_qubits]
                     qc.append(self.target.gate, new_indices)
                     self2._definition = qc
 
@@ -745,9 +706,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     "__array__": array,
                     "__init__": new_init,
                 }
-                new_gate_cls = type(
-                    f"{gate.name.capitalize()}_{i}", (Gate,), new_gate_methods
-                )
+                new_gate_cls = type(f"{gate.name.capitalize()}_{i}", (Gate,), new_gate_methods)
                 new_gate = new_gate_cls()
                 self.new_gates.append(new_gate)
                 cal_sched = schedule(gate_qc[i], self.backend)

@@ -54,11 +54,13 @@ def custom_schedule(
     ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
     sq_pulse_features = ["amp"]  # For single qubit gates
     sq_name = "x"  # Name of the single qubit gate baseline to pick ("x" or "sx")
-    keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
-    include_baseline = True  # Choose if original calibration shall be included as baseline in parametrization
-    include_duration = (
-        False  # Choose if pulse duration shall be included in parametrization
+    keep_symmetry = (
+        True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
     )
+    include_baseline = (
+        True  # Choose if original calibration shall be included as baseline in parametrization
+    )
+    include_duration = False  # Choose if pulse duration shall be included in parametrization
     duration_window = 1  # Duration window for the pulse duration
     if include_duration:
         ecr_pulse_features.append("duration")
@@ -106,9 +108,7 @@ def custom_schedule(
 
     basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
-    if isinstance(
-        backend, BackendV1
-    ):  # Convert to BackendV2 if needed (to access Target)
+    if isinstance(backend, BackendV1):  # Convert to BackendV2 if needed (to access Target)
         backend = BackendV2Converter(backend)
 
     # Choose which gate to build here
@@ -136,16 +136,12 @@ def validate_pulse_kwargs(
     assert isinstance(
         backend, (BackendV1, BackendV2)
     ), "Backend should be a valid Qiskit Backend instance"
-    assert isinstance(
-        target, dict
-    ), "Target should be a dictionary with 'physical_qubits' keys."
+    assert isinstance(target, dict), "Target should be a dictionary with 'physical_qubits' keys."
 
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
     if gate is not None:
         assert isinstance(gate, Gate), "Gate should be a valid Qiskit Gate instance"
-    assert isinstance(
-        physical_qubits, list
-    ), "Physical qubits should be a list of integers"
+    assert isinstance(physical_qubits, list), "Physical qubits should be a list of integers"
     assert all(
         isinstance(qubit, int) for qubit in physical_qubits
     ), "Physical qubits should be a list of integers"
@@ -206,9 +202,7 @@ def apply_parametrized_circuit(
                 {params: generic_params}, inplace=False
             ),
         )
-        backend.target.add_instruction(
-            parametrized_gate, {tuple(physical_qubits): properties}
-        )
+        backend.target.add_instruction(parametrized_gate, {tuple(physical_qubits): properties})
 
 
 def get_circuit_context(phi: float | Parameter) -> QuantumCircuit:

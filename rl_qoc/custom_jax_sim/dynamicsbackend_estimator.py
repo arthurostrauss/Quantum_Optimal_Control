@@ -32,12 +32,8 @@ class DynamicsBackendEstimator(BackendEstimator):
         skip_transpilation: bool = False,
     ):
         if not isinstance(backend, DynamicsBackend):
-            raise TypeError(
-                "DynamicsBackendEstimator can only be used with a DynamicsBackend."
-            )
-        super().__init__(
-            backend, options, abelian_grouping, bound_pass_manager, skip_transpilation
-        )
+            raise TypeError("DynamicsBackendEstimator can only be used with a DynamicsBackend.")
+        super().__init__(backend, options, abelian_grouping, bound_pass_manager, skip_transpilation)
 
     def _call(
         self,
@@ -54,14 +50,11 @@ class DynamicsBackendEstimator(BackendEstimator):
 
         # Bind parameters
         parameter_dicts = [
-            dict(zip(self._parameters[i], value))
-            for i, value in zip(circuits, parameter_values)
+            dict(zip(self._parameters[i], value)) for i, value in zip(circuits, parameter_values)
         ]
         # Set JaxSolver options for running the circuits with the given parameters
         self.backend.options.solver_options["parameter_dicts"] = parameter_dicts
-        self.backend.options.solver_options["subsystem_dims"] = (
-            self.backend.options.subsystem_dims
-        )
+        self.backend.options.solver_options["subsystem_dims"] = self.backend.options.subsystem_dims
         self.backend.options.solver_options["parameter_values"] = parameter_values
         self.backend.options.solver_options["observables"] = transpile(
             self.preprocessed_circuits[0][1], self.backend
@@ -84,9 +77,7 @@ class DynamicsBackendEstimator(BackendEstimator):
                 new_bound_circuits.append(circ.copy())
         accum = [0] + list(accumulate([num_observables[0]] * len(parameter_values)))
         # Run
-        result, metadata = _run_circuits(
-            new_bound_circuits, self._backend, **run_options
-        )
+        result, metadata = _run_circuits(new_bound_circuits, self._backend, **run_options)
 
         # Reset JaxSolver options to avoid any conflict with the next estimator call / Benchmarking
         for option in [

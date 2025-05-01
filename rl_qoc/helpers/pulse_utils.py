@@ -66,9 +66,7 @@ def perform_standard_calibrations(
 
     """
     if not isinstance(backend, DynamicsBackend):
-        raise TypeError(
-            "Backend must be a DynamicsBackend instance (given: {type(backend)})"
-        )
+        raise TypeError("Backend must be a DynamicsBackend instance (given: {type(backend)})")
 
     target, qubits, dt = backend.target, range(backend.num_qubits), backend.dt
     num_qubits = len(qubits)
@@ -98,9 +96,7 @@ def perform_standard_calibrations(
             }
         backend.set_options(control_channel_map=control_channel_map)
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
-        two_qubit_properties = {
-            qubits: InstructionProperties() for qubits in control_channel_map
-        }
+        two_qubit_properties = {qubits: InstructionProperties() for qubits in control_channel_map}
 
     standard_gates: Dict[str, Gate] = gate_map()  # standard gate library
     fixed_phase_gates = {
@@ -190,9 +186,7 @@ def perform_standard_calibrations(
 
         for gate, phase in fixed_phase_gates.items():
             gate_cal = rz_cal.assign_parameters({phi: phase}, inplace=False)
-            instruction_prop = InstructionProperties(
-                gate_cal.duration * dt, 0.0, gate_cal
-            )
+            instruction_prop = InstructionProperties(gate_cal.duration * dt, 0.0, gate_cal)
             target.update_instruction_properties(gate, (qubit,), instruction_prop)
 
         # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
@@ -202,19 +196,13 @@ def perform_standard_calibrations(
             rabi_exp = RoughXSXAmplitudeCal(
                 [qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 100)
             )
-            drag_exp = RoughDragCal(
-                [qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15)
-            )
+            drag_exp = RoughDragCal([qubit], cals, backend=backend, betas=np.linspace(-20, 20, 15))
             drag_exp.set_experiment_options(reps=[3, 5, 7])
             print(f"Starting Rabi experiment for qubit {qubit}...")
-            rabi_result = rabi_exp.run(
-                sampler=sampler, backend_run=backend_run
-            ).block_for_results()
+            rabi_result = rabi_exp.run(sampler=sampler, backend_run=backend_run).block_for_results()
             print(f"Rabi experiment for qubit {qubit} done.")
             print(f"Starting Drag experiment for qubit {qubit}...")
-            drag_result = drag_exp.run(
-                sampler=sampler, backend_run=backend_run
-            ).block_for_results()
+            drag_result = drag_exp.run(sampler=sampler, backend_run=backend_run).block_for_results()
             print(f"Drag experiments done for qubit {qubit} done.")
             exp_results[qubit] = [rabi_result, drag_result]
 
@@ -240,9 +228,7 @@ def perform_standard_calibrations(
     if calibration_files is None:
         cals.save(overwrite=True, file_prefix="Custom" + backend.name)
     error_dict = {"x": single_qubit_errors, "sx": single_qubit_errors}
-    target.update_from_instruction_schedule_map(
-        cals.get_inst_map(), error_dict=error_dict
-    )
+    target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
     # for qubit_pair in control_channel_map:
     #     print(qubit_pair)
     #     cr_ham_exp = CrossResonanceHamiltonian(physical_qubits=qubit_pair, flat_top_widths=np.linspace(0, 5000, 17),
@@ -262,9 +248,7 @@ def perform_standard_calibrations(
     return cals, exp_results
 
 
-def add_ecr_gate(
-    backend: BackendV2, basis_gates: Optional[List[str]] = None, coupling_map=None
-):
+def add_ecr_gate(backend: BackendV2, basis_gates: Optional[List[str]] = None, coupling_map=None):
     """
     Add ECR gate to basis gates if not present
     :param backend: Backend instance
@@ -295,9 +279,7 @@ def add_ecr_gate(
                     qubit_pair,
                     InstructionProperties(
                         error=error,
-                        calibration=cals.get_schedule(
-                            "ecr", qubit_pair, default_params
-                        ),
+                        calibration=cals.get_schedule("ecr", qubit_pair, default_params),
                     ),
                 )
         basis_gates.append("ecr")
@@ -342,9 +324,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
 
     q_c, q_t = (physical_qubits[0],), (physical_qubits[1],)
     physical_qubits = tuple(physical_qubits)
-    basis_gate_instructions = instruction_schedule_map.get(
-        basis_gate, qubits=physical_qubits
-    )
+    basis_gate_instructions = instruction_schedule_map.get(basis_gate, qubits=physical_qubits)
     instructions_array = np.array(basis_gate_instructions.instructions)[:, 1]
     control_pulse = target_pulse = x_pulse = None
 
@@ -389,9 +369,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
         ("angle", q_c, "x"): x_pulse.angle,
     }
     for sched in ["cr45p", "cr45m"]:
-        rise_fall = (control_pulse.duration - control_pulse.width) / (
-            2 * control_pulse.sigma
-        )
+        rise_fall = (control_pulse.duration - control_pulse.width) / (2 * control_pulse.sigma)
         default_params.update(
             {
                 ("amp", physical_qubits, sched): control_pulse.amp,
@@ -424,9 +402,7 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
     return default_params, pulse_features, basis_gate_instructions, instructions_array
 
 
-def get_pulse_params(
-    backend: Backend_type, physical_qubit: Sequence[int], gate_name: str = "x"
-):
+def get_pulse_params(backend: Backend_type, physical_qubit: Sequence[int], gate_name: str = "x"):
     """
     Determine default parameters for SX or X gate on provided backend
 
@@ -446,18 +422,14 @@ def get_pulse_params(
         instruction_schedule_map = backend.defaults().instruction_schedule_map
     else:
         instruction_schedule_map = backend.target.instruction_schedule_map()
-    basis_gate_inst: PulseInput = instruction_schedule_map.get(
-        gate_name, physical_qubit
-    )
+    basis_gate_inst: PulseInput = instruction_schedule_map.get(gate_name, physical_qubit)
     basis_gate_instructions = np.array(basis_gate_inst.instructions)[:, 1]
 
     play_instructions = basis_gate_inst.filter(instruction_types=[pulse.Play])
     if len(play_instructions) == 0:
         raise ValueError(f"No Play instructions found for {gate_name} gate")
     if len(play_instructions) > 1:
-        warnings.warn(
-            f"Multiple Play instructions found for {gate_name} gate, using the first one"
-        )
+        warnings.warn(f"Multiple Play instructions found for {gate_name} gate, using the first one")
 
     ref_pulse = play_instructions.instructions[0][1].pulse
 
@@ -504,22 +476,16 @@ def new_params_ecr(
         for sched in ["cr45p", "cr45m"]:
             for i, feature in enumerate(pulse_features):
                 if feature != "duration" and feature in available_features:
-                    if (
-                        include_baseline
-                    ):  # Add the parameter to the pulse baseline calibration
+                    if include_baseline:  # Add the parameter to the pulse baseline calibration
                         new_params[(feature, qubits, sched)] += params[i]
                     else:  # Replace baseline calibration with the parameter
                         new_params[(feature, qubits, sched)] = 0.0 + params[i]
 
                 else:
                     if include_baseline:
-                        new_params[(feature, qubits, sched)] += (
-                            duration_window * params[i]
-                        )
+                        new_params[(feature, qubits, sched)] += duration_window * params[i]
                     else:
-                        new_params[(feature, qubits, sched)] = (
-                            duration_window * params[i]
-                        )
+                        new_params[(feature, qubits, sched)] = duration_window * params[i]
 
     else:
         if 2 * len(pulse_features) != len(params):
@@ -674,10 +640,7 @@ def custom_experiment_result_function(
             for sub_dim in backend.options.subsystem_dims:
                 theta = 2 * np.pi / sub_dim
                 iq_centers.append(
-                    [
-                        (np.cos(idx * theta), np.sin(idx * theta))
-                        for idx in range(sub_dim)
-                    ]
+                    [(np.cos(idx * theta), np.sin(idx * theta)) for idx in range(sub_dim)]
                 )
 
         # generate IQ
@@ -771,20 +734,16 @@ def simulate_pulse_input(
     ]
 
     projected_unitaries = [
-        qubit_projection(output_unitary, subsystem_dims)
-        for output_unitary in output_unitaries
+        qubit_projection(output_unitary, subsystem_dims) for output_unitary in output_unitaries
     ]
 
     initial_state = (
-        DensityMatrix.from_int(0, subsystem_dims)
-        if initial_state is None
-        else initial_state
+        DensityMatrix.from_int(0, subsystem_dims) if initial_state is None else initial_state
     )
 
     final_states = [initial_state.evolve(output_op) for output_op in output_ops]
     projected_statevectors = [
-        projected_state(final_state, subsystem_dims, normalize)
-        for final_state in final_states
+        projected_state(final_state, subsystem_dims, normalize) for final_state in final_states
     ]
     rotated_state = None
 
@@ -820,9 +779,7 @@ def simulate_pulse_input(
                         elif isinstance(op, QuantumState):
                             target_states.append(op)
                         else:
-                            raise TypeError(
-                                "Target must be either Operator or Statevector"
-                            )
+                            raise TypeError("Target must be either Operator or Statevector")
                 elif isinstance(target_op, Operator):
                     target_unitaries.append(target_op)
                 elif isinstance(target_op, QuantumState):
@@ -843,9 +800,7 @@ def simulate_pulse_input(
             elif isinstance(target, QuantumState):
                 target_states.extend([target] * len(qc_input))
             else:
-                raise TypeError(
-                    "Target must be either Operator or Statevector or a Tuple of them"
-                )
+                raise TypeError("Target must be either Operator or Statevector or a Tuple of them")
     else:
         for qc in qc_input:
             if isinstance(qc, QuantumCircuit):
@@ -858,31 +813,19 @@ def simulate_pulse_input(
     if target_unitaries:
         optimal_rots = [
             (
-                get_optimal_z_rotation(
-                    projected_unitary, target_unitary, len(subsystem_dims)
-                )
+                get_optimal_z_rotation(projected_unitary, target_unitary, len(subsystem_dims))
                 if target_unitary is not None
                 else None
             )
-            for projected_unitary, target_unitary in zip(
-                projected_unitaries, target_unitaries
-            )
+            for projected_unitary, target_unitary in zip(projected_unitaries, target_unitaries)
         ]
         rotated_unitaries = [
-            (
-                rotate_unitary(optimal_rot.x, projected_unitary)
-                if optimal_rot is not None
-                else None
-            )
+            (rotate_unitary(optimal_rot.x, projected_unitary) if optimal_rot is not None else None)
             for optimal_rot, projected_unitary in zip(optimal_rots, projected_unitaries)
         ]
         try:
             rotated_states = [
-                (
-                    initial_state.evolve(rotated_unitary)
-                    if rotated_unitary is not None
-                    else None
-                )
+                (initial_state.evolve(rotated_unitary) if rotated_unitary is not None else None)
                 for rotated_unitary in rotated_unitaries
             ]
         except QiskitError:
@@ -894,9 +837,7 @@ def simulate_pulse_input(
                 if target_unitary is not None
                 else None
             )
-            for projected_unitary, target_unitary in zip(
-                projected_unitaries, target_unitaries
-            )
+            for projected_unitary, target_unitary in zip(projected_unitaries, target_unitaries)
         ]
         optimal_gate_fids = [
             (
@@ -904,27 +845,19 @@ def simulate_pulse_input(
                 if rotated_unitary is not None
                 else None
             )
-            for rotated_unitary, target_unitary in zip(
-                rotated_unitaries, target_unitaries
-            )
+            for rotated_unitary, target_unitary in zip(rotated_unitaries, target_unitaries)
         ]
 
         final_results["gate_fidelity"] = {
             "raw": gate_fids if len(gate_fids) > 1 else gate_fids[0],
-            "optimal": (
-                optimal_gate_fids
-                if len(optimal_gate_fids) > 1
-                else optimal_gate_fids[0]
-            ),
+            "optimal": (optimal_gate_fids if len(optimal_gate_fids) > 1 else optimal_gate_fids[0]),
             "rotations": (
                 [optimal_rot.x for optimal_rot in optimal_rots]
                 if len(optimal_rots) > 1
                 else optimal_rots[0].x
             ),
             "rotated_unitary": (
-                rotated_unitaries
-                if len(rotated_unitaries) > 1
-                else rotated_unitaries[0]
+                rotated_unitaries if len(rotated_unitaries) > 1 else rotated_unitaries[0]
             ),
         }
 
@@ -935,17 +868,13 @@ def simulate_pulse_input(
                 if target_state is not None
                 else None
             )
-            for projected_statevec, target_state in zip(
-                projected_statevectors, target_states
-            )
+            for projected_statevec, target_state in zip(projected_statevectors, target_states)
         ]
         state_fid2 = []
         if rotated_states is not None:
             for rotated_state, target_state in zip(rotated_states, target_states):
                 if rotated_state is not None and target_state is not None:
-                    state_fid2.append(
-                        state_fidelity(rotated_state, target_state, validate=False)
-                    )
+                    state_fid2.append(state_fidelity(rotated_state, target_state, validate=False))
                 else:
                     state_fid2.append(None)
 
@@ -996,9 +925,7 @@ def rotate_frame(yf: Any, tf: Any, backend: DynamicsBackend):
     """
     # Take state out of frame, put in dressed basis, and normalize
     if isinstance(yf, Statevector):
-        yf = np.array(
-            backend.options.solver.model.rotating_frame.state_out_of_frame(t=tf, y=yf)
-        )
+        yf = np.array(backend.options.solver.model.rotating_frame.state_out_of_frame(t=tf, y=yf))
         yf = backend._dressed_states_adjoint @ yf
         yf = Statevector(yf, dims=backend.options.subsystem_dims)
 
@@ -1006,9 +933,7 @@ def rotate_frame(yf: Any, tf: Any, backend: DynamicsBackend):
             yf = yf / np.linalg.norm(yf.data)
     elif isinstance(yf, DensityMatrix):
         yf = np.array(
-            backend.options.solver.model.rotating_frame.operator_out_of_frame(
-                t=tf, operator=yf
-            )
+            backend.options.solver.model.rotating_frame.operator_out_of_frame(t=tf, operator=yf)
         )
         yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
         yf = DensityMatrix(yf, dims=backend.options.subsystem_dims)
@@ -1017,9 +942,7 @@ def rotate_frame(yf: Any, tf: Any, backend: DynamicsBackend):
             yf = yf / np.diag(yf.data).sum()
     elif isinstance(yf, Operator):
         yf = np.array(
-            backend.options.solver.model.rotating_frame.operator_out_of_frame(
-                t=tf, operator=yf
-            )
+            backend.options.solver.model.rotating_frame.operator_out_of_frame(t=tf, operator=yf)
         )
         yf = backend._dressed_states_adjoint @ yf @ backend._dressed_states
         yf = Operator(
@@ -1050,14 +973,10 @@ def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
         input_dims=tuple(initial_subsystem_dims),
         output_dims=output_dims,
     )  # Projector initialized in the qudit space
-    for i in range(
-        total_dim
-    ):  # Loop over all computational basis states in the qudit space
+    for i in range(total_dim):  # Loop over all computational basis states in the qudit space
         s = Statevector.from_int(i, initial_subsystem_dims)  # Computational qudit state
         for key in s.to_dict().keys():  # Loop over all computational basis states
-            if all(
-                c in "01" for c in key
-            ):  # Check if basis state is in the qubit space
+            if all(c in "01" for c in key):  # Check if basis state is in the qubit space
                 s_qubit = Statevector.from_label(key)  # Computational qubit state
                 projector += Operator(
                     s_qubit.data.reshape(total_qubit_dim, 1)
@@ -1086,9 +1005,7 @@ def projected_state(
     """
     if not isinstance(state, (np.ndarray, QuantumState)):
         raise TypeError("State must be either numpy array or QuantumState object")
-    proj = build_qubit_space_projector(
-        subsystem_dims
-    )  # Projector on qubit space (in qudit space)
+    proj = build_qubit_space_projector(subsystem_dims)  # Projector on qubit space (in qudit space)
     if isinstance(state, np.ndarray):
         state_type = DensityMatrix if state.ndim == 2 else Statevector
         output_state: Statevector | DensityMatrix = state_type(state)
@@ -1108,9 +1025,7 @@ def projected_state(
     return qubitized_state
 
 
-def qubit_projection(
-    unitary: np.ndarray | Operator, subsystem_dims: List[int]
-) -> Operator:
+def qubit_projection(unitary: np.ndarray | Operator, subsystem_dims: List[int]) -> Operator:
     """
     Project unitary on qubit space
 
@@ -1121,20 +1036,14 @@ def qubit_projection(
     Returns: unitary projected on qubit space as a Qiskit Operator object
     """
 
-    proj = build_qubit_space_projector(
-        subsystem_dims
-    )  # Projector on qubit space (in qudit space)
+    proj = build_qubit_space_projector(subsystem_dims)  # Projector on qubit space (in qudit space)
     unitary_op = (
-        Operator(
-            unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
-        )
+        Operator(unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims))
         if isinstance(unitary, np.ndarray)
         else unitary
     )  # Unitary operator (in qudit space)
 
-    qubitized_op = (
-        proj @ unitary_op @ proj.adjoint()
-    )  # Projected unitary (in qubit space)
+    qubitized_op = proj @ unitary_op @ proj.adjoint()  # Projected unitary (in qubit space)
     # (Note that is actually not unitary at this point, it's a Channel on the multi-qubit system)
     return qubitized_op
 
@@ -1188,9 +1097,7 @@ def handle_virtual_rotations(operations, fidelities, subsystem_dims, n_reps, tar
     Optimize gate fidelity by finding optimal Z-rotations before and after gate
     """
     best_op = operations[np.argmax(fidelities)]
-    res = get_optimal_z_rotation(
-        best_op, target.target_operator.power(n_reps), len(subsystem_dims)
-    )
+    res = get_optimal_z_rotation(best_op, target.target_operator.power(n_reps), len(subsystem_dims))
     rotated_unitaries = [rotate_unitary(res.x, op) for op in operations]
     fidelities = [target.fidelity(op, n_reps) for op in rotated_unitaries]
 
@@ -1219,11 +1126,13 @@ def custom_schedule(
     ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
     sq_pulse_features = ["amp"]  # For single qubit gates
     sq_name = "x"  # Name of the single qubit gate baseline to pick ("x" or "sx")
-    keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
-    include_baseline = False  # Choose if original calibration shall be included as baseline in parametrization
-    include_duration = (
-        False  # Choose if pulse duration shall be included in parametrization
+    keep_symmetry = (
+        True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
     )
+    include_baseline = (
+        False  # Choose if original calibration shall be included as baseline in parametrization
+    )
+    include_duration = False  # Choose if pulse duration shall be included in parametrization
     duration_window = 1  # Duration window for the pulse duration
     if include_duration:
         ecr_pulse_features.append("duration")
@@ -1271,9 +1180,7 @@ def custom_schedule(
 
     basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
-    if isinstance(
-        backend, BackendV1
-    ):  # Convert to BackendV2 if needed (to access Target)
+    if isinstance(backend, BackendV1):  # Convert to BackendV2 if needed (to access Target)
         backend = BackendV2Converter(backend)
 
     # Choose which gate to build here
@@ -1301,9 +1208,7 @@ def validate_pulse_kwargs(
     assert isinstance(
         backend, (BackendV1, BackendV2)
     ), "Backend should be a valid Qiskit Backend instance"
-    assert isinstance(
-        target, dict
-    ), "Target should be a dictionary with 'physical_qubits' keys."
+    assert isinstance(target, dict), "Target should be a dictionary with 'physical_qubits' keys."
 
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
     if gate is not None:
@@ -1311,9 +1216,7 @@ def validate_pulse_kwargs(
 
         gate = get_gate(gate)
         assert isinstance(gate, Gate), "Gate should be a valid Qiskit Gate instance"
-    assert isinstance(
-        physical_qubits, list
-    ), "Physical qubits should be a list of integers"
+    assert isinstance(physical_qubits, list), "Physical qubits should be a list of integers"
     assert all(
         isinstance(qubit, int) for qubit in physical_qubits
     ), "Physical qubits should be a list of integers"

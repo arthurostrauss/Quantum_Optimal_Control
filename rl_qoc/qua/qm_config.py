@@ -32,9 +32,7 @@ class QMConfig(BackendConfig):
 
     def __post_init__(self):
         self.input_type = (
-            InputType(self.input_type)
-            if isinstance(self.input_type, str)
-            else self.input_type
+            InputType(self.input_type) if isinstance(self.input_type, str) else self.input_type
         )
 
 

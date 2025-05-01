@@ -22,9 +22,7 @@ def get_pulse_name(pulse: Pulse) -> str:
     elif pulse.parent is not None:
         return pulse.parent.get_attr_name(pulse)
     else:
-        raise AttributeError(
-            f"Cannot infer id of {pulse} because it is not attached to a parent"
-        )
+        raise AttributeError(f"Cannot infer id of {pulse} because it is not attached to a parent")
 
 
 @quam_dataclass
@@ -35,9 +33,7 @@ class MeasureMacro(QubitMacro):
         state = kwargs.get("state", declare(int))
         qua_vars = kwargs.get("qua_vars", (declare(fixed), declare(fixed)))
         pulse: ReadoutPulse = (
-            self.pulse
-            if isinstance(self.pulse, Pulse)
-            else self.qubit.get_pulse(self.pulse)
+            self.pulse if isinstance(self.pulse, Pulse) else self.qubit.get_pulse(self.pulse)
         )
 
         resonator: ReadoutResonator = self.qubit.resonator

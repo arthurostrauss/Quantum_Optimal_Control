@@ -104,9 +104,7 @@ class ORBITReward(Reward):
                 ref_qc = circuit_ref.copy_empty_like(name="orbit_ref_circ")
                 run_qc = qc.copy_empty_like(name="orbit_run_circ")
                 for l in range(execution_config.current_n_reps):
-                    r_cliff = random_clifford(
-                        target.causal_cone_size, self.clifford_rng
-                    )
+                    r_cliff = random_clifford(target.causal_cone_size, self.clifford_rng)
                     for circ, context in zip([run_qc, ref_qc], [qc, circuit_ref]):
                         circ.compose(
                             r_cliff.to_circuit(),
@@ -117,9 +115,7 @@ class ORBITReward(Reward):
                         circ.compose(context, inplace=True)
                         circ.barrier()
 
-                sim_qc = causal_cone_circuit(
-                    ref_qc.decompose(), target.causal_cone_qubits
-                )[0]
+                sim_qc = causal_cone_circuit(ref_qc.decompose(), target.causal_cone_qubits)[0]
                 reverse_unitary = Operator(sim_qc).adjoint()
                 reverse_unitary_qc = QuantumCircuit.copy_empty_like(run_qc)
                 reverse_unitary_qc.unitary(
@@ -140,9 +136,7 @@ class ORBITReward(Reward):
                 transpiled_circuit.barrier()
                 transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
                 transpiled_circuit.measure_all()
-                pub = SamplerPub.coerce(
-                    (transpiled_circuit, params, execution_config.n_shots)
-                )
+                pub = SamplerPub.coerce((transpiled_circuit, params, execution_config.n_shots))
                 reward_data.append(
                     ORBITRewardData(
                         pub,
@@ -189,14 +183,10 @@ class ORBITReward(Reward):
         num_bits = pub_results[0].data.meas[0].num_bits
         if num_bits == causal_cone_size:
             pub_data = [
-                [pub_result.data.meas[i] for i in range(batch_size)]
-                for pub_result in pub_results
+                [pub_result.data.meas[i] for i in range(batch_size)] for pub_result in pub_results
             ]
             survival_probability = [
-                [
-                    bit_array.get_int_counts().get(0, 0) / n_shots
-                    for bit_array in bit_arrays
-                ]
+                [bit_array.get_int_counts().get(0, 0) / n_shots for bit_array in bit_arrays]
                 for bit_arrays in pub_data
             ]
         else:

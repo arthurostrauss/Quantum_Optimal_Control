@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import List, Optional, Tuple, Literal
 from ..environment.target import GateTarget, StateTarget
 from ..environment.configuration.qconfig import QEnvConfig
@@ -29,18 +31,14 @@ def get_real_time_reward_circuit(
     """
     execution_config = env_config.execution_config
     backend_info = env_config.backend_info
-    reward_method = (
-        reward_method if reward_method is not None else env_config.reward_method
-    )
+    reward_method = reward_method if reward_method is not None else env_config.reward_method
     if reward_method not in ["cafe", "channel", "state"]:
         raise NotImplementedError(
             f"Selected reward method {reward_method} does not (yet?) "
             f"support a real-time version of circuit"
         )
     prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
-    target_instances = (
-        [target] if isinstance(target, (GateTarget, StateTarget)) else target
-    )
+    target_instances = [target] if isinstance(target, (GateTarget, StateTarget)) else target
     if len(prep_circuits) != len(target_instances):
         raise ValueError("Number of circuits and targets must be the same")
     if not all(
@@ -73,9 +71,7 @@ def get_real_time_reward_circuit(
         target_instance = None
     # Compare qubits of each circuit between each other and ensure they are the same
     qubits = [qc.qubits for qc in prep_circuits]
-    if len(qubits) > 1 and not all(
-        qubits[0] == qubits[i] for i in range(1, len(qubits))
-    ):
+    if len(qubits) > 1 and not all(qubits[0] == qubits[i] for i in range(1, len(qubits))):
         raise ValueError("All circuits must have the same qubits")
 
     qc = prep_circuits[0].copy_empty_like(name="real_time_qc")
@@ -107,9 +103,7 @@ def get_real_time_reward_circuit(
         ), f"ClassicalRegister not matching causal cone size of circuit"
 
     if is_gate_target:  # Declare input states variables
-        input_state_vars = [
-            qc.add_input(f"input_state_{i}", Uint(4)) for i in range(num_qubits)
-        ]
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(4)) for i in range(num_qubits)]
     else:
         input_state_vars = None
 
@@ -120,9 +114,7 @@ def get_real_time_reward_circuit(
 
     if is_gate_target:
         input_choice = (
-            target_instance.input_states_choice
-            if reward_method != "channel"
-            else "pauli6"
+            target_instance.input_states_choice if reward_method != "channel" else "pauli6"
         )
         input_circuits = [
             circ.decompose() if input_choice in ["pauli4", "pauli6"] else circ
@@ -142,9 +134,7 @@ def get_real_time_reward_circuit(
         with qc.switch(circuit_choice) as circuit_case:
             for i, prep_circuit in enumerate(prep_circuits):
                 with circuit_case(i):
-                    handle_real_time_n_reps(
-                        execution_config.n_reps, n_reps_var, prep_circuit, qc
-                    )
+                    handle_real_time_n_reps(execution_config.n_reps, n_reps_var, prep_circuit, qc)
     else:
         prep_circuit = prep_circuits[0]
         handle_real_time_n_reps(execution_config.n_reps, n_reps_var, prep_circuit, qc)
@@ -179,24 +169,19 @@ def get_real_time_reward_circuit(
                 )
                 cycle_circuit.save_unitary()
                 sim_unitary = (
-                    AerSimulator(method="unitary")
-                    .run(cycle_circuit)
-                    .result()
-                    .get_unitary()
+                    AerSimulator(method="unitary").run(cycle_circuit).result().get_unitary()
                 )
                 inverse_circuit = ref_circ.copy_empty_like()
-                inverse_circuit.unitary(
-                    sim_unitary.adjoint(), causal_cone_qubits, label="U_inv"
-                )
+                inverse_circuit.unitary(sim_unitary.adjoint(), causal_cone_qubits, label="U_inv")
                 inverse_circuit = backend_info.custom_transpile(
                     inverse_circuit,
                     initial_layout=target_instance.layout,
                     scheduling=False,
                     optimization_level=3,
                 )
-                inverse_circuit = causal_cone_circuit(
-                    inverse_circuit, causal_cone_qubits_indices
-                )[0]
+                inverse_circuit = causal_cone_circuit(inverse_circuit, causal_cone_qubits_indices)[
+                    0
+                ]
                 cycle_circuit_inverses[i].append(inverse_circuit)
         if len(prep_circuits) > 1:
             with qc.switch(circuit_choice) as circuit_case:
@@ -255,9 +240,7 @@ def get_real_time_reward_circuit(
     return qc
 
 
-def apply_real_time_n_reps(
-    n_reps_int: int, qc: QuantumCircuit, prep_circuit: QuantumCircuit
-):
+def apply_real_time_n_reps(n_reps_int: int, qc: QuantumCircuit, prep_circuit: QuantumCircuit):
     """
     Apply the number of repetitions of the circuit in the real-time reward computation
 
@@ -269,9 +252,9 @@ def apply_real_time_n_reps(
 
     if n_reps_int > 1:
         with qc.for_loop(range(n_reps_int)):
-            qc.compose(prep_circuit, inplace=True)
+            qc &= prep_circuit
     else:
-        qc.compose(prep_circuit, inplace=True)
+        qc &= prep_circuit
 
 
 def handle_real_time_n_reps(
@@ -297,7 +280,7 @@ def handle_real_time_n_reps(
 
             n_reps_var_range = DynamicRange(n_reps_var)
             with qc.for_loop(n_reps_var_range):
-                qc.compose(prep_circuit, inplace=True)
+                qc &= prep_circuit
         except ImportError:
             # TODO: When Qiskit will support variable range in for loop, replace
             # this with a for loop with appropriate range object

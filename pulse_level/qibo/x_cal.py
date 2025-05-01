@@ -15,9 +15,7 @@ from rl_qoc import (
 from rl_qoc.qibo import QiboConfig
 
 
-def param_circuit(
-    qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
-):
+def param_circuit(qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs):
     target = kwargs["target"]
     gate: Gate = target.get("gate", "x")
     if gate == "x":

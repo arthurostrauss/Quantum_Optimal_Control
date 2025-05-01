@@ -26,9 +26,7 @@ logging.basicConfig(
 
 
 # Collect filenames from a directory
-def collect_filenames(
-    directory: Union[List[str], str], date: Optional[str] = None
-) -> List[str]:
+def collect_filenames(directory: Union[List[str], str], date: Optional[str] = None) -> List[str]:
     filenames = []
     if isinstance(directory, str):
         directory = [directory]
@@ -91,8 +89,7 @@ def create_animation(file_name: str):
             1.2
             * max(
                 [
-                    data["hyper_params"]["N_SHOTS"]
-                    * data["hyper_params"]["SAMPLE_PAULIS"]
+                    data["hyper_params"]["N_SHOTS"] * data["hyper_params"]["SAMPLE_PAULIS"]
                     for data in data_list
                 ]
             ),
@@ -120,8 +117,7 @@ def create_animation(file_name: str):
                 0,
                 max(
                     [
-                        data["hyper_params"]["N_SHOTS"]
-                        * data["hyper_params"]["SAMPLE_PAULIS"]
+                        data["hyper_params"]["N_SHOTS"] * data["hyper_params"]["SAMPLE_PAULIS"]
                         for data in data_list
                     ]
                 ),
@@ -130,8 +126,7 @@ def create_animation(file_name: str):
                 0,
                 max(
                     [
-                        data["hyper_params"]["N_SHOTS"]
-                        * data["hyper_params"]["SAMPLE_PAULIS"]
+                        data["hyper_params"]["N_SHOTS"] * data["hyper_params"]["SAMPLE_PAULIS"]
                         for data in data_list
                     ]
                 ),
@@ -146,10 +141,7 @@ def create_animation(file_name: str):
         marker = markers[i // len(colors) % len(markers)]
 
         data = data_list[i]
-        x = (
-            data["hyper_params"]["MINIBATCH_SIZE"]
-            * data["hyper_params"]["BATCHSIZE_MULTIPLIER"]
-        )
+        x = data["hyper_params"]["MINIBATCH_SIZE"] * data["hyper_params"]["BATCHSIZE_MULTIPLIER"]
         y = data["hyper_params"]["N_SHOTS"] * data["hyper_params"]["SAMPLE_PAULIS"]
         ax.scatter(x, y, color=color, marker=marker, label=f"Trial {i + 1}")
 
@@ -181,16 +173,12 @@ def create_animation(file_name: str):
 ##################### Hyperparameter Analysis #####################
 
 
-def extract_parameters_hpo_analysis(
-    target, fidelity_info, considered_fidelities, file_data
-):
+def extract_parameters_hpo_analysis(target, fidelity_info, considered_fidelities, file_data):
     considered = target in considered_fidelities
     achieved = considered and fidelity_info[target].get("achieved", False)
     shots_used = fidelity_info[target].get("shots_used", 0) if achieved else "N/A"
     updates_used = fidelity_info[target].get("update_at", 0) if achieved else "N/A"
-    hardware_runtime = (
-        fidelity_info[target].get("hardware_runtime", "N/A") if achieved else "N/A"
-    )
+    hardware_runtime = fidelity_info[target].get("hardware_runtime", "N/A") if achieved else "N/A"
     file_data[(f"fidelity: {target}", "considered")] = considered
     file_data[(f"fidelity: {target}", "achieved")] = achieved
     file_data[(f"fidelity: {target}", "shots_used")] = shots_used
@@ -226,9 +214,7 @@ def process_file_hpo_analysis(filename):
     }
 
     for target in [0.99, 0.999, 0.9999, 0.99999]:
-        extract_parameters_hpo_analysis(
-            target, fidelity_info, considered_fidelities, file_data
-        )
+        extract_parameters_hpo_analysis(target, fidelity_info, considered_fidelities, file_data)
 
     return (phi, gamma), file_data
 
@@ -360,9 +346,7 @@ def make_scatter(
     legend_sizes = np.quantile(shots_used_normalized, [0.25, 0.5, 0.75])
     labels = [f"{int(size)}" for size in legend_sizes]
     scatter_handles = [
-        plt.scatter(
-            [], [], s=size, color="gray", alpha=0.6, edgecolors="w", linewidth=1
-        )
+        plt.scatter([], [], s=size, color="gray", alpha=0.6, edgecolors="w", linewidth=1)
         for size in legend_sizes
     ]
     bubble_legend = ax.legend(

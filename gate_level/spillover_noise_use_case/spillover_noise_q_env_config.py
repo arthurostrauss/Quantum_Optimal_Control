@@ -86,9 +86,7 @@ def get_backend(ϕ=np.pi / 2, γ=0.05, custom_rx_gate_label="rx_custom"):
 
     p0given1 = 0.0138  # IBM Sherbrooke
     p1given0 = 0.0116  # IBM Sherbrooke
-    readout_error_matrix = ReadoutError(
-        [[1 - p1given0, p1given0], [p0given1, 1 - p0given1]]
-    )
+    readout_error_matrix = ReadoutError([[1 - p1given0, p1given0], [p0given1, 1 - p0given1]])
     noise_model.add_all_qubit_readout_error(readout_error_matrix, "measure")
     noise_model.add_all_qubit_quantum_error(reset_error(0.01), "reset")
 
@@ -111,9 +109,7 @@ gamma = 0.05  # spillover rate for the CRX gate
 custom_rx_gate_label = "rx_custom"
 
 
-def get_circuit_context(
-    backend: Optional[BackendV2], initial_layout: Optional[List[int]] = None
-):
+def get_circuit_context(backend: Optional[BackendV2], initial_layout: Optional[List[int]] = None):
     """
     Define the context of the circuit to be used in the training
     :param backend: Backend instance
@@ -195,6 +191,4 @@ q_env_config.backend_config.parametrized_circuit_kwargs = {
 q_env_config.backend_config.instruction_durations_dict = get_instruction_durations(
     q_env_config.backend
 )
-circuit_context = get_circuit_context(
-    q_env_config.backend, q_env_config.physical_qubits
-)
+circuit_context = get_circuit_context(q_env_config.backend, q_env_config.physical_qubits)

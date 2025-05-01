@@ -148,8 +148,7 @@ class ParameterExpression:
         }
         if not jax_tracer:
             if (
-                hasattr(bound_symbol_expr, "is_infinite")
-                and bound_symbol_expr.is_infinite
+                hasattr(bound_symbol_expr, "is_infinite") and bound_symbol_expr.is_infinite
             ) or bound_symbol_expr == float("inf"):
                 raise ZeroDivisionError(
                     "Binding provided for expression "
@@ -219,18 +218,14 @@ class ParameterExpression:
 
     def _raise_if_passed_nan(self, parameter_values):
         nan_parameter_values = {
-            p: v
-            for p, v in parameter_values.items()
-            if not isinstance(v, numbers.Number)
+            p: v for p, v in parameter_values.items() if not isinstance(v, numbers.Number)
         }
         if nan_parameter_values:
             raise CircuitError(
                 f"Expression cannot bind non-numeric values ({nan_parameter_values})"
             )
 
-    def _raise_if_parameter_names_conflict(
-        self, inbound_parameters, outbound_parameters=None
-    ):
+    def _raise_if_parameter_names_conflict(self, inbound_parameters, outbound_parameters=None):
         if outbound_parameters is None:
             outbound_parameters = set()
             outbound_names = {}

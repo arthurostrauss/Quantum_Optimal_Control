@@ -43,9 +43,7 @@ def numbers_to_pauli_string(pauli_numbers: List[int]):
     """
     This function converts a list of numbers that represent the Pauli operators to a Pauli string
     """
-    return "".join(
-        [key for key, value in pauli_mapping.items() if value in pauli_numbers]
-    )
+    return "".join([key for key, value in pauli_mapping.items() if value in pauli_numbers])
 
 
 def pad_pauli_numbers(pauli_numbers: List[int], n_qubits: int):

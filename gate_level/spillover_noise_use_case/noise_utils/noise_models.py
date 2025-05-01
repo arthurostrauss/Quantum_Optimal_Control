@@ -21,8 +21,7 @@ def generate_random_cptp_map(dim: int, num_ops: int, epsilon: float):
     """
     # Step 1: Generate random matrices
     kraus_ops_tilde = [
-        np.random.randn(dim, dim) + 1j * np.random.randn(dim, dim)
-        for _ in range(num_ops - 1)
+        np.random.randn(dim, dim) + 1j * np.random.randn(dim, dim) for _ in range(num_ops - 1)
     ]
 
     # Step 2: Impose the completeness condition using the generated matrices

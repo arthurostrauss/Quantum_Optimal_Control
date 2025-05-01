@@ -50,11 +50,7 @@ class ParameterTable:
                     Tuple[
                         Union[float, int, bool, List, np.ndarray],
                         Optional[Union[str, type]],
-                        Optional[
-                            Union[
-                                Literal["INPUT_STREAM", "DGX", "IO1", "IO2"], InputType
-                            ]
-                        ],
+                        Optional[Union[Literal["INPUT_STREAM", "DGX", "IO1", "IO2"], InputType]],
                         Optional[Union[Literal["INCOMING", "OUTGOING"], Direction]],
                     ],
                     Union[float, int, bool, List, np.ndarray],
@@ -100,9 +96,7 @@ class ParameterTable:
         self._direction = None
 
         if isinstance(parameters_dict, Dict):
-            for index, (parameter_name, parameter) in enumerate(
-                parameters_dict.items()
-            ):
+            for index, (parameter_name, parameter) in enumerate(parameters_dict.items()):
                 input_type = None
                 direction = None
                 if isinstance(parameter, Tuple):
@@ -170,9 +164,7 @@ class ParameterTable:
                 if self._input_type is None:
                     self._input_type = parameter.input_type
                 elif self._input_type != parameter.input_type:
-                    raise ValueError(
-                        "All parameters in the table must have the same input type."
-                    )
+                    raise ValueError("All parameters in the table must have the same input type.")
                 if self._input_type == InputType.DGX:
                     if self._direction is None:
                         self._direction = parameter.direction
@@ -188,9 +180,7 @@ class ParameterTable:
                 ]
                 for parameter in self.parameters
             }
-            struct = qua_struct(
-                type("Struct", (object,), {"__annotations__": attributes})
-            )
+            struct = qua_struct(type("Struct", (object,), {"__annotations__": attributes}))
             self._packet_type = struct
             for parameter in self.parameters:
                 parameter.dgx_struct = struct
@@ -208,9 +198,7 @@ class ParameterTable:
 
         """
         if self.input_type == InputType.DGX:
-            qua_direction = (
-                "INCOMING" if self.direction == Direction.OUTGOING else "OUTGOING"
-            )
+            qua_direction = "INCOMING" if self.direction == Direction.OUTGOING else "OUTGOING"
             self._packet = declare_struct(self._packet_type)
             self._qua_external_stream = declare_external_stream(
                 self._packet, self._id, qua_direction
@@ -225,9 +213,7 @@ class ParameterTable:
                 if declare_streams:
                     parameter.declare_stream()
 
-            if (
-                self._direction == Direction.INCOMING
-            ):  # OPX -> DGX (Initialize the packet)
+            if self._direction == Direction.INCOMING:  # OPX -> DGX (Initialize the packet)
                 for parameter in self.parameters:
                     if parameter.is_array:
 
@@ -254,9 +240,7 @@ class ParameterTable:
             else:
                 return self.variables
 
-    def load_input_values(
-        self, filter_function: Optional[Callable[[Parameter], bool]] = None
-    ):
+    def load_input_values(self, filter_function: Optional[Callable[[Parameter], bool]] = None):
         """
         QUA Macro to load all the input values of the parameters in the parameter table.
         This macro is expected to work jointly with the use of push_to_opx method on the
@@ -265,13 +249,9 @@ class ParameterTable:
         """
         if self.input_type == InputType.DGX:
             if filter_function is not None:
-                warnings.warn(
-                    "Filter function is not supported for DGX parameter tables."
-                )
+                warnings.warn("Filter function is not supported for DGX parameter tables.")
             if self.direction == Direction.INCOMING:
-                raise ValueError(
-                    "Cannot load input values for outgoing DGX parameter tables."
-                )
+                raise ValueError("Cannot load input values for outgoing DGX parameter tables.")
             elif self.direction == Direction.OUTGOING:
                 fetch_from_external_stream(self._qua_external_stream, self._packet)
 
@@ -314,13 +294,8 @@ class ParameterTable:
         a Python value or a QuaExpressionType.
         """
         for parameter_name, parameter_value in values.items():
-            if (
-                isinstance(parameter_name, str)
-                and parameter_name not in self.table.keys()
-            ):
-                raise KeyError(
-                    f"No parameter named {parameter_name} in the parameter table."
-                )
+            if isinstance(parameter_name, str) and parameter_name not in self.table.keys():
+                raise KeyError(f"No parameter named {parameter_name} in the parameter table.")
             if isinstance(parameter_name, str):
                 self.table[parameter_name].assign_value(parameter_value)
             else:
@@ -349,17 +324,13 @@ class ParameterTable:
         """
         if isinstance(parameter, str):
             if parameter not in self.table.keys():
-                raise KeyError(
-                    f"No parameter named {parameter} in the parameter table."
-                )
+                raise KeyError(f"No parameter named {parameter} in the parameter table.")
             return self.table[parameter].type
         elif isinstance(parameter, int):
             for param in self.parameters:
                 if param.get_index(self) == parameter:
                     return param.type
-            raise IndexError(
-                f"No parameter with index {parameter} in the parameter table."
-            )
+            raise IndexError(f"No parameter with index {parameter} in the parameter table.")
         else:
             raise ValueError("Invalid parameter name. Please use a string or an int.")
 
@@ -370,15 +341,9 @@ class ParameterTable:
         Returns: Index of the parameter in the parameter table.
         """
         if isinstance(parameter_name, Parameter):
-            return (
-                parameter_name.get_index(self)
-                if parameter_name in self.parameters
-                else None
-            )
+            return parameter_name.get_index(self) if parameter_name in self.parameters else None
         if parameter_name not in self.table.keys():
-            raise KeyError(
-                f"No parameter named {parameter_name} in the parameter table."
-            )
+            raise KeyError(f"No parameter named {parameter_name} in the parameter table.")
         return self.table[parameter_name].get_index(self)
 
     def get_parameter(self, parameter: Union[str, int]) -> Parameter:
@@ -393,24 +358,18 @@ class ParameterTable:
         """
         if isinstance(parameter, str):
             if parameter not in self.table.keys():
-                raise KeyError(
-                    f"No parameter named {parameter} in the parameter table."
-                )
+                raise KeyError(f"No parameter named {parameter} in the parameter table.")
             return self.table[parameter]
         elif isinstance(parameter, int):
             for param in self.parameters:
                 if param.get_index(self) == parameter:
                     return param
 
-            raise IndexError(
-                f"No parameter with index {parameter} in the parameter table."
-            )
+            raise IndexError(f"No parameter with index {parameter} in the parameter table.")
         else:
             raise ValueError("Invalid parameter name. Please use a string or an int.")
 
-    def get_variable(
-        self, parameter: Union[str, int]
-    ) -> QuaVariable | QuaArrayVariable:
+    def get_variable(self, parameter: Union[str, int]) -> QuaVariable | QuaArrayVariable:
         """
         Get the QUA variable corresponding to the specified parameter name.
 
@@ -420,18 +379,14 @@ class ParameterTable:
         """
         if isinstance(parameter, str):
             if parameter not in self.table:
-                raise KeyError(
-                    f"No parameter named {parameter} in the parameter table."
-                )
+                raise KeyError(f"No parameter named {parameter} in the parameter table.")
             return self.table[parameter].var
 
         if isinstance(parameter, int):
             for param in self.parameters:
                 if param.get_index(self) == parameter:
                     return param.var
-            raise IndexError(
-                f"No parameter with index {parameter} in the parameter table."
-            )
+            raise IndexError(f"No parameter with index {parameter} in the parameter table.")
 
         raise ValueError("Invalid parameter name. Please use a string or an int.")
 
@@ -448,9 +403,7 @@ class ParameterTable:
         if isinstance(parameter, List):
             for parameter in parameter:
                 if not isinstance(parameter, Parameter):
-                    raise ValueError(
-                        "Invalid parameter type. Please use a ParameterValue object."
-                    )
+                    raise ValueError("Invalid parameter type. Please use a ParameterValue object.")
                 if parameter.name in self.table.keys():
                     raise KeyError(
                         f"Parameter {parameter.name} already exists in the parameter table."
@@ -458,9 +411,7 @@ class ParameterTable:
                 max_index = max([param.get_index(self) for param in self.parameters])
                 parameter.set_index(self, max_index + 1)
                 if parameter.input_type != self.input_type:
-                    raise ValueError(
-                        "All parameters in the table must have the same input type."
-                    )
+                    raise ValueError("All parameters in the table must have the same input type.")
                 parameter.stream_id = self._id
                 parameter.dgx_struct = self._packet_type
 
@@ -480,9 +431,7 @@ class ParameterTable:
             )
         if isinstance(parameter_value, str):
             if parameter_value not in self.table.keys():
-                raise KeyError(
-                    f"No parameter named {parameter_value} in the parameter table."
-                )
+                raise KeyError(f"No parameter named {parameter_value} in the parameter table.")
             del self.table[parameter_value]
         elif isinstance(parameter_value, Parameter):
             if parameter_value not in self.parameters:
@@ -493,9 +442,7 @@ class ParameterTable:
                 "Invalid parameter name. Please use a string or a ParameterValue object."
             )
 
-    def add_table(
-        self, parameter_table: Union[List["ParameterTable"], "ParameterTable"]
-    ) -> None:
+    def add_table(self, parameter_table: Union[List["ParameterTable"], "ParameterTable"]) -> None:
         """
         Add a parameter table to the current table.
         Args: parameter_table: ParameterTable object to be merged with the current table.
@@ -518,9 +465,7 @@ class ParameterTable:
         elif isinstance(item, Parameter):
             return item in self.parameters
         else:
-            raise ValueError(
-                "Invalid parameter name. Please use a string or a Parameter object."
-            )
+            raise ValueError("Invalid parameter name. Please use a string or a Parameter object.")
 
     def __iter__(self):
         return iter(self.table.values())
@@ -587,10 +532,7 @@ class ParameterTable:
             raise ValueError(
                 "Not all parameters have been declared. Please declare all parameters first."
             )
-        return {
-            parameter_name: parameter.var
-            for parameter_name, parameter in self.table.items()
-        }
+        return {parameter_name: parameter.var for parameter_name, parameter in self.table.items()}
 
     @property
     def parameters(self) -> List[Parameter]:
@@ -640,9 +582,7 @@ class ParameterTable:
 
     def push_to_opx(
         self,
-        param_dict: Dict[
-            Union[str, Parameter], Union[float, int, bool, List, np.ndarray]
-        ],
+        param_dict: Dict[Union[str, Parameter], Union[float, int, bool, List, np.ndarray]],
         job: RunningQmJob,
         qm: Optional[QuantumMachine] = None,
         verbosity: int = 1,
@@ -655,9 +595,7 @@ class ParameterTable:
             for parameter, value in param_dict.items():
                 if isinstance(parameter, str):
                     if parameter not in self.table.keys():
-                        raise KeyError(
-                            f"No parameter named {parameter} in the parameter table."
-                        )
+                        raise KeyError(f"No parameter named {parameter} in the parameter table.")
                     self.table[parameter].push_to_opx(value, job, qm, verbosity)
                 elif isinstance(parameter, Parameter):
                     if parameter not in self.parameters:
@@ -672,19 +610,14 @@ class ParameterTable:
                 raise ValueError("Cannot push values to incoming DGX parameter tables.")
             # Check if all parameters are in the dictionary
             for parameter in self.parameters:
-                if (
-                    parameter not in param_dict.keys()
-                    and parameter.name not in param_dict.keys()
-                ):
+                if parameter not in param_dict.keys() and parameter.name not in param_dict.keys():
                     raise KeyError(
                         f"Parameter {parameter.name} not found in the dictionary, all packet must be filled."
                     )
             # Transform all values to fit the packet (convert to list if necessary)
             packet_dict = {
                 parameter.name if isinstance(parameter, Parameter) else parameter: (
-                    [param_dict[parameter]]
-                    if not parameter.is_array
-                    else param_dict[parameter]
+                    [param_dict[parameter]] if not parameter.is_array else param_dict[parameter]
                 )
                 for parameter in self.parameters
             }
@@ -696,9 +629,7 @@ class ParameterTable:
 
             if ParameterPool.configured and ParameterPool.patched:
                 if "opnic_wrapper" not in sys.modules:
-                    sys.path.append(
-                        "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
-                    )
+                    sys.path.append("/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python")
                 from opnic_wrapper import OutgoingPacket, send_packet
 
                 flattened_values = list(chain(*packet_dict.values()))
@@ -744,25 +675,19 @@ class ParameterTable:
                 value = parameter.fetch_from_opx(job, qm, verbosity)
                 param_dict[parameter.name] = value
         elif self.input_type == InputType.INPUT_STREAM:
-            results = fetching_tool(
-                job, [param.name for param in self.parameters], mode="live"
-            )
+            results = fetching_tool(job, [param.name for param in self.parameters], mode="live")
             while results.is_processing():
                 results = results.fetch_all()
             for parameter, result in zip(self.parameters, results):
                 param_dict[parameter.name] = result
         else:  # DGX
             if self.direction == Direction.OUTGOING:
-                raise ValueError(
-                    "Cannot fetch values from outgoing DGX parameter tables."
-                )
+                raise ValueError("Cannot fetch values from outgoing DGX parameter tables.")
             elif not ParameterPool.configured or not ParameterPool.patched:
                 raise ValueError("OPNIC wrapper not configured or patched. ")
 
             if "opnic_wrapper" not in sys.modules:
-                sys.path.append(
-                    "/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python"
-                )
+                sys.path.append("/home/dpoulos/aps_demo/python-wrapper/wrapper/build/python")
             from opnic_wrapper import read_packet, wait_for_packets
 
             wait_for_packets(self.stream_id, 1)
@@ -787,6 +712,7 @@ class ParameterTable:
         qc: QuantumCircuit | Schedule | ScheduleBlock,
         input_type: Literal["INPUT_STREAM", "DGX", "IO1", "IO2"] | InputType = None,
         filter_function: Optional[Callable[[Parameter | Var], bool]] = None,
+        name: Optional[str] = None,
     ) -> "ParameterTable":
         """
         Create a ParameterTable object from a QuantumCircuit object (and stores it in circuit metadata).
@@ -794,6 +720,7 @@ class ParameterTable:
             qc: QuantumCircuit object to be converted to a ParameterTable object.
             input_type: Input type of the parameters in the table.
             filter_function: Optional function to filter the parameters to be included in the table.
+            name: Optional name for the parameter table.
         """
         param_list = []
         for parameter in qc.parameters:
@@ -846,7 +773,7 @@ class ParameterTable:
                         )
                     )
 
-        return cls(param_list)
+        return cls(param_list, name)
 
     def reset(self):
         """

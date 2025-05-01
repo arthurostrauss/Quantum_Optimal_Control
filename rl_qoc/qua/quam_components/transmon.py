@@ -167,8 +167,7 @@ class Transmon(Qubit):
                 return qubit_pair
         else:
             raise ValueError(
-                "Qubit pair not found: qubit_control={self.name}, "
-                "qubit_target={other.name}"
+                "Qubit pair not found: qubit_control={self.name}, " "qubit_target={other.name}"
             )
 
     def wait(self, duration):

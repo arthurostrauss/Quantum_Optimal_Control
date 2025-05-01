@@ -106,9 +106,7 @@ class ChannelReward(Reward):
         control_flow = execution_config.control_flow_enabled
         c_factor = execution_config.c_factor
 
-        Chi = target.Chi(
-            n_reps
-        )  # Characteristic function for cycle circuit repeated n_reps times
+        Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
 
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
@@ -120,9 +118,7 @@ class ChannelReward(Reward):
         non_zero_probabilities = probabilities[non_zero_indices]
         non_zero_probabilities /= np.sum(non_zero_probabilities)
 
-        basis = pauli_basis(
-            num_qubits=n_qubits
-        )  # all n_fold tensor-product single qubit Paulis
+        basis = pauli_basis(num_qubits=n_qubits)  # all n_fold tensor-product single qubit Paulis
 
         if dfe_precision is not None:
             # DFE precision guarantee, ϵ additive error, δ failure probability
@@ -153,15 +149,11 @@ class ChannelReward(Reward):
         # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
         identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
         id_coeff = (
-            c_factor
-            * dim
-            * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
+            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
         )
         # Additional dim factor to account for all eigenstates of identity input state
         self.id_coeff = (
-            c_factor
-            * dim
-            * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
+            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
         )  # Additional dim factor to account for all eigenstates of identity input state
         self._id_count = len(identity_terms)
 
@@ -169,9 +161,7 @@ class ChannelReward(Reward):
         samples = np.delete(samples, identity_terms)
         counts = np.delete(counts, identity_terms)
 
-        reward_factor = (
-            c_factor * counts / (dim * Chi[samples])
-        )  # Based on DFE estimator
+        reward_factor = c_factor * counts / (dim * Chi[samples])  # Based on DFE estimator
         fiducials_list = [
             (basis[p[0]], SparsePauliOp(basis[p[1]], r))
             for p, r in zip(pauli_indices, reward_factor)
@@ -264,9 +254,7 @@ class ChannelReward(Reward):
                 )
 
                 obs_ = parity * obs_list
-                pub_obs = extend_observables(
-                    obs_, prep_circuit, target.causal_cone_qubits_indices
-                )
+                pub_obs = extend_observables(obs_, prep_circuit, target.causal_cone_qubits_indices)
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 if prep_indices not in used_prep_indices:  # Add new PUB
                     # Add PUB
@@ -309,11 +297,9 @@ class ChannelReward(Reward):
                         ),
                     )
 
-                    used_prep_indices[prep_indices].shots = max(
-                        dedicated_shots, ref_shots
-                    )
-                    used_prep_indices[prep_indices].observables_indices = (
-                        observables_to_indices(new_obs)
+                    used_prep_indices[prep_indices].shots = max(dedicated_shots, ref_shots)
+                    used_prep_indices[prep_indices].observables_indices = observables_to_indices(
+                        new_obs
                     )
 
         reward_data = []
@@ -396,9 +382,7 @@ class ChannelReward(Reward):
         control_flow = execution_config.control_flow_enabled
         c_factor = execution_config.c_factor
         dim = 2**n_qubits
-        Chi = target.Chi(
-            n_reps
-        )  # Characteristic function for cycle circuit repeated n_reps times
+        Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
 
         # Reset storage variables
         self._fiducials_indices = []
@@ -421,9 +405,7 @@ class ChannelReward(Reward):
         non_zero_indices = np.nonzero(probabilities)[0]  # Filter out zero probabilities
         non_zero_probabilities = probabilities[non_zero_indices]
 
-        basis = pauli_basis(
-            num_qubits=n_qubits
-        )  # all n_fold tensor-product single qubit Paulis
+        basis = pauli_basis(num_qubits=n_qubits)  # all n_fold tensor-product single qubit Paulis
 
         if (
             dfe_precision is not None
@@ -494,9 +476,7 @@ class ChannelReward(Reward):
                     prep,
                     (ref_obs + obs).simplify(),
                 )
-                filtered_pauli_shots[index] = max(
-                    filtered_pauli_shots[index], counts[i]
-                )
+                filtered_pauli_shots[index] = max(filtered_pauli_shots[index], counts[i])
 
         for i, (prep, obs) in enumerate(filtered_fiducials_list):
             filtered_fiducials_list[i] = (prep, obs.group_commuting(qubit_wise=True))
@@ -561,9 +541,7 @@ class ChannelReward(Reward):
                 # Prepare the input state vector
                 input_unitary = Operator(input_circuit)
                 output_state = Statevector.from_int(0, (2,) * n_qubits)
-                output_state = output_state.evolve(input_unitary).evolve(
-                    repeated_unitary
-                )
+                output_state = output_state.evolve(input_unitary).evolve(repeated_unitary)
 
                 ideal_exp_value = output_state.expectation_value(parity * sum(obs_list))
                 expectation_values.append(ideal_exp_value)

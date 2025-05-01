@@ -37,9 +37,7 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         self.circuit_parameters = unbound_circuit_context.parameters
 
         super().__init__(q_env_config, unbound_circuit_context)
-        self._rotation_angles_rng = np.random.default_rng(
-            self.np_random.integers(2**32)
-        )
+        self._rotation_angles_rng = np.random.default_rng(self.np_random.integers(2**32))
         self.observation_space = Box(
             low=np.array([0.0] * len(self.circuit_parameters)),
             high=np.array([2 * np.pi] * len(self.circuit_parameters)),

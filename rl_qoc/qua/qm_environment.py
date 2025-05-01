@@ -38,7 +38,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         training_config: QEnvConfig,
         circuit_context: Optional[QuantumCircuit] = None,
     ):
-
+        ParameterPool.reset()
         super().__init__(training_config, circuit_context)
         if not isinstance(self.config.backend_config, QMConfig) or not isinstance(
             self.backend, QMBackend
@@ -63,7 +63,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             input_type=self.input_type,
             direction=Direction.OUTGOING,
         )
-        self.policy = ParameterTable([mu, sigma])
+        self.policy = ParameterTable([mu, sigma], name="policy")
         self.reward = QuaParameter(
             "reward",
             [0] * 2**self.n_qubits,
@@ -80,22 +80,22 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.real_time_circuit,
             input_type=self.input_type,
             filter_function=lambda x: "input" in x.name,
+            name="input_state_vars",
         )
         self.observable_vars: Optional[ParameterTable] = (
             ParameterTable.from_qiskit(
                 self.real_time_circuit,
                 input_type=self.input_type,
                 filter_function=lambda x: "observable" in x.name,
+                name="observable_vars",
             )
             if self.config.dfe
             else None
         )
 
-        self.n_reps_var: Optional[ParameterTable] = (
-            ParameterTable.from_qiskit(
-                self.real_time_circuit,
-                input_type=self.input_type,
-                filter_function=lambda x: "n_reps" in x.name,
+        self.n_reps_var: Optional[QuaParameter] = (
+            QuaParameter(
+                "n_reps", self.n_reps, input_type=self.input_type, direction=Direction.OUTGOING
             )
             if self.real_time_circuit.get_var("n_reps", None) is not None
             else None
@@ -105,19 +105,16 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.real_time_circuit,
             input_type=self.input_type,
             filter_function=lambda x: isinstance(x, Parameter),
+            name="real_time_circuit_parameters",
         )
-        self.circuit_choice_var: Optional[ParameterTable] = (
-            ParameterTable(
-                [
-                    QuaParameter(
-                        "circuit_choice",
-                        0,
-                        input_type=self.input_type,
-                        direction=Direction.OUTGOING,
-                    )
-                ]
+        self.circuit_choice_var: Optional[QuaParameter] = (
+            QuaParameter(
+                "circuit_choice",
+                0,
+                input_type=self.input_type,
+                direction=Direction.OUTGOING,
             )
-            if len(self.circuits) > 1
+            if self.real_time_circuit.get_var("circuit_choice", None) is not None
             else None
         )
 
@@ -161,9 +158,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self._qm_job = self.start_program()
 
         verbosity = (
-            self.qm_backend_config.verbosity
-            if isinstance(self.qm_backend_config, DGXConfig)
-            else 2
+            self.qm_backend_config.verbosity if isinstance(self.qm_backend_config, DGXConfig) else 2
         )
         push_args = {
             "job": self.qm_job,
@@ -188,9 +183,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             )
 
         additional_input = (
-            self.config.execution_config.dfe_precision
-            if self.config.dfe
-            else self.baseline_circuit
+            self.config.execution_config.dfe_precision if self.config.dfe else self.baseline_circuit
         )
         reward_data = self.config.reward.get_reward_data(
             self.circuit,
@@ -204,17 +197,12 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         self.max_input_state.push_to_opx(len(input_state_indices), **push_args)
         if hasattr(reward_data, "observable_indices"):
-            self.max_observables.push_to_opx(
-                len(reward_data.observable_indices), **push_args
-            )
+            self.max_observables.push_to_opx(len(reward_data.observable_indices), **push_args)
 
         reward = []
         for i, input_state in enumerate(input_state_indices):
             self.input_state_vars.push_to_opx(
-                {
-                    f"input_state_{j}": input_state[j]
-                    for j in range(len(self.input_state_vars))
-                },
+                {f"input_state_{j}": input_state[j] for j in range(len(self.input_state_vars))},
                 **push_args,
             )
             if self.config.dfe:
@@ -247,9 +235,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                                 diag_obs_label += char if char == "I" else "Z"
                             new_op += SparsePauliOp(diag_obs_label, coeff)
 
-                        bit_array = BitArray.from_counts(
-                            counts_dict, num_bits=self.n_qubits
-                        )
+                        bit_array = BitArray.from_counts(counts_dict, num_bits=self.n_qubits)
                         exp_value = bit_array.expectation_values(new_op)
                         reward.append(exp_value)
 
@@ -277,9 +263,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.policy.declare_variables(pause_program=False)
             self.reward.declare_variable(pause_program=False)
             if isinstance(self.circuit_choice_var, ParameterTable):
-                self.circuit_choice_var.declare_variables(pause_program=False)
+                self.circuit_choice_var.declare_variable(pause_program=False)
             if self.n_reps_var is not None:
-                self.n_reps_var.declare_variables(pause_program=False)
+                self.n_reps_var.declare_variable(pause_program=False)
             if self.observable_vars is not None:
                 self.observable_vars.declare_variables(pause_program=False)
                 observable_count = declare(int)
@@ -304,11 +290,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 if (
                     self.circuit_choice_var is not None
                 ):  # Load circuit choice (switch over circuit contexts)
-                    self.circuit_choice_var.load_input_values()
+                    self.circuit_choice_var.load_input_value()
 
                 if self.n_reps_var is not None:
                     # Load number of repetitions of cycle circuit (can vary at each iteration)
-                    self.n_reps_var.load_input_values()
+                    self.n_reps_var.load_input_value()
 
                 self.max_input_state.load_input_value()  # Load number of input states to prepare
                 if (
@@ -364,9 +350,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             temp_action, temp_action2 = self._action_sampling()
 
             with for_(j, 0, j < 2, j + 1):
-                for i, parameter in enumerate(
-                    self.real_time_circuit_parameters.parameters
-                ):
+                for i, parameter in enumerate(self.real_time_circuit_parameters.parameters):
                     parameter.assign_value(
                         temp_action[i],
                         condition=(j == 0),
@@ -409,10 +393,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             )
             assign(
                 temp_action2[j],
-                μ[j]
-                + σ[j]
-                * ln_array[u1]
-                * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
+                μ[j] + σ[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
             )
 
             return temp_action, temp_action2
@@ -457,9 +438,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                     ]
                 else:
                     creg, creg_index = bit.registers[0]
-                    bit_output = compilation_result.result_program[creg.name][
-                        creg_index
-                    ]
+                    bit_output = compilation_result.result_program[creg.name][creg_index]
                 assign(
                     state_int,
                     state_int + 2**c * Cast.to_int(bit_output),

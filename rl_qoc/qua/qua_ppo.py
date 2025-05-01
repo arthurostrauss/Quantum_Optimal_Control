@@ -109,9 +109,7 @@ class CustomQMPPO(CustomPPO):
         std_action = probs.stddev
         batch_size = mean_action.size(0)
         if isinstance(self.env, ActionWrapper):
-            self.unwrapped_env.mean_action = self.env.action(
-                mean_action[0].cpu().numpy()
-            )
+            self.unwrapped_env.mean_action = self.env.action(mean_action[0].cpu().numpy())
         else:
             self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
         self.unwrapped_env.std_action = std_action[0].cpu().numpy()
@@ -122,12 +120,9 @@ class CustomQMPPO(CustomPPO):
         action = np.zeros((batch_size, self.n_actions))
         seed = self.seed
         n_lookup = 512
-        cos_array = [
-            FixedPoint(np.cos(2 * np.pi * x / n_lookup)) for x in range(n_lookup)
-        ]
+        cos_array = [FixedPoint(np.cos(2 * np.pi * x / n_lookup)) for x in range(n_lookup)]
         ln_array = [
-            FixedPoint(np.sqrt(-2 * np.log(x / (n_lookup + 1))))
-            for x in range(1, n_lookup + 1)
+            FixedPoint(np.sqrt(-2 * np.log(x / (n_lookup + 1)))) for x in range(1, n_lookup + 1)
         ]
         for b in range(0, batch_size, 2):
             for j in range(self.n_actions):
@@ -135,14 +130,10 @@ class CustomQMPPO(CustomPPO):
                 uniform_sample = FixedPoint(uniform_sample)
                 u1 = (uniform_sample >> 19).to_unsafe_int()
                 u2 = uniform_sample.to_unsafe_int() & ((1 << 19) - 1)
-                temp_action1 = (
-                    μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
-                )
+                temp_action1 = μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
                 temp_action2 = (
                     μ_f[j]
-                    + σ_f[j]
-                    * ln_array[u1]
-                    * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
+                    + σ_f[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
                 )
                 action[b][j] = temp_action1.to_float()
                 action[b + 1][j] = temp_action2.to_float()
@@ -152,9 +143,7 @@ class CustomQMPPO(CustomPPO):
 
         return torch_action, logprob
 
-    def post_process_action(
-        self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor
-    ):
+    def post_process_action(self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor):
         """
         Post-process the action taken by the agent
         :param probs: Probabilities of the action distribution

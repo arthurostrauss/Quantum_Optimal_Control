@@ -50,9 +50,7 @@ def fixed_frequency_transmon_backend(
     # Construct the static part of the Hamiltonian
     static_ham = construct_static_hamiltonian(dims, freqs, anharmonicities, N_ops)
 
-    drive_ops = [
-        2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_systems)
-    ]
+    drive_ops = [2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_systems)]
     drive_channels = {f"d{i}": freqs[i] for i in range(n_systems)}
     ecr_ops = []
     control_channel_map = None
@@ -68,9 +66,7 @@ def fixed_frequency_transmon_backend(
         static_ham += coupling_ham
 
     channels = {**drive_channels, **control_channels}
-    dissipator_channels, static_dissipators = get_t1_t2_dissipators(
-        t1s, t2s, a_ops, adag_ops
-    )
+    dissipator_channels, static_dissipators = get_t1_t2_dissipators(t1s, t2s, a_ops, adag_ops)
     solver = Solver(
         static_hamiltonian=static_ham,
         hamiltonian_operators=drive_ops + ecr_ops,

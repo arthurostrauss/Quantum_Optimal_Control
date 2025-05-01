@@ -58,9 +58,7 @@ def sympy_to_qua(sympy_expr: sp.Basic, parameters: Dict[str, Parameter]) -> QuaV
 
     sympy_to_qua_dict = {}
     for symbol in sympy_expr.free_symbols:
-        assert (
-            symbol.name in parameters
-        ), f"Parameter {symbol.name} not found in parameter_vals"
+        assert symbol.name in parameters, f"Parameter {symbol.name} not found in parameter_vals"
         sympy_to_qua_dict[symbol] = parameters[symbol.name].var
 
     if isinstance(sympy_expr, se.Basic):

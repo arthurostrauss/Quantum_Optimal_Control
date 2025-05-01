@@ -36,18 +36,13 @@ def create_circuit_from_own_unitaries(circuit_context: QuantumCircuit, **kwargs)
         qubits_indices = [circuit_context.find_bit(q).index for q in qargs]
 
         # Check if the current gate matches the target operation
-        if (
-            gate_name == target_gate_instruction.name
-            and qubits_indices == target_gate_qubits
-        ):
+        if gate_name == target_gate_instruction.name and qubits_indices == target_gate_qubits:
             # Add the target gate unchanged to the new circuit
             print("Target gate found")
             new_circuit.append(instruction=inst, qargs=qargs)
         else:
             # Process non-target gates
-            gate_label, qubit_indices = process_gate(
-                inst, qargs, gate_count, circuit_context
-            )
+            gate_label, qubit_indices = process_gate(inst, qargs, gate_count, circuit_context)
             matrix_representation = Operator(inst).data
             new_circuit.unitary(matrix_representation, qubit_indices, label=gate_label)
 
@@ -84,9 +79,7 @@ def process_gate(
         qubit_indices = (control_index, target_index)
     else:  # Handling for single-qubit gates and other types of gates
         gate_label = f"{gate_name}_q{'_'.join(map(str, qubits_indices))}"
-        qubit_indices = (
-            qubits_indices[0] if len(qubits_indices) == 1 else tuple(qubits_indices)
-        )
+        qubit_indices = qubits_indices[0] if len(qubits_indices) == 1 else tuple(qubits_indices)
 
     # Increment gate instance count and update label
     gate_count[gate_label] = gate_count.get(gate_label, 0) + 1

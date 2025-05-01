@@ -30,9 +30,7 @@ The reward is a binary number obtained upon measurement (only two possible outco
 """
 
 
-def perform_action(
-    amp: Union[tf.Tensor, np.array], shots=1, target_state="|1>", epoch=1
-):
+def perform_action(amp: Union[tf.Tensor, np.array], shots=1, target_state="|1>", epoch=1):
     """
     Execute quantum circuit with parametrized amplitude, retrieve measurement result and assign rewards accordingly
     :param amp: amplitude parameter, provided as an array of size batchsize
@@ -47,18 +45,14 @@ def perform_action(
 
     for j, angle in enumerate(angles):
         if tgt_string == "|1>":
-            qc.rx(
-                2 * np.pi * angle, 0
-            )  # Add parametrized gate for each amplitude in the batch
+            qc.rx(2 * np.pi * angle, 0)  # Add parametrized gate for each amplitude in the batch
             q_state = qi.Statevector.from_instruction(qc)
             density_matrix += (
                 np.array(q_state.to_operator()) / batch
             )  # Build density matrix as a statistical mixture of
             # states created by the different actions
         elif tgt_string == "|+>":
-            qc.ry(
-                2 * np.pi * angle, 0
-            )  # Add parametrized gate for each amplitude in the batch
+            qc.ry(2 * np.pi * angle, 0)  # Add parametrized gate for each amplitude in the batch
             q_state = qi.Statevector.from_instruction(qc)
             density_matrix += (
                 np.array(q_state.to_operator()) / batch
@@ -85,9 +79,7 @@ def perform_action(
             )
         qc.clear()  # Reset the Quantum Circuit for next iteration
 
-    return reward_table, qi.DensityMatrix(
-        density_matrix
-    )  # reward_table is of Shape [batchsize]
+    return reward_table, qi.DensityMatrix(density_matrix)  # reward_table is of Shape [batchsize]
 
 
 # Variables to define environment
@@ -139,9 +131,7 @@ mu = tf.Variable(
     name="µ",
     constraint=constrain_mean_value,
 )
-sigma = tf.Variable(
-    initial_value=1.0, trainable=True, name="sigma", constraint=constrain_std_value
-)
+sigma = tf.Variable(initial_value=1.0, trainable=True, name="sigma", constraint=constrain_std_value)
 
 # Old parameters are updated with one-step delay, necessary for PPO implementation
 mu_old = tf.Variable(initial_value=mu, trainable=False, name="µ_old")
@@ -182,9 +172,7 @@ for i in tqdm(range(n_epochs)):
     print("baseline", np.array(b))
 
     # Sample action from policy (Gaussian distribution with parameters mu and sigma)
-    Normal_distrib = Normal(
-        loc=mu, scale=sigma, validate_args=True, allow_nan_stats=False
-    )
+    Normal_distrib = Normal(loc=mu, scale=sigma, validate_args=True, allow_nan_stats=False)
     Normal_distrib_old = Normal(
         loc=mu_old, scale=sigma_old, validate_args=True, allow_nan_stats=False
     )
@@ -205,9 +193,7 @@ for i in tqdm(range(n_epochs)):
         if use_PPO:
             ratio = Normal_distrib.prob(a) / (Normal_distrib_old.prob(a) + sigma_eps)
             clipped_ratio = tf.clip_by_value(ratio, 1 - epsilon, 1 + epsilon)
-            actor_loss = -tf.reduce_mean(
-                tf.minimum(advantage * ratio, advantage * clipped_ratio)
-            )
+            actor_loss = -tf.reduce_mean(tf.minimum(advantage * ratio, advantage * clipped_ratio))
 
         else:  # REINFORCE algorithm
             log_probs = Normal_distrib.log_prob(a)

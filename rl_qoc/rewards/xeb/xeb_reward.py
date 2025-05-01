@@ -143,8 +143,7 @@ class XEBReward(Reward):
         if num_bits == causal_cone_size:
             # No post-selection based on causal cone
             pub_data = [
-                [pub_result.data.meas[i] for i in range(batch_size)]
-                for pub_result in results
+                [pub_result.data.meas[i] for i in range(batch_size)] for pub_result in results
             ]
             experimental_probabilities = [
                 [
@@ -176,9 +175,7 @@ class XEBReward(Reward):
             for i in range(len(pub_data)):
                 xeb_fidelities.append(
                     [
-                        self.compute_xeb_fidelity(
-                            experimental_probs, reward_data[i].state
-                        )
+                        self.compute_xeb_fidelity(experimental_probs, reward_data[i].state)
                         for experimental_probs in experimental_probabilities[i]
                     ]
                 )
@@ -192,9 +189,7 @@ class XEBReward(Reward):
         incoherent_dist = np.ones(state.dim) / state.dim
         expected_probs = state.probabilities(decimals=4)
         if self.xeb_fidelity_type == "log":
-            return compute_log_fidelity(
-                incoherent_dist, expected_probs, experimental_probs
-            )
+            return compute_log_fidelity(incoherent_dist, expected_probs, experimental_probs)
         elif self.xeb_fidelity_type == "linear":
             e_u = np.sum(expected_probs**2)
             u_u = np.sum(expected_probs) / state.dim

@@ -106,11 +106,7 @@ class SwitchCaseOp(ControlFlowOp):
         :meth:`.replace_blocks` and :class:`.QuantumCircuit.assign_parameters` to do their jobs
         without accidentally mutating the same circuit instance more than once."""
         for i, (value_spec, case_) in enumerate(cases):
-            values = (
-                tuple(value_spec)
-                if isinstance(value_spec, (tuple, list))
-                else (value_spec,)
-            )
+            values = tuple(value_spec) if isinstance(value_spec, (tuple, list)) else (value_spec,)
             for value in values:
                 if value in self._case_map:
                     raise CircuitError(f"duplicate case value {value}")
@@ -118,9 +114,7 @@ class SwitchCaseOp(ControlFlowOp):
                     raise CircuitError("cases after the default are unreachable")
                 if value is not CASE_DEFAULT:
                     if not isinstance(value, int) or value < 0:
-                        raise CircuitError(
-                            "case values must be Booleans or non-negative integers"
-                        )
+                        raise CircuitError("case values must be Booleans or non-negative integers")
                     if value > target_max:
                         raise CircuitError(
                             f"switch target '{target}' has {target_bits} bit(s) of precision,"
@@ -142,9 +136,7 @@ class SwitchCaseOp(ControlFlowOp):
             # This condition also implies that `num_qubits` and `num_clbits` must be non-None.
             raise CircuitError("must have at least one case to run")
 
-        super().__init__(
-            "switch_case", num_qubits, num_clbits, self._params, label=label
-        )
+        super().__init__("switch_case", num_qubits, num_clbits, self._params, label=label)
 
     def __eq__(self, other):
         # The general __eq__ will compare the blocks in the right order, so we just need to ensure
@@ -154,9 +146,7 @@ class SwitchCaseOp(ControlFlowOp):
             and self.target == other.target
             and all(
                 set(labels_self) == set(labels_other)
-                for labels_self, labels_other in zip(
-                    self._label_spec, other._label_spec
-                )
+                for labels_self, labels_other in zip(self._label_spec, other._label_spec)
             )
         )
 
@@ -193,9 +183,7 @@ class SwitchCaseOp(ControlFlowOp):
     def replace_blocks(self, blocks: Iterable[QuantumCircuit]) -> "SwitchCaseOp":
         blocks = tuple(blocks)
         if len(blocks) != len(self._params):
-            raise CircuitError(
-                f"needed {len(self._case_map)} blocks but received {len(blocks)}"
-            )
+            raise CircuitError(f"needed {len(self._case_map)} blocks but received {len(blocks)}")
         return SwitchCaseOp(self.target, zip(self._label_spec, blocks))
 
     def c_if(self, classical, val):
@@ -272,9 +260,7 @@ class SwitchCasePlaceholder(InstructionPlaceholder):
             (labels, unified_body)
             for (labels, _), unified_body in zip(
                 self.__cases,
-                unify_circuit_resources(
-                    body.build(qubits, clbits) for _, body in self.__cases
-                ),
+                unify_circuit_resources(body.build(qubits, clbits) for _, body in self.__cases),
             )
         ]
         if cases:
@@ -287,9 +273,7 @@ class SwitchCasePlaceholder(InstructionPlaceholder):
         else:
             resources = self.__resources
         return (
-            self._copy_mutable_properties(
-                SwitchCaseOp(self.__target, cases, label=self.label)
-            ),
+            self._copy_mutable_properties(SwitchCaseOp(self.__target, cases, label=self.label)),
             resources,
         )
 
@@ -357,9 +341,7 @@ class SwitchContext:
         self._cases.append((labels, block))
 
     def __enter__(self):
-        self.circuit._push_scope(
-            forbidden_message="Cannot have instructions outside a case"
-        )
+        self.circuit._push_scope(forbidden_message="Cannot have instructions outside a case")
         return CaseBuilder(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -371,14 +353,10 @@ class SwitchContext:
         # If we're in a loop-builder context, we need to emit a placeholder so that any `break` or
         # `continue`s in any of our cases can be expanded when the loop-builder.  If we're not, we
         # need to emit a concrete instruction immediately.
-        placeholder = SwitchCasePlaceholder(
-            self._target, self._cases, label=self._op_label
-        )
+        placeholder = SwitchCasePlaceholder(self._target, self._cases, label=self._op_label)
         initial_resources = placeholder.placeholder_resources()
         if self.in_loop:
-            self.circuit.append(
-                placeholder, initial_resources.qubits, initial_resources.clbits
-            )
+            self.circuit.append(placeholder, initial_resources.qubits, initial_resources.clbits)
         else:
             operation, resources = placeholder.concrete_instruction(
                 set(initial_resources.qubits), set(initial_resources.clbits)

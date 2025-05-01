@@ -67,9 +67,7 @@ def apply_parametrized_circuit(
         target: Target = backend.target
         properties = InstructionProperties(
             duration=parametrized_schedule.duration * backend.dt,
-            calibration=parametrized_schedule.assign_parameters(
-                {params: params2}, inplace=False
-            ),
+            calibration=parametrized_schedule.assign_parameters({params: params2}, inplace=False),
         )
         target.add_instruction(parametrized_gate, {tuple(physical_qubits): properties})
 

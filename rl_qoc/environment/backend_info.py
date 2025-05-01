@@ -17,9 +17,7 @@ from qiskit.providers import BackendV2
 
 class BackendInfo(ABC):
 
-    def __init__(
-        self, n_qubits: int = 0, pass_manager=None, skip_transpilation: bool = False
-    ):
+    def __init__(self, n_qubits: int = 0, pass_manager=None, skip_transpilation: bool = False):
         """
         Initialize the backend information
 
@@ -32,9 +30,7 @@ class BackendInfo(ABC):
         self._backend = None
 
     @abstractmethod
-    def custom_transpile(
-        self, qc_input, *args, **kwargs
-    ) -> QuantumCircuit | List[QuantumCircuit]:
+    def custom_transpile(self, qc_input, *args, **kwargs) -> QuantumCircuit | List[QuantumCircuit]:
         pass
 
     @property
@@ -121,16 +117,12 @@ class QiskitBackendInfo(BackendInfo):
         Custom transpile function to transpile the quantum circuit
         """
         if self.backend is None and self.instruction_durations is None and scheduling:
-            raise QiskitError(
-                "Backend or instruction durations should be provided for scheduling"
-            )
+            raise QiskitError("Backend or instruction durations should be provided for scheduling")
         if remove_final_measurements:
             if isinstance(qc_input, QuantumCircuit):
                 circuit = qc_input.remove_final_measurements(inplace=False)
             else:
-                circuit = [
-                    circ.remove_final_measurements(inplace=False) for circ in qc_input
-                ]
+                circuit = [circ.remove_final_measurements(inplace=False) for circ in qc_input]
         else:
             circuit = qc_input
 
@@ -138,25 +130,15 @@ class QiskitBackendInfo(BackendInfo):
             if self._pass_manager is None:
                 self._pass_manager = generate_preset_pass_manager(
                     optimization_level=optimization_level,
-                    backend=(
-                        self.backend if isinstance(self.backend, BackendV2) else None
-                    ),
-                    target=(
-                        self.backend.target
-                        if isinstance(self.backend, BackendV2)
-                        else None
-                    ),
+                    backend=(self.backend if isinstance(self.backend, BackendV2) else None),
+                    target=(self.backend.target if isinstance(self.backend, BackendV2) else None),
                     basis_gates=self.basis_gates,
-                    coupling_map=(
-                        self.coupling_map if self.coupling_map.size() != 0 else None
-                    ),
+                    coupling_map=(self.coupling_map if self.coupling_map.size() != 0 else None),
                     instruction_durations=self.instruction_durations,
                     initial_layout=initial_layout,
                     dt=self.dt,
                     scheduling_method=(
-                        "asap"
-                        if self.instruction_durations is not None and scheduling
-                        else None
+                        "asap" if self.instruction_durations is not None and scheduling else None
                     ),
                     translation_method="translator",
                 )
@@ -176,8 +158,7 @@ class QiskitBackendInfo(BackendInfo):
         """
         return (
             self.backend.coupling_map
-            if isinstance(self.backend, BackendV2)
-            and self.backend.coupling_map is not None
+            if isinstance(self.backend, BackendV2) and self.backend.coupling_map is not None
             else CouplingMap.from_full(self._n_qubits)
         )
 

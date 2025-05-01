@@ -38,9 +38,7 @@ class MomentAnalysisPass(AnalysisPass):
 
         self.property_history.append(moments)
         self.property_set["moments"] = (
-            self.property_history
-            if len(self.property_history) > 1
-            else self.property_history[0]
+            self.property_history if len(self.property_history) > 1 else self.property_history[0]
         )
 
 
@@ -66,11 +64,7 @@ def _parse_instruction(instruction):
     if isinstance(instruction, CircuitInstruction):
         return (instruction.operation, instruction.qubits, instruction.clbits)
     op = gate_map().get(instruction[0], instruction[0])
-    qargs = (
-        tuple(instruction[1])
-        if isinstance(instruction[1], QuantumRegister)
-        else instruction[1]
-    )
+    qargs = tuple(instruction[1]) if isinstance(instruction[1], QuantumRegister) else instruction[1]
     if len(instruction) > 2:
         cargs = (
             tuple(instruction[2])
@@ -86,9 +80,7 @@ def _parse_function(func):
     try:
         return gate_map()[func] if isinstance(func, str) else func
     except KeyError:
-        raise ValueError(
-            "Provided instruction name not part of standard instruction set"
-        )
+        raise ValueError("Provided instruction name not part of standard instruction set")
 
 
 class CustomGateReplacementPass(TransformationPass):
@@ -120,9 +112,7 @@ class CustomGateReplacementPass(TransformationPass):
         target_instructions = format_input(
             target_instructions, Union[CircuitInstruction, Tuple, str, Instruction]
         )
-        new_elements = format_input(
-            new_elements, Union[Callable, Gate, QuantumCircuit, str]
-        )
+        new_elements = format_input(new_elements, Union[Callable, Gate, QuantumCircuit, str])
         parameters = format_input(
             parameters,
             Optional[Union[ParameterVector, List]],
@@ -141,9 +131,7 @@ class CustomGateReplacementPass(TransformationPass):
             == len(parameters)
             == len(parametrized_circuit_functions_args)
         ), "Number of target instructions, parametrized circuit functions, and parameters must match"
-        self.target_instructions = [
-            _parse_instruction(inst) for inst in target_instructions
-        ]
+        self.target_instructions = [_parse_instruction(inst) for inst in target_instructions]
         self.functions = [_parse_function(func) for func in new_elements]
         self.parameters = parameters
         self.parametrized_circuit_functions_args = parametrized_circuit_functions_args
@@ -184,9 +172,7 @@ class CustomGateReplacementPass(TransformationPass):
                 )
             )
             for node in instruction_nodes:
-                dag.substitute_node_with_dag(
-                    node, circuit_to_dag(qc), wires=args if args else None
-                )
+                dag.substitute_node_with_dag(node, circuit_to_dag(qc), wires=args if args else None)
         for gate_name, cal_info in qc.calibrations.items():
             for (qubits, parameters), schedule in cal_info.items():
                 dag.add_calibration(
@@ -248,9 +234,7 @@ class FilterLocalContext(TransformationPass):
                     not isinstance(target_instruction[0], str)
                     or target_instruction[0] not in mapping
                 ):
-                    raise ValueError(
-                        "Provided instruction name is not a valid gate name"
-                    )
+                    raise ValueError("Provided instruction name is not a valid gate name")
                 op = mapping[target_instruction[0]]
                 qargs = target_instruction[1]
                 if isinstance(qargs, QuantumRegister):
@@ -296,8 +280,7 @@ class FilterLocalContext(TransformationPass):
             filter(
                 lambda node: any(
                     [
-                        node.qargs == tgt_instruction[1]
-                        and node.cargs == tgt_instruction[2]
+                        node.qargs == tgt_instruction[1] and node.cargs == tgt_instruction[2]
                         for tgt_instruction in self.target_instructions
                     ]
                 ),
@@ -309,9 +292,7 @@ class FilterLocalContext(TransformationPass):
         isolated_tgt_nodes = list(set(target_nodes))
         node_instruction_mapping = {
             node: target_instruction
-            for node, target_instruction in zip(
-                isolated_tgt_nodes, self.target_instructions
-            )
+            for node, target_instruction in zip(isolated_tgt_nodes, self.target_instructions)
         }
         count_occurrences = [0 for _ in range(len(isolated_tgt_nodes))]
         for node in target_nodes:
@@ -333,22 +314,14 @@ class FilterLocalContext(TransformationPass):
                 for q in node.qargs:
                     if q in involved_qubits:
                         keeping_nodes[node] = True
-                        involved_qubits.extend(
-                            [q for q in node.qargs if q not in qargs]
-                        )
-                        involved_clbits.extend(
-                            [c for c in node.cargs if c not in cargs]
-                        )
+                        involved_qubits.extend([q for q in node.qargs if q not in qargs])
+                        involved_clbits.extend([c for c in node.cargs if c not in cargs])
                         break
                 for c in node.cargs:
                     if c in involved_clbits:
                         keeping_nodes[node] = True
-                        involved_qubits.extend(
-                            [q for q in node.qargs if q not in qargs]
-                        )
-                        involved_clbits.extend(
-                            [c for c in node.cargs if c not in cargs]
-                        )
+                        involved_qubits.extend([q for q in node.qargs if q not in qargs])
+                        involved_clbits.extend([c for c in node.cargs if c not in cargs])
                         break
                 else:
                     keeping_nodes[node] = False
@@ -364,23 +337,13 @@ class FilterLocalContext(TransformationPass):
         def filter_function(node):
             for q in node.qargs:
                 if q in involved_qubits and (
-                    any(
-                        [
-                            node in dag.ancestors(target_node)
-                            for target_node in target_nodes
-                        ]
-                    )
+                    any([node in dag.ancestors(target_node) for target_node in target_nodes])
                     or node in target_nodes
                 ):
                     return True
             for c in node.cargs:
                 if c in involved_clbits and (
-                    any(
-                        [
-                            node in dag.ancestors(target_node)
-                            for target_node in target_nodes
-                        ]
-                    )
+                    any([node in dag.ancestors(target_node) for target_node in target_nodes])
                     or node in target_nodes
                 ):
                     return True
@@ -457,8 +420,6 @@ class CausalConePass(TransformationPass):
             if all(q in involved_qubits for q in node.qargs):
                 filtered_dag.apply_operation_back(node.op, node.qargs)
 
-        filtered_dag.remove_qubits(
-            *[q for q in filtered_dag.qubits if q not in involved_qubits]
-        )
+        filtered_dag.remove_qubits(*[q for q in filtered_dag.qubits if q not in involved_qubits])
 
         return filtered_dag

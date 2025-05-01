@@ -18,9 +18,7 @@ def register_pulse_features(pulse: SymbolicPulse):
     """
     stored_parameter_expressions = {}
     for param_name, param_value in pulse.parameters.items():
-        if param_name in _real_time_parameters and isinstance(
-            param_value, ParameterExpression
-        ):
+        if param_name in _real_time_parameters and isinstance(param_value, ParameterExpression):
             stored_parameter_expressions[param_name] = lambda val: sympy_to_qua(
                 param_value.sympify(), val
             )
@@ -32,11 +30,7 @@ def return_samples_output(pulse: SymbolicPulse):
     Return the samples of a SymbolicPulse to be used in the QUA compiler
     """
     if np.abs(pulse.angle) < 1e-10:
-        return (
-            pulse.amp
-            if isinstance(pulse, Constant)
-            else pulse.get_waveform().samples.real
-        )
+        return pulse.amp if isinstance(pulse, Constant) else pulse.get_waveform().samples.real
     else:
         return (
             pulse.amp * np.exp(1j * pulse.angle)
@@ -121,9 +115,7 @@ class QuAMQiskitPulse(QuAMPulse):
         try:
             return_samples_output(self.pulse)
         except (AttributeError, PulseError) as e:
-            raise PulseError(
-                "Pulse waveform could not be retrieved from the given pulse"
-            ) from e
+            raise PulseError("Pulse waveform could not be retrieved from the given pulse") from e
 
     def is_parameterized(self):
         return self.pulse.is_parameterized()

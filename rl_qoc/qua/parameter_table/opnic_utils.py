@@ -29,9 +29,7 @@ def make_cpp_packet_definition(
     packet_definition = f"QM_DECLARE_PACKET(Internal{direction}Packet, "
 
     parameters = (
-        param_table.parameters
-        if isinstance(param_table, ParameterTable)
-        else [param_table]
+        param_table.parameters if isinstance(param_table, ParameterTable) else [param_table]
     )
     for i, parameter in enumerate(parameters):
         packet_definition += (
@@ -54,14 +52,10 @@ def make_h_packet_definition(
     packet_definition = f"struct {struct_name} " + "{ "
 
     parameters = (
-        param_table.parameters
-        if isinstance(param_table, ParameterTable)
-        else [param_table]
+        param_table.parameters if isinstance(param_table, ParameterTable) else [param_table]
     )
     for parameter in parameters:
-        packet_definition += (
-            f"std::vector<{get_cpp_type(parameter)}> {parameter.name}{{}}; "
-        )
+        packet_definition += f"std::vector<{get_cpp_type(parameter)}> {parameter.name}{{}}; "
 
     if direction == "Incoming":
         pass
@@ -70,9 +64,7 @@ def make_h_packet_definition(
         for i, parameter in enumerate(parameters):
             if parameter.is_array:
                 for j in range(parameter.length):
-                    packet_definition += (
-                        f"{get_cpp_type(parameter)} _{parameter.name}_{j}"
-                    )
+                    packet_definition += f"{get_cpp_type(parameter)} _{parameter.name}_{j}"
                     if not (i == len(parameters) - 1 and j == parameter.length - 1):
                         packet_definition += ", "
             else:
@@ -85,9 +77,7 @@ def make_h_packet_definition(
         for i, parameter in enumerate(parameters):
             if parameter.is_array:
                 for j in range(parameter.length):
-                    packet_definition += (
-                        f"{parameter.name}.push_back(_{parameter.name}_{j}); "
-                    )
+                    packet_definition += f"{parameter.name}.push_back(_{parameter.name}_{j}); "
             else:
                 packet_definition += f"{parameter.name}.push_back(_{parameter.name}); "
 
@@ -107,14 +97,10 @@ def make_i_packet_definition(
     packet_definition = f"extern struct {struct_name} " + "{ "
 
     parameters = (
-        param_table.parameters
-        if isinstance(param_table, ParameterTable)
-        else [param_table]
+        param_table.parameters if isinstance(param_table, ParameterTable) else [param_table]
     )
     for parameter in parameters:
-        packet_definition += (
-            f"std::vector<{get_cpp_type(parameter)}> {parameter.name}; "
-        )
+        packet_definition += f"std::vector<{get_cpp_type(parameter)}> {parameter.name}; "
 
     if direction == "Incoming":
         # Add default constructor signature
@@ -126,9 +112,7 @@ def make_i_packet_definition(
         for i, parameter in enumerate(parameters):
             if parameter.is_array:
                 for j in range(parameter.length):
-                    packet_definition += (
-                        f"{get_cpp_type(parameter)} _{parameter.name}_{j}"
-                    )
+                    packet_definition += f"{get_cpp_type(parameter)} _{parameter.name}_{j}"
                     if not (i == len(parameters) - 1 and j == parameter.length - 1):
                         packet_definition += ", "
             else:
@@ -149,9 +133,7 @@ def make_outgoing_packet_typecast(param_table: Union[ParameterTable, Parameter])
     """const InternalOutgoingPacket out_packet{qm::Value<double, 10>(packet.data)};"""
     definition = "const InternalOutgoingPacket out_packet{ "
     parameters = (
-        param_table.parameters
-        if isinstance(param_table, ParameterTable)
-        else [param_table]
+        param_table.parameters if isinstance(param_table, ParameterTable) else [param_table]
     )
 
     for i, parameter in enumerate(parameters):
@@ -175,9 +157,7 @@ def make_ingoing_packet_typecast(param_table: Union[ParameterTable, Parameter]) 
 
     definition = "IncomingPacket incoming_packet; "
     parameters = (
-        param_table.parameters
-        if isinstance(param_table, ParameterTable)
-        else [param_table]
+        param_table.parameters if isinstance(param_table, ParameterTable) else [param_table]
     )
 
     for parameter in parameters:
@@ -237,23 +217,17 @@ def patch_opnic_wrapper(
 
         replacements_ = [[f"s/QM_D.*{direction_}.*/{cpp_packet}/g", str(paths["cpp"])]]
         if direction == "Outgoing":
-            replacements_.append(
-                [f"s/const Int.* out_packet.*/{typecast}/g", str(paths["cpp"])]
-            )
+            replacements_.append([f"s/const Int.* out_packet.*/{typecast}/g", str(paths["cpp"])])
         else:
             replacements_.append(
                 [f"s/IncomingPacket incoming_packet.*/{typecast}/g", str(paths["cpp"])]
             )
 
         replacements_.append([f"s/struct {direction_}.*/{h_packet}/g", str(paths["h"])])
-        replacements_.append(
-            [f"s/.*struct {direction_}.*/{i_packet}/g", str(paths["i"])]
-        )
+        replacements_.append([f"s/.*struct {direction_}.*/{i_packet}/g", str(paths["i"])])
         replacements.extend(replacements_)
 
-        modified_count = sum(
-            run_sed_and_check_for_changes(args) for args in replacements
-        )
+        modified_count = sum(run_sed_and_check_for_changes(args) for args in replacements)
 
         if modified_count > 0:
             logging.info(f"{modified_count} C++ files. Recompiling...")

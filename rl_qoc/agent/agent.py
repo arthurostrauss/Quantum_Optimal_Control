@@ -14,9 +14,7 @@ class ActorNetwork(nn.Module):
         hidden_layers: Sequence[int],
         n_actions: int,
         input_activation_function: nn.Module | str = "identity",
-        hidden_activation_functions: (
-            Sequence[nn.Module | str] | nn.Module | str
-        ) = "tanh",
+        hidden_activation_functions: Sequence[nn.Module | str] | nn.Module | str = "tanh",
         output_activation_mean: nn.Module | str = "tanh",
         output_activation_std: Optional[nn.Module | str] = None,
         include_critic=True,
@@ -49,8 +47,7 @@ class ActorNetwork(nn.Module):
             hidden_activation_functions, str
         ):
             hidden_activation_functions = [
-                get_module(hidden_activation_functions)
-                for _ in range(len(hidden_sizes))
+                get_module(hidden_activation_functions) for _ in range(len(hidden_sizes))
             ]
         else:
             if len(hidden_activation_functions) != len(hidden_sizes):
@@ -137,9 +134,7 @@ class CriticNetwork(nn.Module):
         observation_space: Space,
         hidden_layers: Sequence[int],
         input_activation_function: nn.Module | str = "identity",
-        hidden_activation_functions: (
-            Sequence[nn.Module | str] | nn.Module | str
-        ) = "tanh",
+        hidden_activation_functions: Sequence[nn.Module | str] | nn.Module | str = "tanh",
         chkpt_dir: str = "tmp/critic_ppo",
     ):
         super(CriticNetwork, self).__init__()
@@ -156,8 +151,7 @@ class CriticNetwork(nn.Module):
             hidden_activation_functions, str
         ):
             hidden_activation_functions = [
-                get_module(hidden_activation_functions)
-                for _ in range(len(hidden_sizes))
+                get_module(hidden_activation_functions) for _ in range(len(hidden_sizes))
             ]
         else:
             if len(hidden_activation_functions) != len(hidden_sizes):
@@ -205,18 +199,14 @@ class CriticNetwork(nn.Module):
 
 
 class Agent(nn.Module):
-    def __init__(
-        self, actor_net: ActorNetwork, critic_net: Optional[CriticNetwork] = None
-    ):
+    def __init__(self, actor_net: ActorNetwork, critic_net: Optional[CriticNetwork] = None):
         super().__init__()
 
         self.actor_net = actor_net
         self.critic_net = critic_net
 
         if self.critic_net is not None:
-            assert (
-                not self.actor_net.include_critic
-            ), "Critic already included in Actor Network"
+            assert not self.actor_net.include_critic, "Critic already included in Actor Network"
 
     def forward(self, x):
         if self.actor_net.include_critic:

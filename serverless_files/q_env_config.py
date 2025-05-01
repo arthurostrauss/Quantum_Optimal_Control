@@ -133,9 +133,7 @@ backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
     apply_parametrized_circuit,
     backend,
-    estimator_options=(
-        estimator_options if isinstance(backend, RuntimeBackend) else None
-    ),
+    estimator_options=(estimator_options if isinstance(backend, RuntimeBackend) else None),
     parametrized_circuit_kwargs={"target": env_params["target"], "backend": backend},
 )
 

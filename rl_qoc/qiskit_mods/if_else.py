@@ -89,9 +89,7 @@ class IfElseOp(ControlFlowOp):
         num_qubits = true_body.num_qubits
         num_clbits = true_body.num_clbits
 
-        super().__init__(
-            "if_else", num_qubits, num_clbits, [true_body, false_body], label=label
-        )
+        super().__init__("if_else", num_qubits, num_clbits, [true_body, false_body], label=label)
 
         self._condition = validate_condition(condition)
 
@@ -120,10 +118,7 @@ class IfElseOp(ControlFlowOp):
                 f"QuantumCircuit, but received {type(true_body)}."
             )
 
-        if (
-            true_body.num_qubits != self.num_qubits
-            or true_body.num_clbits != self.num_clbits
-        ):
+        if true_body.num_qubits != self.num_qubits or true_body.num_clbits != self.num_clbits:
             raise CircuitError(
                 "Attempted to assign a true_body parameter with a num_qubits or "
                 "num_clbits different than that of the IfElseOp. "
@@ -138,10 +133,7 @@ class IfElseOp(ControlFlowOp):
                     f"QuantumCircuit, but received {type(false_body)}."
                 )
 
-            if (
-                false_body.num_qubits != self.num_qubits
-                or false_body.num_clbits != self.num_clbits
-            ):
+            if false_body.num_qubits != self.num_qubits or false_body.num_clbits != self.num_clbits:
                 raise CircuitError(
                     "Attempted to assign a false_body parameter with a num_qubits or "
                     "num_clbits different than that of the IfElseOp. "
@@ -170,12 +162,9 @@ class IfElseOp(ControlFlowOp):
         """
 
         true_body, false_body = (
-            ablock
-            for ablock, _ in itertools.zip_longest(blocks, range(2), fillvalue=None)
+            ablock for ablock, _ in itertools.zip_longest(blocks, range(2), fillvalue=None)
         )
-        return IfElseOp(
-            self._condition, true_body, false_body=false_body, label=self.label
-        )
+        return IfElseOp(self._condition, true_body, false_body=false_body, label=self.label)
 
     def c_if(self, classical, val):
         raise NotImplementedError(
@@ -229,9 +218,7 @@ class IfElsePlaceholder(InstructionPlaceholder):
         # Set the condition after super().__init__() has initialized it to None.
         self._condition = validate_condition(condition)
 
-    def with_false_block(
-        self, false_block: ControlFlowBuilderBlock
-    ) -> "IfElsePlaceholder":
+    def with_false_block(self, false_block: ControlFlowBuilderBlock) -> "IfElsePlaceholder":
         """Return a new placeholder instruction, with the false block set to the given value,
         updating the bits used by both it and the true body, if necessary.
 
@@ -422,9 +409,7 @@ class IfContext:
             # but we still need to emit a placeholder instruction here in case we get an ``else``
             # attached which _does_ gain them.  We emit a placeholder to defer defining the
             # resources we use until the containing loop concludes, to support ``break``.
-            operation = IfElsePlaceholder(
-                self._condition, true_block, label=self._label
-            )
+            operation = IfElsePlaceholder(self._condition, true_block, label=self._label)
             resources = operation.placeholder_resources()
             self._appended_instructions = self._circuit.append(
                 operation, resources.qubits, resources.clbits
@@ -482,9 +467,7 @@ class ElseContext:
         appended_instructions = self._if_context.appended_instructions
         circuit = self._if_context.circuit
         if appended_instructions is None:
-            raise CircuitError(
-                "Cannot attach an 'else' branch to an incomplete 'if' block."
-            )
+            raise CircuitError("Cannot attach an 'else' branch to an incomplete 'if' block.")
         if len(appended_instructions) != 1:
             # I'm not even sure how you'd get this to trigger, but just in case...
             raise CircuitError("Cannot attach an 'else' to a broadcasted 'if' block.")
@@ -497,9 +480,9 @@ class ElseContext:
             )
         self._if_instruction = circuit._pop_previous_instruction_in_scope()
         if isinstance(self._if_instruction.operation, IfElseOp):
-            self._if_registers = set(
-                self._if_instruction.operation.blocks[0].cregs
-            ).union(self._if_instruction.operation.blocks[0].qregs)
+            self._if_registers = set(self._if_instruction.operation.blocks[0].cregs).union(
+                self._if_instruction.operation.blocks[0].qregs
+            )
         else:
             self._if_registers = self._if_instruction.operation.registers()
         circuit._push_scope(

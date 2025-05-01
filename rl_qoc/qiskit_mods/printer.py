@@ -32,9 +32,7 @@ from .experimental import ExperimentalFeatures
 #
 # This hashmap is ordered from highest precedence to lowest, for convenience.  Function calls,
 # indexing and casting are all higher priority than these, so we just ignore them.
-_BindingPower = collections.namedtuple(
-    "_BindingPower", ("left", "right"), defaults=(255, 255)
-)
+_BindingPower = collections.namedtuple("_BindingPower", ("left", "right"), defaults=(255, 255))
 _BINDING_POWER = {
     # Power: (24, 23)
     #
@@ -208,9 +206,7 @@ class BasicPrinter:
     def _visit_Pragma(self, node: ast.Pragma) -> None:
         self._write_statement(f"#pragma {node.content}")
 
-    def _visit_CalibrationGrammarDeclaration(
-        self, node: ast.CalibrationGrammarDeclaration
-    ) -> None:
+    def _visit_CalibrationGrammarDeclaration(self, node: ast.CalibrationGrammarDeclaration) -> None:
         self._write_statement(f'defcalgrammar "{node.name}"')
 
     def _visit_FloatType(self, node: ast.FloatType) -> None:
@@ -267,9 +263,7 @@ class BasicPrinter:
         self.stream.write("measure ")
         self._visit_sequence(node.identifierList, separator=", ")
 
-    def _visit_QuantumMeasurementAssignment(
-        self, node: ast.QuantumMeasurementAssignment
-    ) -> None:
+    def _visit_QuantumMeasurementAssignment(self, node: ast.QuantumMeasurementAssignment) -> None:
         self._start_line()
         self.visit(node.identifier)
         self.stream.write(" = ")
@@ -461,9 +455,7 @@ class BasicPrinter:
         self.visit(node.name)
         self.stream.write(" ")
         if node.calibrationArgumentList:
-            self._visit_sequence(
-                node.calibrationArgumentList, start="(", end=")", separator=", "
-            )
+            self._visit_sequence(node.calibrationArgumentList, start="(", end=")", separator=", ")
             self.stream.write(" ")
         self._visit_sequence(node.identifierList, separator=", ")
         # This is temporary: calibration definition blocks are not currently (2021-10-04) defined
@@ -498,9 +490,7 @@ class BasicPrinter:
                 and len(node.false_body.statements) == 1
                 and isinstance(node.false_body.statements[0], ast.BranchingStatement)
             ):
-                self._visit_BranchingStatement(
-                    node.false_body.statements[0], chained=True
-                )
+                self._visit_BranchingStatement(node.false_body.statements[0], chained=True)
             else:
                 self.visit(node.false_body)
         if not chained:

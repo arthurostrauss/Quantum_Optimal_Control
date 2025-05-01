@@ -31,9 +31,7 @@ class QiboEnvironment(QuantumEnvironment):
         :param params: List of Action vectors to execute on quantum system
         :return: None
         """
-        benchmarking_method: Literal["tomography", "rb"] = (
-            self.config.benchmark_config.method
-        )
+        benchmarking_method: Literal["tomography", "rb"] = self.config.benchmark_config.method
         backend_config = self.config.backend_config
         set_backend("qibolab", platform=backend_config.platform)
         target = backend_config.physical_qubits[0]
@@ -66,15 +64,9 @@ class QiboEnvironment(QuantumEnvironment):
                         circuit=qibo_circ,
                         nshots=5000,
                     )
-                    rho_real = tomography_output.results.measured_density_matrix_real[
-                        target
-                    ]
-                    rho_imaginary = (
-                        tomography_output.results.measured_density_matrix_imag[target]
-                    )
-                    rho = np.transpose(
-                        np.array(rho_real) + 1j * np.array(rho_imaginary)
-                    )
+                    rho_real = tomography_output.results.measured_density_matrix_real[target]
+                    rho_imaginary = tomography_output.results.measured_density_matrix_imag[target]
+                    rho = np.transpose(np.array(rho_real) + 1j * np.array(rho_imaginary))
                     dm = DensityMatrix(rho)
                     fidelity = self.target.fidelity(dm, validate=False)
                 report(e.path, e.history)
