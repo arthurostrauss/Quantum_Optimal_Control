@@ -168,9 +168,9 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironment):
         ideal_circ.cx(0, 1)
         return ideal_circ
 
-    def _ident_str(self):
+    def __str__(self):
         """This is a one-line description of the environment with some key parameters."""
-        base_ident_str = super()._ident_str()
+        base_ident_str = super().__str__()
         return f"SpilloverNoise_phi-{self.phi / np.pi}pi_gamma-{self.gamma}_{base_ident_str}"
 
     def __repr__(self):
