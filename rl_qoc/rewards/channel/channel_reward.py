@@ -7,7 +7,7 @@ from qiskit.primitives import BaseEstimatorV2
 from ..base_reward import Reward
 from dataclasses import dataclass, field
 from qiskit.circuit import QuantumCircuit
-from qiskit.quantum_info import Pauli, SparsePauliOp, pauli_basis
+from qiskit.quantum_info import Pauli, SparsePauliOp, pauli_basis, PauliList
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit_experiments.library.tomography.basis import (
     Pauli6PreparationBasis,
@@ -105,7 +105,7 @@ class ChannelReward(Reward):
         n_qubits = target.causal_cone_size
         dim = 2**n_qubits
         nb_states = self.num_eigenstates_per_pauli
-        if nb_states >= dim:
+        if nb_states > dim:
             raise ValueError(
                 f"Number of eigenstates per Pauli should be less than or equal to {dim}"
             )
@@ -126,23 +126,6 @@ class ChannelReward(Reward):
         non_zero_indices = np.nonzero(probabilities > cutoff)[0]
         non_zero_probabilities = probabilities[non_zero_indices]
         non_zero_probabilities /= np.sum(non_zero_probabilities)
-        # Sort in descending order
-        non_zero_indices = np.argsort(non_zero_probabilities)[::-1]
-        non_zero_probabilities = non_zero_probabilities[non_zero_indices]
-
-        basis = pauli_basis(num_qubits=n_qubits)  # all n_fold tensor-product single qubit Paulis
-
-        pauli_indices = np.array([np.unravel_index(sample, (dim**2, dim**2)) for sample in non_zero_indices], dtype=int)
-        # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
-        identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
-        id_coeff = (
-            c_factor
-            * dim
-            * np.sum(non_zero_probabilities[identity_terms] / (dim * Chi[non_zero_indices[identity_terms]]))
-        )
-        # Additional dim factor to account for all eigenstates of identity input state
-        
-        
 
         if dfe_precision is not None:
             # DFE precision guarantee, ϵ additive error, δ failure probability
@@ -161,14 +144,20 @@ class ChannelReward(Reward):
             ),
             return_counts=True,
         )
-
+        
+        # Sort samples in descending order based on probabilities
+        sorted_indices = np.argsort(counts)[::-1]
+        counts = counts[sorted_indices]
+        samples = samples[sorted_indices]
+        
+        
         # Convert samples to a pair of indices in the Pauli basis
         pauli_indices = np.array(
             [np.unravel_index(sample, (dim**2, dim**2)) for sample in samples],
             dtype=int,
         )
 
-        # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
+        # Filter out the case where identity ('I'*n_qubits) is sampled (trivial case)
         identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
         id_coeff = (
             c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
@@ -187,29 +176,41 @@ class ChannelReward(Reward):
             for p, r in zip(pauli_indices, reward_factor)
         ]
 
-        self._observables = SparsePauliOp("I" * n_qubits, self.id_coeff) + sum(
-            [obs for _, obs in fiducials_list]
-        )
-
-        obs_dict = {}
-        # Regroup observables for same input Pauli
+        # Regroup qubit-wise commuting input Paulis
+        input_paulis = PauliList([prep for prep, _ in fiducials_list]).unique().group_qubit_wise_commuting()
+        # Regroup qubit-wise commuting observables
+        filtered_fiducials_list = [[group, []] for group in input_paulis]
+        pauli_shots = [[] for _ in range(len(input_paulis))]
         for i, (prep, obs) in enumerate(fiducials_list):
-            label = prep.to_label()
-            if label not in obs_dict:
-                obs_dict[label] = (prep, obs, counts[i])
-            else:
-                _, ref_obs, ref_count = obs_dict[label]
-                obs_dict[label] = (
-                    prep,
-                    (ref_obs + obs).simplify(),
-                    max(ref_count, counts[i]),
-                )
-
-        filtered_fiducials_list = [(prep, obs) for prep, obs, _ in obs_dict.values()]
-        filtered_pauli_shots = [count for _, _, count in obs_dict.values()]
+            for j, group in enumerate(input_paulis):
+                if prep in group:
+                    filtered_fiducials_list[j][1].append(obs)
+                    pauli_shots[j].append(counts[i])
+                    break
+                
+        filtered_fiducials_list = [[group, sum(obs_list).simplify().group_commuting(True)] 
+                                   for group, obs_list in filtered_fiducials_list]
+        pauli_shots = [sum(shots) * n_shots for shots in pauli_shots]
+        
+        
+        # obs_dict = {}
+        # # Regroup observables for same input Pauli
+        # for i, (prep, obs) in enumerate(fiducials_list):
+        #     label = prep.to_label()
+        #     if label not in obs_dict:
+        #         obs_dict[label] = (prep, obs, counts[i])
+        #     else:
+        #         _, ref_obs, ref_count = obs_dict[label]
+        #         obs_dict[label] = (
+        #             prep,
+        #             (ref_obs + obs).simplify(),
+        #             max(ref_count, counts[i]),
+        #         )
+        # 
+        # filtered_fiducials_list = [(prep, obs) for prep, obs, _ in obs_dict.values()]
+        # filtered_pauli_shots = [count for _, _, count in obs_dict.values()]
 
         fiducials = filtered_fiducials_list
-        pauli_shots = filtered_pauli_shots
 
         used_prep_indices = {}
 
@@ -220,13 +221,15 @@ class ChannelReward(Reward):
 
             # self._fiducials_indices.append(([], observables_to_indices(obs_list)))
             # self._full_fiducials.append(([], obs_list))
-            max_input_states = dim // nb_states
+            max_input_states = nb_states
             selected_input_states: List[int] = self.input_states_rng.choice(
                 dim, size=max_input_states, replace=False
             )
-            prep_label = prep.to_label()
+            # TODO: Convert this part for the PauliList
+            pauli_rep = Pauli((np.logical_or.reduce(prep.z), np.logical_or.reduce(prep.x)))
+            prep_label = pauli_rep.to_label()
             dedicated_shots = (
-                shots * n_shots // max_input_states
+                shots // max_input_states
             )  # Number of shots per Pauli eigenstate (divided equally)
             if dedicated_shots == 0:
                 continue
@@ -244,9 +247,7 @@ class ChannelReward(Reward):
                     ]
                 )
 
-                prep_indices = pauli_input_to_indices(prep, inputs)
-
-                # self._fiducials_indices[-1][0].append(tuple(prep_indices))
+                prep_indices = pauli_input_to_indices(pauli_rep, inputs)
 
                 # Create input state preparation circuit
                 input_circuit = qc.copy_empty_like().compose(
@@ -273,8 +274,8 @@ class ChannelReward(Reward):
                     optimization_level=0,
                 )
 
-                obs_ = parity * obs_list
-                pub_obs = extend_observables(obs_, prep_circuit, target.causal_cone_qubits_indices)
+                obs_ = [parity * o for o in obs_list]
+                pub_obs = extend_observables(sum(obs_), prep_circuit, target.causal_cone_qubits_indices)
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 if prep_indices not in used_prep_indices:  # Add new PUB
                     # Add PUB
@@ -290,7 +291,7 @@ class ChannelReward(Reward):
                         obs_,
                         n_reps,
                         target.causal_cone_qubits_indices,
-                        prep,
+                        pauli_rep,
                         extended_prep_indices,
                         observables_to_indices(obs_),
                     )
