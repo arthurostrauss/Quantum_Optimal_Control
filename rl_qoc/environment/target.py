@@ -43,7 +43,6 @@ from ..helpers.circuit_utils import (
 )
 import warnings
 
-
 def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Gate):
     """
     Calculate characteristic function for the given target. Based on DFE scheme

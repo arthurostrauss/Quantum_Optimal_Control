@@ -1,22 +1,22 @@
 from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import List, Union, Optional
+from dataclasses import dataclass, field
+from typing import List, Union, TYPE_CHECKING
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
 from qiskit.primitives.base import BaseEstimatorV2, BaseSamplerV2
 
 from .reward_data import RewardData, RewardDataList
-from ..environment.configuration.qconfig import QEnvConfig
-from ..environment.target import StateTarget, GateTarget
 import numpy as np
 
+if TYPE_CHECKING:
+    from ..environment.configuration.qconfig import QEnvConfig
+    from ..environment.target import Target  
+    
 PubLike = Union[SamplerPubLike, EstimatorPubLike]
 Pub = Union[SamplerPub, EstimatorPub]
 Primitive = Union[BaseEstimatorV2, BaseSamplerV2]
-Target = Union[StateTarget, GateTarget]
 
 
 @dataclass
@@ -59,9 +59,7 @@ class Reward(ABC):
             qc: Quantum circuit to be executed on quantum system
             params: Parameters to feed the parametrized circuit
             target: Target gate or state to prepare
-            backend_info: Backend information
-            execution_config: Execution configuration
-            n_reps: Number of repetitions of cycle circuit
+            env_config: Environment configuration
 
         Returns:
             List of pubs related to the reward method

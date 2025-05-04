@@ -581,7 +581,7 @@ def observables_to_indices(
     return observable_indices
 
 
-def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]):
+def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]|Tuple[int]):
     """
     Convert the input state to single qubit state indices for the reward computation
 

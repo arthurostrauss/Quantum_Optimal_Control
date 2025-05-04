@@ -65,6 +65,7 @@ from ..helpers.helper_functions import (
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
 from ..rewards.reward_data import RewardDataList
+from ..rewards.base_reward import Reward
 
 rewards = Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity"]
 
