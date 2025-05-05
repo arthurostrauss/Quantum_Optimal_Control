@@ -5,12 +5,12 @@ from quam.components.channels import IQChannel
 from quam.components.macro import QubitMacro, QubitPairMacro, PulseMacro
 from quam.components.pulses import ReadoutPulse, Pulse
 from quam.core import quam_dataclass
-from quam.utils import string_reference as str_ref
-from rl_qoc.qua.quam_components import Transmon, ReadoutResonator
+from quam_builder.architecture.superconducting.qubit import FluxTunableTransmon
+from quam_builder.architecture.superconducting.components import ReadoutResonatorIQ
 from qm.qua import declare, assign, while_, Cast, broadcast, fixed
 from quam.utils.qua_types import QuaVariableBool, QuaVariableFloat, QuaVariableInt
 
-__all__ = ["MeasureMacro", "ResetMacro", "VirtualZMacro"]
+__all__ = ["MeasureMacro", "ResetMacro", "VirtualZMacro", "CZMacro", "DelayMacro"]
 
 
 def get_pulse_name(pulse: Pulse) -> str:
@@ -36,7 +36,7 @@ class MeasureMacro(QubitMacro):
             self.pulse if isinstance(self.pulse, Pulse) else self.qubit.get_pulse(self.pulse)
         )
 
-        resonator: ReadoutResonator = self.qubit.resonator
+        resonator: ReadoutResonatorIQ = self.qubit.resonator
         resonator.measure(get_pulse_name(pulse), qua_vars=qua_vars)
         I, Q = qua_vars
         assign(state, Cast.to_int(I > pulse.threshold))
@@ -141,3 +141,11 @@ class CZMacro(QubitPairMacro):
         self.qubit_control.xy.play("x180", amplitude_scale=None, duration=4)
         self.qubit_target.xy.play("x180", amplitude_scale=None, duration=4)
         self.qubit_pair.align()
+
+
+@quam_dataclass
+class DelayMacro(QubitMacro):
+
+    def apply(self, duration):
+        qubit: FluxTunableTransmon = self.qubit
+        qubit.wait(duration // 4)

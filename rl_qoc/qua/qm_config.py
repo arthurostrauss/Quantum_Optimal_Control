@@ -4,9 +4,9 @@ from ctypes import CDLL
 from dataclasses import dataclass
 
 from ..environment.configuration.backend_config import BackendConfig
-from .qm_backend import QMBackend
+from qiskit_qm_provider import QMBackend
 from typing import Any, Callable, Literal, Union
-from .parameter_table.input_type import InputType
+from qiskit_qm_provider import InputType
 
 Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX"]]
 

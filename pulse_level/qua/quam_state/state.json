@@ -8,19 +8,22 @@
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "rz": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.VirtualZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.VirtualZMacro"
                 },
                 "sx": {
                     "pulse": "x90",
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "measure": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.MeasureMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.MeasureMacro"
                 },
                 "reset": {
                     "pi_pulse": "x180",
                     "readout_pulse": "readout",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.ResetMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.ResetMacro"
+                },
+                "delay": {
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.DelayMacro"
                 }
             },
             "xy": {
@@ -180,7 +183,7 @@
                         "__class__": "quam.components.pulses.SquarePulse"
                     }
                 },
-                "intermediate_frequency": -16682781,
+                "intermediate_frequency": 16682781,
                 "core": "b",
                 "opx_input": "#/wiring/qubits/q1/rr/opx_input",
                 "time_of_flight": 28,
@@ -229,19 +232,22 @@
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "rz": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.VirtualZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.VirtualZMacro"
                 },
                 "sx": {
                     "pulse": "x90",
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "measure": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.MeasureMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.MeasureMacro"
                 },
                 "reset": {
                     "pi_pulse": "x180",
                     "readout_pulse": "readout",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.ResetMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.ResetMacro"
+                },
+                "delay": {
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.DelayMacro"
                 }
             },
             "xy": {
@@ -450,19 +456,22 @@
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "rz": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.VirtualZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.VirtualZMacro"
                 },
                 "sx": {
                     "pulse": "x90",
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "measure": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.MeasureMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.MeasureMacro"
                 },
                 "reset": {
                     "pi_pulse": "x180",
                     "readout_pulse": "readout",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.ResetMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.ResetMacro"
+                },
+                "delay": {
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.DelayMacro"
                 }
             },
             "xy": {
@@ -676,19 +685,22 @@
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "rz": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.VirtualZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.VirtualZMacro"
                 },
                 "sx": {
                     "pulse": "x90",
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "measure": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.MeasureMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.MeasureMacro"
                 },
                 "reset": {
                     "pi_pulse": "x180",
                     "readout_pulse": "readout",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.ResetMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.ResetMacro"
+                },
+                "delay": {
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.DelayMacro"
                 }
             },
             "xy": {
@@ -897,19 +909,22 @@
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "rz": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.VirtualZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.VirtualZMacro"
                 },
                 "sx": {
                     "pulse": "x90",
                     "__class__": "quam.components.macro.qubit_macros.PulseMacro"
                 },
                 "measure": {
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.MeasureMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.MeasureMacro"
                 },
                 "reset": {
                     "pi_pulse": "x180",
                     "readout_pulse": "readout",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.ResetMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.ResetMacro"
+                },
+                "delay": {
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.DelayMacro"
                 }
             },
             "xy": {
@@ -1118,7 +1133,7 @@
                 "cz": {
                     "flux_pulse_control": "#/qubits/q1/z/operations/flux_pulse",
                     "coupler_flux_pulse": "#/qubit_pairs/coupler_q1_q2/coupler/operations/cz",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.CZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.CZMacro"
                 }
             },
             "qubit_control": "#/wiring/qubit_pairs/q1-2/c/control_qubit",
@@ -1154,7 +1169,7 @@
                 "cz": {
                     "flux_pulse_control": "#/qubits/q2/z/operations/flux_pulse",
                     "coupler_flux_pulse": "#/qubit_pairs/coupler_q2_q3/coupler/operations/cz",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.CZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.CZMacro"
                 }
             },
             "qubit_control": "#/wiring/qubit_pairs/q2-3/c/control_qubit",
@@ -1190,7 +1205,7 @@
                 "cz": {
                     "flux_pulse_control": "#/qubits/q3/z/operations/flux_pulse",
                     "coupler_flux_pulse": "#/qubit_pairs/coupler_q3_q4/coupler/operations/cz",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.CZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.CZMacro"
                 }
             },
             "qubit_control": "#/wiring/qubit_pairs/q3-4/c/control_qubit",
@@ -1226,7 +1241,7 @@
                 "cz": {
                     "flux_pulse_control": "#/qubits/q4/z/operations/flux_pulse",
                     "coupler_flux_pulse": "#/qubit_pairs/coupler_q4_q5/coupler/operations/cz",
-                    "__class__": "rl_qoc.qua.quam_components.gate_macros.CZMacro"
+                    "__class__": "rl_qoc.qua.quam_components.flux_tunable_gate_macros.CZMacro"
                 }
             },
             "qubit_control": "#/wiring/qubit_pairs/q4-5/c/control_qubit",

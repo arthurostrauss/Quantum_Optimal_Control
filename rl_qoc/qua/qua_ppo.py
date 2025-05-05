@@ -1,23 +1,13 @@
 from __future__ import annotations
-
-import time
 import numpy as np
 from typing import Optional, Dict
-import tqdm
-import warnings
-from IPython.display import clear_output
 from gymnasium import Wrapper, ActionWrapper
 
 # Torch imports for building RL agent and framework
-from gymnasium.spaces import Box
 import torch
-import torch.nn as nn
-from matplotlib import pyplot as plt
-from torch.utils.tensorboard import SummaryWriter
-import torch.optim as optim
 from torch.distributions import Normal
 from ..agent import CustomPPO
-from ..environment import QuantumEnvironment
+from ..environment.base_q_env import BaseQuantumEnvironment as QuantumEnvironment
 from .fixed_point import FixedPoint
 
 import sys

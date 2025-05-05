@@ -12,13 +12,13 @@ from ..environment import (
     QEnvConfig,
 )
 from ..rewards.real_time import get_real_time_reward_circuit
-from .qm_backend import QMBackend
+from qiskit_qm_provider import QMBackend
 from .qua_utils import binary, get_gaussian_sampling_input
 from .qm_config import QMConfig, DGXConfig
 from qm.qua import *
 from qm.jobs.running_qm_job import RunningQmJob
 from typing import Optional
-from .parameter_table import (
+from qiskit_qm_provider import (
     Parameter as QuaParameter,
     ParameterTable,
     Direction,
@@ -168,20 +168,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         mean_val = self.mean_action.tolist()
         std_val = self.std_action.tolist()
 
-        # Push policy parameters to trigger real-time action sampling
-        self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
-        if self.circuit_choice_var is not None:
-            self.circuit_choice_var.push_to_opx(
-                {"circuit_choice": self.trunc_index},
-                **push_args,
-            )
-
-        if self.n_reps_var is not None:
-            self.n_reps_var.push_to_opx(
-                {"n_reps": self.n_reps},
-                **push_args,
-            )
-
         additional_input = (
             self.config.execution_config.dfe_precision if self.config.dfe else self.baseline_circuit
         )
@@ -192,6 +178,15 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.config,
             additional_input,
         )
+
+        # Push policy parameters to trigger real-time action sampling
+        self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
+        if self.circuit_choice_var is not None:
+            self.circuit_choice_var.push_to_opx(self.trunc_index, **push_args)
+
+        if self.n_reps_var is not None:
+            self.n_reps_var.push_to_opx(self.n_reps, **push_args)
+
         # Push the reward data to the OPX
         input_state_indices = reward_data.input_indices
 
@@ -201,43 +196,41 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         reward = []
         for i, input_state in enumerate(input_state_indices):
-            self.input_state_vars.push_to_opx(
-                {f"input_state_{j}": input_state[j] for j in range(len(self.input_state_vars))},
-                **push_args,
-            )
+            input_state_dict = {
+                input_var: input_state_val
+                for input_var, input_state_val in zip(self.input_state_vars, input_state)
+            }
+            self.input_state_vars.push_to_opx(input_state_dict, **push_args)
             if self.config.dfe:
                 for j, observable in enumerate(reward_data.observable_indices):
-                    self.observable_vars.push_to_opx(
-                        {
-                            f"observable_{k}": observable[k]
-                            for k in range(len(self.observable_vars))
-                        },
-                        **push_args,
-                    )
+                    observable_dict = {
+                        observable_var: observable_val
+                        for observable_var, observable_val in zip(self.observable_vars, observable)
+                    }
+                    self.observable_vars.push_to_opx(observable_dict, **push_args)
                     self.pauli_shots.push_to_opx(reward_data.shots[j], **push_args)
 
-            # Collect the counts from the OPX
-            for i in range(len(input_state_indices)):
-                if self.config.dfe:
-                    for j in range(len(reward_data.observable_indices)):
-                        counts = self.reward.fetch_from_opx(**push_args)
-                        counts_dict = [
-                            {binary(i, self.n_qubits): count[i] for i in range(dim)}
-                            for count in counts
-                        ]  # Batch of counts
-                        # Get the expectation value from the reward data
-                        obs = reward_data[j].hamiltonian
-                        # Create an appropriate diagonal observable
-                        new_op = SparsePauliOp("I" * self.n_qubits, 0.0)
-                        for obs_, coeff in zip((obs.paulis, obs.coeffs)):
-                            diag_obs_label = ""
-                            for char in obs_.to_label():
-                                diag_obs_label += char if char == "I" else "Z"
-                            new_op += SparsePauliOp(diag_obs_label, coeff)
+        # Collect the counts from the OPX
+        for i in range(len(input_state_indices)):
+            if self.config.dfe:
+                for j in range(len(reward_data.observable_indices)):
+                    counts = self.reward.fetch_from_opx(**push_args)
+                    counts_dict = [
+                        {binary(i, self.n_qubits): count[i] for i in range(dim)} for count in counts
+                    ]  # Batch of counts
+                    # Get the expectation value from the reward data
+                    obs = reward_data[j].hamiltonian
+                    # Create an appropriate diagonal observable
+                    new_op = SparsePauliOp("I" * self.n_qubits, 0.0)
+                    for obs_, coeff in zip((obs.paulis, obs.coeffs)):
+                        diag_obs_label = ""
+                        for char in obs_.to_label():
+                            diag_obs_label += char if char == "I" else "Z"
+                        new_op += SparsePauliOp(diag_obs_label, coeff)
 
-                        bit_array = BitArray.from_counts(counts_dict, num_bits=self.n_qubits)
-                        exp_value = bit_array.expectation_values(new_op)
-                        reward.append(exp_value)
+                    bit_array = BitArray.from_counts(counts_dict, num_bits=self.n_qubits)
+                    exp_value = bit_array.expectation_values(new_op)
+                    reward.append(exp_value)
 
         # Reward: BitArray.from_counts()
 
@@ -255,24 +248,22 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         with program() as rl_qoc_training_prog:
             # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
 
-            self.real_time_circuit_parameters.declare_variables(
-                pause_program=False, declare_streams=False
-            )
-            self.max_input_state.declare_variable(pause_program=False)
-            self.input_state_vars.declare_variables(pause_program=False)
-            self.policy.declare_variables(pause_program=False)
-            self.reward.declare_variable(pause_program=False)
-            if isinstance(self.circuit_choice_var, ParameterTable):
-                self.circuit_choice_var.declare_variable(pause_program=False)
+            self.real_time_circuit_parameters.declare_variables(declare_streams=False)
+            self.max_input_state.declare_variable()
+            self.input_state_vars.declare_variables()
+            self.policy.declare_variables()
+            self.reward.declare_variable()
+            if self.circuit_choice_var is not None:
+                self.circuit_choice_var.declare_variable()
             if self.n_reps_var is not None:
-                self.n_reps_var.declare_variable(pause_program=False)
+                self.n_reps_var.declare_variable()
             if self.observable_vars is not None:
-                self.observable_vars.declare_variables(pause_program=False)
+                self.observable_vars.declare_variables()
                 observable_count = declare(int)
-                self.max_observables.declare_variable(pause_program=False)
+                self.max_observables.declare_variable()
 
             # Number of shots for each observable (or total number of shots if no observables)
-            self.pauli_shots.declare_variable(pause_program=False)
+            self.pauli_shots.declare_variable()
             num_updates = declare(int)
             input_state_count = declare(int)
 
@@ -287,19 +278,15 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             ):
                 self.policy.load_input_values()  # Load µ and σ
 
-                if (
-                    self.circuit_choice_var is not None
-                ):  # Load circuit choice (switch over circuit contexts)
+                if self.circuit_choice_var is not None:  # Switch between circuit contexts
                     self.circuit_choice_var.load_input_value()
 
-                if self.n_reps_var is not None:
+                if self.n_reps_var is not None:  # Variable number of repetitions
                     # Load number of repetitions of cycle circuit (can vary at each iteration)
                     self.n_reps_var.load_input_value()
 
                 self.max_input_state.load_input_value()  # Load number of input states to prepare
-                if (
-                    self.observable_vars is not None
-                ):  # DFE: Load number of qubit-wise non-commuting observables
+                if self.observable_vars is not None:  # DFE reward only
                     self.max_observables.load_input_value()
 
                 assign(input_state_count, 0)
@@ -323,6 +310,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             with stream_processing():
                 self.reward.stream_processing()
 
+        self.reset_parameters()
         return rl_qoc_training_prog
 
     def reset_parameters(self):
@@ -345,9 +333,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         j = declare(int)
         lower_bound = declare(fixed, value=self.action_space.low)
         upper_bound = declare(fixed, value=self.action_space.high)
+        μ = self.policy.get_variable("mu")
+        σ = self.policy.get_variable("sigma")
 
         with for_(b, 0, b < self.batch_size // 2, b + 1):
-            temp_action, temp_action2 = self._action_sampling()
+            temp_action, temp_action2 = self._action_sampling(μ, σ)
 
             with for_(j, 0, j < 2, j + 1):
                 for i, parameter in enumerate(self.real_time_circuit_parameters.parameters):
@@ -366,7 +356,16 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
                 self.reward.send_to_python()
 
-    def _action_sampling(self):
+    def _action_sampling(self, mu, sigma):
+        """
+        Sample actions from a multivariate Gaussian distribution using the Muller-Box method
+        Args:
+            µ: Mean of the Gaussian distribution (as a QUA array variable)
+            σ: Standard deviation of the Gaussian distribution (as a QUA array variable)
+
+        Returns:
+
+        """
         # Declare variables for efficient Gaussian random sampling
         j = declare(int)
         n_lookup, cos_array, ln_array = get_gaussian_sampling_input()
@@ -375,9 +374,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         batch_r = Random(self.seed)
         temp_action = declare(fixed, size=self.n_actions)
         temp_action2 = declare(fixed, size=self.n_actions)
-
-        μ = self.policy.get_variable("mu")
-        σ = self.policy.get_variable("sigma")
 
         # Sample actions from multivariate Gaussian distribution (Muller-Box method)
         with for_(j, 0, j < self.n_actions, j + 1):
@@ -389,11 +385,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             )
             assign(
                 temp_action[j],
-                μ[j] + σ[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)],
+                mu[j] + sigma[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)],
             )
             assign(
                 temp_action2[j],
-                μ[j] + σ[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
+                mu[j] + sigma[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
             )
 
             return temp_action, temp_action2
