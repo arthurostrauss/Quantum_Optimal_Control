@@ -21,8 +21,7 @@ from qiskit.primitives.containers.observables_array import ObservablesArray
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.transpiler.passes import Optimize1qGatesDecomposition
 
-from qm_backend import QMBackend
-from qualang_tools.video_mode import ParameterTable
+from qiskit_qm_provider import QMBackend, ParameterTable
 from qiskit.transpiler import PassManager, PassManagerConfig
 from qiskit.pulse.library import SymbolicPulse
 from typing import List

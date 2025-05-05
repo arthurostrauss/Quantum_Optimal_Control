@@ -10,7 +10,6 @@ from qiskit.pulse import Schedule, ScheduleBlock
 
 from qm.qua import *
 
-from .parameter_table import ParameterTable, Parameter as QuaParameter
 import numpy as np
 from quam.components.quantum_components import Qubit, QubitPair
 

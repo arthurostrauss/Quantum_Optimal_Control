@@ -8,7 +8,7 @@ import torch
 from torch.distributions import Normal
 from ..agent import CustomPPO
 from ..environment.base_q_env import BaseQuantumEnvironment as QuantumEnvironment
-from .fixed_point import FixedPoint
+from qiskit_qm_provider import FixedPoint
 
 import sys
 import logging
