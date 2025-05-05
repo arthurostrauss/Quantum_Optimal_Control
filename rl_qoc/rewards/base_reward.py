@@ -12,8 +12,8 @@ import numpy as np
 
 if TYPE_CHECKING:
     from ..environment.configuration.qconfig import QEnvConfig
-    from ..environment.target import Target  
-    
+    from ..environment.target import Target
+
 PubLike = Union[SamplerPubLike, EstimatorPubLike]
 Pub = Union[SamplerPub, EstimatorPub]
 Primitive = Union[BaseEstimatorV2, BaseSamplerV2]

@@ -110,9 +110,9 @@ class ChannelRewardData(RewardData):
                         state += "-"
                 else:
                     if input_indices[i] % 2 == 0:
-                        state += "+y"
+                        state += "+i"
                     else:
-                        state += "-y"
+                        state += "-i"
         state += ">"
         return state
 
@@ -177,23 +177,24 @@ class ChannelRewardDataList(RewardDataList):
         return sum(reward_data.total_shots for reward_data in self.reward_data)
 
     @property
-    def hamiltonian(self) -> SparsePauliOp:
+    def hamiltonian(self) -> List[SparsePauliOp]:
         """
         Return the Hamiltonian to be estimated.
         """
-        ham = SparsePauliOp("I" * self.num_qubits, coeffs=self.id_coeff)
-        used_labels = []
+        ham = [SparsePauliOp("I" * self.num_qubits, coeffs=self.id_coeff)]
         for reward_data in self.reward_data:
-            if reward_data.input_pauli.to_label() not in used_labels and all(
-                index % 2 == 0
-                for index in [
-                    reward_data.input_indices[i] for i in reward_data.causal_cone_qubits_indices
-                ]
-            ):
-                ham += reward_data.hamiltonian
-                used_labels.append(reward_data.input_pauli.to_label())
+            if isinstance(reward_data.observables, List):
+                ham += reward_data.observables
+            else:
+                ham.append(reward_data.observables)
+        return ham
 
-        return ham.simplify()
+    @property
+    def observables(self) -> List[SparsePauliOp]:
+        """
+        Return the observables.
+        """
+        return [reward_data.observables for reward_data in self.reward_data]
 
     @property
     def input_paulis(self) -> List[Pauli]:
@@ -201,6 +202,20 @@ class ChannelRewardDataList(RewardDataList):
         Return the input Pauli operators.
         """
         return [reward_data.input_pauli for reward_data in self.reward_data]
+
+    @property
+    def input_circuits(self) -> List[QuantumCircuit]:
+        """
+        Return the input circuits.
+        """
+        return [reward_data.input_circuit for reward_data in self.reward_data]
+
+    @property
+    def pauli_eigenstates(self) -> List[str]:
+        """
+        Return the Pauli eigenstates.
+        """
+        return [reward_data.pauli_eigenstate for reward_data in self.reward_data]
 
     @property
     def input_indices(self) -> List[Tuple[int]]:

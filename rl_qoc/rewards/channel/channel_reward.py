@@ -144,13 +144,12 @@ class ChannelReward(Reward):
             ),
             return_counts=True,
         )
-        
+
         # Sort samples in descending order based on probabilities
         sorted_indices = np.argsort(counts)[::-1]
         counts = counts[sorted_indices]
         samples = samples[sorted_indices]
-        
-        
+
         # Convert samples to a pair of indices in the Pauli basis
         pauli_indices = np.array(
             [np.unravel_index(sample, (dim**2, dim**2)) for sample in samples],
@@ -159,15 +158,12 @@ class ChannelReward(Reward):
 
         # Filter out the case where identity ('I'*n_qubits) is sampled (trivial case)
         identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
-        id_coeff = (
-            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
-        )
-        # Additional dim factor to account for all eigenstates of identity input state
+        id_coeff = c_factor * np.sum(counts[identity_terms] / (Chi[samples[identity_terms]]))
 
         pauli_indices = np.delete(pauli_indices, identity_terms, axis=0)
         samples = np.delete(samples, identity_terms)
         counts = np.delete(counts, identity_terms)
-        
+
         basis = pauli_basis(num_qubits=n_qubits)
 
         reward_factor = c_factor * counts / (dim * Chi[samples])  # Based on DFE estimator
@@ -177,7 +173,9 @@ class ChannelReward(Reward):
         ]
 
         # Regroup qubit-wise commuting input Paulis
-        input_paulis = PauliList([prep for prep, _ in fiducials_list]).unique().group_qubit_wise_commuting()
+        input_paulis = (
+            PauliList([prep for prep, _ in fiducials_list]).unique().group_qubit_wise_commuting()
+        )
         # Regroup qubit-wise commuting observables
         filtered_fiducials_list = [[group, []] for group in input_paulis]
         pauli_shots = [[] for _ in range(len(input_paulis))]
@@ -187,12 +185,13 @@ class ChannelReward(Reward):
                     filtered_fiducials_list[j][1].append(obs)
                     pauli_shots[j].append(counts[i])
                     break
-                
-        filtered_fiducials_list = [[group, sum(obs_list).simplify().group_commuting(True)] 
-                                   for group, obs_list in filtered_fiducials_list]
+
+        filtered_fiducials_list = [
+            [group, sum(obs_list).simplify().group_commuting(True)]
+            for group, obs_list in filtered_fiducials_list
+        ]
         pauli_shots = [sum(shots) * n_shots for shots in pauli_shots]
-        
-        
+
         # obs_dict = {}
         # # Regroup observables for same input Pauli
         # for i, (prep, obs) in enumerate(fiducials_list):
@@ -206,7 +205,7 @@ class ChannelReward(Reward):
         #             (ref_obs + obs).simplify(),
         #             max(ref_count, counts[i]),
         #         )
-        # 
+        #
         # filtered_fiducials_list = [(prep, obs) for prep, obs, _ in obs_dict.values()]
         # filtered_pauli_shots = [count for _, _, count in obs_dict.values()]
 
@@ -275,7 +274,9 @@ class ChannelReward(Reward):
                 )
 
                 obs_ = [parity * o for o in obs_list]
-                pub_obs = extend_observables(sum(obs_), prep_circuit, target.causal_cone_qubits_indices)
+                pub_obs = extend_observables(
+                    sum(obs_), prep_circuit, target.causal_cone_qubits_indices
+                )
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 if prep_indices not in used_prep_indices:  # Add new PUB
                     # Add PUB

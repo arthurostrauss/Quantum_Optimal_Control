@@ -57,7 +57,12 @@ def precision_to_shots(precision: float) -> int:
     return int(np.ceil(1 / precision**2))
 
 
-def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flow=True):
+def handle_n_reps(
+    qc: QuantumCircuit,
+    n_reps: int = 1,
+    backend: Optional[BackendV2] = None,
+    control_flow: bool = True,
+):
     """
     Returns a Quantum Circuit with qc repeated n_reps times
     Depending on the backend and the control_flow flag,
@@ -67,7 +72,7 @@ def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flo
         qc: Quantum Circuit
         n_reps: Number of repetitions
         backend: Backend instance
-        control_flow: Control flow flag (uses for_loop if True and backend supports it)
+        control_flow: Control flow flag (uses for_loop if True and if backend supports it)
     """
     # Repeat the circuit n_reps times and prepend the input state preparation
     if n_reps == 1:
@@ -581,7 +586,7 @@ def observables_to_indices(
     return observable_indices
 
 
-def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]|Tuple[int]):
+def pauli_input_to_indices(prep: Pauli | str, inputs: List[int] | Tuple[int]):
     """
     Convert the input state to single qubit state indices for the reward computation
 
@@ -662,6 +667,7 @@ def extend_observables(
 
     return observables
 
+
 def pauli_weight(pauli_obj: Union[Pauli, SparsePauliOp, PauliList]) -> Union[int, List[int]]:
     """
     Return the weight(s) of a Pauli object:
@@ -671,10 +677,10 @@ def pauli_weight(pauli_obj: Union[Pauli, SparsePauliOp, PauliList]) -> Union[int
     """
 
     if isinstance(pauli_obj, Pauli):
-        return pauli_obj.x|pauli_obj.z
+        return pauli_obj.x | pauli_obj.z
     elif isinstance(pauli_obj, SparsePauliOp):
         return np.sum(pauli_obj.paulis.x | pauli_obj.paulis.z, axis=1).tolist()
     elif isinstance(pauli_obj, PauliList):
-        return np.sum(pauli_obj.x|pauli_obj.z, axis=1).tolist()
+        return np.sum(pauli_obj.x | pauli_obj.z, axis=1).tolist()
     else:
         raise TypeError("Input must be a Pauli or SparsePauliOp.")
