@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Union, Optional
@@ -91,3 +93,30 @@ class Reward(ABC):
 
     def set_reward_seed(self, seed: int):
         pass
+
+    def get_real_time_circuit(
+        self,
+        circuits: QuantumCircuit | List[QuantumCircuit],
+        target: Target | List[Target],
+        env_config: QEnvConfig,
+        *args,
+    ) -> QuantumCircuit:
+        """
+        Get a circuit containing real-time control flow and logic to compute the reward.
+        To be used with the QMEnvironment for optimizing compilation latency.
+        Args:
+            circuits: List of quantum circuits to be executed on quantum system (or a single circuit)
+                      A switch statement is used to select the circuit to be executed at runtime.
+            target:  List of target gates or states to prepare (or a single target), used to inform the transpilation
+                     pipeline
+            env_config: Environment configuration, containing information for transpilation process and
+                        execution configuration (notably the desired number of repetitions of the cycle circuit)
+            *args: Optional arguments for the reward method
+
+        Returns:
+            A QuantumCircuit object containing the real-time control flow and logic to compute the reward.
+
+        """
+        raise NotImplementedError(
+            "get_real_time_circuit is not implemented for this reward method."
+        )

@@ -11,7 +11,7 @@ from ..environment import (
     ContextAwareQuantumEnvironment,
     QEnvConfig,
 )
-from ..rewards.real_time import get_real_time_reward_circuit
+
 from qiskit_qm_provider import QMBackend
 from .qua_utils import binary, get_gaussian_sampling_input
 from .qm_config import QMConfig, DGXConfig
@@ -71,7 +71,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             direction=Direction.INCOMING,
         )
 
-        self.real_time_circuit = get_real_time_reward_circuit(
+        self.real_time_circuit = self.config.reward.get_real_time_circuit(
             self.circuits,
             self.get_target(),
             self.config,
@@ -144,11 +144,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         if self.input_type == InputType.DGX:
             ParameterPool.patch_opnic_wrapper(self.qm_backend_config.opnic_dev_path)
-        self.backend.update_calibrations(self.real_time_circuit, self.input_type)
+        self.backend.update_calibrations(self.real_time_circuit, input_type=self.input_type)
         self._qm_job: Optional[RunningQmJob] = None
         self._qm: Optional[QuantumMachine] = None
 
-    def step(self, action: np.array):
+    def step(self, action):
         """
         Perform the action on the quantum environment
         """

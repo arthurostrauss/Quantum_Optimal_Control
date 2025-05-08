@@ -29,7 +29,7 @@ def get_pulse_name(pulse: Pulse) -> str:
 class MeasureMacro(QubitMacro):
     pulse: Union[ReadoutPulse, str] = "readout"
 
-    def apply(self, **kwargs) -> Any:
+    def apply(self, **kwargs) -> QuaVariableBool:
         state = kwargs.get("state", declare(int))
         qua_vars = kwargs.get("qua_vars", (declare(fixed), declare(fixed)))
         pulse: ReadoutPulse = (
@@ -55,7 +55,7 @@ class ResetMacro(QubitMacro):
         super().__post_init__()
         assert self.max_attempts > 0, "max_attempts must be greater than 0"
 
-    def apply(self, **kwargs) -> Any:
+    def apply(self, **kwargs) -> None:
         pi_pulse: Pulse = (
             self.pi_pulse
             if isinstance(self.pi_pulse, Pulse)
@@ -79,7 +79,7 @@ class ResetMacro(QubitMacro):
 
 @quam_dataclass
 class VirtualZMacro(QubitMacro):
-    def apply(self, angle: float):
+    def apply(self, angle: float) -> None:
         self.qubit.xy.frame_rotation_2pi(angle)
 
 
@@ -118,7 +118,7 @@ class CZMacro(QubitPairMacro):
         phase_shift_control=None,
         phase_shift_target=None,
         **kwargs,
-    ):
+    ) -> None:
         self.qubit_control.z.play(
             self.flux_pulse_control_label,
             validate=False,
@@ -146,6 +146,6 @@ class CZMacro(QubitPairMacro):
 @quam_dataclass
 class DelayMacro(QubitMacro):
 
-    def apply(self, duration):
+    def apply(self, duration) -> None:
         qubit: FluxTunableTransmon = self.qubit
         qubit.wait(duration // 4)

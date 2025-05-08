@@ -1,4 +1,7 @@
 from typing import List, Tuple, Optional
+
+from qiskit import ClassicalRegister
+from qiskit.circuit.classical.types import Uint
 from qiskit.primitives import BaseEstimatorV2
 
 from ..base_reward import Reward
@@ -6,11 +9,16 @@ from dataclasses import dataclass, field
 from qiskit.circuit import QuantumCircuit
 from qiskit.quantum_info import Pauli, SparsePauliOp, pauli_basis
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
-from qiskit_experiments.library.tomography.basis import Pauli6PreparationBasis
+from qiskit_experiments.library.tomography.basis import (
+    Pauli6PreparationBasis,
+    PauliMeasurementBasis,
+)
 import numpy as np
 
+from ..real_time_utils import handle_real_time_n_reps
 from ...environment.configuration.qconfig import QEnvConfig
 from ...environment.target import GateTarget
+from ...helpers import get_single_qubit_input_states
 from ...helpers.circuit_utils import (
     handle_n_reps,
     extend_observables,
@@ -20,6 +28,7 @@ from ...helpers.circuit_utils import (
     precision_to_shots,
     shots_to_precision,
 )
+from ...helpers.helper_functions import validate_circuit_and_target
 from .channel_reward_data import ChannelRewardData, ChannelRewardDataList
 
 
@@ -194,8 +203,8 @@ class ChannelReward(Reward):
         used_prep_indices = {}
 
         for (prep, obs_list), shots in zip(fiducials, pauli_shots):
-            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis
-            # Below, we select at random a subset of pure input states to prepare for each prep
+            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis.
+            # Below, we select at random a subset of pure input states to prepare for each prep.
             # If nb_states = 1, we prepare all pure input states for each Pauli prep (no random selection)
 
             # self._fiducials_indices.append(([], observables_to_indices(obs_list)))
@@ -345,6 +354,84 @@ class ChannelReward(Reward):
                 * precision_to_shots(pub.precision)
             )
         return total_shots
+
+    def get_real_time_circuit(
+        self,
+        circuits: QuantumCircuit | List[QuantumCircuit],
+        target: GateTarget | List[GateTarget],
+        env_config: QEnvConfig,
+        *args,
+    ) -> QuantumCircuit:
+
+        n_reps = env_config.current_n_reps
+        all_n_reps = env_config.n_reps
+
+        prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
+        targets = [target] if isinstance(target, GateTarget) else target
+        validate_circuit_and_target(prep_circuits, targets)
+        ref_target = targets[0]
+        qubits = [qc.qubits for qc in prep_circuits]
+        if not all(qc.qubits == qubits[0] for qc in prep_circuits):
+            raise ValueError("All circuits must have the same qubits")
+
+        qc = prep_circuits[0].copy_empty_like("real_time_channel_qc")
+        num_qubits = qc.num_qubits
+
+        n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
+
+        if not qc.clbits:
+            meas = ClassicalRegister(ref_target.causal_cone_size, name="meas")
+            qc.add_register(meas)
+        else:
+            meas = qc.cregs[0]
+            if meas.size != ref_target.causal_cone_size:
+                raise ValueError("Classical register size must match the target causal cone size")
+
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
+        observables_vars = [
+            qc.add_input(f"observable_{i}", Uint(4)) for i in range(ref_target.causal_cone_size)
+        ]
+        input_circuits = [circ.decompose() for circ in get_single_qubit_input_states("pauli6")]
+
+        for q, qubit in enumerate(qc.qubits):
+            # Input state prep (over all qubits of the circuit context)
+            with qc.switch(input_state_vars[q]) as case_input_state:
+                for i, input_circuit in enumerate(input_circuits):
+                    with case_input_state(i):
+                        qc.compose(input_circuit, qubit, inplace=True)
+
+        if len(prep_circuits) > 1:  # Switch over possible contexts
+            circuit_choice = qc.add_input("circuit_choice", Uint(8))
+            with qc.switch(circuit_choice) as case_circuit:
+                for i, prep_circuit in enumerate(prep_circuits):
+                    with case_circuit(i):
+                        handle_real_time_n_reps(all_n_reps, n_reps_var, prep_circuit, qc)
+        else:
+            handle_real_time_n_reps(all_n_reps, n_reps_var, prep_circuits[0], qc)
+
+        # Local Basis rotation handling
+        meas_basis = PauliMeasurementBasis()
+        for q, qubit in enumerate(ref_target.causal_cone_qubits):
+            with qc.switch(observables_vars[q]) as case_observable:
+                for i in range(3):
+                    with case_observable(i):
+                        qc.compose(
+                            meas_basis.circuit([i]).decompose().remove_final_measurements(False),
+                            qubit,
+                            inplace=True,
+                        )
+
+        # Measurement
+        qc.measure(ref_target.causal_cone_qubits, meas)
+        qc.reset(qc.qubits)
+
+        return env_config.backend_info.custom_transpile(
+            qc,
+            optimization_level=1,
+            initial_layout=ref_target.layout,
+            scheduling=False,
+            remove_final_measurements=False,
+        )
 
     def compute_expectation_values(
         self,

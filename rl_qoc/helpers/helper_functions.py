@@ -729,3 +729,16 @@ def generate_default_instruction_durations_dict(
                 default_instruction_durations_dict[(gate, (qubit,))] = (0.0, "s")
 
     return default_instruction_durations_dict
+
+
+def validate_circuit_and_target(prep_circuits, targets):
+    from ..environment.target import GateTarget
+
+    if len(prep_circuits) != len(targets):
+        raise ValueError("Number of circuits and targets must match")
+    if not all([isinstance(t, GateTarget) for t in targets]):
+        raise ValueError("This reward can only be computed for a target gate")
+    if not all(t.causal_cone_size == targets[0].causal_cone_size for t in targets):
+        raise ValueError("All targets must have the same causal cone size")
+    if not all(t.causal_cone_qubits == targets[0].causal_cone_qubits for t in targets):
+        raise ValueError("All targets must have the same causal cone qubits")
