@@ -171,8 +171,16 @@ class StateTarget(BaseTarget):
             if state.purity() - 1 > 1e-6:
                 raise ValueError("Density matrix should be pure")
             self.dm = state
+            if circuit is not None:
+                if not Statevector(circuit).equiv(density_matrix_to_statevector(state)):
+                    raise ValueError("State and circuit do not match")
+                self.circuit = circuit
         elif isinstance(state, Statevector):
             self.dm = DensityMatrix(state)
+            if circuit is not None:
+                if not Statevector(circuit).equiv(state):
+                    raise ValueError("State and circuit do not match")
+                self.circuit = circuit
 
         elif state is None:
             if circuit is None:

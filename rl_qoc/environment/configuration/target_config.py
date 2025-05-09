@@ -8,6 +8,8 @@ from qiskit.circuit import Gate
 from qiskit.exceptions import QiskitError
 from qiskit.circuit.library.standard_gates import get_standard_gate_name_mapping
 
+from ...helpers.circuit_utils import density_matrix_to_statevector, get_gate
+
 
 @dataclass
 class TargetConfig:
@@ -47,17 +49,7 @@ class GateTargetConfig(TargetConfig):
     gate: Gate | str
 
     def __post_init__(self):
-        if isinstance(self.gate, str):
-            if self.gate.lower() == "cnot":
-                self.gate = "cx"
-            elif self.gate.lower() == "cphase":
-                self.gate = "cz"
-            elif self.gate.lower() == "x/2":
-                self.gate = "sx"
-            try:
-                self.gate = get_standard_gate_name_mapping()[self.gate.lower()]
-            except KeyError as e:
-                raise ValueError(f"Gate {self.gate} not recognized") from e
+        self.gate = get_gate(self.gate)
 
     def as_dict(self):
         return {
@@ -84,6 +76,10 @@ class StateTargetConfig(TargetConfig):
                 self.state = Statevector.from_label(self.state)
             except QiskitError as e:
                 raise QiskitError(f"State {self.state} not recognized") from e
+        elif isinstance(self.state, QuantumCircuit):
+            self.state = Statevector(self.state)
+        elif isinstance(self.state, DensityMatrix):
+            self.state = density_matrix_to_statevector(self.state)
 
     def as_dict(self):
         return {

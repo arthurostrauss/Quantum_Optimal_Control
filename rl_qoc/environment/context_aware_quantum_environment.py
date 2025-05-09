@@ -35,11 +35,12 @@ from qiskit.circuit import (
     Instruction,
     Parameter,
 )
+from qiskit.circuit.library import StatePreparation
 from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
 from qiskit.providers import BackendV2
-from qiskit.quantum_info import Operator
+from qiskit.quantum_info import Operator, DensityMatrix
 from qiskit.transpiler import (
     Layout,
     InstructionProperties,
@@ -55,10 +56,11 @@ from ..helpers import (
     CustomGateReplacementPass,
     retrieve_primitives,
 )
-from ..helpers.circuit_utils import get_instruction_timings, get_gate
+from ..helpers.circuit_utils import get_instruction_timings
 from .configuration.qconfig import QEnvConfig, GateTargetConfig
 from .base_q_env import (
     GateTarget,
+    StateTarget,
     BaseQuantumEnvironment,
     QiskitBackendInfo,
 )
@@ -133,8 +135,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
 
         super().__init__(training_config)
-        if not isinstance(self.config.target, GateTargetConfig):
-            raise ValueError("Target should be a GateTargetConfig, not a custom instruction")
+        if circuit_context is not None and not isinstance(self.config.target, GateTargetConfig):
+            raise ValueError(
+                "Target should be a GateTargetConfig, if a circuit context is provided"
+            )
         self._optimal_actions = None
         self._param_values = None
         self.circ_tgt_register = None
@@ -149,7 +153,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         if circuit_context is None:
             q_reg = QuantumRegister(len(self.config.target.physical_qubits), name="tgt")
             circuit_context = QuantumCircuit(q_reg)
-            circuit_context.append(self.config.target.gate, q_reg)
+            if isinstance(self.config.target, GateTargetConfig):
+                circuit_context.append(self.config.target.gate, q_reg)
+            else:  # State
+                circuit_context.prepare_state(self.config.target.state, q_reg)
+
         self.set_unbound_circuit_context(circuit_context, **context_kwargs)
 
     def define_target_and_circuits(self):
@@ -158,7 +166,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         if self.circuit_context.parameters:
             raise ValueError("Circuit context still contains unassigned parameters")
-        assert isinstance(self.config.target, GateTargetConfig), "Target should be a gate"
+        # assert isinstance(self.config.target, GateTargetConfig), "Target should be a gate"
 
         if self.backend_info.coupling_map.size() == 0 and self.backend is None:
             # Build a fully connected coupling map if no backend is provided
@@ -254,17 +262,30 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     self.custom_instructions.append(op)
                     operations_mapping[op.name] = op
 
-        target = [
-            GateTarget(
-                self.config.target.gate,
-                self.physical_target_qubits,
-                baseline_circuit,
-                self.circ_tgt_register,
-                layout,
-                input_states_choice=input_states_choice,
-            )
-            for baseline_circuit, layout in zip(baseline_circuits, layouts)
-        ]
+        target = (
+            [
+                GateTarget(
+                    self.config.target.gate,
+                    self.physical_target_qubits,
+                    baseline_circuit,
+                    self.circ_tgt_register,
+                    layout,
+                    input_states_choice=input_states_choice,
+                )
+                for baseline_circuit, layout in zip(baseline_circuits, layouts)
+            ]
+            if isinstance(self.config.target, GateTargetConfig)
+            else [
+                StateTarget(
+                    self.config.target.state,
+                    baseline_circuit,
+                    self.physical_target_qubits,
+                    self.circ_tgt_register,
+                    layout,
+                )
+                for baseline_circuit, layout in zip(baseline_circuits, layouts)
+            ]
+        )
         return target, custom_circuits, baseline_circuits
 
     def reset(
@@ -567,8 +588,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         )
 
         # Adjust target register to match it with circuit context
+        instruction = (
+            self.config.target.gate
+            if isinstance(self.config.target, GateTargetConfig)
+            else new_context.data[0].operation
+        )
         self.target_instruction = CircuitInstruction(
-            get_gate(self.config.target.gate),
+            instruction,
             (qubit for qubit in self.circ_tgt_register),
         )
         tgt_instruction_counts = self.tgt_instruction_counts
