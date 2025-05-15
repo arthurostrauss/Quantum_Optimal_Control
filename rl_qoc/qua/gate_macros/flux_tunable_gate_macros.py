@@ -30,7 +30,7 @@ class MeasureMacro(QubitMacro):
     pulse: Union[ReadoutPulse, str] = "readout"
 
     def apply(self, **kwargs) -> QuaVariableBool:
-        state = kwargs.get("state", declare(int))
+        state = kwargs.get("state", declare(bool))
         qua_vars = kwargs.get("qua_vars", (declare(fixed), declare(fixed)))
         pulse: ReadoutPulse = (
             self.pulse if isinstance(self.pulse, Pulse) else self.qubit.get_pulse(self.pulse)
@@ -39,7 +39,7 @@ class MeasureMacro(QubitMacro):
         resonator: ReadoutResonatorIQ = self.qubit.resonator
         resonator.measure(get_pulse_name(pulse), qua_vars=qua_vars)
         I, Q = qua_vars
-        assign(state, Cast.to_int(I > pulse.threshold))
+        assign(state, I > pulse.threshold)
         return state
 
 
@@ -148,4 +148,4 @@ class DelayMacro(QubitMacro):
 
     def apply(self, duration) -> None:
         qubit: FluxTunableTransmon = self.qubit
-        qubit.wait(duration // 4)
+        qubit.wait(duration)

@@ -1,16 +1,20 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Optional
 import numpy as np
+from qiskit import ClassicalRegister
 from qiskit.circuit import QuantumCircuit
+from qiskit.circuit.classical.types import Uint
 from qiskit.primitives import BaseSamplerV2
 from qiskit.primitives.containers.sampler_pub import SamplerPub
-from qiskit.quantum_info import random_clifford, Operator
+from qiskit.quantum_info import random_clifford, Operator, Clifford
 
-from ..base_reward import Reward
+from ..base_reward import Reward, Target
 from .orbit_reward_data import ORBITRewardDataList, ORBITRewardData
 from ...environment.target import GateTarget
 from ...environment.configuration.qconfig import QEnvConfig
-from ...helpers import causal_cone_circuit
+from ...helpers import causal_cone_circuit, validate_circuit_and_target
 
 
 @dataclass
@@ -212,3 +216,45 @@ class ORBITReward(Reward):
         Retrieve number of shots associated to the input pub list
         """
         return sum([pub.shots * pub.parameter_values.shape[0] for pub in pubs])
+
+    def get_real_time_circuit(
+        self,
+        circuits: QuantumCircuit | List[QuantumCircuit],
+        target: GateTarget | List[GateTarget],
+        env_config: QEnvConfig,
+        *args,
+    ) -> QuantumCircuit:
+        """
+        Get the real time circuit for the given target
+        """
+        l = env_config.current_n_reps
+        all_n_reps = env_config.n_reps
+
+        prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
+        targets = [target] if isinstance(target, GateTarget) else target
+        validate_circuit_and_target(prep_circuits, targets)
+        ref_target = targets[0]
+        qubits = [qc.qubits for qc in prep_circuits]
+        if not all(qc.qubits == qubits[0] for qc in prep_circuits):
+            raise ValueError("All circuits should have the same qubits")
+
+        qc = prep_circuits[0].copy_empty_like(name="real_time_orbit_qc")
+        num_qubits = qc.num_qubits
+
+        if num_qubits != 1:
+            raise ValueError("ORBIT reward can only be computed for a single qubit")
+        if ref_target.causal_cone_size != num_qubits:
+            raise ValueError("ORBIT reward can only be computed for a single qubit causal cone")
+
+        n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else l
+
+        if not qc.clbits:
+            meas = ClassicalRegister(ref_target.causal_cone_size, name="meas")
+            qc.add_register(meas)
+        else:
+            meas = qc.cregs[0]
+            if meas.size != ref_target.causal_cone_size:
+                raise ValueError(
+                    "Classical register size should be equal to the number of qubits in the causal cone"
+                )
+        random_clifford()
