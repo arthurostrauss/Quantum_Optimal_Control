@@ -119,10 +119,10 @@ class ChannelReward(Reward):
 
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
-        prep_basis = Pauli6PreparationBasis()
+        prep_basis = Pauli6PreparationBasis() # Pauli6 basis for input state preparation
 
         probabilities = Chi**2 / (dim**2)
-        cutoff = 1e-4
+        cutoff = 1e-4 # Cutoff for negligible probabilities
         non_zero_indices = np.nonzero(probabilities > cutoff)[0]
         non_zero_probabilities = probabilities[non_zero_indices]
         non_zero_probabilities /= np.sum(non_zero_probabilities)
@@ -181,7 +181,7 @@ class ChannelReward(Reward):
         pauli_shots = [[] for _ in range(len(input_paulis))]
         for i, (prep, obs) in enumerate(fiducials_list):
             for j, group in enumerate(input_paulis):
-                if prep in group:
+                if prep in group: 
                     filtered_fiducials_list[j][1].append(obs)
                     pauli_shots[j].append(counts[i])
                     break
@@ -210,13 +210,13 @@ class ChannelReward(Reward):
         # filtered_pauli_shots = [count for _, _, count in obs_dict.values()]
 
         fiducials = filtered_fiducials_list
-
+        
         used_prep_indices = {}
 
         for (prep, obs_list), shots in zip(fiducials, pauli_shots):
-            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis.
-            # Below, we select at random a subset of pure input states to prepare for each prep.
-            # If nb_states = 1, we prepare all pure input states for each Pauli prep (no random selection)
+            # Each prep is a Pauli, that we need to decompose in its pure eigenbasis.
+            # Below, we select at random a subset of pure input states to prepare for each prep
+            # If nb_states = dim, we prepare all pure input states for each Pauli prep (no random selection)
 
             # self._fiducials_indices.append(([], observables_to_indices(obs_list)))
             # self._full_fiducials.append(([], obs_list))
@@ -224,7 +224,7 @@ class ChannelReward(Reward):
             selected_input_states: List[int] = self.input_states_rng.choice(
                 dim, size=max_input_states, replace=False
             )
-            # TODO: Convert this part for the PauliList
+            # Build representative of the qubit-wise commuting Pauli group (the one with highest weight)
             pauli_rep = Pauli((np.logical_or.reduce(prep.z), np.logical_or.reduce(prep.x)))
             prep_label = pauli_rep.to_label()
             dedicated_shots = (
