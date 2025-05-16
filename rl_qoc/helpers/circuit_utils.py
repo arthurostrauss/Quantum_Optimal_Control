@@ -546,6 +546,45 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
     return states
 
 
+def observables_from_array(pauli_array: np.ndarray, coeff_array: np.ndarray) -> list:
+    """
+    Convert a numpy array to a list of SparsePauliOp objects.
+    Args:
+        pauli_array: Last dimension of the array is the Pauli string per qubit
+        coeff_array: Coefficients for each Pauli string
+
+    Returns:
+        list: List of SparsePauliOp objects
+
+    """
+    pauli_list = []
+    if pauli_array.shape[:-1] != coeff_array.shape:
+        raise ValueError("Shapes of pauli_array and coeff_array do not match")
+
+    # Mapping for Pauli operators
+    pauli_map = {0: "I", 1: "X", 2: "Y", 3: "Z"}
+
+    # Flatten all dimensions except the last one
+    flat_paulis = pauli_array.reshape(-1, pauli_array.shape[-1])
+    flat_coeffs = coeff_array.flatten()
+
+    for pauli_string, coeff in zip(flat_paulis, flat_coeffs):
+        # Convert numbers to Pauli string
+        pauli_str = ''.join(pauli_map[int(p)] for p in pauli_string)
+        pauli_list.append(SparsePauliOp.from_list([(pauli_str, coeff)]))
+
+    # Manually reshape using the original shape
+    def nested_reshape(flat_list, shape):
+        """Recursively reshape a flat list into nested lists."""
+        if not shape:
+            return flat_list.pop(0)
+        size = shape[0]
+        return [nested_reshape(flat_list, shape[1:]) for _ in range(size)]
+
+    return nested_reshape(pauli_list.copy(), list(coeff_array.shape))
+
+
+
 def observables_to_indices(
     observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str,
 ):
