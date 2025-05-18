@@ -32,7 +32,6 @@ from ...helpers.circuit_utils import (
 Indices = Tuple[int]
 Target = Union[StateTarget, GateTarget]
 
-
 @dataclass
 class StateReward(Reward):
     """
