@@ -314,6 +314,7 @@ class BaseQuantumEnvironment(ABC, Env):
         super().reset(seed=seed)
         self._episode_tracker += 1
         self._episode_ended = False
+        options = options or {}
         self.modify_environment_params(**options)
         if len(self.config.execution_config.n_reps) > 1:
             self.config.execution_config.n_reps_index = self._n_reps_rng.integers(
