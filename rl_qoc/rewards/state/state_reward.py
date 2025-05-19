@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple, Literal, Optional
+from typing import List, Tuple, Literal, Optional, Union
 
 from qiskit import ClassicalRegister
 from qiskit.circuit import QuantumCircuit
@@ -12,7 +12,7 @@ from qiskit.quantum_info import SparsePauliOp, pauli_basis
 import numpy as np
 from qiskit_experiments.library.tomography.basis import PauliMeasurementBasis
 
-from ..base_reward import Reward, Target
+from ..base_reward import Reward
 from .state_reward_data import StateRewardData, StateRewardDataList
 from ..real_time_utils import handle_real_time_n_reps
 from ...environment.configuration.qconfig import QEnvConfig
@@ -30,7 +30,7 @@ from ...helpers.circuit_utils import (
 )
 
 Indices = Tuple[int]
-
+Target = Union[StateTarget, GateTarget]
 
 @dataclass
 class StateReward(Reward):
@@ -302,7 +302,7 @@ class StateReward(Reward):
         observables_vars = [
             qc.add_input(f"observable_{i}", Uint(4)) for i in range(ref_target.causal_cone_size)
         ]
-        input_circuits = [circ.decompose() for circ in get_single_qubit_input_states("pauli6")]
+        input_circuits = [circ.decompose() for circ in get_single_qubit_input_states(self.input_states_choice)]
 
         for q, qubit in enumerate(qc.qubits):
             # Input state prep (over all qubits of the circuit context)

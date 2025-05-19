@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, List, Literal, Callable, Any
+from typing import Dict, Optional, List, Literal, Callable, Any, TYPE_CHECKING
 from gymnasium.spaces import Box
 from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit import ParameterVector, Parameter
@@ -22,6 +22,9 @@ from .execution_config import ExecutionConfig
 from .benchmark_config import BenchmarkConfig
 from ..backend_info import BackendInfo
 from ...helpers import load_q_env_from_yaml_file, select_backend
+
+if TYPE_CHECKING:
+    from ...rewards import Reward
 
 
 def default_benchmark_config():
@@ -47,7 +50,7 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward: Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward" = "state"
+    reward: Reward = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
     _backend_info: BackendInfo = None

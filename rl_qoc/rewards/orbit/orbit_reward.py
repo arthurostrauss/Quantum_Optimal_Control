@@ -10,7 +10,7 @@ from qiskit.primitives import BaseSamplerV2
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 from qiskit.quantum_info import random_clifford, Operator, Clifford
 
-from ..base_reward import Reward, Target
+from ..base_reward import Reward
 from .orbit_reward_data import ORBITRewardDataList, ORBITRewardData
 from ...environment.target import GateTarget
 from ...environment.configuration.qconfig import QEnvConfig
