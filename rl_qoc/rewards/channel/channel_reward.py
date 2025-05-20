@@ -99,7 +99,7 @@ class ChannelReward(Reward):
         if target.causal_cone_size > 3:
             raise ValueError(
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
-            )
+            ) 
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
         n_qubits = target.causal_cone_size
@@ -214,17 +214,17 @@ class ChannelReward(Reward):
         used_prep_indices = {}
 
         for (prep, obs_list), shots in zip(fiducials, pauli_shots):
-            # Each prep is a Pauli, that we need to decompose in its pure eigenbasis.
+            # Each prep is a Pauli that we need to decompose in its pure eigenbasis.
             # Below, we select at random a subset of pure input states to prepare for each prep
             # If nb_states = dim, we prepare all pure input states for each Pauli prep (no random selection)
 
             # self._fiducials_indices.append(([], observables_to_indices(obs_list)))
             # self._full_fiducials.append(([], obs_list))
             max_input_states = nb_states
-            selected_input_states: List[int] = self.input_states_rng.choice(
+            selected_input_states = self.input_states_rng.choice(
                 dim, size=max_input_states, replace=False
             )
-            # Build representative of the qubit-wise commuting Pauli group (the one with highest weight)
+            # Build representative of qubit-wise commuting Pauli group (the one with the highest weight)
             pauli_rep = Pauli((np.logical_or.reduce(prep.z), np.logical_or.reduce(prep.x)))
             prep_label = pauli_rep.to_label()
             dedicated_shots = (
