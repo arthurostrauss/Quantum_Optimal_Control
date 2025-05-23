@@ -570,7 +570,7 @@ def observables_from_array(pauli_array: np.ndarray, coeff_array: np.ndarray) -> 
 
     for pauli_string, coeff in zip(flat_paulis, flat_coeffs):
         # Convert numbers to Pauli string
-        pauli_str = ''.join(pauli_map[int(p)] for p in pauli_string)
+        pauli_str = "".join(pauli_map[int(p)] for p in pauli_string)
         pauli_list.append(SparsePauliOp.from_list([(pauli_str, coeff)]))
 
     # Manually reshape using the original shape
@@ -582,7 +582,6 @@ def observables_from_array(pauli_array: np.ndarray, coeff_array: np.ndarray) -> 
         return [nested_reshape(flat_list, shape[1:]) for _ in range(size)]
 
     return nested_reshape(pauli_list.copy(), list(coeff_array.shape))
-
 
 
 def observables_to_indices(
@@ -723,3 +722,38 @@ def pauli_weight(pauli_obj: Union[Pauli, SparsePauliOp, PauliList]) -> Union[int
         return np.sum(pauli_obj.x | pauli_obj.z, axis=1).tolist()
     else:
         raise TypeError("Input must be a Pauli or SparsePauliOp.")
+
+
+def are_qubit_wise_commuting(p1: Pauli, p2: Pauli) -> bool:
+    """Check qubit-wise commutation: commute on each qubit independently."""
+    for c1, c2 in zip(p1.to_label(), p2.to_label()):
+        if c1 != "I" and c2 != "I" and c1 != c2:
+            return False
+    return True
+
+
+def group_input_paulis_by_qwc(input_paulis: PauliList, counts) -> List[PauliList]:
+    """Group input Pauli operators by qubit-wise commutation (QWC), sorted by descending importance.
+
+    Each group is returned as a PauliList.
+    """
+    # Extract input Pauli operators
+
+    # Sort input Paulis by descending count importance
+    sorted_indices = sorted(range(len(counts)), key=lambda i: -counts[i])
+    sorted_paulis = [input_paulis[i] for i in sorted_indices]
+
+    grouped = []
+    while sorted_paulis:
+        ref = sorted_paulis.pop(0)
+        group = [ref]
+        to_remove = []
+        for i, other in enumerate(sorted_paulis):
+            if are_qubit_wise_commuting(ref, other):
+                group.append(other)
+                to_remove.append(i)
+        for i in reversed(to_remove):
+            sorted_paulis.pop(i)
+        grouped.append(PauliList(group))  # Convert to PauliList
+
+    return grouped
