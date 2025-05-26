@@ -5,7 +5,7 @@ from qiskit.quantum_info import SparsePauliOp
 from qiskit.circuit import QuantumCircuit, Parameter
 from qiskit.result import QuasiDistribution, sampled_expectation_value
 from qiskit.primitives.containers.bit_array import BitArray
-from qm import QuantumMachine, QuantumMachinesManager
+from qm import QuantumMachine, QuantumMachinesManager, Program, CompilerOptionArguments
 
 from ..environment import (
     ContextAwareQuantumEnvironment,
@@ -17,7 +17,7 @@ from .qua_utils import binary, get_gaussian_sampling_input
 from .qm_config import QMConfig, DGXConfig
 from qm.qua import *
 from qm.jobs.running_qm_job import RunningQmJob
-from typing import Optional
+from typing import Optional, Union
 from qiskit_qm_provider import (
     Parameter as QuaParameter,
     ParameterTable,
@@ -25,10 +25,12 @@ from qiskit_qm_provider import (
     InputType,
     ParameterPool,
 )
+from ..rewards import CAFERewardDataList, ChannelRewardDataList, StateRewardDataList
 
 ALL_MEASUREMENTS_TAG = "measurements"
 """The tag to save all measurements results to."""
 _QASM3_DUMP_LOOSE_BIT_PREFIX = "_bit"
+RewardDataType = Union[CAFERewardDataList, ChannelRewardDataList, StateRewardDataList]
 
 
 class QMEnvironment(ContextAwareQuantumEnvironment):
@@ -37,6 +39,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self,
         training_config: QEnvConfig,
         circuit_context: Optional[QuantumCircuit] = None,
+        job: Optional[RunningQmJob] = None,
     ):
         ParameterPool.reset()
         super().__init__(training_config, circuit_context)
@@ -75,6 +78,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.circuits,
             self.get_target(),
             self.config,
+            skip_transpilation=True,
         )
         self.input_state_vars = ParameterTable.from_qiskit(
             self.real_time_circuit,
@@ -95,7 +99,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         self.n_reps_var: Optional[QuaParameter] = (
             QuaParameter(
-                "n_reps", self.n_reps, input_type=self.input_type, direction=Direction.OUTGOING
+                "n_reps",
+                self.n_reps,
+                input_type=self.input_type,
+                direction=Direction.OUTGOING,
             )
             if self.real_time_circuit.get_var("n_reps", None) is not None
             else None
@@ -145,7 +152,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         if self.input_type == InputType.DGX:
             ParameterPool.patch_opnic_wrapper(self.qm_backend_config.opnic_dev_path)
         self.backend.update_calibrations(self.real_time_circuit, input_type=self.input_type)
-        self._qm_job: Optional[RunningQmJob] = None
+        self._qm_job: Optional[RunningQmJob] = job
         self._qm: Optional[QuantumMachine] = None
 
     def step(self, action):
@@ -155,7 +162,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         dim = 2**self.n_qubits
         if self._qm_job is None:
-            self._qm_job = self.start_program()
+            raise RuntimeError(
+                "The QUA program has not been started yet. Call start_program() first."
+            )
 
         verbosity = (
             self.qm_backend_config.verbosity if isinstance(self.qm_backend_config, DGXConfig) else 2
@@ -171,7 +180,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         additional_input = (
             self.config.execution_config.dfe_precision if self.config.dfe else self.baseline_circuit
         )
-        reward_data = self.config.reward.get_reward_data(
+        reward_data: RewardDataType = self.config.reward.get_reward_data(
             self.circuit,
             np.zeros((1, self.n_actions)),
             self.target,
@@ -189,52 +198,90 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         # Push the reward data to the OPX
         input_state_indices = reward_data.input_indices
+        max_input_state = len(input_state_indices)
 
-        self.max_input_state.push_to_opx(len(input_state_indices), **push_args)
-        if hasattr(reward_data, "observable_indices"):
-            self.max_observables.push_to_opx(len(reward_data.observable_indices), **push_args)
+        self.max_input_state.push_to_opx(max_input_state, **push_args)
+        if self.config.dfe:
+            self.max_observables.push_to_opx(len(reward_data.observables_indices), **push_args)
+            max_observables = len(reward_data.observables_indices)
 
-        reward = []
+        reward = np.zeros(shape=(self.batch_size,))
         for i, input_state in enumerate(input_state_indices):
             input_state_dict = {
                 input_var: input_state_val
-                for input_var, input_state_val in zip(self.input_state_vars, input_state)
+                for input_var, input_state_val in zip(self.input_state_vars.parameters, input_state)
             }
             self.input_state_vars.push_to_opx(input_state_dict, **push_args)
             if self.config.dfe:
-                for j, observable in enumerate(reward_data.observable_indices):
+                for j, observable in enumerate(reward_data.observables_indices):
                     observable_dict = {
-                        observable_var: observable_val
-                        for observable_var, observable_val in zip(self.observable_vars, observable)
+                        observable_var: list(observable_val)
+                        for observable_var, observable_val in zip(
+                            self.observable_vars.parameters, observable
+                        )
                     }
                     self.observable_vars.push_to_opx(observable_dict, **push_args)
                     self.pauli_shots.push_to_opx(reward_data.shots[j], **push_args)
 
-        # Collect the counts from the OPX
-        for i in range(len(input_state_indices)):
+        collected_counts = self.reward.fetch_from_opx(
+            **push_args,
+            fetching_index=self.step_tracker,
+            fetching_size=self.batch_size
+            * max_input_state
+            * (max_observables if self.config.dfe else 1),
+        )
+
+        # The counts are a flattened list of counts from the initial shape (max_input_state, max_observables, batch_size)
+        # Reshape the counts to the original shape
+        if self.config.dfe:
+            counts = np.array(collected_counts).reshape(
+                (max_input_state, max_observables, self.batch_size, dim)
+            )
+        else:
+            counts = np.array(collected_counts).reshape((max_input_state, self.batch_size, dim))
+
+        # In what follows, we will want to put the batch_size dimension first, so we transpose the counts
+        if self.config.dfe:
+            counts = np.transpose(counts, (2, 0, 1, 3))
+        else:
+            counts = np.transpose(counts, (1, 0, 2))
+        # Convert the counts to a dictionary of counts
+
+        for batch_idx in range(self.batch_size):
             if self.config.dfe:
-                for j in range(len(reward_data.observable_indices)):
-                    counts = self.reward.fetch_from_opx(**push_args)
-                    counts_dict = [
-                        {binary(i, self.n_qubits): count[i] for i in range(dim)} for count in counts
-                    ]  # Batch of counts
-                    # Get the expectation value from the reward data
-                    obs = reward_data[j].hamiltonian
-                    # Create an appropriate diagonal observable
-                    new_op = SparsePauliOp("I" * self.n_qubits, 0.0)
-                    for obs_, coeff in zip((obs.paulis, obs.coeffs)):
-                        diag_obs_label = ""
-                        for char in obs_.to_label():
-                            diag_obs_label += char if char == "I" else "Z"
-                        new_op += SparsePauliOp(diag_obs_label, coeff)
-
+                exp_value = reward_data.id_coeff
+                for i_idx in range(max_input_state):
+                    for o_idx in range(max_observables):
+                        counts_dict = {
+                            binary(i, self.n_qubits): counts[batch_idx, i_idx, o_idx, i]
+                            for i in range(dim)
+                        }
+                        obs = reward_data[i_idx].hamiltonian.group_commuting(True)[o_idx]
+                        diag_obs = SparsePauliOp("I" * self.n_qubits, 0.0)
+                        for obs_, coeff in zip((obs.paulis, obs.coeffs)):
+                            diag_obs_label = ""
+                            for char in obs_.to_label():
+                                diag_obs_label += char if char == "I" else "Z"
+                            diag_obs += SparsePauliOp(diag_obs_label, coeff)
+                        bit_array = BitArray.from_counts(counts_dict, num_bits=self.n_qubits)
+                        exp_value += bit_array.expectation_values(diag_obs)
+                exp_value /= reward_data.pauli_sampling
+                reward[batch_idx] = exp_value
+            else:
+                survival_probability = np.zeros(shape=(max_input_state,))
+                for i_idx in range(max_input_state):
+                    counts_dict = {
+                        binary(i, self.n_qubits): counts[batch_idx, i_idx, i] for i in range(dim)
+                    }
                     bit_array = BitArray.from_counts(counts_dict, num_bits=self.n_qubits)
-                    exp_value = bit_array.expectation_values(new_op)
-                    reward.append(exp_value)
+                    survival_probability[i_idx] = (
+                        bit_array.get_int_counts().get(0, 0) / self.n_shots
+                    )
+                reward[batch_idx] = np.mean(survival_probability)
 
-        # Reward: BitArray.from_counts()
+        return self._get_obs(), reward, True, False, self._get_info()
 
-    def rl_qoc_training_qua_prog(self):
+    def rl_qoc_training_qua_prog(self, num_updates: int = 1000) -> Program:
         """
         Generate a QUA program tailor-made for the RL-based calibration project
         """
@@ -264,17 +311,17 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
             # Number of shots for each observable (or total number of shots if no observables)
             self.pauli_shots.declare_variable()
-            num_updates = declare(int)
+            n_updates = declare(int)
             input_state_count = declare(int)
 
             if self.backend.init_macro is not None:
                 self.backend.init_macro()
             # Infinite loop to run the training
             with for_(
-                num_updates,
+                n_updates,
                 0,
-                num_updates < self.qm_backend_config.num_updates,
-                num_updates + 1,
+                n_updates < num_updates,
+                n_updates + 1,
             ):
                 self.policy.load_input_values()  # Load µ and σ
 
@@ -354,7 +401,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 if self.input_type != InputType.INPUT_STREAM:
                     self.reward.save_to_stream()
 
-                self.reward.send_to_python()
+                self.reward.stream_back()
 
     def _action_sampling(self, mu, sigma):
         """
@@ -421,23 +468,20 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             if self.config.dfe:
                 param_inputs.append(self.observable_vars)
 
-            compilation_result = self.backend.quantum_circuit_to_qua(
-                self.real_time_circuit,
+            result = self.backend.quantum_circuit_to_qua(
+                self.real_time_transpiled_circuit,
                 param_inputs,
             )
             for c, clbit in enumerate(qc.clbits):
                 bit = qc.find_bit(clbit)
-
                 if len(bit.registers) == 0:
-                    bit_output = compilation_result.result_program[
-                        f"{_QASM3_DUMP_LOOSE_BIT_PREFIX}{c}"
-                    ]
+                    bit_output = result.result_program[f"{_QASM3_DUMP_LOOSE_BIT_PREFIX}{c}"]
                 else:
                     creg, creg_index = bit.registers[0]
-                    bit_output = compilation_result.result_program[creg.name][creg_index]
+                    bit_output = result.result_program[creg.name][creg_index]
                 assign(
                     state_int,
-                    state_int + 2**c * Cast.to_int(bit_output),
+                    state_int + 1 << c * Cast.to_int(bit_output),
                 )
 
             assign(counts[state_int], counts[state_int] + 1)
@@ -445,7 +489,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         return counts, state_int
 
     @property
-    def qm_backend_config(self) -> QMConfig | DGXConfig:
+    def qm_backend_config(self) -> QMConfig:
         """
         Get the QM backend configuration
         """
@@ -455,7 +499,24 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
     def backend(self) -> QMBackend:
         return super().backend
 
-    def start_program(self) -> RunningQmJob:
+    @property
+    def real_time_transpiled_circuit(self) -> QuantumCircuit:
+        """
+        Get the real-time circuit transpiled for QUA execution
+        """
+        return self.backend_info.custom_transpile(
+            self.real_time_circuit,
+            optimization_level=1,
+            initial_layout=self.layout,
+            remove_final_measurement=False,
+            scheduling=False,
+        )
+
+    def start_program(
+        self,
+        num_updates: int = 1000,
+        compiler_options: Optional[CompilerOptionArguments] = None,
+    ) -> RunningQmJob:
         """
         Start the QUA program
 
@@ -465,13 +526,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         if self.input_type == InputType.DGX:
             ParameterPool.configure_stream()
         self.backend.update_calibrations(self.real_time_circuit, self.input_type)
-        prog = self.rl_qoc_training_qua_prog()
+        prog = self.rl_qoc_training_qua_prog(num_updates=num_updates)
         qmm: QuantumMachinesManager = self.backend.machine.connect()
-        qmm.close_all_quantum_machines()
         config = self.backend.machine.generate_config()
         self._qm = qmm.open_qm(config)
-        job = self.qm.execute(prog)
-        return job
+        return self.qm.execute(prog, compiler_options=compiler_options)
 
     def close(self) -> None:
         """

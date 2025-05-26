@@ -232,6 +232,7 @@ class CAFEReward(Reward):
         circuits: QuantumCircuit | List[QuantumCircuit],
         target: List[GateTarget] | GateTarget,
         env_config: QEnvConfig,
+        skip_transpilation: bool = False,
         *args,
     ) -> QuantumCircuit:
         execution_config = env_config.execution_config
@@ -332,7 +333,9 @@ class CAFEReward(Reward):
                                             )
                             else:
                                 qc.compose(
-                                    inverse_circuit[0], ref_target.causal_cone_qubits, inplace=True
+                                    inverse_circuit[0],
+                                    ref_target.causal_cone_qubits,
+                                    inplace=True,
                                 )
             else:
                 if len(all_n_reps) > 1:
@@ -346,7 +349,9 @@ class CAFEReward(Reward):
                                 )
                 else:
                     qc.compose(
-                        cycle_circuit_inverses[0][0], ref_target.causal_cone_qubits, inplace=True
+                        cycle_circuit_inverses[0][0],
+                        ref_target.causal_cone_qubits,
+                        inplace=True,
                     )
 
             # Revert the input state prep
@@ -358,6 +363,9 @@ class CAFEReward(Reward):
         # Measure the causal cone qubits
         qc.measure(ref_target.causal_cone_qubits, meas)
         qc.reset(qc.qubits)
+
+        if skip_transpilation:
+            return qc
 
         return backend_info.custom_transpile(
             qc,

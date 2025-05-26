@@ -32,6 +32,7 @@ from ...helpers.circuit_utils import (
 Indices = Tuple[int]
 Target = Union[StateTarget, GateTarget]
 
+
 @dataclass
 class StateReward(Reward):
     """
@@ -258,6 +259,7 @@ class StateReward(Reward):
         circuits: QuantumCircuit | List[QuantumCircuit],
         target: Target | List[Target],
         env_config: QEnvConfig,
+        skip_transpilation: bool = False,
         *args,
     ) -> QuantumCircuit:
 
@@ -302,7 +304,9 @@ class StateReward(Reward):
         observables_vars = [
             qc.add_input(f"observable_{i}", Uint(4)) for i in range(ref_target.causal_cone_size)
         ]
-        input_circuits = [circ.decompose() for circ in get_single_qubit_input_states(self.input_states_choice)]
+        input_circuits = [
+            circ.decompose() for circ in get_single_qubit_input_states(self.input_states_choice)
+        ]
 
         for q, qubit in enumerate(qc.qubits):
             # Input state prep (over all qubits of the circuit context)
@@ -335,6 +339,9 @@ class StateReward(Reward):
         # Measurement
         qc.measure(ref_target.causal_cone_qubits, meas)
         qc.reset(qc.qubits)
+
+        if skip_transpilation:
+            return qc
 
         return env_config.backend_info.custom_transpile(
             qc,

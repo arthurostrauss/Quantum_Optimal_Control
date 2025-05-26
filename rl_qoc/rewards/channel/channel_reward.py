@@ -360,6 +360,7 @@ class ChannelReward(Reward):
         circuits: QuantumCircuit | List[QuantumCircuit],
         target: GateTarget | List[GateTarget],
         env_config: QEnvConfig,
+        skip_transpilation: bool = False,
         *args,
     ) -> QuantumCircuit:
 
@@ -424,6 +425,9 @@ class ChannelReward(Reward):
         # Measurement
         qc.measure(ref_target.causal_cone_qubits, meas)
         qc.reset(qc.qubits)
+
+        if skip_transpilation:
+            return qc
 
         return env_config.backend_info.custom_transpile(
             qc,

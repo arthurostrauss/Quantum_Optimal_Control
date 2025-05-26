@@ -22,9 +22,9 @@ class QMConfig(BackendConfig):
     """
 
     backend: QMBackend = None
-    init_macro: Callable = None
     input_type: InputType = "INPUT_STREAM"
-    num_updates: int = 500
+    verbosity: int = 1
+    opnic_dev_path: str = "/home/dpoulos/opnic-dev"
 
     @property
     def config_type(self):

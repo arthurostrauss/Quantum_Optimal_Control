@@ -99,6 +99,7 @@ class Reward(ABC):
         circuits: QuantumCircuit | List[QuantumCircuit],
         target: Target | List[Target],
         env_config: QEnvConfig,
+        skip_transpilation: bool = False,
         *args,
     ) -> QuantumCircuit:
         """
@@ -111,6 +112,9 @@ class Reward(ABC):
                      pipeline
             env_config: Environment configuration, containing information for transpilation process and
                         execution configuration (notably the desired number of repetitions of the cycle circuit)
+            skip_transpilation: If True, the circuit will not be transpiled and will be returned as is.
+                                Used when there is no need to transpile the circuit, for example when using IQCC in
+                                sync-hook mode.
             *args: Optional arguments for the reward method
 
         Returns:
