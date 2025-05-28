@@ -1,0 +1,26 @@
+WANDB_CONFIG:
+  ENABLED: True # Whether to enable Weights & Biases logging
+  PROJECT: "GateCalibration" # Weights & Biases project name
+  ENTITY: null # Weights & Biases entity name
+  API_KEY: null # Weights & Biases API key
+RUN_NAME: "spillover_subsystem" # Name of the run
+OPTIMIZER: "adam" # Optimizer for the policy network
+NUM_UPDATES: 1 # Number of policy updates
+N_EPOCHS: 8 # Number of epochs for each policy update
+MINIBATCH_SIZE: 8 # Number of samples per mini-batch
+LEARNING_RATE: 0.003 # Learning rate
+GAMMA: 0.99 # Discount factor
+GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
+ENTROPY_COEF: 0.0 # Entropy coefficient
+VALUE_LOSS_COEF: 0.5 # Value (critic) function coefficient
+GRADIENT_CLIP: 0.5 # Gradient clipping
+CLIP_VALUE_LOSS: True # Whether to clip value loss
+CLIP_VALUE_COEF: 0.2 # Clipping coefficient for value loss
+CLIP_RATIO: 0.2 # Clipping ratio for PPO
+INPUT_ACTIVATION_FUNCTION: "identity" # Input activation function
+HIDDEN_lAYERS: [64, 64] # Number of units in hidden layers
+HIDDEN_ACTIVATION_FUNCTIONS: ["elu", "elu"] # Activation functions
+OUTPUT_ACTIVATION_MEAN: "tanh" # Output activation function (for continuous action space)
+OUTPUT_ACTIVATION_STD: "sigmoid" # Output activation function (for continuous action space)
+INCLUDE_CRITIC: True # Whether to include critic network within ActorCritic model
+NORMALIZE_ADVANTAGE: True # Whether to normalize advantage

@@ -10,29 +10,138 @@ from torch.utils.tensorboard import SummaryWriter
 from .ppo_config import HardwareRuntime
 
 
+# def plot_curves(env: BaseQuantumEnvironment):
+#     """
+#     Plots the reward history and fidelity history of the environment
+#     """
+#     fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
+#     plt.plot(np.mean(env.reward_history, axis=1), label="Reward")
+#     if env.target.target_type == "gate" and env.target.causal_cone_size < 3:
+#         fidelity_type = "Avg gate"
+#     else:
+#         fidelity_type = "State"
+
+#     plt.plot(
+#         fidelity_range,
+#         env.fidelity_history,
+#         label=f"{fidelity_type} Fidelity",
+#     )
+
+#     plt.title("Reward History")
+#     plt.legend()
+#     plt.xlabel("Iteration")
+#     plt.ylabel("Reward")
+#     # Ensure integer ticks on the x-axis
+#     plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+#     plt.show()
+
+
 def plot_curves(env: BaseQuantumEnvironment):
     """
-    Plots the reward history and fidelity history of the environment
+    Plots the reward history, fidelity history, and (for moving_discrete) marginal reward and probability distributions for each qubit.
     """
     fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
-    plt.plot(np.mean(env.reward_history, axis=1), label="Reward")
-    if env.target.target_type == "gate" and env.target.causal_cone_size < 3:
-        fidelity_type = "Avg gate"
-    else:
-        fidelity_type = "State"
+    num_qubits = len(env.unwrapped.applied_qubits)  # Number of qubits
+    # Number of subplots: 2 for reward/fidelity, plus 2 per qubit for moving_discrete
+    num_plots = 2 + (
+        2 * num_qubits
+        if env.unwrapped.circuit_param_distribution == "moving_discrete"
+        else 0
+    )
+    fig, ax = plt.subplots(num_plots, 1, figsize=(8.0, 6.0 * num_plots), squeeze=False)
+    ax = ax.flatten()
 
-    plt.plot(
+    # Plot average reward and fidelity history
+    ax[0].plot(np.mean(env.reward_history, axis=1), label="Reward")
+    ax[0].plot(
         fidelity_range,
         env.fidelity_history,
-        label=f"{fidelity_type} Fidelity",
+        label="Circuit Fidelity",
     )
+    ax[0].set_title("Reward History")
+    ax[0].legend()
+    ax[0].set_xlabel("Iteration")
+    ax[0].set_ylabel("Reward")
+    ax[0].xaxis.set_major_locator(MaxNLocator(integer=True))
 
-    plt.title("Reward History")
-    plt.legend()
-    plt.xlabel("Iteration")
-    plt.ylabel("Reward")
-    # Ensure integer ticks on the x-axis
-    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+    # Plot RL reward history
+    ax[1].plot(np.mean(env.reward_history, axis=1), label="RL Reward")
+    ax[1].set_title("RL Reward History")
+    ax[1].legend()
+    ax[1].set_xlabel("Iteration")
+    ax[1].set_ylabel("RL Reward")
+    ax[1].xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    if env.unwrapped.circuit_param_distribution == "moving_discrete":
+        # Single-qubit discrete values and their corresponding angles
+        single_qubit_vals = env.unwrapped.single_qubit_discrete_obs_vals_raw
+        angles = env.unwrapped.obs_raw_to_angles(single_qubit_vals)
+        num_vals = len(single_qubit_vals)
+
+        for qubit_idx in range(num_qubits):
+            # Compute marginal reward distribution for this qubit
+            marginal_rewards = np.zeros(num_vals)
+            marginal_std = np.zeros(num_vals)
+            for i, val in enumerate(single_qubit_vals):
+                # Find indices where this qubit has the given value
+                mask = np.isclose(
+                    env.unwrapped.discrete_obs_vals_raw[:, qubit_idx],
+                    val,
+                    rtol=1e-5,
+                    atol=1e-8,
+                )
+                marginal_rewards[i] = (
+                    np.mean(env.unwrapped.discrete_reward_history[:, mask])
+                    if np.any(mask)
+                    else 0
+                )
+                marginal_std[i] = (
+                    np.std(env.unwrapped.discrete_reward_history[:, mask])
+                    if np.any(mask)
+                    else 0
+                )
+
+            # Plot marginal reward history with error bars
+            ax[2 + qubit_idx * 2].errorbar(
+                angles,
+                marginal_rewards,
+                yerr=marginal_std,
+                fmt="-o",
+                label=f"Qubit {qubit_idx} Reward History",
+            )
+            ax[2 + qubit_idx * 2].set_title(
+                f"Marginal Reward History (Qubit {qubit_idx})"
+            )
+            ax[2 + qubit_idx * 2].legend()
+            ax[2 + qubit_idx * 2].set_xlabel("Observation Value (Angles)")
+            ax[2 + qubit_idx * 2].set_ylabel("Reward")
+
+            # Compute marginal probability distribution
+            marginal_probs = np.zeros(num_vals)
+            for i, val in enumerate(single_qubit_vals):
+                mask = np.isclose(
+                    env.unwrapped.discrete_obs_vals_raw[:, qubit_idx],
+                    val,
+                    rtol=1e-5,
+                    atol=1e-8,
+                )
+                marginal_probs[i] = (
+                    np.sum(env.unwrapped.prob_weights[mask]) if np.any(mask) else 0
+                )
+
+            # Plot marginal probability weights
+            ax[3 + qubit_idx * 2].scatter(
+                angles,
+                marginal_probs,
+                label=f"Qubit {qubit_idx} Probability Weights",
+            )
+            ax[3 + qubit_idx * 2].set_title(
+                f"Marginal Probability Weights (Qubit {qubit_idx})"
+            )
+            ax[3 + qubit_idx * 2].legend()
+            ax[3 + qubit_idx * 2].set_xlabel("Observation Value (Angles)")
+            ax[3 + qubit_idx * 2].set_ylabel("Probability")
+
     plt.show()
 
 
