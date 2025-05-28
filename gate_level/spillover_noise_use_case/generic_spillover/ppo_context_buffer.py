@@ -1,135 +1,21 @@
-# Adapted from CleanRL ppo_continuous_action.py
-import random
+import uuid
 import time
-from typing import Optional, Dict
-
+import random
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
-from IPython.display import clear_output
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
+from gymnasium.spaces import Box
+from typing import Dict, Optional, Any
+import collections
 
-# from gymnasium import ActionWrapper
-
-from rl_qoc.environment.base_q_env import BaseQuantumEnvironment
-
-
-def process_action(self, probs: Normal):
-    """
-    Decide how actions should be processed before being sent to environment.
-    For certain environments such as QUA, policy parameters should be streamed to the environment directly
-    and actions are sampled within the environment (in real time).
-    """
-
-    # action = torch.clip(
-    #     probs.sample(),
-    #     torch.Tensor(self.min_action),
-    #     torch.Tensor(self.max_action),
-    # )
-    action = probs.sample()
-    logprob = probs.log_prob(action).sum(1)
-    mean_action = probs.mean
-    std_action = probs.stddev
-
-    if isinstance(self.env, ActionWrapper):
-        self.unwrapped_env.mean_action = self.env.action(mean_action[0].cpu().numpy())
-    else:
-        self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
-
-    self.unwrapped_env.std_action = std_action[0].cpu().numpy()
-    return action, logprob
-
-
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    # torch.nn.init.zeros_(layer.weight)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
-def plot_curves(env: BaseQuantumEnvironment):
-    """
-    Plots the reward history, fidelity history, and (for moving_discrete) marginal reward and probability distributions for each qubit.
-    """
-    fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
-    num_qubits = len(env.unwrapped.applied_qubits)  # Number of qubits
-    # Number of subplots: 2 for reward/fidelity, plus 2 per qubit for moving_discrete
-    num_plots = 2 + (2 * num_qubits if env.unwrapped.circuit_param_distribution == "moving_discrete" else 0)
-    fig, ax = plt.subplots(num_plots, 1, figsize=(8.0, 6.0 * num_plots), squeeze=False)
-    ax = ax.flatten()
-
-    # Plot average reward and fidelity history
-    ax[0].plot(np.mean(env.reward_history, axis=1), label="Reward")
-    ax[0].plot(
-        fidelity_range,
-        env.fidelity_history,
-        label="Circuit Fidelity",
-    )
-    ax[0].set_title("Reward History")
-    ax[0].legend()
-    ax[0].set_xlabel("Iteration")
-    ax[0].set_ylabel("Reward")
-    ax[0].xaxis.set_major_locator(MaxNLocator(integer=True))
-
-    # Plot RL reward history
-    ax[1].plot(np.mean(env.reward_history, axis=1), label="RL Reward")
-    ax[1].set_title("RL Reward History")
-    ax[1].legend()
-    ax[1].set_xlabel("Iteration")
-    ax[1].set_ylabel("RL Reward")
-    ax[1].xaxis.set_major_locator(MaxNLocator(integer=True))
-
-    if env.unwrapped.circuit_param_distribution == "moving_discrete":
-        # Single-qubit discrete values and their corresponding angles
-        single_qubit_vals = env.unwrapped.single_qubit_discrete_obs_vals_raw
-        angles = env.unwrapped.obs_raw_to_angles(single_qubit_vals)
-        num_vals = len(single_qubit_vals)
-
-        for qubit_idx in range(num_qubits):
-            # Compute marginal reward distribution for this qubit
-            marginal_rewards = np.zeros(num_vals)
-            marginal_std = np.zeros(num_vals)
-            for i, val in enumerate(single_qubit_vals):
-                # Find indices where this qubit has the given value
-                mask = np.isclose(env.unwrapped.discrete_obs_vals_raw[:, qubit_idx], val, rtol=1e-5, atol=1e-8)
-                marginal_rewards[i] = np.mean(env.unwrapped.discrete_reward_history[:, mask]) if np.any(mask) else 0
-                marginal_std[i] = np.std(env.unwrapped.discrete_reward_history[:, mask]) if np.any(mask) else 0
-
-            # Plot marginal reward history with error bars
-            ax[2 + qubit_idx * 2].errorbar(
-                angles,
-                marginal_rewards,
-                yerr=marginal_std,
-                fmt='-o',
-                label=f"Qubit {qubit_idx} Reward History",
-            )
-            ax[2 + qubit_idx * 2].set_title(f"Marginal Reward History (Qubit {qubit_idx})")
-            ax[2 + qubit_idx * 2].legend()
-            ax[2 + qubit_idx * 2].set_xlabel("Observation Value (Angles)")
-            ax[2 + qubit_idx * 2].set_ylabel("Reward")
-
-            # Compute marginal probability distribution
-            marginal_probs = np.zeros(num_vals)
-            for i, val in enumerate(single_qubit_vals):
-                mask = np.isclose(env.unwrapped.discrete_obs_vals_raw[:, qubit_idx], val, rtol=1e-5, atol=1e-8)
-                marginal_probs[i] = np.sum(env.unwrapped.prob_weights[mask]) if np.any(mask) else 0
-
-            # Plot marginal probability weights
-            ax[3 + qubit_idx * 2].scatter(
-                angles,
-                marginal_probs,
-                label=f"Qubit {qubit_idx} Probability Weights",
-            )
-            ax[3 + qubit_idx * 2].set_title(f"Marginal Probability Weights (Qubit {qubit_idx})")
-            ax[3 + qubit_idx * 2].legend()
-            ax[3 + qubit_idx * 2].set_xlabel("Observation Value (Angles)")
-            ax[3 + qubit_idx * 2].set_ylabel("Probability")
-    
-    plt.show()
+# Assuming these are defined elsewhere
+from your_environment import GeneralAngleSpilloverEnv, BaseQuantumEnvironment
+from your_utils import layer_init, plot_curves
 
 
 class Agent(nn.Module):
@@ -154,6 +40,7 @@ class Agent(nn.Module):
             self.activation_fn = nn.LeakyReLU
         elif activation_function_str == "elu":
             self.activation_fn = nn.ELU
+
         if not self.use_combined_networks:
             self.critic = nn.Sequential(
                 layer_init(
@@ -178,6 +65,7 @@ class Agent(nn.Module):
             self.actor_logstd = nn.Parameter(
                 torch.zeros(1, np.prod(env.action_space.shape))
             )
+
         if self.use_combined_networks:
             self.main_network = nn.Sequential(
                 layer_init(
@@ -192,15 +80,7 @@ class Agent(nn.Module):
                 layer_init(
                     nn.Linear(layer_size, np.prod(env.action_space.shape)), std=0.01
                 ),
-                # self.activation_fn(),
             )
-            # self.actor_std = nn.Sequential(
-            #     self.main_network,
-            #     layer_init(
-            #         nn.Linear(layer_size, np.prod(env.action_space.shape)), std=0.01
-            #     ),
-            #     nn.Sigmoid(),
-            # )
             self.critic = nn.Sequential(
                 self.main_network,
                 layer_init(nn.Linear(layer_size, 1), std=1.0),
@@ -216,11 +96,6 @@ class Agent(nn.Module):
         action_mean = self.actor_mean(x)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
-        # if self.use_combined_networks:
-        #     action_std = self.actor_std(x)
-        # else:
-        #     action_logstd = self.actor_logstd.expand_as(action_mean)
-        #     action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
@@ -232,13 +107,16 @@ class Agent(nn.Module):
         )
 
 
-class PPO_CleanRL:
+class PPO_ContextBuffer:
     def __init__(
         self,
         agent_config: Dict,
         env: BaseQuantumEnvironment,
         chkpt_dir: Optional[str] = "tmp/ppo",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
+        num_warmup_updates: int = 100,
+        context_buffer_size: int = 1000,
+        noise_scale: float = 0.1,
     ):
         # General Run Params
         self.agent_config = agent_config
@@ -279,6 +157,13 @@ class PPO_CleanRL:
         self.target_kl = self.agent_config["target_kl"]
         self.robust_ppo = self.agent_config["robust_ppo"]
 
+        # Context Buffer Params
+        self.num_warmup_updates = num_warmup_updates
+        self.context_buffer_size = context_buffer_size
+        self.noise_scale = noise_scale
+        self.context_buffer = collections.deque(maxlen=context_buffer_size)
+        self.context_rewards = []
+
         self.batch_size = int(self.num_envs * self.num_steps)
         self.minibatch_size = int(self.batch_size // self.num_minibatches)
 
@@ -286,7 +171,9 @@ class PPO_CleanRL:
             self.anneal_lr + self.exp_anneal_lr
         ), "Learning Rate Combination doesn't work"
 
-        self.run_name = f"PPO_CleanRL__{self.exp_name}__{self.seed}__{int(time.time())}"
+        self.run_name = (
+            f"PPO_ContextBuffer__{self.exp_name}__{self.seed}__{int(time.time())}"
+        )
 
         if self.track:
             import wandb
@@ -311,7 +198,7 @@ class PPO_CleanRL:
             ),
         )
 
-        # TRY NOT TO MODIFY: seeding
+        # Seeding
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
@@ -320,7 +207,6 @@ class PPO_CleanRL:
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() and self.cuda else "cpu"
         )
-
         self.env = env
 
         self.agent = Agent(
@@ -334,8 +220,48 @@ class PPO_CleanRL:
             self.agent.parameters(), lr=self.learning_rate, eps=1e-5
         )
 
+    def add_to_context_buffer(self, context, reward):
+        """Add context-reward pair to buffer and maintain size"""
+        self.context_buffer.append(context)
+        self.context_rewards.append(reward)
+        if len(self.context_buffer) > self.context_buffer_size:
+            self.context_buffer.popleft()
+            self.context_rewards.pop(0)
+
+    def sample_context(self, warmup=False):
+        """Sample context from buffer or randomly during warmup"""
+        if warmup or len(self.context_buffer) == 0:
+            return np.random.uniform(
+                self.env.observation_space.low,
+                self.env.observation_space.high,
+                self.env.observation_space.shape,
+            )
+        else:
+            # Create probability distribution based on inverse rewards
+            rewards = np.array(self.context_rewards)
+            # Avoid division by zero and handle negative rewards
+            rewards = np.clip(rewards, a_min=1e-6, a_max=None)
+            prob_weights = 1.0 / rewards
+            prob_weights = prob_weights / np.sum(prob_weights)
+
+            # Sample context from buffer
+            idx = np.random.choice(len(self.context_buffer), p=prob_weights)
+            context = self.context_buffer[idx]
+
+            # Add noise to sampled context
+            noise = np.random.normal(0, self.noise_scale, context.shape)
+            noisy_context = context + noise
+            # Clip to observation space bounds
+            noisy_context = np.clip(
+                noisy_context,
+                self.env.observation_space.low,
+                self.env.observation_space.high,
+            )
+
+            return noisy_context
+
     def run_training(self):
-        # ALGO Logic: Storage setup
+        # Storage setup
         self.obs = torch.zeros(
             (self.num_steps, self.num_envs) + self.env.observation_space.shape
         ).to(self.device)
@@ -347,15 +273,23 @@ class PPO_CleanRL:
         self.dones = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
         self.values = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
 
-        # TRY NOT TO MODIFY: start the game
+        # Start training
         global_step = 0
         start_time = time.time()
-        next_obs, _ = self.env.reset(seed=self.seed)
-        next_obs = np.tile(next_obs, (self.num_envs, 1))
-        next_obs = torch.Tensor(next_obs).to(self.device)
-        next_done = torch.zeros(self.num_envs).to(self.device)
 
         for update in range(1, self.num_updates + 1):
+            # Determine if in warmup phase
+            is_warmup = update <= self.num_warmup_updates
+
+            # Sample new context
+            context = self.sample_context(warmup=is_warmup)
+
+            # Reset environment with sampled context
+            next_obs, _ = self.env.reset(debug_obs=context)
+            next_obs = np.tile(next_obs, (self.num_envs, 1))
+            next_obs = torch.Tensor(next_obs).to(self.device)
+            next_done = torch.zeros(self.num_envs).to(self.device)
+
             # Annealing the Learning Rate
             if self.anneal_lr or self.exp_anneal_lr:
                 if self.anneal_lr:
@@ -377,7 +311,7 @@ class PPO_CleanRL:
                 self.obs[step] = next_obs
                 self.dones[step] = next_done
 
-                # ALGO LOGIC: action logic
+                # Action logic
                 with torch.no_grad():
                     action, logprob, _, value = self.agent.get_action_and_value(
                         next_obs
@@ -386,14 +320,8 @@ class PPO_CleanRL:
                 self.actions[step] = action
                 self.logprobs[step] = logprob
 
-                # TRY NOT TO MODIFY: execute the game and log data.
+                # Execute step
                 cpu_action = action.cpu().numpy()
-                # cpu_action = np.clip(
-                #     cpu_action,
-                #     self.env.action_space.low,
-                #     self.env.action_space.high,
-                # )
-
                 mean_action = np.mean(cpu_action, axis=0)
                 self.env.unwrapped.mean_action = self.env.action(mean_action)
 
@@ -401,11 +329,18 @@ class PPO_CleanRL:
                     cpu_action
                 )
                 print(f"Mean Action: {np.mean(cpu_action, axis=0)}")
+
+                # Add to context buffer
+                mean_reward = np.mean(reward)
+                self.add_to_context_buffer(context, mean_reward)
+
                 next_obs = np.tile(next_obs, (self.num_envs, 1))
                 next_done = np.logical_or(terminations, truncations)
-                if next_done:
-                    next_obs, _ = self.env.reset(seed=self.seed)
+                if next_done.any():
+                    context = self.sample_context(warmup=is_warmup)
+                    next_obs, _ = self.env.reset(debug_obs=context)
                     next_obs = np.tile(next_obs, (self.num_envs, 1))
+
                 self.rewards[step] = torch.tensor(reward).to(self.device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(
                     self.device
@@ -428,7 +363,7 @@ class PPO_CleanRL:
                                 global_step,
                             )
 
-            # bootstrap value if not done
+            # Bootstrap value
             with torch.no_grad():
                 next_value = self.agent.get_value(next_obs).reshape(1, -1)
                 advantages = torch.zeros_like(self.rewards).to(self.device)
@@ -451,7 +386,7 @@ class PPO_CleanRL:
                     )
                 returns = advantages + self.values
 
-            # flatten the batch
+            # Flatten batch
             b_obs = self.obs.reshape((-1,) + self.env.observation_space.shape)
             b_logprobs = self.logprobs.reshape(-1)
             b_actions = self.actions.reshape((-1,) + self.env.action_space.shape)
@@ -459,7 +394,7 @@ class PPO_CleanRL:
             b_returns = returns.reshape(-1)
             b_values = self.values.reshape(-1)
 
-            # Optimizing the policy and value network
+            # Optimize policy and value network
             b_inds = np.arange(self.batch_size)
             clipfracs = []
             for epoch in range(self.update_epochs):
@@ -475,7 +410,6 @@ class PPO_CleanRL:
                     ratio = logratio.exp()
 
                     with torch.no_grad():
-                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
                         old_approx_kl = (-logratio).mean()
                         approx_kl = ((ratio - 1) - logratio).mean()
                         clipfracs += [
@@ -531,7 +465,7 @@ class PPO_CleanRL:
                 np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
             )
 
-            # TRY NOT TO MODIFY: record rewards for plotting purposes
+            # Log metrics
             self.writer.add_scalar(
                 "charts/learning_rate",
                 self.optimizer.param_groups[0]["lr"],
@@ -554,6 +488,8 @@ class PPO_CleanRL:
             )
 
             if global_step % self.num_prints == 0:
+                from IPython.display import clear_output
+
                 clear_output(wait=True)
                 if self.plot_real_time:
                     plot_curves(self.env.unwrapped)

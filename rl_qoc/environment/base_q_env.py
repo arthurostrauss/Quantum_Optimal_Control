@@ -187,6 +187,7 @@ class BaseQuantumEnvironment(ABC, Env):
         reward_method: Optional[
             Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity"]
         ] = None,
+        fit_p0: Optional[list] = [0.1, 0.1],
     ) -> plt.Figure:
         """
         Method to fit the initial reward function to the first set of actions in the environment
@@ -217,7 +218,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 channel_fid = (np.cos(n * phi_1 / 2) * np.cos(n * phi_2 / 2)) ** 2
                 return (4 * channel_fid + 1) / 5
 
-        p0 = [0.01, 0.01]  # Initial guess for the parameters
+        # p0 = [0.01, 0.01]  # Initial guess for the parameters
+        p0 = fit_p0  # Initial guess for the parameters
         lower_bounds = [0.0, 0.0]
         upper_bounds = [np.pi, np.pi]
 
@@ -247,7 +249,7 @@ class BaseQuantumEnvironment(ABC, Env):
         ax.legend()
         ax.set_title("Initial reward fit (for varying number of repetitions)")
         # Print found parameters
-        print("Found parameters:", popt)
+        print(f"Found parameters: {popt}, in radians: {np.round(np.array(popt) / np.pi, 5)}")
 
         if execution_config is not None:
             self.config.execution_config = initial_execution_config
@@ -295,7 +297,7 @@ class BaseQuantumEnvironment(ABC, Env):
             if self.config.dfe
             else self.baseline_circuits[self.trunc_index]
         )
-        
+
         if self.config.execution_config.n_reps_mode == "sequential":
             reward_data = rewarder.get_reward_data(
                 qc,
@@ -777,17 +779,18 @@ class BaseQuantumEnvironment(ABC, Env):
             self.backend_info.coupling_map,
             self.physical_target_qubits + self.physical_neighbor_qubits,
         )
-    
+
     @property
     def transpiled_circuits(self):
         """
         Return the transpiled circuits
         """
-        return self.backend_info.custom_transpile(self.circuits,
-                                                  initial_layout = self.target.layout,
-                                                  optimization_level=0,
-                                                  remove_final_measurements=False,
-                                                  )
+        return self.backend_info.custom_transpile(
+            self.circuits,
+            initial_layout=self.target.layout,
+            optimization_level=0,
+            remove_final_measurements=False,
+        )
 
     @property
     @abstractmethod
