@@ -6,12 +6,12 @@ from qiskit.circuit.parametervector import (
     Parameter,
     ParameterVector,
 )
-from qiskit.pulse import Schedule, ScheduleBlock
 
-from qm.qua import *
+from qm.qua import declare, assign, while_, if_, fixed, Cast, Util
 
 import numpy as np
 from quam.components.quantum_components import Qubit, QubitPair
+from quam.utils.qua_types import QuaVariableInt, Scalar, ScalarInt
 
 
 def validate_parameter_table(qc: QuantumCircuit):
@@ -43,6 +43,18 @@ def validate_parameter_table(qc: QuantumCircuit):
                 raise ValueError(
                     f"Parameter {parameter.name} is not a scalar in the parameter table"
                 )
+
+
+def clip_qua(var: Scalar, min_val: Scalar, max_val: Scalar):
+    """
+    Clip a QUA variable to a given range.
+    :param var: QUA variable to clip
+    :param min_val: Minimum value to clip to
+    :param max_val: Maximum value to clip to
+    :return: Clipped QUA variable
+    """
+    assign(var, Util.cond(var < min_val, min_val, var))
+    assign(var, Util.cond(var > max_val, max_val, var))
 
 
 def get_gaussian_sampling_input():

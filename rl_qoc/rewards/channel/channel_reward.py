@@ -376,6 +376,7 @@ class ChannelReward(Reward):
             raise ValueError("All circuits must have the same qubits")
 
         qc = prep_circuits[0].copy_empty_like("real_time_channel_qc")
+        qc.reset(qc.qubits)
         num_qubits = qc.num_qubits
 
         n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
@@ -424,7 +425,6 @@ class ChannelReward(Reward):
 
         # Measurement
         qc.measure(ref_target.causal_cone_qubits, meas)
-        qc.reset(qc.qubits)
 
         if skip_transpilation:
             return qc

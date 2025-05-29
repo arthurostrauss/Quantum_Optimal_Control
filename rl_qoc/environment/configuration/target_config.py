@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Sequence
 from qiskit import QuantumCircuit
 from qiskit.quantum_info import DensityMatrix, Statevector
 from qiskit.circuit import Gate
@@ -21,7 +21,7 @@ class TargetConfig:
         physical_qubits: Physical qubits on which the target gate is applied
     """
 
-    physical_qubits: List[int]
+    physical_qubits: Sequence[int]
 
     def __getitem__(self, key):
         try:

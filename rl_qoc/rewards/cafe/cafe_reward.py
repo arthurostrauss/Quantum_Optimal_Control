@@ -247,6 +247,7 @@ class CAFEReward(Reward):
             raise ValueError("All circuits must have the same qubits")
 
         qc = prep_circuits[0].copy_empty_like(name="real_time_cafe_qc")
+        qc.reset(qc.qubits)
         num_qubits = qc.num_qubits
         all_n_reps = execution_config.n_reps
         n_reps = execution_config.current_n_reps
@@ -362,7 +363,6 @@ class CAFEReward(Reward):
                             qc.compose(input_circuit, qubit, inplace=True)
         # Measure the causal cone qubits
         qc.measure(ref_target.causal_cone_qubits, meas)
-        qc.reset(qc.qubits)
 
         if skip_transpilation:
             return qc

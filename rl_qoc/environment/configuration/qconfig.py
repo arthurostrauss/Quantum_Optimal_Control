@@ -7,7 +7,7 @@ from qiskit import QuantumCircuit, QuantumRegister
 from qiskit.circuit import ParameterVector, Parameter
 from qiskit.providers import BackendV2
 from qiskit.transpiler import InstructionDurations, PassManager
-from qiskit_dynamics import DynamicsBackend
+from qiskit.version import get_version_info
 from qiskit_ibm_runtime import IBMBackend
 
 from .backend_config import (
@@ -70,7 +70,7 @@ class QEnvConfig:
 
             if not isinstance(self.reward, Reward):
                 raise ValueError("Reward configuration must be a string or a Reward instance")
-        if self.backend_config.config_type in ["qiskit", "dynamics", "runtime"]:
+        if self.backend_config.config_type in ["qiskit", "dynamics", "runtime", "qm"]:
             from ..backend_info import QiskitBackendInfo
 
             self._backend_info = QiskitBackendInfo(
@@ -349,15 +349,18 @@ class QEnvConfig:
             backend = backend(**backend_callback_kwargs)
         elif backend is None:
             backend = select_backend(**backend_params)
+        if get_version_info() < "2.0.0":
+            from qiskit_dynamics import DynamicsBackend
 
-        if isinstance(backend, DynamicsBackend):
-            backend_config = DynamicsConfig(
-                parametrized_circ_func,
-                backend,
-                pass_manager=pass_manager,
-                instruction_durations=instruction_durations,
-            )
-        elif isinstance(backend, IBMBackend):
+            if isinstance(backend, DynamicsBackend):
+                backend_config = DynamicsConfig(
+                    parametrized_circ_func,
+                    backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+                return cls(backend_config=backend_config, **params)
+        if isinstance(backend, IBMBackend):
             backend_config = QiskitRuntimeConfig(
                 parametrized_circ_func,
                 backend,

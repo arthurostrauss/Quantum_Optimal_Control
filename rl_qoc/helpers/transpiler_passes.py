@@ -138,9 +138,8 @@ class CustomGateReplacementPass(TransformationPass):
 
     def run(self, dag: DAGCircuit):
         """Run the custom transformation on the DAG."""
+        qc = QuantumCircuit()
         for i, (op, qargs, cargs) in enumerate(self.target_instructions):
-
-            qc = QuantumCircuit()
             qargs = tuple(dag.qubits[q] if isinstance(q, int) else q for q in qargs)
             cargs = tuple(dag.clbits[c] if isinstance(c, int) else c for c in cargs)
             qc.add_bits(qargs + cargs)
@@ -173,14 +172,16 @@ class CustomGateReplacementPass(TransformationPass):
             )
             for node in instruction_nodes:
                 dag.substitute_node_with_dag(node, circuit_to_dag(qc), wires=args if args else None)
-        for gate_name, cal_info in qc.calibrations.items():
-            for (qubits, parameters), schedule in cal_info.items():
-                dag.add_calibration(
-                    gate_name,
-                    qubits,
-                    schedule,
-                    params=parameters,
-                )
+
+        if hasattr(qc, "calibrations") and qc.calibrations:
+            for gate_name, cal_info in qc.calibrations.items():
+                for (qubits, parameters), schedule in cal_info.items():
+                    dag.add_calibration(
+                        gate_name,
+                        qubits,
+                        schedule,
+                        params=parameters,
+                    )
         return dag
 
 

@@ -6,19 +6,10 @@ import pickle
 import gzip
 import warnings
 
-from qiskit import pulse, QuantumRegister
-from qiskit.circuit import (
-    QuantumCircuit,
-    Parameter,
-    ParameterVector,
-)
+from qiskit.circuit import QuantumCircuit, Parameter, ParameterVector, QuantumRegister
 from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map
 from qiskit.exceptions import QiskitError
 from qiskit.primitives import (
-    BackendEstimator,
-    Estimator,
-    Sampler,
-    BackendSampler,
     StatevectorEstimator,
     StatevectorSampler,
     BaseEstimatorV1,
@@ -36,7 +27,6 @@ from qiskit.transpiler import (
 )
 
 from qiskit.providers import (
-    BackendV1,
     BackendV2,
     Options as AerOptions,
     QiskitBackendNotFoundError,
@@ -55,8 +45,6 @@ from qiskit_ibm_runtime import (
     QiskitRuntimeService,
 )
 
-from qiskit_dynamics import DynamicsBackend
-
 from typing import Optional, Tuple, List, Union, Dict, Callable, Any
 import yaml
 
@@ -64,11 +52,6 @@ import numpy as np
 
 from gymnasium.spaces import Box
 import optuna
-
-from .pulse_utils import perform_standard_calibrations
-from ..custom_jax_sim import PulseEstimatorV2
-
-
 import logging
 
 logging.basicConfig(
@@ -80,20 +63,14 @@ logging.basicConfig(
 
 Estimator_type = Union[
     RuntimeEstimatorV2,
-    Estimator,
-    BackendEstimator,
     BackendEstimatorV2,
     StatevectorEstimator,
 ]
 Sampler_type = Union[
     RuntimeSamplerV2,
-    Sampler,
-    BackendSampler,
     BackendSamplerV2,
     StatevectorSampler,
 ]
-QuantumInput = Union[QuantumCircuit, pulse.Schedule, pulse.ScheduleBlock]
-PulseInput = Union[pulse.Schedule, pulse.ScheduleBlock]
 
 
 def retrieve_primitives(
@@ -111,12 +88,19 @@ def retrieve_primitives(
         config: BackendConfig object
         estimator_options: Estimator options
     """
-    if isinstance(backend, DynamicsBackend):
+
+    if config.config_type == "dynamics":
         from ..environment.configuration.backend_config import DynamicsConfig
 
+        try:
+            from .pulse_utils import perform_standard_calibrations
+        except ImportError:
+            raise ImportError("Qiskit DynamicsBackend requires Qiskit below 2.x.")
         assert isinstance(config, DynamicsConfig), "Configuration must be a DynamicsConfig"
         dummy_param = Parameter("dummy")
         if hasattr(dummy_param, "jax_compat"):
+            from ..custom_jax_sim import PulseEstimatorV2
+
             estimator = PulseEstimatorV2(backend=backend, options=estimator_options)
         else:
             estimator = BackendEstimatorV2(backend=backend, options=estimator_options)
@@ -245,10 +229,15 @@ def select_backend(
 
     if backend is not None:
         if use_dynamics:
+            try:
+                from qiskit_dynamics import DynamicsBackend
+                from .pulse_utils import perform_standard_calibrations
+
+            except ImportError:
+                raise ImportError("Qiskit DynamicsBackend requires Qiskit below 2.x")
+
             solver_options = convert_solver_options(solver_options, backend.dt)
-            assert isinstance(
-                backend, BackendV1
-            ), "DynamicsBackend can only be used with BackendV1 instances"
+
             backend = DynamicsBackend.from_backend(
                 backend,
                 subsystem_list=list(physical_qubits),
@@ -463,25 +452,15 @@ def get_q_env_config(
     elif backend is None:
         backend = select_backend(**backend_params)
 
-    if isinstance(backend, DynamicsBackend):
-        from ..environment.configuration.backend_config import DynamicsConfig
+    from ..environment.configuration.backend_config import QiskitRuntimeConfig
 
-        backend_config = DynamicsConfig(
-            parametrized_circ_func,
-            backend,
-            pass_manager=pass_manager,
-            instruction_durations=instruction_durations,
-        )
-    else:
-        from ..environment.configuration.backend_config import QiskitRuntimeConfig
-
-        backend_config = QiskitRuntimeConfig(
-            parametrized_circ_func,
-            backend,
-            pass_manager=pass_manager,
-            instruction_durations=instruction_durations,
-            primitive_options=(runtime_options if isinstance(backend, RuntimeBackend) else None),
-        )
+    backend_config = QiskitRuntimeConfig(
+        parametrized_circ_func,
+        backend,
+        pass_manager=pass_manager,
+        instruction_durations=instruction_durations,
+        primitive_options=(runtime_options if isinstance(backend, RuntimeBackend) else None),
+    )
 
     q_env_config = QEnvConfig(backend_config=backend_config, **params)
     return q_env_config

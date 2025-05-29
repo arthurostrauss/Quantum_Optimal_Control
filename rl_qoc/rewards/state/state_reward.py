@@ -283,6 +283,7 @@ class StateReward(Reward):
             raise ValueError("All circuits must be defined on the same qubits")
 
         qc = prep_circuits[0].copy_empty_like("real_time_state_qc")
+        qc.reset(qc.qubits)
         num_qubits = qc.num_qubits
         n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
         if is_gate_target:
@@ -338,7 +339,6 @@ class StateReward(Reward):
 
         # Measurement
         qc.measure(ref_target.causal_cone_qubits, meas)
-        qc.reset(qc.qubits)
 
         if skip_transpilation:
             return qc

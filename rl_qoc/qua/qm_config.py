@@ -25,10 +25,11 @@ class QMConfig(BackendConfig):
     input_type: InputType = "INPUT_STREAM"
     verbosity: int = 1
     opnic_dev_path: str = "/home/dpoulos/opnic-dev"
+    num_updates: int = 1000
 
     @property
     def config_type(self):
-        return "qua"
+        return "qm"
 
     def __post_init__(self):
         self.input_type = (

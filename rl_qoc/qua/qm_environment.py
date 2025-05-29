@@ -12,8 +12,7 @@ from ..environment import (
     QEnvConfig,
 )
 
-from qiskit_qm_provider import QMBackend
-from .qua_utils import binary, get_gaussian_sampling_input
+from .qua_utils import binary, get_gaussian_sampling_input, clip_qua
 from .qm_config import QMConfig, DGXConfig
 from qm.qua import *
 from qm.jobs.running_qm_job import RunningQmJob
@@ -21,9 +20,11 @@ from typing import Optional, Union
 from qiskit_qm_provider import (
     Parameter as QuaParameter,
     ParameterTable,
+    QUA2DArray,
     Direction,
     InputType,
     ParameterPool,
+    QMBackend,
 )
 from ..rewards import CAFERewardDataList, ChannelRewardDataList, StateRewardDataList
 
@@ -151,9 +152,12 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         if self.input_type == InputType.DGX:
             ParameterPool.patch_opnic_wrapper(self.qm_backend_config.opnic_dev_path)
-        self.backend.update_calibrations(self.real_time_circuit, input_type=self.input_type)
+
         self._qm_job: Optional[RunningQmJob] = job
         self._qm: Optional[QuantumMachine] = None
+        self.backend.update_compiler_from_target(self.input_type)
+        if hasattr(self.real_time_circuit, "calibrations") and self.real_time_circuit.calibrations:
+            self.backend.update_calibrations(qc=self.real_time_circuit, input_type=self.input_type)
 
     def step(self, action):
         """
@@ -166,9 +170,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 "The QUA program has not been started yet. Call start_program() first."
             )
 
-        verbosity = (
-            self.qm_backend_config.verbosity if isinstance(self.qm_backend_config, DGXConfig) else 2
-        )
+        verbosity = self.qm_backend_config.verbosity
+
         push_args = {
             "job": self.qm_job,
             "qm": self.qm,
@@ -201,9 +204,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         max_input_state = len(input_state_indices)
 
         self.max_input_state.push_to_opx(max_input_state, **push_args)
-        if self.config.dfe:
-            self.max_observables.push_to_opx(len(reward_data.observables_indices), **push_args)
-            max_observables = len(reward_data.observables_indices)
 
         reward = np.zeros(shape=(self.batch_size,))
         for i, input_state in enumerate(input_state_indices):
@@ -212,7 +212,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 for input_var, input_state_val in zip(self.input_state_vars.parameters, input_state)
             }
             self.input_state_vars.push_to_opx(input_state_dict, **push_args)
+            self.pauli_shots.push_to_opx(reward_data.shots[i], **push_args)
             if self.config.dfe:
+                max_observables = len(reward_data.observables_indices[i])
+                self.max_observables.push_to_opx(max_observables, **push_args)
                 for j, observable in enumerate(reward_data.observables_indices):
                     observable_dict = {
                         observable_var: list(observable_val)
@@ -221,7 +224,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                         )
                     }
                     self.observable_vars.push_to_opx(observable_dict, **push_args)
-                    self.pauli_shots.push_to_opx(reward_data.shots[j], **push_args)
 
         collected_counts = self.reward.fetch_from_opx(
             **push_args,
@@ -234,17 +236,15 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         # The counts are a flattened list of counts from the initial shape (max_input_state, max_observables, batch_size)
         # Reshape the counts to the original shape
         if self.config.dfe:
-            counts = np.array(collected_counts).reshape(
-                (max_input_state, max_observables, self.batch_size, dim)
-            )
+            shape = (max_input_state, max_observables, self.batch_size, dim)
+            transpose_shape = (2, 0, 1, 3)
         else:
-            counts = np.array(collected_counts).reshape((max_input_state, self.batch_size, dim))
+            shape = (max_input_state, self.batch_size, dim)
+            transpose_shape = (1, 0, 2)
 
         # In what follows, we will want to put the batch_size dimension first, so we transpose the counts
-        if self.config.dfe:
-            counts = np.transpose(counts, (2, 0, 1, 3))
-        else:
-            counts = np.transpose(counts, (1, 0, 2))
+        counts = np.transpose(np.array(collected_counts).reshape(shape), transpose_shape)
+
         # Convert the counts to a dictionary of counts
 
         for batch_idx in range(self.batch_size):
@@ -292,6 +292,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
 
+        action_batch = QUA2DArray("action_batch", self.batch_size, self.n_actions, qua_type=fixed)
+        action_batch.reset()
+
         with program() as rl_qoc_training_prog:
             # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
 
@@ -299,6 +302,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.max_input_state.declare_variable()
             self.input_state_vars.declare_variables()
             self.policy.declare_variables()
+            mu = self.policy.get_variable("mu")
+            sigma = self.policy.get_variable("sigma")
             self.reward.declare_variable()
             if self.circuit_choice_var is not None:
                 self.circuit_choice_var.declare_variable()
@@ -311,19 +316,49 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
             # Number of shots for each observable (or total number of shots if no observables)
             self.pauli_shots.declare_variable()
-            n_updates = declare(int)
+            n_u = declare(int)
             input_state_count = declare(int)
+
+            action_batch.declare_variable()
+            b = declare(int)
+
+            # Declare variables for efficient Gaussian random sampling
+            j = declare(int)
+            n_lookup, cos_array, ln_array = get_gaussian_sampling_input()
+            uniform_r = declare(fixed)
+            u1, u2 = declare(int), declare(int)
+            batch_r = Random(self.seed)
+            tmp1 = declare(fixed, size=self.n_actions)
+            tmp2 = declare(fixed, size=self.n_actions)
+            lower_bound = declare(fixed, value=self.action_space.low)
+            upper_bound = declare(fixed, value=self.action_space.high)
 
             if self.backend.init_macro is not None:
                 self.backend.init_macro()
             # Infinite loop to run the training
-            with for_(
-                n_updates,
-                0,
-                n_updates < num_updates,
-                n_updates + 1,
-            ):
+            with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 self.policy.load_input_values()  # Load µ and σ
+                with for_(b, 0, b < self.batch_size, b + 2):  # Sample batch of actions
+                    # Sample from a multivariate Gaussian distribution (Muller-Box method)
+                    with for_(j, 0, j < self.n_actions, j + 1):
+                        assign(uniform_r, batch_r.rand_fixed())
+                        assign(u1, Cast.unsafe_cast_int(uniform_r >> 19))
+                        assign(u2, Cast.unsafe_cast_int(uniform_r) & ((1 << 19) - 1))
+                        assign(
+                            tmp1[j],
+                            mu[j] + sigma[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)],
+                        )
+                        assign(
+                            tmp2[j],
+                            mu[j]
+                            + sigma[j]
+                            * ln_array[u1]
+                            * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
+                        )
+                        clip_qua(tmp1[j], lower_bound[j], upper_bound[j])
+                        clip_qua(tmp2[j], lower_bound[j], upper_bound[j])
+                    action_batch[b].assign(tmp1)
+                    action_batch[b + 1].assign(tmp2)
 
                 if self.circuit_choice_var is not None:  # Switch between circuit contexts
                     self.circuit_choice_var.load_input_value()
@@ -332,33 +367,90 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                     # Load number of repetitions of cycle circuit (can vary at each iteration)
                     self.n_reps_var.load_input_value()
 
-                self.max_input_state.load_input_value()  # Load number of input states to prepare
-                if self.observable_vars is not None:  # DFE reward only
-                    self.max_observables.load_input_value()
-
+                self.max_input_state.load_input_value()  # Load a number of input states to prepare
                 assign(input_state_count, 0)
 
-                with while_(input_state_count < self.max_input_state.var):
+                with for_(
+                    input_state_count,
+                    0,
+                    input_state_count < self.max_input_state.var,
+                    input_state_count + 1,
+                ):
                     assign(input_state_count, input_state_count + 1)
                     # Load info about input states to prepare (single qubit indices)
                     self.input_state_vars.load_input_values()
 
                     if self.config.dfe:
-                        assign(observable_count, 0)
-                        with while_(observable_count < self.max_observables.var):
-                            assign(observable_count, observable_count + 1)
+                        self.max_observables.load_input_value()
+                        with for_(
+                            observable_count,
+                            0,
+                            observable_count < self.max_observables.var,
+                            observable_count + 1,
+                        ):
                             # Load info about observable to measure (single qubit indices)
                             self.observable_vars.load_input_values()
                             self.pauli_shots.load_input_value()
-                            self._rl_qua_macro()
+
+                            self._rl_macro(action_batch, b)
                     else:
-                        self._rl_qua_macro()
+                        self._rl_macro(action_batch, b)
 
             with stream_processing():
                 self.reward.stream_processing()
 
         self.reset_parameters()
         return rl_qoc_training_prog
+
+    def _rl_macro(self, action_batch, b):
+        with for_(b, 0, b < self.batch_size, b + 1):
+            for i, parameter in enumerate(self.real_time_circuit_parameters.parameters):
+                parameter.assign(action_batch[b, i])
+
+            counts, state_int = self._run_circuit()
+
+            self.reward.assign(counts)
+            if self.input_type != InputType.INPUT_STREAM:
+                self.reward.save_to_stream()
+
+            self.reward.stream_back()
+
+    def _run_circuit(self):
+        """
+        Run the circuit and get the counts
+        """
+        qc = self.real_time_transpiled_circuit
+        n_shots = declare(int)
+        state_int = declare(int, value=0)
+        counts = declare(int, value=[0 for _ in range(2**self.n_qubits)])
+
+        with for_(n_shots, 0, n_shots < self.pauli_shots.var, n_shots + 1):
+            param_inputs = [
+                self.input_state_vars,
+                self.real_time_circuit_parameters,
+                self.circuit_choice_var,
+                self.n_reps_var,
+                self.observable_vars if self.config.dfe else None,
+            ]
+            param_inputs = [param for param in param_inputs if param is not None]
+
+            result = self.backend.quantum_circuit_to_qua(qc, param_inputs)
+            for c, clbit in enumerate(qc.clbits):
+                bit = qc.find_bit(clbit)
+                if len(bit.registers) == 0:
+                    bit_output = result.result_program[f"{_QASM3_DUMP_LOOSE_BIT_PREFIX}{c}"]
+                else:
+                    creg, creg_index = bit.registers[0]
+                    bit_output = result.result_program[creg.name][creg_index]
+                assign(
+                    state_int,
+                    state_int + 1 << c * Cast.to_int(bit_output),
+                )
+
+            assign(counts[state_int], counts[state_int] + 1)
+            assign(state_int, 0)  # Reset state_int for the next shot
+
+        return counts, state_int
 
     def reset_parameters(self):
         self.policy.reset()
@@ -374,119 +466,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.n_reps_var.reset()
         if self.circuit_choice_var is not None:
             self.circuit_choice_var.reset()
-
-    def _rl_qua_macro(self):
-        b = declare(int)
-        j = declare(int)
-        lower_bound = declare(fixed, value=self.action_space.low)
-        upper_bound = declare(fixed, value=self.action_space.high)
-        μ = self.policy.get_variable("mu")
-        σ = self.policy.get_variable("sigma")
-
-        with for_(b, 0, b < self.batch_size // 2, b + 1):
-            temp_action, temp_action2 = self._action_sampling(μ, σ)
-
-            with for_(j, 0, j < 2, j + 1):
-                for i, parameter in enumerate(self.real_time_circuit_parameters.parameters):
-                    parameter.assign_value(
-                        temp_action[i],
-                        condition=(j == 0),
-                        value_cond=temp_action2[i],
-                    )
-                    parameter.clip(lower_bound[i], upper_bound[i])
-
-                counts, state_int = self._run_circuit()
-
-                self.reward.assign_value(counts, is_qua_array=True)
-                if self.input_type != InputType.INPUT_STREAM:
-                    self.reward.save_to_stream()
-
-                self.reward.stream_back()
-
-    def _action_sampling(self, mu, sigma):
-        """
-        Sample actions from a multivariate Gaussian distribution using the Muller-Box method
-        Args:
-            µ: Mean of the Gaussian distribution (as a QUA array variable)
-            σ: Standard deviation of the Gaussian distribution (as a QUA array variable)
-
-        Returns:
-
-        """
-        # Declare variables for efficient Gaussian random sampling
-        j = declare(int)
-        n_lookup, cos_array, ln_array = get_gaussian_sampling_input()
-        uniform_r = declare(fixed)
-        u1, u2 = declare(int), declare(int)
-        batch_r = Random(self.seed)
-        temp_action = declare(fixed, size=self.n_actions)
-        temp_action2 = declare(fixed, size=self.n_actions)
-
-        # Sample actions from multivariate Gaussian distribution (Muller-Box method)
-        with for_(j, 0, j < self.n_actions, j + 1):
-            assign(uniform_r, batch_r.rand_fixed())
-            assign(u1, Cast.unsafe_cast_int(uniform_r >> 19))
-            assign(
-                u2,
-                Cast.unsafe_cast_int(uniform_r) & ((1 << 19) - 1),
-            )
-            assign(
-                temp_action[j],
-                mu[j] + sigma[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)],
-            )
-            assign(
-                temp_action2[j],
-                mu[j] + sigma[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
-            )
-
-            return temp_action, temp_action2
-
-    def _run_circuit(self):
-        """
-        Run the circuit and get the counts
-        """
-        qc = self.real_time_circuit
-        n_shots = declare(int)
-        state_int = declare(int, value=0)
-        counts = declare(int, value=[0 for _ in range(2**self.n_qubits)])
-
-        with for_(
-            n_shots,
-            0,
-            n_shots < self.pauli_shots.var,
-            n_shots + 1,
-        ):
-            param_inputs = [
-                self.input_state_vars,
-                self.real_time_circuit_parameters,
-            ]
-            if self.circuit_choice_var is not None:
-                param_inputs.append(self.circuit_choice_var)
-            if self.n_reps_var is not None:
-                param_inputs.append(self.n_reps_var)
-
-            if self.config.dfe:
-                param_inputs.append(self.observable_vars)
-
-            result = self.backend.quantum_circuit_to_qua(
-                self.real_time_transpiled_circuit,
-                param_inputs,
-            )
-            for c, clbit in enumerate(qc.clbits):
-                bit = qc.find_bit(clbit)
-                if len(bit.registers) == 0:
-                    bit_output = result.result_program[f"{_QASM3_DUMP_LOOSE_BIT_PREFIX}{c}"]
-                else:
-                    creg, creg_index = bit.registers[0]
-                    bit_output = result.result_program[creg.name][creg_index]
-                assign(
-                    state_int,
-                    state_int + 1 << c * Cast.to_int(bit_output),
-                )
-
-            assign(counts[state_int], counts[state_int] + 1)
-
-        return counts, state_int
 
     @property
     def qm_backend_config(self) -> QMConfig:
@@ -508,7 +487,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.real_time_circuit,
             optimization_level=1,
             initial_layout=self.layout,
-            remove_final_measurement=False,
+            remove_final_measurements=False,
             scheduling=False,
         )
 
@@ -526,6 +505,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         if self.input_type == InputType.DGX:
             ParameterPool.configure_stream()
         self.backend.update_calibrations(self.real_time_circuit, self.input_type)
+        self.backend.update_compiler_from_target()
         prog = self.rl_qoc_training_qua_prog(num_updates=num_updates)
         qmm: QuantumMachinesManager = self.backend.machine.connect()
         config = self.backend.machine.generate_config()

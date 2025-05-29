@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Union, Callable, Any, Optional, Dict, Iterable, List
 
 from qiskit import QuantumCircuit, QuantumRegister
-from qiskit.circuit import ParameterVector
+from qiskit.circuit import ParameterVector, Parameter
 
 from qiskit.primitives import EstimatorPubLike, SamplerPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
@@ -39,9 +39,9 @@ class BackendConfig(ABC):
     parametrized_circuit: Callable[
         [
             QuantumCircuit,
-            ParameterVector,
+            ParameterVector | List[Parameter],
             QuantumRegister,
-            Any,
+            ...,
         ],
         None,
     ]

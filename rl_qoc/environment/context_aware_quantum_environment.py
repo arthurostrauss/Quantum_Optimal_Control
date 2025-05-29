@@ -23,7 +23,6 @@ from typing import (
 
 import numpy as np
 from gymnasium.spaces import Box
-from qiskit import schedule
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -47,11 +46,9 @@ from qiskit.transpiler import (
     PassManager,
 )
 
-from qiskit_dynamics import DynamicsBackend
 from qiskit_experiments.library import ProcessTomography
 
 from ..helpers import (
-    simulate_pulse_input,
     MomentAnalysisPass,
     CustomGateReplacementPass,
     retrieve_primitives,
@@ -671,6 +668,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         Args:
             gate_names: Names of the custom gates to be created
         """
+        try:
+            from qiskit import schedule, pulse
+            from qiskit_dynamics import DynamicsBackend
+            from ..helpers.pulse_utils import (
+                simulate_pulse_input,
+                get_optimal_z_rotation,
+            )
+        except ImportError as e:
+            raise ImportError(
+                "Pulse calibration requires Qiskit Pulse, Qiskit Dynamics and Qiskit Experiments below 0.10."
+                "Please set your Qiskit version to 1.x to use this feature."
+            )
         if self.abstraction_level == "pulse":
             if gate_names is not None and len(gate_names) != len(self.custom_instructions):
                 raise ValueError(

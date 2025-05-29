@@ -16,19 +16,14 @@ from typing import List, Any, SupportsFloat, Tuple, Optional
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule, pulse, QuantumRegister
 
 # Qiskit imports
-from qiskit.circuit import (
-    QuantumCircuit,
-    ParameterVector,
-    Parameter,
-)
+from qiskit.circuit import QuantumCircuit, ParameterVector, Parameter, QuantumRegister
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info import DensityMatrix, Operator
 from qiskit.transpiler import InstructionProperties
-from qiskit_dynamics import DynamicsBackend
+
 from qiskit_experiments.library import ProcessTomography
 
 from .base_q_env import (
@@ -36,10 +31,7 @@ from .base_q_env import (
     GateTarget,
     StateTarget,
 )
-from ..helpers import (
-    simulate_pulse_input,
-    get_optimal_z_rotation,
-)
+
 from ..helpers.circuit_utils import fidelity_from_tomography
 from .configuration.qconfig import QEnvConfig, GateTargetConfig
 
@@ -287,6 +279,18 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
         :return: Pulse calibration for the custom gate
         """
+        try:
+            from qiskit import schedule, pulse
+            from qiskit_dynamics import DynamicsBackend
+            from ..helpers.pulse_utils import (
+                simulate_pulse_input,
+                get_optimal_z_rotation,
+            )
+        except ImportError as e:
+            raise ImportError(
+                "Pulse calibration requires Qiskit Pulse, Qiskit Dynamics and Qiskit Experiments below 0.10."
+                "Please set your Qiskit version to 1.x to use this feature."
+            )
         if not isinstance(self.target, GateTarget):
             raise ValueError("Target type should be a gate for gate calibration task.")
 

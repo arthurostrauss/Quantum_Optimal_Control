@@ -48,9 +48,6 @@ from qiskit.providers import BackendV2
 from qiskit_aer.noise import NoiseModel
 from qiskit_aer import AerSimulator
 
-# Qiskit dynamics for pulse simulation (& benchmarking)
-from qiskit_dynamics import DynamicsBackend
-
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
@@ -60,19 +57,13 @@ import matplotlib.pyplot as plt
 from .backend_info import QiskitBackendInfo, BackendInfo
 from .configuration.qconfig import QEnvConfig, ExecutionConfig
 from .target import GateTarget, StateTarget
-from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
+
 from ..helpers.helper_functions import (
     retrieve_primitives,
     get_hardware_runtime_single_circuit,
     has_noise_model,
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
-from ..helpers.pulse_utils import (
-    handle_virtual_rotations,
-    projected_state,
-    qubit_projection,
-    rotate_frame,
-)
 from ..rewards.reward_data import RewardDataList
 
 
@@ -494,6 +485,21 @@ class BaseQuantumEnvironment(ABC, Env):
         :param params: List of Action vectors to execute on quantum system
         :param update_env_history: Boolean to update the environment history
         """
+        try:
+            # Qiskit dynamics for pulse simulation (& benchmarking)
+            from qiskit_dynamics import DynamicsBackend
+            from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
+            from ..helpers.pulse_utils import (
+                handle_virtual_rotations,
+                projected_state,
+                qubit_projection,
+                rotate_frame,
+            )
+        except ImportError:
+            raise ImportError(
+                "Qiskit Dynamics is required for pulse simulation, as well as "
+                "Qiskit version below 2.0.0 for Qiskit Pulse. "
+            )
         if self.abstraction_level != "pulse":
             raise ValueError(
                 "This method should only be called when the abstraction level is 'pulse'"
@@ -770,7 +776,11 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the abstraction level of the environment (can be 'circuit' or 'pulse')
         """
-        return "pulse" if self.circuits[0].calibrations else "circuit"
+        return (
+            "pulse"
+            if hasattr(self.circuit, "calibrations") and self.circuit.calibrations
+            else "circuit"
+        )
 
     @step_tracker.setter
     def step_tracker(self, step: int):

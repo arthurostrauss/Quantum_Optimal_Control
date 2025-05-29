@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -93,7 +93,7 @@ class FidelityReward(Reward):
                 n_reps = qc.metadata["n_reps"]
             except KeyError:
                 raise ValueError("Number of repetitions is required for computing the reward")
-            if qc.calibrations:
+            if hasattr(qc, "calibrations") and qc.calibrations:
                 fidelities.append(
                     self.get_pulse_fidelity(qc, params, target, backend_info, n_reps=n_reps)
                 )
