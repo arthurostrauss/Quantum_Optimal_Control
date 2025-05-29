@@ -10,7 +10,7 @@ from qiskit.transpiler import (
     InstructionDurations,
     Layout,
     CouplingMap,
-    generate_preset_pass_manager,
+    generate_preset_pass_manager, Target,
 )
 from qiskit.providers import BackendV2
 
@@ -128,13 +128,19 @@ class QiskitBackendInfo(BackendInfo):
 
         if not self.skip_transpilation:
             if self._pass_manager is None:
+                if self.backend is None:
+                    target = Target.from_configuration(self.basis_gates,
+                                                       self.num_qubits,
+                                                       self.coupling_map if self.coupling_map.size() != 0 else None,
+                                                       instruction_durations=self.instruction_durations,
+                                                       dt=self.dt,
+                                                       )
+                else:
+                    target = self.backend.target
                 self._pass_manager = generate_preset_pass_manager(
                     optimization_level=optimization_level,
-                    backend=(self.backend if isinstance(self.backend, BackendV2) else None),
-                    target=(self.backend.target if isinstance(self.backend, BackendV2) else None),
-                    basis_gates=self.basis_gates,
-                    coupling_map=(self.coupling_map if self.coupling_map.size() != 0 else None),
-                    instruction_durations=self.instruction_durations,
+                    backend=self.backend,
+                    target=target if self.backend is None else None,
                     initial_layout=initial_layout,
                     dt=self.dt,
                     scheduling_method=(
