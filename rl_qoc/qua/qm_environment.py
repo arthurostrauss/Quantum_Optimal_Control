@@ -496,10 +496,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.backend.update_calibrations(qc=self.real_time_circuit, input_type=self.input_type)
         self.backend.update_compiler_from_target()
         prog = self.rl_qoc_training_qua_prog(num_updates=num_updates)
-        if isinstance(self.backend.qm, QuantumMachine):
-            return self.qm.execute(prog, compiler_options=compiler_options)
-        else:
-            raise NotImplementedError("IQCC Cloud Mode is not yet enabled")
+        self._qm_job = self.qm.execute(prog, compiler_options=compiler_options)
+        return self.qm_job
+
 
     def close(self) -> None:
         """

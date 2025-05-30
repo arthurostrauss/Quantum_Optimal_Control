@@ -135,3 +135,5 @@ q_env_config = QEnvConfig(
 
 q_env = QMEnvironment(training_config=q_env_config)
 rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
+
+job = q_env.start_program(num_updates.total_updates)
