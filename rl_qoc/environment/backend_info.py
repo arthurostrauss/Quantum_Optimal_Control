@@ -10,9 +10,10 @@ from qiskit.transpiler import (
     InstructionDurations,
     Layout,
     CouplingMap,
-    generate_preset_pass_manager, Target,
+    generate_preset_pass_manager,
+    Target,
 )
-from qiskit.providers import BackendV2
+from qiskit.providers import BackendV2 as QiskitBackend
 
 
 class BackendInfo(ABC):
@@ -82,7 +83,7 @@ class QiskitBackendInfo(BackendInfo):
 
     def __init__(
         self,
-        backend: Optional[BackendV2] = None,
+        backend: Optional[QiskitBackend] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
         pass_manager: PassManager = None,
         skip_transpilation: bool = False,
@@ -96,7 +97,7 @@ class QiskitBackendInfo(BackendInfo):
         :param n_qubits: Number of qubits for the quantum environment
         """
         super().__init__(
-            backend.num_qubits if isinstance(backend, BackendV2) else n_qubits,
+            backend.num_qubits if isinstance(backend, QiskitBackend) else n_qubits,
             pass_manager,
             skip_transpilation,
         )
@@ -129,12 +130,13 @@ class QiskitBackendInfo(BackendInfo):
         if not self.skip_transpilation:
             if self._pass_manager is None:
                 if self.backend is None:
-                    target = Target.from_configuration(self.basis_gates,
-                                                       self.num_qubits,
-                                                       self.coupling_map if self.coupling_map.size() != 0 else None,
-                                                       instruction_durations=self.instruction_durations,
-                                                       dt=self.dt,
-                                                       )
+                    target = Target.from_configuration(
+                        self.basis_gates,
+                        self.num_qubits,
+                        self.coupling_map if self.coupling_map.size() != 0 else None,
+                        instruction_durations=self.instruction_durations,
+                        dt=self.dt,
+                    )
                 else:
                     target = self.backend.target
                 self._pass_manager = generate_preset_pass_manager(
@@ -164,7 +166,7 @@ class QiskitBackendInfo(BackendInfo):
         """
         return (
             self.backend.coupling_map
-            if isinstance(self.backend, BackendV2) and self.backend.coupling_map is not None
+            if isinstance(self.backend, QiskitBackend) and self.backend.coupling_map is not None
             else CouplingMap.from_full(self._n_qubits)
         )
 
@@ -175,7 +177,7 @@ class QiskitBackendInfo(BackendInfo):
         """
         return (
             self.backend.operation_names
-            if isinstance(self.backend, BackendV2)
+            if isinstance(self.backend, QiskitBackend)
             else ["u", "rzx", "cx", "rz", "h", "s", "sdg", "x", "z", "measure", "reset"]
         )
 
@@ -184,7 +186,7 @@ class QiskitBackendInfo(BackendInfo):
         """
         Retrieve the time unit of the backend (default is 1e-9)
         """
-        return self.backend.dt if isinstance(self.backend, BackendV2) else 1e-9
+        return self.backend.dt if isinstance(self.backend, QiskitBackend) else 1e-9
 
     @property
     def instruction_durations(self):
@@ -193,7 +195,7 @@ class QiskitBackendInfo(BackendInfo):
         """
         return (
             self.backend.instruction_durations
-            if isinstance(self.backend, BackendV2)
+            if isinstance(self.backend, QiskitBackend)
             and self.backend.instruction_durations.duration_by_name_qubits
             else self._instruction_durations
         )
@@ -203,7 +205,7 @@ class QiskitBackendInfo(BackendInfo):
         """
         Assess if the backend supports real-time control flow
         """
-        if isinstance(self.backend, BackendV2):
+        if isinstance(self.backend, QiskitBackend):
             if any(
                 operation_name in CONTROL_FLOW_OP_NAMES
                 for operation_name in self.backend.operation_names

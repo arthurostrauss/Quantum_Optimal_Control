@@ -108,7 +108,7 @@ class CustomQMPPO(CustomPPO):
         μ_f = [FixedPoint(μ[i]) for i in range(self.n_actions)]
         σ_f = [FixedPoint(σ[i]) for i in range(self.n_actions)]
         action = np.zeros((batch_size, self.n_actions))
-        seed = self.seed
+        seed = self.seed + self.global_step
         n_lookup = 512
         cos_array = [FixedPoint(np.cos(2 * np.pi * x / n_lookup)) for x in range(n_lookup)]
         ln_array = [
