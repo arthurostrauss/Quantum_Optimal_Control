@@ -193,6 +193,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         # Push policy parameters to trigger real-time action sampling
         self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
+        print("Just pushed policy parameters to OPX:", mean_val, std_val)
         if self.circuit_choice_var is not None:
             self.circuit_choice_var.push_to_opx(self.trunc_index, **push_args)
 
@@ -202,10 +203,13 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         # Push the reward data to the OPX
         input_state_indices = reward_data.input_indices
         max_input_state = len(input_state_indices)
+        max_observables = (
+            1 if not self.config.dfe else sum([len(obs) for obs in reward_data.observables_indices])
+        )
 
         self.max_input_state.push_to_opx(max_input_state, **push_args)
-
         reward = np.zeros(shape=(self.batch_size,))
+        collected_counts = []
         for i, input_state in enumerate(input_state_indices):
             input_state_dict = {
                 input_var: input_state_val
@@ -214,24 +218,35 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.input_state_vars.push_to_opx(input_state_dict, **push_args)
             self.pauli_shots.push_to_opx(reward_data.shots[i], **push_args)
             if self.config.dfe:
-                max_observables = len(reward_data.observables_indices[i])
-                self.max_observables.push_to_opx(max_observables, **push_args)
-                for j, observable in enumerate(reward_data.observables_indices):
+                observables = reward_data.observables_indices[i]
+                num_obs = len(observables)
+                self.max_observables.push_to_opx(num_obs, **push_args)
+                for j, observable in enumerate(observables):
                     observable_dict = {
-                        observable_var: list(observable_val)
+                        observable_var: observable_val
                         for observable_var, observable_val in zip(
                             self.observable_vars.parameters, observable
                         )
                     }
                     self.observable_vars.push_to_opx(observable_dict, **push_args)
+                    if self.input_type == InputType.IO1 or self.input_type == InputType.IO2:
+                        for _ in range(self.batch_size):
+                            # For IO1 and IO2, we push the observable data for each batch
+                            collected_counts.extend(self.reward.fetch_from_opx(**push_args))
 
-        collected_counts = self.reward.fetch_from_opx(
-            **push_args,
-            fetching_index=self.step_tracker,
-            fetching_size=self.batch_size
-            * max_input_state
-            * (max_observables if self.config.dfe else 1),
-        )
+            elif self.input_type == InputType.IO1 or self.input_type == InputType.IO2:
+                for _ in range(self.batch_size):
+                    # For IO1 and IO2, we push the observable data for each batch
+                    collected_counts.extend(self.reward.fetch_from_opx(**push_args))
+        if self.input_type == InputType.INPUT_STREAM or self.input_type == InputType.DGX:
+            # If the input type is INPUT_STREAM or DGX, we fetch the counts after all input states are pushed
+            # This is to avoid multiple fetches in a loop which can be inefficient
+
+            collected_counts = self.reward.fetch_from_opx(
+                **push_args,
+                fetching_index=self.step_tracker,
+                fetching_size=self.batch_size * max_input_state * max_observables,
+            )
 
         # The counts are a flattened list of counts from the initial shape (max_input_state, max_observables, batch_size)
         # Reshape the counts to the original shape
@@ -279,6 +294,14 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                     )
                 reward[batch_idx] = np.mean(survival_probability)
 
+        if np.mean(reward) > self._max_return:
+            self._max_return = np.mean(reward)
+            self._optimal_actions[self.trunc_index] = self.mean_action
+
+        reward = np.clip(reward, 0.0, 1.0)
+        self.reward_history.append(reward)
+        reward = -np.log10(1.0 - reward)  # Convert to negative log10 scale
+
         return self._get_obs(), reward, True, False, self._get_info()
 
     def rl_qoc_training_qua_prog(self, num_updates: int = 1000) -> Program:
@@ -308,7 +331,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             if self.observable_vars is not None:
                 self.observable_vars.declare_variables()
                 obs_idx = declare(int)
-    
 
             # Number of shots for each observable (or total number of shots if no observables)
             self.pauli_shots.declare_variable()
@@ -343,24 +365,52 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                     input_state_count < self.max_input_state.var,
                     input_state_count + 1,
                 ):
-                    assign(input_state_count, input_state_count + 1)
                     # Load info about input states to prepare (single qubit indices)
                     self.input_state_vars.load_input_values()
 
                     if self.config.dfe:
                         self.max_observables.load_input_value()
-                        with for_(obs_idx,0, obs_idx < self.max_observables.var, obs_idx + 1):
+                        self.pauli_shots.load_input_value()  # TODO: RELAX THIS TO PUT IT PER OBSERVABLE 5WITHIN LOOP BELOW)
+                        with for_(obs_idx, 0, obs_idx < self.max_observables.var, obs_idx + 1):
                             # Load info about observable to measure (single qubit indices)
                             self.observable_vars.load_input_values()
-                            self.pauli_shots.load_input_value()
 
-                            self._rl_macro(b, batch_r, cos_array, j, ln_array, lower_bound, mu, n_lookup, sigma, tmp1,
-                                           tmp2, u1, u2, uniform_r, upper_bound)
-                            
+                            self._rl_macro(
+                                b,
+                                batch_r,
+                                cos_array,
+                                j,
+                                ln_array,
+                                lower_bound,
+                                mu,
+                                n_lookup,
+                                sigma,
+                                tmp1,
+                                tmp2,
+                                u1,
+                                u2,
+                                uniform_r,
+                                upper_bound,
+                            )
+
                     else:
-                        self._rl_macro(b, batch_r, cos_array, j, ln_array, lower_bound, mu, n_lookup, sigma, tmp1,
-                                           tmp2, u1, u2, uniform_r, upper_bound)
-                       
+                        self._rl_macro(
+                            b,
+                            batch_r,
+                            cos_array,
+                            j,
+                            ln_array,
+                            lower_bound,
+                            mu,
+                            n_lookup,
+                            sigma,
+                            tmp1,
+                            tmp2,
+                            u1,
+                            u2,
+                            uniform_r,
+                            upper_bound,
+                        )
 
             with stream_processing():
                 self.reward.stream_processing()
@@ -368,8 +418,24 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.reset_parameters()
         return rl_qoc_training_prog
 
-    def _rl_macro(self, b, batch_r, cos_array, j, ln_array, lower_bound, mu, n_lookup, sigma, tmp1, tmp2, u1, u2,
-                  uniform_r, upper_bound):
+    def _rl_macro(
+        self,
+        b,
+        batch_r,
+        cos_array,
+        j,
+        ln_array,
+        lower_bound,
+        mu,
+        n_lookup,
+        sigma,
+        tmp1,
+        tmp2,
+        u1,
+        u2,
+        uniform_r,
+        upper_bound,
+    ):
         with for_(b, 0, b < self.batch_size, b + 2):
             # Sample from a multivariate Gaussian distribution (Muller-Box method)
             with for_(j, 0, j < self.n_actions, j + 1):
@@ -383,15 +449,13 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 assign(
                     tmp2[j],
                     mu[j]
-                    + sigma[j]
-                    * ln_array[u1]
-                    * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
+                    + sigma[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
                 )
                 clip_qua(tmp1[j], lower_bound[j], upper_bound[j])
                 clip_qua(tmp2[j], lower_bound[j], upper_bound[j])
 
             with for_(j, 0, j < 2, j + 1):
-                # Assign the sampled actions to the action batch    
+                # Assign the sampled actions to the action batch
                 for i, parameter in enumerate(self.real_time_circuit_parameters.parameters):
                     parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
 
@@ -497,10 +561,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.backend.update_compiler_from_target()
         prog = self.rl_qoc_training_qua_prog(num_updates=num_updates)
         self._qm_job = self.qm.execute(prog, compiler_options=compiler_options)
-        return self.qm_job
+        return self._qm_job
 
-
-    def close(self) -> None:
+    def close(self) -> bool:
         """
         Close the environment (stop the running QUA program)
         Returns:
@@ -512,6 +575,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         if not finish:
             print("Failed to halt the job")
         self._qm_job = None
+        return finish
 
     @property
     def input_type(self) -> InputType:
@@ -533,3 +597,83 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         Get the QM object
         """
         return self.backend.qm
+
+    # Add this method to your QMEnvironment class
+    def _reshape_and_reorganize_counts(
+        self,
+        # collected_counts_list_of_arrays is now always a list of dim-sized arrays/lists
+        collected_counts_list_of_arrays: list[Union[np.ndarray, list[Union[int, float]]]],
+        max_input_state: int,
+        reward_data: RewardDataType,
+    ) -> list[list[list[np.ndarray]]]:
+        """
+        Reshapes and reorganizes fetched counts into a batch-first nested list structure.
+        Assumes collected_counts_list_of_arrays is a list where each element
+        is a dim-sized array/list of counts, ordered by QUA execution flow
+        (input_state -> observable -> batch).
+
+        Output structure:
+        reorganized_counts[batch_idx][input_state_idx] = list_of_observable_counts_arrays
+        where each counts_array is a 1D NumPy array of size 'dim' (integers).
+        """
+        dim = 2**self.n_qubits
+        # Initialize the nested list structure:
+        # reorganized_counts[batch_idx][input_state_idx] will store a list of observable_counts_arrays
+        reorganized_counts: list[list[list[np.ndarray]]] = [
+            [[] for _ in range(max_input_state)] for _ in range(self.batch_size)
+        ]
+
+        current_item_idx = 0  # Index for iterating through collected_counts_list_of_arrays
+
+        # Iterate in the order data was generated by the QUA program
+        for i_idx_qua_loop in range(max_input_state):
+            num_obs_for_this_input_state = 1
+            if self.config.dfe:
+                if i_idx_qua_loop >= len(reward_data.observables_indices):
+                    # This check ensures reward_data is consistent with max_input_state
+                    raise IndexError(
+                        f"Input state index {i_idx_qua_loop} is out of bounds for "
+                        f"reward_data.observables_indices (length: {len(reward_data.observables_indices)}). "
+                        "Ensure reward_data is correctly populated for all input states."
+                    )
+                num_obs_for_this_input_state = len(reward_data.observables_indices[i_idx_qua_loop])
+
+            for _o_idx_qua_loop in range(num_obs_for_this_input_state):
+                for batch_idx_qua_loop in range(self.batch_size):
+                    if current_item_idx >= len(collected_counts_list_of_arrays):
+                        raise ValueError(
+                            f"Not enough data in collected_counts_list_of_arrays. "
+                            f"Attempting to access index: {current_item_idx}, "
+                            f"Total items available: {len(collected_counts_list_of_arrays)}. "
+                            "This may indicate an issue with QUA program logic or data fetching size."
+                        )
+
+                    # Ensure the fetched item is a NumPy array of the correct shape and integer type
+                    try:
+                        counts_array_for_instance = np.array(
+                            collected_counts_list_of_arrays[current_item_idx], dtype=int
+                        ).reshape(dim)
+                    except Exception as e:
+                        problematic_item = collected_counts_list_of_arrays[current_item_idx]
+                        raise ValueError(
+                            f"Error processing counts at index {current_item_idx}. Item: {problematic_item}, Type: {type(problematic_item)}. "
+                            f"Expected a {dim}-element list/array of numbers."
+                        ) from e
+
+                    current_item_idx += 1
+
+                    # Append to the correct batch and input_state slot, building the batch-first structure
+                    reorganized_counts[batch_idx_qua_loop][i_idx_qua_loop].append(
+                        counts_array_for_instance
+                    )
+
+        # Sanity check: all items from collected_counts_list_of_arrays should have been consumed
+        if current_item_idx != len(collected_counts_list_of_arrays):
+            # This warning is important as it indicates a potential mismatch.
+            print(
+                f"Warning: Mismatch in consumed items from collected_counts_list_of_arrays. "
+                f"Consumed: {current_item_idx}, Total available: {len(collected_counts_list_of_arrays)}. "
+                "Check QUA program logic, number of measurement settings, and batch size."
+            )
+
+        return reorganized_counts

@@ -80,7 +80,7 @@ class ResetMacro(QubitMacro):
 @quam_dataclass
 class VirtualZMacro(QubitMacro):
     def apply(self, angle: float) -> None:
-        self.qubit.xy.frame_rotation_2pi(angle)
+        self.qubit.xy.frame_rotation(angle)
 
 
 @quam_dataclass

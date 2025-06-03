@@ -398,7 +398,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     0.0,
                     self.trunc_index,
                 ]
-                + list(self._observable_to_observation())
+                + list(self._observable_to_observation()),
+                dtype=np.float32,
             )
         else:
             return np.array([0, self.trunc_index])
