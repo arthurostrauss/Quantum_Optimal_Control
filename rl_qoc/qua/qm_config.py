@@ -1,11 +1,7 @@
-import ctypes
-from _ctypes import Structure, POINTER
-from ctypes import CDLL
 from dataclasses import dataclass
-
 from ..environment.configuration.backend_config import BackendConfig
 from qiskit_qm_provider import QMBackend
-from typing import Any, Callable, Literal, Union
+from typing import Literal, Union
 from qiskit_qm_provider import InputType
 
 Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX"]]
@@ -24,8 +20,8 @@ class QMConfig(BackendConfig):
     backend: QMBackend = None
     input_type: InputType = "INPUT_STREAM"
     verbosity: int = 1
-    opnic_dev_path: str = "/home/dpoulos/opnic-dev"
     num_updates: int = 1000
+    opnic_dev_path: str = "/home/dpoulos/opnic-dev"
 
     @property
     def config_type(self):
@@ -35,27 +31,3 @@ class QMConfig(BackendConfig):
         self.input_type = (
             InputType(self.input_type) if isinstance(self.input_type, str) else self.input_type
         )
-
-
-@dataclass
-class DGXConfig(QMConfig):
-    """
-    DGX Configuration
-
-    Args:
-        parametrized_circuit: Function applying parametrized transformation to a QUA program
-        backend: Quantum Machine backend
-        hardware_config: Hardware configuration
-    """
-
-    opnic_dev_path: str = "/home/dpoulos/aps_demo"
-    verbosity: int = 1
-
-    def __post_init__(self):
-        super().__post_init__()
-        if self.input_type != InputType.DGX:
-            raise ValueError("DGXConfig must have input_type as 'dgx'")
-
-    @property
-    def config_type(self):
-        return "dgx"

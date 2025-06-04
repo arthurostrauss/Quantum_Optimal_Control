@@ -1,16 +1,18 @@
-from typing import Union, Any, Tuple, Optional, Literal
+from typing import Union, Literal
 
 import numpy as np
-from quam.components.channels import IQChannel
-from quam.components.macro import QubitMacro, QubitPairMacro, PulseMacro
+from quam.components.macro import QubitMacro, QubitPairMacro
 from quam.components.pulses import ReadoutPulse, Pulse
 from quam.core import quam_dataclass
 from quam_builder.architecture.superconducting.qubit import FluxTunableTransmon
-from quam_builder.architecture.superconducting.components import ReadoutResonatorIQ
-from qm.qua import declare, assign, while_, Cast, broadcast, fixed
-from quam.utils.qua_types import QuaVariableBool, QuaVariableFloat, QuaVariableInt
+from quam_builder.architecture.superconducting.components.tunable_coupler import TunableCoupler
+from quam_builder.architecture.superconducting.components.readout_resonator import (
+    ReadoutResonatorIQ,
+)
+from qm.qua import declare, assign, fixed
+from quam.utils.qua_types import QuaVariableBool
 
-__all__ = ["MeasureMacro", "ResetMacro", "VirtualZMacro", "CZMacro", "DelayMacro"]
+__all__ = ["MeasureMacro", "ResetMacro", "VirtualZMacro", "CZMacro", "DelayMacro", "IdMacro"]
 
 
 def get_pulse_name(pulse: Pulse) -> str:
@@ -30,7 +32,7 @@ class MeasureMacro(QubitMacro):
     pulse: Union[ReadoutPulse, str] = "readout"
 
     def apply(self, **kwargs) -> QuaVariableBool:
-        state = kwargs.get("state", declare(bool))
+        state: QuaVariableBool = kwargs.get("state", declare(bool))
         qua_vars = kwargs.get("qua_vars", (declare(fixed), declare(fixed)))
         pulse: ReadoutPulse = (
             self.pulse if isinstance(self.pulse, Pulse) else self.qubit.get_pulse(self.pulse)
@@ -56,6 +58,7 @@ class ResetMacro(QubitMacro):
         assert self.max_attempts > 0, "max_attempts must be greater than 0"
 
     def apply(self, **kwargs) -> None:
+
         pi_pulse: Pulse = (
             self.pi_pulse
             if isinstance(self.pi_pulse, Pulse)
@@ -67,6 +70,10 @@ class ResetMacro(QubitMacro):
             else self.qubit.get_pulse(self.readout_pulse)
         )
         if self.reset_type == "active":
+            # from ..macros import active_reset
+            # active_reset(self.qubit, pi_pulse_name=get_pulse_name(pi_pulse),
+            #              readout_pulse_name=get_pulse_name(readout_pulse),
+            #              max_attempts=self.max_attempts)
             self.qubit.reset_qubit_active(
                 pi_pulse_name=get_pulse_name(pi_pulse),
                 readout_pulse_name=get_pulse_name(readout_pulse),
@@ -92,6 +99,10 @@ class CZMacro(QubitPairMacro):
 
     phase_shift_control: float = 0.0
     phase_shift_target: float = 0.0
+
+    @property
+    def coupler(self) -> TunableCoupler:
+        return self.qubit_pair.coupler
 
     @property
     def flux_pulse_control_label(self) -> str:
@@ -138,8 +149,8 @@ class CZMacro(QubitPairMacro):
         elif np.abs(self.phase_shift_target) > 1e-6:
             self.qubit_target.xy.frame_rotation_2pi(self.phase_shift_target)
 
-        self.qubit_control.xy.play("x180", amplitude_scale=None, duration=4)
-        self.qubit_target.xy.play("x180", amplitude_scale=None, duration=4)
+        self.qubit_control.xy.play("x180", amplitude_scale=0.0, duration=4)
+        self.qubit_target.xy.play("x180", amplitude_scale=0.0, duration=4)
         self.qubit_pair.align()
 
 
@@ -147,5 +158,17 @@ class CZMacro(QubitPairMacro):
 class DelayMacro(QubitMacro):
 
     def apply(self, duration) -> None:
-        qubit: FluxTunableTransmon = self.qubit
-        qubit.wait(duration)
+        self.qubit.wait(duration)
+
+
+@quam_dataclass
+class IdMacro(QubitMacro):
+    """
+    Identity macro for a qubit.
+    This macro does not perform any operation on the qubit.
+    It is used to ensure that the qubit is in a valid state.
+    """
+
+    def apply(self, **kwargs) -> None:
+        # No operation is performed
+        self.qubit.align()
