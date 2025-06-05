@@ -137,7 +137,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         self.real_time_circuit_parameters = ParameterTable.from_qiskit(
             self.real_time_circuit,
-            input_type=self.input_type,
+            input_type=None,
             filter_function=lambda x: isinstance(x, Parameter),
             name="real_time_circuit_parameters",
         )
@@ -196,11 +196,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 "The QUA program has not been started yet. Call start_program() first."
             )
 
-        verbosity = self.qm_backend_config.verbosity
-
         push_args = {
             "job": self.qm_job,
-            "verbosity": verbosity,
+            "verbosity": self.qm_backend_config.verbosity,
         }
         mean_val = self.mean_action.tolist()
         std_val = self.std_action.tolist()
@@ -582,8 +580,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.max_input_state.declare_variable()
             self.input_state_vars.declare_variables()
             self.policy.declare_variables()
-            mu = self.policy.get_variable("mu")
-            sigma = self.policy.get_variable("sigma")
             self.reward.declare_variable()
             for var in [self.circuit_choice_var, self.n_reps_var, self.max_observables]:
                 if var is not None:
@@ -596,12 +592,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.pauli_shots.declare_variable()
             n_u = declare(int)
             input_state_count = declare(int)
-            b = declare(int)
             state_int = declare(int, value=0)
             counts = declare(int, value=[0 for _ in range(2**self.n_qubits)])
-
-            # Declare variables for efficient Gaussian random sampling
-            j = declare(int)
 
             batch_r = Random(self.seed)
 
@@ -633,23 +625,23 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
                             self._rl_macro(
                                 batch_r,
-                                mu,
-                                sigma,
                                 state_int,
                                 counts,
                             )
+                            # self.reward.stream_back(counts)
 
                     else:
                         self._rl_macro(
                             batch_r,
-                            mu,
-                            sigma,
                             state_int,
                             counts,
                         )
+                        # self.reward.stream_back(counts)
 
             with stream_processing():
-                self.reward.stream_processing(buffer=(self.batch_size, dim))
+                buffer = (self.batch_size, dim)
+                # buffer = None # TODO: Change this
+                self.reward.stream_processing(buffer=buffer)
 
         self.reset_parameters()
         return rl_qoc_training_prog
@@ -657,11 +649,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
     def _rl_macro(
         self,
         batch_r,
-        mu,
-        sigma,
         state_int,
         counts,
     ):
+
+        # Declare variables for efficient Gaussian random sampling
         b = declare(int)
         j = declare(int)
         n_lookup, cos_array, ln_array = get_gaussian_sampling_input()
@@ -671,6 +663,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         tmp2 = declare(fixed, size=self.n_actions)
         lower_bound = declare(fixed, value=self.action_space.low)
         upper_bound = declare(fixed, value=self.action_space.high)
+        mu = self.policy.get_variable("mu")
+        sigma = self.policy.get_variable("sigma")
 
         with for_(b, 0, b < self.batch_size, b + 2):
             # Sample from a multivariate Gaussian distribution (Muller-Box method)
@@ -733,6 +727,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.real_time_circuit_parameters.reset()
         self.input_state_vars.reset()
         self.max_input_state.reset()
+        self.pauli_shots.reset()
         if self.observable_vars is not None:
             self.observable_vars.reset()
             self.pauli_shots.reset()
