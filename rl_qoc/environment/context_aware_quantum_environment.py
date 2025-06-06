@@ -110,6 +110,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self,
         training_config: QEnvConfig,
         circuit_context: Optional[QuantumCircuit] = None,
+        virtual_target_qubits: Optional[List[int]] = None,
         training_steps_per_gate: Union[List[int], int] = 1500,
         intermediate_rewards: bool = False,
         **context_kwargs,
@@ -125,6 +126,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             training_config: The configuration of the training environment
             circuit_context: The circuit context containing the target gate to be calibrated. If None, a new circuit
                 context will be created with the target gate appended to it on the target qubits.
+            virtual_target_qubits: The virtual target qubits to be used in the circuit context. If None, will be set to
+                the first qubits of the circuit context.
             training_steps_per_gate: The number of training steps per gate instance
             intermediate_rewards: Whether to provide intermediate rewards during the training
             context_kwargs: Additional keyword arguments to be passed to the context-aware environment (e.g.
@@ -141,6 +144,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.circ_tgt_register = None
         self.target_instruction = None
         self._circuit_context = None
+        self._virtual_target_qubits = virtual_target_qubits
         self._training_steps_per_gate = training_steps_per_gate
         self._intermediate_rewards = intermediate_rewards
         self.custom_instructions: List[Instruction] = []
@@ -154,7 +158,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 circuit_context.append(self.config.target.gate, q_reg)
             else:  # State
                 circuit_context.prepare_state(self.config.target.state, q_reg)
-
+            self._virtual_target_qubits = list(range(q_reg.size))
         self.set_unbound_circuit_context(circuit_context, **context_kwargs)
 
     def define_target_and_circuits(self):
@@ -174,7 +178,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         _ = pm.run(self.circuit_context)
         moments = pm.property_set["moments"]  # type: dict[int, list[DAGOpNode]]
         layouts = [
-            Layout({qubit: q for q, qubit in enumerate(self.circuit_context.qubits)})
+            Layout(
+                {
+                    qubit: q
+                    for q, qubit in zip(self.physical_target_qubits, self.circuit_context.qubits)
+                }
+            )
             for _ in range(tgt_instruction_counts)
         ]
         context_dag = circuit_to_dag(self.circuit_context)
@@ -527,6 +536,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return self._training_steps_per_gate
 
     @property
+    def virtual_target_qubits(self) -> List[int]:
+        """
+        Return the virtual target qubits used in the circuit context
+        """
+        if self._virtual_target_qubits is None:
+            return list(range(self.physical_target_qubits))
+        else:
+            return self._virtual_target_qubits
+
+    @property
     def optimal_action(self):
         """
         Return optimal action for current gate instance
@@ -581,7 +600,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         # Define target register and nearest neighbor register for truncated circuits
         self.circ_tgt_register = QuantumRegister(
-            bits=[self._unbound_circuit_context.qubits[i] for i in self.physical_target_qubits],
+            bits=[self._unbound_circuit_context.qubits[i] for i in self.virtual_target_qubits],
             name="tgt",
         )
 

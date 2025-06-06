@@ -301,14 +301,14 @@ class StateReward(Reward):
             if meas.size != causal_cone_size:
                 raise ValueError("Classical register size must match the target causal cone size")
 
-        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
         observables_vars = [
-            qc.add_input(f"observable_{i}", Uint(4)) for i in range(ref_target.causal_cone_size)
+            qc.add_input(f"observable_{i}", Uint(4)) for i in range(causal_cone_size)
         ]
         input_circuits = [
             circ.decompose() for circ in get_single_qubit_input_states(self.input_states_choice)
         ]
 
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
         for q, qubit in enumerate(qc.qubits):
             # Input state prep (over all qubits of the circuit context)
             with qc.switch(input_state_vars[q]) as case_input_state:
@@ -338,7 +338,7 @@ class StateReward(Reward):
                         )
 
         # Measurement
-        qc.measure(ref_target.causal_cone_qubits, meas)
+        qc.measure(causal_cone_qubits, meas)
 
         if skip_transpilation:
             return qc
