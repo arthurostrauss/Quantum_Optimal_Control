@@ -152,7 +152,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
         if circuit_context is None:
-            q_reg = QuantumRegister(len(self.config.target.physical_qubits), name="tgt")
+            q_reg = QuantumRegister(len(self.physical_target_qubits), name="tgt")
             circuit_context = QuantumCircuit(q_reg)
             if isinstance(self.config.target, GateTargetConfig):
                 circuit_context.append(self.config.target.gate, q_reg)
@@ -274,6 +274,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                     self.config.target.gate,
                     self.physical_target_qubits,
                     baseline_circuit,
+                    self.virtual_target_qubits,
                     self.circ_tgt_register,
                     layout,
                     input_states_choice=input_states_choice,

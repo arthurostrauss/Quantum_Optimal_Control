@@ -22,7 +22,7 @@ from qiskit.circuit import QuantumCircuit, ParameterVector, Parameter, QuantumRe
 
 # Qiskit Quantum Information, for fidelity benchmarking
 from qiskit.quantum_info import DensityMatrix, Operator
-from qiskit.transpiler import InstructionProperties
+from qiskit.transpiler import InstructionProperties, Layout
 
 from qiskit_experiments.library import ProcessTomography
 
@@ -95,15 +95,19 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             self.config.reward.reward_args, "input_states_choice", "pauli4"
         )
         q_reg = QuantumRegister(len(self.config.target.physical_qubits))
+        layout = Layout({q_reg[i]: self.config.target.physical_qubits[i] for i in range(len(q_reg))})
         if isinstance(self.config.target, GateTargetConfig):
             target = GateTarget(
                 **self.config.target.as_dict(),
                 input_states_choice=input_states_choice,
                 tgt_register=q_reg,
+                layout=layout,
             )
 
         else:
-            target = StateTarget(**asdict(self.config.target), tgt_register=q_reg)
+            target = StateTarget(**asdict(self.config.target),
+                                 tgt_register=q_reg,
+                                 layout=layout)
 
         custom_circuit = QuantumCircuit(q_reg, name="custom_circuit")
 

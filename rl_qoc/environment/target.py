@@ -297,15 +297,17 @@ class GateTarget(BaseTarget):
         gate: Gate | str,
         physical_qubits: Optional[List[int]] = None,
         circuit_context: Optional[QuantumCircuit] = None,
+        virtual_target_qubits: Optional[List[int]] = None,
         tgt_register: Optional[QuantumRegister] = None,
         layout: Optional[Layout] = None,
         input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4",
     ):
         """
-        Initialize the gate target for the quantum environment
-        :param gate: Gate to be calibrated
-        :param physical_qubits: Physical qubits forming the target gate
-        :param circuit_context: circuit to be used for context-aware calibration (default is the gate to be calibrated)
+        Initialize the gate target for the quantum environment.
+        :param gate: Gate to be calibrated. It can be a Gate object or a string representing the gate name.
+        :param physical_qubits: Physical qubits forming the target gate.
+        :param circuit_context: Circuit to be used for context-aware calibration (default is the gate to be calibrated).
+        :param virtual_target_qubits: Virtual target qubits to be used for the context-aware calibration.
         :param tgt_register: Specify target QuantumRegister if already declared
         :param layout: Specify layout if already declared
         :param input_states_choice: Type of input states to be used for
@@ -327,10 +329,12 @@ class GateTarget(BaseTarget):
             raise ValueError("circuit_context should be a QuantumCircuit")
 
         self._circuit_context: QuantumCircuit = circuit_context
-
+        self._virtual_target_qubits = virtual_target_qubits
+        if self._virtual_target_qubits is None:
+            self._virtual_target_qubits = list(range(self.n_qubits))
         if self.has_context:
             # Filter context to get causal cone of the target gate
-            target_qubits = [self._circuit_context.qubits[i] for i in self.physical_qubits]
+            target_qubits = [self._circuit_context.qubits[i] for i in self.virtual_target_qubits]
             filtered_context, filtered_qubits = causal_cone_circuit(
                 self._circuit_context,
                 target_qubits,
@@ -529,6 +533,13 @@ class GateTarget(BaseTarget):
         gate_qc.append(self.gate, list(range(self.gate.num_qubits)))
 
         return Operator(self._circuit_context) != Operator(gate_qc)
+
+    @property
+    def virtual_target_qubits(self):
+        """
+        Get the virtual target qubits for the context-aware calibration
+        """
+        return self._virtual_target_qubits
 
     @property
     def causal_cone_qubits(self):

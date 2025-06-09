@@ -91,11 +91,11 @@ class StateRewardDataList(RewardDataList):
     reward_data: List[StateRewardData]
 
     @property
-    def shots(self) -> int:
+    def shots(self) -> List[int]:
         """
         Return the number of shots.
         """
-        return self.reward_data[0].shots
+        return [self.reward_data[0].shots]
 
     @property
     def n_reps(self) -> int:

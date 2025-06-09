@@ -198,6 +198,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         push_args = {
             "job": self.qm_job,
+            "qm": self.qm,
             "verbosity": self.qm_backend_config.verbosity,
         }
         mean_val = self.mean_action.tolist()
@@ -254,9 +255,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                     self.observable_vars.push_to_opx(observable_dict, **push_args)
 
         collected_counts = self.reward.fetch_from_opx(
-            **push_args,
+            self.qm_job,
             fetching_index=self.step_tracker - 1,
             fetching_size=max_input_state * max_observables,
+            verbosity=self.qm_backend_config.verbosity,
+            time_out=self.backend.options.timeout
         )
 
         # The counts are a flattened list of counts from the initial shape (max_input_state, max_observables, batch_size)
@@ -576,11 +579,12 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         with program() as rl_qoc_training_prog:
             # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
 
-            self.real_time_circuit_parameters.declare_variables(declare_streams=False)
+            self.real_time_circuit_parameters.declare_variables()
             self.max_input_state.declare_variable()
             self.input_state_vars.declare_variables()
             self.policy.declare_variables()
             self.reward.declare_variable()
+            self.reward.declare_stream()
             for var in [self.circuit_choice_var, self.n_reps_var, self.max_observables]:
                 if var is not None:
                     var.declare_variable()
@@ -593,15 +597,18 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             n_u = declare(int)
             input_state_count = declare(int)
             state_int = declare(int, value=0)
-            counts = declare(int, value=[0 for _ in range(2**self.n_qubits)])
-
             batch_r = Random(self.seed)
 
+            #TODO: Remove streams
+            self.policy.declare_streams()
+            self.input_state_vars.declare_streams()
             if self.backend.init_macro is not None:
                 self.backend.init_macro()
             # Infinite loop to run the training
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 self.policy.load_input_values()  # Load µ and σ
+                self.policy.save_to_stream() # TODO: Remove
+
                 batch_r.set_seed(self.seed + n_u)
                 for var in [self.circuit_choice_var, self.n_reps_var, self.max_input_state]:
                     if var is not None:

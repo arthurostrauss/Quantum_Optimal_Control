@@ -314,7 +314,7 @@ class CAFEReward(Reward):
                     remove_final_measurements=False,
                 )
                 inverse_circuit, _ = causal_cone_circuit(
-                    inverse_circuit, ref_target.causal_cone_qubits_indices
+                    inverse_circuit, ref_target.physical_qubits
                 )
                 cycle_circuit_inverses[i].append(inverse_circuit)
 
