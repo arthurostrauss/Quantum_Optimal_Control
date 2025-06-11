@@ -11,7 +11,7 @@ MINIBATCH_SIZE: 16 # Number of samples per mini-batch
 LEARNING_RATE: 0.0005 # Learning rate
 GAMMA: 0.99 # Discount factor
 GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
-ENTROPY_COEF: 0.01 # Entropy coefficient
+ENTROPY_COEF: 0.05 # Entropy coefficient
 VALUE_LOSS_COEF: 0.5 # Value (critic) function coefficient
 GRADIENT_CLIP: 0.5 # Gradient clipping
 CLIP_VALUE_LOSS: True # Whether to clip value loss

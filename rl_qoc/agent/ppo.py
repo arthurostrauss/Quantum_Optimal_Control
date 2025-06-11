@@ -6,6 +6,8 @@ from gymnasium import ActionWrapper
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+from torch.optim import Optimizer
+
 from .agent import Agent
 from .ppo_config import TotalUpdates, TrainFunctionSettings, TrainingConfig, PPOConfig
 from .ppo_initialization import initialize_networks
@@ -94,7 +96,7 @@ class CustomPPO:
         )
         self.agent.to(self.device)
         # Initialize optimizer
-        self.optimizer = self.agent_config.optimizer(
+        self.optimizer: Optimizer = self.agent_config.optimizer(
             self.agent.parameters(), lr=self.agent_config.learning_rate, eps=1e-5
         )
 
@@ -130,14 +132,6 @@ class CustomPPO:
             self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
 
         self.unwrapped_env.std_action = std_action[0].cpu().numpy()
-        return action, logprob
-
-    def post_process_action(self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor):
-        """
-        Decide how actions should be processed after being sent to environment.
-        For certain environments such as QUA, actions should be streamed back from the environment directly.
-        Default implementation returns the action and logprob as is.
-        """
         return action, logprob
 
     def process_std(self, std_action):
@@ -255,7 +249,7 @@ class CustomPPO:
                     reward = torch.Tensor(reward, device=self.device)
                     rewards[step] = reward
 
-                    actions[step], logprobs[step] = self.post_process_action(probs, action, logprob)
+                    actions[step], logprobs[step] = action, logprob
 
                     batch_obs = torch.tile(next_obs, (batch_size, 1))
                     next_done = done * torch.ones_like(dones[0], device=self.device)

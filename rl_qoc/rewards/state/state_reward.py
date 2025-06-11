@@ -192,15 +192,15 @@ class StateReward(Reward):
             prep_circuit, initial_layout=target_instance.layout, scheduling=False
         )
         if isinstance(target_instance, GateTarget):
-            observables = extend_observables(
+            pub_obs = extend_observables(
                 observables, prep_circuit, target_instance.causal_cone_qubits_indices
             )
         else:
-            observables = observables.apply_layout(prep_circuit.layout)
+            pub_obs = observables.apply_layout(prep_circuit.layout)
 
         pub = (
             prep_circuit,
-            observables,
+            pub_obs,
             params,
             shots_to_precision(max(pauli_shots)),
         )
