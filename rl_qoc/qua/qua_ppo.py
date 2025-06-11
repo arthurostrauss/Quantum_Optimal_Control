@@ -108,7 +108,7 @@ class CustomQMPPO(CustomPPO):
         μ_f = [FixedPoint(μ[i]) for i in range(self.n_actions)]
         σ_f = [FixedPoint(σ[i]) for i in range(self.n_actions)]
         action = np.zeros((batch_size, self.n_actions))
-        seed = self.seed + self.global_step
+        seed = self.seed + self.global_step - 1
         n_lookup = 512
         cos_array = [FixedPoint(np.cos(2 * np.pi * x / n_lookup)) for x in range(n_lookup)]
         ln_array = [
@@ -130,7 +130,6 @@ class CustomQMPPO(CustomPPO):
         action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
         torch_action = torch.tensor(action, device=self.device)
         logprob = probs.log_prob(torch_action).sum(1)
-
         return torch_action, logprob
 
     def post_process_action(self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor):

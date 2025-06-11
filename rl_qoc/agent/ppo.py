@@ -8,10 +8,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 from .agent import Agent
 from .ppo_config import TotalUpdates, TrainFunctionSettings, TrainingConfig, PPOConfig
-from .ppo_initialization import (
-    get_environment_specs,
-    initialize_networks,
-)
+from .ppo_initialization import initialize_networks
 from .ppo_logging import *
 
 import sys
@@ -80,14 +77,6 @@ class CustomPPO:
             writer = None
 
         self.writer = writer
-
-        # Initialize environment parameters
-        (
-            self.seed,
-            self.min_action,
-            self.max_action,
-        ) = get_environment_specs(env.unwrapped)
-
         torch.manual_seed(self.seed)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Initialize networks
@@ -229,16 +218,16 @@ class CustomPPO:
             ### Training Loop ###
             if isinstance(self.training_constraint, TotalUpdates):
                 end_condition = self.training_constraint.total_updates
-                step_tracker = lambda i: i
+                step_tracker = lambda x: x
             elif isinstance(self.training_constraint, HardwareRuntime):
                 end_condition = self.training_constraint.hardware_runtime
-                step_tracker = lambda i: np.sum(self.unwrapped_env.hardware_runtime)
+                step_tracker = lambda x: np.sum(self.unwrapped_env.hardware_runtime)
             else:
                 raise ValueError(
                     "Invalid training constraint. Please provide either TotalUpdates or HardwareRuntime."
                 )
 
-            iteration = 1
+            iteration = 0
             while step_tracker(iteration) < end_condition:
                 if self.anneal_learning_rate:  # Anneal learning rate
                     self.learning_rate_annealing(iteration=iteration)
@@ -405,7 +394,7 @@ class CustomPPO:
                 }
                 training_results = {
                     "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],
-                    "total_shots": int(u_env.total_shots[-1]),
+                    "total_shots": int(u_env.reward_data.total_shots),
                 }
                 if u_env.backend_info.instruction_durations is not None:
                     training_results["hardware_runtime"] = u_env.hardware_runtime[-1]
@@ -507,6 +496,31 @@ class CustomPPO:
         if not isinstance(value, int):
             raise ValueError("global_step must be an integer")
         self.unwrapped_env.step_tracker = value
+
+    @property
+    def seed(self):
+        """
+        The seed of the environment
+        """
+        return self.unwrapped_env.seed
+
+    @property
+    def min_action(self):
+        """
+        The minimum action value in the environment
+        """
+        if hasattr(self.unwrapped_env, "min_action"):
+            return self.unwrapped_env.min_action
+        return self.unwrapped_env.action_space.low
+
+    @property
+    def max_action(self):
+        """
+        The maximum action value in the environment
+        """
+        if hasattr(self.unwrapped_env, "max_action"):
+            return self.unwrapped_env.max_action
+        return self.unwrapped_env.action_space.high
 
     @property
     def training_results(self):

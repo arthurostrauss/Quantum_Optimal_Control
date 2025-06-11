@@ -95,7 +95,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             self.config.reward.reward_args, "input_states_choice", "pauli4"
         )
         q_reg = QuantumRegister(len(self.config.target.physical_qubits))
-        layout = Layout({q_reg[i]: self.config.target.physical_qubits[i] for i in range(len(q_reg))})
+        layout = Layout(
+            {q_reg[i]: self.config.target.physical_qubits[i] for i in range(len(q_reg))}
+        )
         if isinstance(self.config.target, GateTargetConfig):
             target = GateTarget(
                 **self.config.target.as_dict(),
@@ -105,9 +107,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             )
 
         else:
-            target = StateTarget(**asdict(self.config.target),
-                                 tgt_register=q_reg,
-                                 layout=layout)
+            target = StateTarget(**asdict(self.config.target), tgt_register=q_reg, layout=layout)
 
         custom_circuit = QuantumCircuit(q_reg, name="custom_circuit")
 
@@ -142,7 +142,6 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         print(f"\n Number of repetitions: {self.n_reps}")
 
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
-        self._step_tracker += 1
         if self._episode_ended:
             print("Resetting environment")
             terminated = True

@@ -144,7 +144,6 @@ class QiskitBackendInfo(BackendInfo):
                     backend=self.backend,
                     target=target if self.backend is None else None,
                     initial_layout=initial_layout,
-                    dt=self.dt,
                     scheduling_method=(
                         "asap" if self.instruction_durations is not None and scheduling else None
                     ),

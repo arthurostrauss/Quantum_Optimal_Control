@@ -163,7 +163,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     def define_target_and_circuits(self):
         """
-        Define target gate and circuits for calibration
+        Define target gates and circuits for calibration
         """
         if self.circuit_context.parameters:
             raise ValueError("Circuit context still contains unassigned parameters")
@@ -321,7 +321,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         # Dependent on global_step and method select_trunc_index
         # Figure out if in middle of param loading or should compute the final reward (step_status < trunc_index or ==)
         step_status = self._inside_trunc_tracker
-        self._step_tracker += 1
 
         if self._episode_ended:
             terminated = True
@@ -600,9 +599,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self._unbound_circuit_context = new_context
 
         # Define target register and nearest neighbor register for truncated circuits
-        self.circ_tgt_register = QuantumRegister(
-            bits=[self._unbound_circuit_context.qubits[i] for i in self.virtual_target_qubits],
-            name="tgt",
+        self.circ_tgt_register = (
+            QuantumRegister(
+                bits=[self._unbound_circuit_context.qubits[i] for i in self.virtual_target_qubits],
+                name="tgt",
+            )
+            if self._unbound_circuit_context.num_qubits != len(self.virtual_target_qubits)
+            else self._unbound_circuit_context.qregs[0]
         )
 
         # Adjust target register to match it with circuit context

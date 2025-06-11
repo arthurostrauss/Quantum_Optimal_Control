@@ -18,7 +18,6 @@ class ChannelRewardData(RewardData):
     pub: EstimatorPub | EstimatorPubLike
     input_circuit: QuantumCircuit
     observables: SparsePauliOp | List[SparsePauliOp]
-    shots: int
     n_reps: int
     causal_cone_qubits_indices: List[int]
     input_pauli: Optional[Pauli] = None

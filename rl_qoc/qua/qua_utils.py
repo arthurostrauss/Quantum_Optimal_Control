@@ -78,16 +78,7 @@ def rand_gauss_moller_box(z1, z2, mean, std, rand):
     """
     Return two random numbers using muller box
     """
-    n_lookup = 512
-
-    cos_array = declare(
-        fixed,
-        value=[(np.cos(2 * np.pi * x / n_lookup).tolist()) for x in range(n_lookup)],
-    )
-    ln_array = declare(
-        fixed,
-        value=[(np.sqrt(-2 * np.log(x / (n_lookup + 1))).tolist()) for x in range(1, n_lookup + 1)],
-    )
+    n_lookup, cos_array, ln_array = get_gaussian_sampling_input()
 
     tmp = declare(fixed)
     u1 = declare(int)

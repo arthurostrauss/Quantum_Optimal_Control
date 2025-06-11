@@ -277,7 +277,6 @@ class ChannelReward(Reward):
                         pub,
                         input_circuit,
                         obs_,
-                        dedicated_shots,
                         n_reps,
                         target.causal_cone_qubits_indices,
                         prep,

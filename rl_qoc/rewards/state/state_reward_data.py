@@ -17,7 +17,6 @@ class StateRewardData(RewardData):
     id_coeff: float
     input_circuit: QuantumCircuit
     observables: SparsePauliOp | List[SparsePauliOp]
-    shots: int
     n_reps: int
     input_indices: Optional[Tuple[int]] = None
     observables_indices: Optional[List[Tuple[int]]] = None

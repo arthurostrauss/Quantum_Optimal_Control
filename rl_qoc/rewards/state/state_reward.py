@@ -213,7 +213,6 @@ class StateReward(Reward):
             observables=observables,
             input_indices=input_state_indices,
             observables_indices=observable_indices,
-            shots=max(pauli_shots),
             n_reps=n_reps,
         )
 
