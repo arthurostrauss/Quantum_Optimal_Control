@@ -105,15 +105,15 @@ class StateReward(Reward):
         input_state_indices = (0,) * num_qubits
         if isinstance(target_instance, GateTarget):
             # State reward: sample a random input state for target gate
-            input_state_index = self.input_states_rng.choice(len(target_instance.input_states))
-
-            input_choice = target_instance.input_states_choice
+            input_choice = self.input_states_choice
+            input_states = target_instance.input_states(input_choice)
+            input_state_index = self.input_states_rng.choice(len(input_states))
             input_state_indices = np.unravel_index(
                 input_state_index,
                 (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
             )
 
-            input_state: InputState = target_instance.input_states[input_state_index]
+            input_state: InputState = input_states[input_state_index]
 
             # Modify target state to match input state and target gate
             target_state = input_state.target_state(n_reps)  # (Gate |input>=|target>)
@@ -266,16 +266,8 @@ class StateReward(Reward):
         all_n_reps = env_config.n_reps
 
         prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
-        targets = [target] if isinstance(target, (GateTarget, StateTarget)) else target
-        if not all(t.target_type == targets[0].target_type for t in targets):
-            raise ValueError("All targets must be of the same type")
-        if len(prep_circuits) != len(targets):
-            raise ValueError("Number of circuits and targets must match")
 
-        is_gate_target = isinstance(targets[0], GateTarget)
-        ref_target = targets[0]
-        if is_gate_target:
-            validate_circuit_and_target(circuits, targets)
+        is_gate_target = isinstance(target, GateTarget)
 
         qubits = [qc.qubits for qc in prep_circuits]
         if not all(qc.qubits == qubits[0] for qc in prep_circuits):
@@ -286,11 +278,11 @@ class StateReward(Reward):
         num_qubits = qc.num_qubits
         n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
         if is_gate_target:
-            causal_cone_qubits = ref_target.causal_cone_qubits
-            causal_cone_size = ref_target.causal_cone_size
+            causal_cone_qubits = target.causal_cone_qubits
+            causal_cone_size =  target.causal_cone_size
         else:
             causal_cone_qubits = qc.qubits
-            causal_cone_size = ref_target.n_qubits
+            causal_cone_size = target.n_qubits
 
         if not qc.clbits:
             meas = ClassicalRegister(causal_cone_size, name="meas")

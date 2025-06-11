@@ -86,15 +86,14 @@ class CAFEReward(Reward):
                 len(target.input_states), env_config.sampling_paulis, replace=True
             ),
         )
-        input_choice = target.input_states_choice
         reward_data = []
         for sample in input_states_samples:
             # for input_state in target.input_states:
             input_state_indices = np.unravel_index(
                 sample,
-                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
+                (get_input_states_cardinality_per_qubit(self.input_states_choice),) * num_qubits,
             )
-            input_state = target.input_states[sample]
+            input_state = target.input_states(self.input_states_choice)[sample]
             run_qc = qc.copy_empty_like(name="cafe_circ")  # Circuit with custom target gate
             ref_qc = circuit_ref.copy_empty_like(
                 name="cafe_ref_circ"
@@ -230,7 +229,7 @@ class CAFEReward(Reward):
     def get_real_time_circuit(
         self,
         circuits: QuantumCircuit | List[QuantumCircuit],
-        target: List[GateTarget] | GateTarget,
+        target: GateTarget,
         env_config: QEnvConfig,
         skip_transpilation: bool = False,
         *args,
@@ -238,9 +237,6 @@ class CAFEReward(Reward):
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
         prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
-        targets = [target] if isinstance(target, GateTarget) else target
-        validate_circuit_and_target(prep_circuits, targets)
-        ref_target = targets[0]
 
         qubits = [qc.qubits for qc in prep_circuits]
         if not all(q == qubits[0] for q in qubits):
@@ -254,16 +250,16 @@ class CAFEReward(Reward):
 
         n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
         if not qc.clbits:
-            meas = ClassicalRegister(ref_target.causal_cone_size, name="meas")
+            meas = ClassicalRegister(target.causal_cone_size, name="meas")
             qc.add_register(meas)
         else:
             meas = qc.cregs[0]
-            if meas.size != ref_target.causal_cone_size:
+            if meas.size != target.causal_cone_size:
                 raise ValueError("Classical register size must match the target causal cone size")
 
         input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
 
-        input_choice = ref_target.input_states_choice
+        input_choice = self.input_states_choice
         input_circuits = [
             circ.decompose() if input_choice in ["pauli4", "pauli6"] else circ
             for circ in get_single_qubit_input_states(input_choice)
@@ -294,7 +290,7 @@ class CAFEReward(Reward):
                 raise ValueError("Baseline circuit not found in metadata")
             for n in all_n_reps:
                 cycle_circuit, _ = causal_cone_circuit(
-                    ref_circ.repeat(n).decompose(), ref_target.causal_cone_qubits
+                    ref_circ.repeat(n).decompose(), target.causal_cone_qubits
                 )
                 cycle_circuit.save_unitary()
                 sim_unitary = (
@@ -303,18 +299,18 @@ class CAFEReward(Reward):
                 inverse_circuit = ref_circ.copy_empty_like(name="inverse_circuit")
                 inverse_circuit.unitary(
                     sim_unitary.adjoint(),  # Inverse unitary
-                    ref_target.causal_cone_qubits,
+                    target.causal_cone_qubits,
                     label="U_inv",
                 )
                 inverse_circuit = backend_info.custom_transpile(
                     inverse_circuit,
-                    initial_layout=ref_target.layout,
+                    initial_layout=target.layout,
                     scheduling=False,
                     optimization_level=3,  # Find smallest circuit implementing inverse unitary
                     remove_final_measurements=False,
                 )
                 inverse_circuit, _ = causal_cone_circuit(
-                    inverse_circuit, ref_target.physical_qubits
+                    inverse_circuit, target.physical_qubits
                 )
                 cycle_circuit_inverses[i].append(inverse_circuit)
 
@@ -329,13 +325,13 @@ class CAFEReward(Reward):
                                         with case_n_reps(n):
                                             qc.compose(
                                                 inverse_circuit[j],
-                                                ref_target.causal_cone_qubits,
+                                                target.causal_cone_qubits,
                                                 inplace=True,
                                             )
                             else:
                                 qc.compose(
                                     inverse_circuit[0],
-                                    ref_target.causal_cone_qubits,
+                                    target.causal_cone_qubits,
                                     inplace=True,
                                 )
             else:
@@ -345,24 +341,24 @@ class CAFEReward(Reward):
                             with case_n_reps(n):
                                 qc.compose(
                                     cycle_circuit_inverses[0][j],
-                                    ref_target.causal_cone_qubits,
+                                    target.causal_cone_qubits,
                                     inplace=True,
                                 )
                 else:
                     qc.compose(
                         cycle_circuit_inverses[0][0],
-                        ref_target.causal_cone_qubits,
+                        target.causal_cone_qubits,
                         inplace=True,
                     )
 
             # Revert the input state prep
-            for q, qubit in enumerate(ref_target.causal_cone_qubits):
+            for q, qubit in enumerate(target.causal_cone_qubits):
                 with qc.switch(input_state_vars[q]) as case_input_state:
                     for i, input_circuit in enumerate(input_state_inverses):
                         with case_input_state(i):
                             qc.compose(input_circuit, qubit, inplace=True)
         # Measure the causal cone qubits
-        qc.measure(ref_target.causal_cone_qubits, meas)
+        qc.measure(target.causal_cone_qubits, meas)
 
         if skip_transpilation:
             return qc
@@ -370,7 +366,7 @@ class CAFEReward(Reward):
         return backend_info.custom_transpile(
             qc,
             optimization_level=1,
-            initial_layout=ref_target.layout,
+            initial_layout=target.layout,
             scheduling=False,
             remove_final_measurements=False,
         )

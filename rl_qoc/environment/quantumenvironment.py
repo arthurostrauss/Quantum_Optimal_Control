@@ -21,8 +21,8 @@ from gymnasium.spaces import Box
 from qiskit.circuit import QuantumCircuit, ParameterVector, Parameter, QuantumRegister
 
 # Qiskit Quantum Information, for fidelity benchmarking
-from qiskit.quantum_info import DensityMatrix, Operator
-from qiskit.transpiler import InstructionProperties, Layout
+from qiskit.quantum_info import Operator
+from qiskit.transpiler import InstructionProperties
 
 from qiskit_experiments.library import ProcessTomography
 
@@ -33,7 +33,7 @@ from .base_q_env import (
 )
 
 from ..helpers.circuit_utils import fidelity_from_tomography
-from .configuration.qconfig import QEnvConfig, GateTargetConfig
+from .configuration.qconfig import QEnvConfig
 
 
 class QuantumEnvironment(BaseQuantumEnvironment):
@@ -49,7 +49,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
         super().__init__(training_config)
 
-        self._target, self.circuits, self.baseline_circuits = self.define_target_and_circuits()
+        self.circuits = self.define_circuits()
         # self.observation_space = Box(
         #     low=np.array([0, 0] + [-5] * (2 ** self.n_qubits) ** 2),
         #     high=np.array([1, 1] + [5] * (2 ** self.n_qubits) ** 2),
@@ -62,69 +62,38 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         return self._parameters
 
     @property
-    def trunc_index(self) -> int:
+    def circuit_choice(self) -> int:
         return 0
 
     @property
     def tgt_instruction_counts(self) -> int:
         return 1
 
-    @property
-    def target(self) -> GateTarget:
-        """
-        Return current target to be calibrated
-        """
-        return self._target
-
     def episode_length(self, global_step: int) -> int:
         return 1
 
-    def define_target_and_circuits(
+    def define_circuits(
         self,
-    ) -> Tuple[
-        GateTarget | StateTarget,
-        List[QuantumCircuit],
-        List[QuantumCircuit | DensityMatrix],
-    ]:
+    ) -> List[QuantumCircuit]:
         """
         Define the target to be used in the environment
         Returns:
             target: GateTarget or StateTarget object
         """
-        input_states_choice = getattr(
-            self.config.reward.reward_args, "input_states_choice", "pauli4"
-        )
-        q_reg = QuantumRegister(len(self.config.target.physical_qubits))
-        layout = Layout(
-            {q_reg[i]: self.config.target.physical_qubits[i] for i in range(len(q_reg))}
-        )
-        if isinstance(self.config.target, GateTargetConfig):
-            target = GateTarget(
-                **self.config.target.as_dict(),
-                input_states_choice=input_states_choice,
-                tgt_register=q_reg,
-                layout=layout,
-            )
 
-        else:
-            target = StateTarget(**asdict(self.config.target), tgt_register=q_reg, layout=layout)
-
-        custom_circuit = QuantumCircuit(q_reg, name="custom_circuit")
+        custom_circuit = QuantumCircuit(self.config.target.tgt_register, name="custom_circuit")
 
         self.parametrized_circuit_func(
             custom_circuit,
             self.parameters,
-            q_reg,
+            self.config.target.tgt_register,
             **self._func_args,
         )
 
-        if isinstance(target, StateTarget):
-            ref_circuit = target.circuit.copy(name="baseline_circuit")
-        else:
-            ref_circuit = target.target_circuit.copy(name="baseline_circuit")
-
-        custom_circuit.metadata["baseline_circuit"] = ref_circuit.copy()
-        return target, [custom_circuit], [ref_circuit]
+        custom_circuit.metadata["baseline_circuit"] = self.config.target.circuits[0].copy(
+            "baseline_circuit"
+        )
+        return [custom_circuit]
 
     def _get_obs(self):
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":

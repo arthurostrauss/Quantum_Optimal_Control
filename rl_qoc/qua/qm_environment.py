@@ -65,11 +65,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
     def __init__(
         self,
         training_config: QEnvConfig,
-        circuit_context: Optional[QuantumCircuit] = None,
         job: Optional[RunningQmJob] = None,
     ):
         ParameterPool.reset()
-        super().__init__(training_config, circuit_context)
+        super().__init__(training_config)
         if not isinstance(self.config.backend_config, QMConfig) or not isinstance(
             self.backend, QMBackend
         ):
@@ -103,7 +102,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         self.real_time_circuit = self.config.reward.get_real_time_circuit(
             self.circuits,
-            self.get_target(),
+            self.target,
             self.config,
             skip_transpilation=True,
         )
@@ -221,7 +220,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
         print("Just pushed policy parameters to OPX:", mean_val, std_val)
         if self.circuit_choice_var is not None:
-            self.circuit_choice_var.push_to_opx(self.trunc_index, **push_args)
+            self.circuit_choice_var.push_to_opx(self.circuit_choice, **push_args)
 
         if self.n_reps_var is not None:
             self.n_reps_var.push_to_opx(self.n_reps, **push_args)
@@ -332,7 +331,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         if np.mean(reward) > self._max_return:
             self._max_return = np.mean(reward)
-            self._optimal_actions[self.trunc_index] = self.mean_action
+            self._optimal_actions[self.circuit_choice] = self.mean_action
 
         reward = np.clip(reward, 0.0, 1.0 - 1e-6)
         self.reward_history.append(reward)
