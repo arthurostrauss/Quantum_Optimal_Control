@@ -681,7 +681,13 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Modify environment parameters (can be overridden by subclasses to modify specific parameters)
         """
-        pass
+        for key, value in kwargs.items():
+            try:
+                setattr(self.config, key, value)
+            except AttributeError:
+                raise AttributeError(f"Invalid attribute {key} for environment config")
+            except Exception as e:
+                raise ValueError(f"Error setting {key} to {value}: {e}")
 
     @property
     def config(self) -> QEnvConfig:
@@ -695,7 +701,7 @@ class BaseQuantumEnvironment(ABC, Env):
     def backend(self, backend: BackendV2):
         self.config.backend = backend
         self._estimator, self._sampler = retrieve_primitives(
-            self.backend,
+            self.config.backend,
             self.config.backend_config,
             self.config.backend_config.as_dict().get("primitive_options", None),
         )

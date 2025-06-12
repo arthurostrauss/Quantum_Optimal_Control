@@ -176,157 +176,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         return circuits
 
-    def define_target_and_circuits(self):
-        """
-        Define target gates and circuits for calibration
-        """
-        if self.circuit_context.parameters:
-            raise ValueError("Circuit context still contains unassigned parameters")
-        # assert isinstance(self.config.target, GateTargetConfig), "Target should be a gate"
-
-        if self.backend_info.coupling_map.size() == 0 and self.backend is None:
-            # Build a fully connected coupling map if no backend is provided
-            self.backend_info.num_qubits = self.circuit_context.num_qubits
-        tgt_instruction_counts = self.tgt_instruction_counts
-        moment_pass = MomentAnalysisPass()
-        pm = PassManager(moment_pass)
-        _ = pm.run(self.circuit_context)
-        moments = pm.property_set["moments"]  # type: dict[int, list[DAGOpNode]]
-        layouts = [
-            Layout(
-                {
-                    qubit: q
-                    for q, qubit in zip(self.physical_target_qubits, self.circuit_context.qubits)
-                }
-            )
-            for _ in range(tgt_instruction_counts)
-        ]
-        context_dag = circuit_to_dag(self.circuit_context)
-        baseline_dags = [context_dag.copy_empty_like() for _ in range(tgt_instruction_counts)]
-
-        target_op_nodes = context_dag.named_nodes(self.target_instruction.operation.name)
-        target_op_nodes: List[DAGOpNode] = list(
-            filter(
-                lambda node: node.qargs == self.target_instruction.qubits
-                and node.cargs == self.target_instruction.clbits,
-                target_op_nodes,
-            )
-        )
-
-        if isinstance(self.backend, BackendV2):
-            operations_mapping = {
-                op.name: op for op in self.backend.operations if hasattr(op, "name")
-            }
-        else:
-            operations_mapping = {}
-
-        # Case 1: Each truncation is a different layer of the full circuit, with only one ref to target gate
-        counts = 0
-        for moment in moments.values():
-            switch_truncation = False
-            for op in moment:
-                baseline_dags[counts].apply_operation_back(op.op, op.qargs, op.cargs)
-                if (
-                    target_op_nodes[0].op == op.op
-                    and target_op_nodes[0].qargs == op.qargs
-                    and target_op_nodes[0].cargs == op.cargs
-                ):
-                    # if DAGOpNode.semantic_eq(
-                    #     target_op_nodes[0], op, bit_indices, bit_indices
-                    # ):
-                    switch_truncation = True
-            if switch_truncation:
-                counts += 1
-            if counts == tgt_instruction_counts:
-                break
-
-        baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
-
-        custom_gate_pass = [
-            CustomGateReplacementPass(
-                [self.target_instruction],
-                [self.parametrized_circuit_func],
-                [self.parameters[i]],
-                [self._func_args],
-            )
-            for i in range(tgt_instruction_counts)
-        ]
-
-        pms = [PassManager(pass_) for pass_ in custom_gate_pass]
-        custom_circuits = [
-            pm.run(circ).copy(f"custom_circ_{i}")
-            for i, (pm, circ) in enumerate(zip(pms, baseline_circuits))
-        ]
-
-        # Case 2: each truncation concatenates the previous ones:
-        # for i in range(tgt_instruction_counts, 0, -1):
-        #     ref_dag = baseline_dags[0].copy_empty_like()
-        #     custom_circ = custom_circuits[0].copy_empty_like()
-        #     for j in range(i):
-        #         ref_dag.compose(baseline_dags[j], inplace=True)
-        #         custom_circ.compose(custom_circuits[j], inplace=True)
-        #     baseline_dags[i - 1] = ref_dag
-        #     custom_circuits[i - 1] = custom_circ
-
-        for i in range(tgt_instruction_counts):
-            custom_circuits[i].metadata["baseline_circuit"] = baseline_circuits[i].copy(
-                f"baseline_circ_{i}"
-            )
-
-        input_states_choice = getattr(
-            self.config.reward.reward_args, "input_states_choice", "pauli4"
-        )
-        if isinstance(self.backend, BackendV2):
-            for op in self.backend.operations:
-                if hasattr(op, "name") and op.name not in operations_mapping:
-                    # If a new custom instruction was added, store it and update operation mapping
-                    self.custom_instructions.append(op)
-                    operations_mapping[op.name] = op
-
-        target = (
-            [
-                GateTarget(
-                    self.config.target.gate,
-                    self.physical_target_qubits,
-                    baseline_circuit,
-                    self.virtual_target_qubits,
-                    self.circ_tgt_register,
-                    layout,
-                    input_states_choice=input_states_choice,
-                )
-                for baseline_circuit, layout in zip(baseline_circuits, layouts)
-            ]
-            if isinstance(self.config.target, GateTargetConfig)
-            else [
-                StateTarget(
-                    self.config.target.state,
-                    baseline_circuit,
-                    self.physical_target_qubits,
-                    self.circ_tgt_register,
-                    layout,
-                )
-                for baseline_circuit, layout in zip(baseline_circuits, layouts)
-            ]
-        )
-        return target, custom_circuits, baseline_circuits
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> tuple[ObsType, dict[str, Any]]:
-        """Reset the Environment, chooses a new input state"""
-        super().reset(seed=seed)
-
-        new_obs: ObsType = self._get_obs()
-        return new_obs, self._get_info()
-
-    def modify_environment_params(self):
-        # self.n_reps = int(np.random.randint(4, 5))
-        if len(self.config.execution_config.n_reps) > 1:
-            print(f"\n Number of repetitions: {self.n_reps}")
-
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         # trunc_index tells us which circuit truncation should be trained
         # Dependent on global_step and method select_trunc_index
@@ -509,57 +358,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """Reset all counters related to training"""
         super().clear_history()
 
-    def set_unbound_circuit_context(self, new_context: QuantumCircuit, **kwargs):
-        """
-        Update the unbound circuit context
-        Keyword arguments can be used to assign values to parameters in the new context for immediate target calculation
-
-        """
-        self._unbound_circuit_context = new_context
-
-        # Define target register and nearest neighbor register for truncated circuits
-        self.circ_tgt_register = (
-            QuantumRegister(
-                bits=[self._unbound_circuit_context.qubits[i] for i in self.virtual_target_qubits],
-                name="tgt",
-            )
-            if self._unbound_circuit_context.num_qubits != len(self.virtual_target_qubits)
-            else self._unbound_circuit_context.qregs[0]
-        )
-
-        # Adjust target register to match it with circuit context
-        instruction = (
-            self.config.target.gate
-            if isinstance(self.config.target, GateTargetConfig)
-            else new_context.data[
-                0
-            ].operation  # Assuming first instruction is the target state preparation
-        )
-        self.target_instruction = CircuitInstruction(
-            instruction,
-            (qubit for qubit in self.circ_tgt_register),
-        )
-        tgt_instruction_counts = self.tgt_instruction_counts
-        if tgt_instruction_counts == 0:
-            raise ValueError("Target gate not found in circuit context")
-
-        self._parameters = [
-            [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
-            for j in range(tgt_instruction_counts)
-        ]
-
-        self._param_values = create_array(
-            tgt_instruction_counts,
-            self.batch_size,
-            self.action_space.shape[-1],
-        )
-
-        self._optimal_actions = [
-            np.zeros(self.config.n_actions) for _ in range(tgt_instruction_counts)
-        ]
-        if not new_context.parameters:
-            self.set_circuit_context(new_context.copy(), **kwargs)
-
     @property
     def circuit_context(self) -> QuantumCircuit:
         """
@@ -741,3 +539,137 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         for target in self._target:
             involved_qubits.extend(list(target.layout.get_physical_bits().keys()))
         return involved_qubits
+
+    # def define_target_and_circuits(self):
+    #     """
+    #     Define target gates and circuits for calibration
+    #     """
+    #     if self.circuit_context.parameters:
+    #         raise ValueError("Circuit context still contains unassigned parameters")
+    #     # assert isinstance(self.config.target, GateTargetConfig), "Target should be a gate"
+
+    #     if self.backend_info.coupling_map.size() == 0 and self.backend is None:
+    #         # Build a fully connected coupling map if no backend is provided
+    #         self.backend_info.num_qubits = self.circuit_context.num_qubits
+    #     tgt_instruction_counts = self.tgt_instruction_counts
+    #     moment_pass = MomentAnalysisPass()
+    #     pm = PassManager(moment_pass)
+    #     _ = pm.run(self.circuit_context)
+    #     moments = pm.property_set["moments"]  # type: dict[int, list[DAGOpNode]]
+    #     layouts = [
+    #         Layout(
+    #             {
+    #                 qubit: q
+    #                 for q, qubit in zip(self.physical_target_qubits, self.circuit_context.qubits)
+    #             }
+    #         )
+    #         for _ in range(tgt_instruction_counts)
+    #     ]
+    #     context_dag = circuit_to_dag(self.circuit_context)
+    #     baseline_dags = [context_dag.copy_empty_like() for _ in range(tgt_instruction_counts)]
+
+    #     target_op_nodes = context_dag.named_nodes(self.target_instruction.operation.name)
+    #     target_op_nodes: List[DAGOpNode] = list(
+    #         filter(
+    #             lambda node: node.qargs == self.target_instruction.qubits
+    #             and node.cargs == self.target_instruction.clbits,
+    #             target_op_nodes,
+    #         )
+    #     )
+
+    #     if isinstance(self.backend, BackendV2):
+    #         operations_mapping = {
+    #             op.name: op for op in self.backend.operations if hasattr(op, "name")
+    #         }
+    #     else:
+    #         operations_mapping = {}
+
+    #     # Case 1: Each truncation is a different layer of the full circuit, with only one ref to target gate
+    #     counts = 0
+    #     for moment in moments.values():
+    #         switch_truncation = False
+    #         for op in moment:
+    #             baseline_dags[counts].apply_operation_back(op.op, op.qargs, op.cargs)
+    #             if (
+    #                 target_op_nodes[0].op == op.op
+    #                 and target_op_nodes[0].qargs == op.qargs
+    #                 and target_op_nodes[0].cargs == op.cargs
+    #             ):
+    #                 # if DAGOpNode.semantic_eq(
+    #                 #     target_op_nodes[0], op, bit_indices, bit_indices
+    #                 # ):
+    #                 switch_truncation = True
+    #         if switch_truncation:
+    #             counts += 1
+    #         if counts == tgt_instruction_counts:
+    #             break
+
+    #     baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
+
+    #     custom_gate_pass = [
+    #         CustomGateReplacementPass(
+    #             [self.target_instruction],
+    #             [self.parametrized_circuit_func],
+    #             [self.parameters[i]],
+    #             [self._func_args],
+    #         )
+    #         for i in range(tgt_instruction_counts)
+    #     ]
+
+    #     pms = [PassManager(pass_) for pass_ in custom_gate_pass]
+    #     custom_circuits = [
+    #         pm.run(circ).copy(f"custom_circ_{i}")
+    #         for i, (pm, circ) in enumerate(zip(pms, baseline_circuits))
+    #     ]
+
+    #     # Case 2: each truncation concatenates the previous ones:
+    #     # for i in range(tgt_instruction_counts, 0, -1):
+    #     #     ref_dag = baseline_dags[0].copy_empty_like()
+    #     #     custom_circ = custom_circuits[0].copy_empty_like()
+    #     #     for j in range(i):
+    #     #         ref_dag.compose(baseline_dags[j], inplace=True)
+    #     #         custom_circ.compose(custom_circuits[j], inplace=True)
+    #     #     baseline_dags[i - 1] = ref_dag
+    #     #     custom_circuits[i - 1] = custom_circ
+
+    #     for i in range(tgt_instruction_counts):
+    #         custom_circuits[i].metadata["baseline_circuit"] = baseline_circuits[i].copy(
+    #             f"baseline_circ_{i}"
+    #         )
+
+    #     input_states_choice = getattr(
+    #         self.config.reward.reward_args, "input_states_choice", "pauli4"
+    #     )
+    #     if isinstance(self.backend, BackendV2):
+    #         for op in self.backend.operations:
+    #             if hasattr(op, "name") and op.name not in operations_mapping:
+    #                 # If a new custom instruction was added, store it and update operation mapping
+    #                 self.custom_instructions.append(op)
+    #                 operations_mapping[op.name] = op
+
+    #     target = (
+    #         [
+    #             GateTarget(
+    #                 self.config.target.gate,
+    #                 self.physical_target_qubits,
+    #                 baseline_circuit,
+    #                 self.virtual_target_qubits,
+    #                 self.circ_tgt_register,
+    #                 layout,
+    #                 input_states_choice=input_states_choice,
+    #             )
+    #             for baseline_circuit, layout in zip(baseline_circuits, layouts)
+    #         ]
+    #         if isinstance(self.config.target, GateTargetConfig)
+    #         else [
+    #             StateTarget(
+    #                 self.config.target.state,
+    #                 baseline_circuit,
+    #                 self.physical_target_qubits,
+    #                 self.circ_tgt_register,
+    #                 layout,
+    #             )
+    #             for baseline_circuit, layout in zip(baseline_circuits, layouts)
+    #         ]
+    #     )
+    #     return target, custom_circuits, baseline_circuits
