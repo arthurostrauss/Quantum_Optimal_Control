@@ -548,14 +548,14 @@ class GateTarget(BaseTarget):
         """
         Get the target instruction
         """
-        return CircuitInstruction(self.gate, (q for q in self.tgt_register[self._circuit_choice]))
+        return CircuitInstruction(self.gate, (q for q in self._tgt_register[self._circuit_choice]))
 
     @property
     def target_instructions(self) -> List[CircuitInstruction]:
         """
         Get the target instructions in the circuit
         """
-        return [CircuitInstruction(self.gate, (q for q in r)) for r in self.tgt_register]
+        return [CircuitInstruction(self.gate, (q for q in r)) for r in self._tgt_register]
 
     @property
     def target_operator(self) -> Operator:

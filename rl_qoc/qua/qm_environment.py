@@ -262,7 +262,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                         )
                     }
                     self.observable_vars.push_to_opx(observable_dict, **push_args)
-        self.qm_job.result_handles.action.wait_for_values(self._total_data_points)
         fetching_index, finishing_index = self._step_indices[self.step_tracker]
         fetching_size = finishing_index - fetching_index
         collected_counts = self.reward.fetch_from_opx(
