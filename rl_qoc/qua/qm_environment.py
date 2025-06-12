@@ -374,10 +374,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             state_int = declare(int, value=0)
             batch_r = Random(self.seed)
 
-            # TODO: Remove streams
-            self.policy.declare_streams()
-            self.input_state_vars.declare_streams()
-
             if self.backend.init_macro is not None:
                 self.backend.init_macro()
             # Infinite loop to run the training
@@ -396,7 +392,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 ):
                     # Load info about input states to prepare (single qubit indices)
                     self.input_state_vars.load_input_values()
-                    self.input_state_vars.save_to_stream()
 
                     if self.config.dfe:
                         self.max_observables.load_input_value()
@@ -421,7 +416,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             with stream_processing():
                 buffer = (self.batch_size, dim)
                 self.reward.stream_processing(buffer=buffer)
-                self.policy.stream_processing()
 
         return rl_qoc_training_prog
 
@@ -430,7 +424,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         batch_r: Random,
         state_int: QuaVariableInt,
         n_u: QuaVariableInt,
-        action_stream=None,
     ):
 
         # Declare variables for efficient Gaussian random sampling
@@ -463,10 +456,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 )
                 clip_qua(tmp1[j], lower_bound[j], upper_bound[j])
                 clip_qua(tmp2[j], lower_bound[j], upper_bound[j])
-            with for_(j, 0, j < self.n_actions, j + 1):
-                save(tmp1[j], action_stream)
-            with for_(j, 0, j < self.n_actions, j + 1):
-                save(tmp2[j], action_stream)
 
             with for_(j, 0, j < 2, j + 1):
                 # Assign the sampled actions to the action batch

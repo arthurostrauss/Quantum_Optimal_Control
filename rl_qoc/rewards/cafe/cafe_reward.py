@@ -83,7 +83,9 @@ class CAFEReward(Reward):
 
         input_states_samples = np.unique(
             self.input_states_rng.choice(
-                len(target.input_states), env_config.sampling_paulis, replace=True
+                len(target.input_states(self.input_states_choice)),
+                env_config.sampling_paulis,
+                replace=True,
             ),
         )
         reward_data = []
@@ -161,7 +163,11 @@ class CAFEReward(Reward):
                     input_state.circuit,
                     execution_config.current_n_reps,
                     input_state_indices,
-                    causal_cone_circuit(reverse_unitary_qc, target.causal_cone_qubits_indices)[0],
+                    (
+                        causal_cone_circuit(reverse_unitary_qc, target.physical_qubits)[0]
+                        if reverse_unitary_qc.num_qubits != target.causal_cone_size
+                        else reverse_unitary_qc
+                    ),
                     target.causal_cone_qubits_indices,
                 )
             )
@@ -309,9 +315,7 @@ class CAFEReward(Reward):
                     optimization_level=3,  # Find smallest circuit implementing inverse unitary
                     remove_final_measurements=False,
                 )
-                inverse_circuit, _ = causal_cone_circuit(
-                    inverse_circuit, target.physical_qubits
-                )
+                inverse_circuit, _ = causal_cone_circuit(inverse_circuit, target.physical_qubits)
                 cycle_circuit_inverses[i].append(inverse_circuit)
 
             # Add the inverse unitary that matches the combo of circuit choice and n_reps

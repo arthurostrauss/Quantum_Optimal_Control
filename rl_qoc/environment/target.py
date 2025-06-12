@@ -21,9 +21,16 @@ from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import Layout
 import numpy as np
-from qiskit.circuit import QuantumCircuit, QuantumRegister, Gate, CircuitInstruction, Qubit
+from qiskit.circuit import (
+    QuantumCircuit,
+    QuantumRegister,
+    Gate,
+    CircuitInstruction,
+    Qubit,
+    Parameter,
+)
 from itertools import product
-from typing import List, Optional, Literal, Sequence
+from typing import Any, List, Optional, Literal, Sequence
 from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
@@ -79,7 +86,7 @@ class BaseTarget(ABC):
     def __init__(
         self,
         physical_qubits: Sequence[int] | int,
-        tgt_register: QuantumRegister | Sequence[Qubit],
+        tgt_register: QuantumRegister | Sequence[Qubit] | Sequence[Sequence[Qubit]],
         layout: Layout | List[Layout],
     ):
         """
@@ -118,8 +125,8 @@ class BaseTarget(ABC):
     def n_qubits(self):
         return self._n_qubits
 
-    @abstractmethod
     @property
+    @abstractmethod
     def target_type(self):
         """
         Type of the target (state / gate)
@@ -197,6 +204,27 @@ class StateTarget(BaseTarget):
         Get the circuits for the target state
         """
         return [self.circuit]
+
+    @property
+    def target_instruction(self) -> CircuitInstruction:
+        """
+        Get the target instruction
+        """
+        return self.circuit.data[0]
+
+    @property
+    def target_instruction_counts(self) -> int:
+        """
+        Get the number of target instructions in the circuit
+        """
+        return self.circuit.data.count(self.target_instruction)
+
+    @property
+    def target_instructions(self) -> List[CircuitInstruction]:
+        """
+        Get the target instructions in the circuit
+        """
+        return [self.target_instruction]
 
     @property
     def target_type(self):
@@ -299,9 +327,8 @@ class GateTarget(BaseTarget):
         gate: Gate | str,
         physical_qubits: Optional[List[int]] = None,
         circuit_context: Optional[QuantumCircuit | List[QuantumCircuit]] = None,
-        virtual_target_qubits: Optional[Sequence[int]] = None,
+        virtual_target_qubits: Optional[Sequence[int | Qubit]] = None,
         layout: Optional[Layout | List[Layout]] = None,
-        input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4",
     ):
         """
         Initialize the gate target for the quantum environment.
@@ -329,65 +356,68 @@ class GateTarget(BaseTarget):
             tgt_register = QuantumRegister(gate.num_qubits, "tgt")
             circuit_context = QuantumCircuit(tgt_register)
             circuit_context.append(gate, tgt_register)
-            self._circuit_context = [circuit_context]
+            circuit_context = [circuit_context]
+            self._virtual_target_qubits = [tgt_register]
+            self._virtual_target_qubits_indices = list(range(gate.num_qubits))
         else:
             self._has_context = True
             if isinstance(circuit_context, QuantumCircuit):
                 circuit_context = [circuit_context]
-            if isinstance(circuit_context, list):
-                if any(circ.num_qubits < gate.num_qubits for circ in circuit_context):
-                    raise ValueError(
-                        "Circuit context must have at least as many qubits as the target gate"
-                    )
-                if virtual_target_qubits is None:
-                    if any(circ.num_qubits > gate.num_qubits for circ in circuit_context):
-                        raise ValueError(
-                            "If circuit context is larger than target gate, virtual_target_qubits must be provided"
-                        )
-                    self._virtual_target_qubits = list(range(gate.num_qubits))
-            else:
-                self._virtual_target_qubits = virtual_target_qubits
-            tgt_register = [circuit_context[0].qubits[q] for q in self._virtual_target_qubits]
-            if layout is None:
+            if any(circ.num_qubits < gate.num_qubits for circ in circuit_context):
+                raise ValueError(
+                    "Circuit context must have at least as many qubits as the target gate"
+                )
+            if virtual_target_qubits is None:
                 if any(circ.num_qubits > gate.num_qubits for circ in circuit_context):
                     raise ValueError(
-                        "If circuit context is larger than target gate, layout must be provided"
+                        "If circuit context is larger than target gate, virtual_target_qubits must be provided"
                     )
-                layout = [
-                    Layout(
-                        {tgt_register[i]: physical_qubits[i] for i in range(len(physical_qubits))}
-                    )
+                self._virtual_target_qubits = [[q for q in circ.qubits] for circ in circuit_context]
+                self._virtual_target_qubits_indices = [
+                    [circ.find_bit(q).index for q in circ.qubits] for circ in circuit_context
                 ]
             else:
-                if isinstance(layout, Layout):
-                    layout = [layout]
-                if len(layout) != len(circuit_context):
-                    raise ValueError("Layout should be provided for each circuit in the context")
-        super().__init__(physical_qubits=physical_qubits, tgt_register=tgt_register, layout=layout)
-        self._circuit_contexts = circuit_context
+                if all(isinstance(q, Qubit) for q in virtual_target_qubits):
+                    if not all(
+                        q in circ.qubits for circ in circuit_context for q in virtual_target_qubits
+                    ):
+                        raise ValueError("Virtual target qubits must be in the circuit context")
+                    self._virtual_target_qubits = [virtual_target_qubits for _ in circuit_context]
 
-        if self.has_context:
-            # Filter context to get causal cone of the target gate
-            target_qubits = [
-                [circ.qubits[i] for i in self.virtual_target_qubits]
-                for circ in self._circuit_contexts
-            ]
-            filtered_contexts = []
-            filtered_qubits = []
-            for circ in self._circuit_contexts:
-                filtered_context, filtered_qbs = causal_cone_circuit(
-                    circ,
-                    target_qubits,
+                else:
+                    if not all(isinstance(q, int) for q in virtual_target_qubits):
+                        raise ValueError(
+                            "Virtual target qubits must be a list of Qubit objects or a list of integers"
+                        )
+                    self._virtual_target_qubits = [
+                        [circ.qubits[q] for q in virtual_target_qubits] for circ in circuit_context
+                    ]
+
+        self._virtual_target_qubits_indices = [
+            [circ.find_bit(q).index for q in vq]
+            for circ, vq in zip(circuit_context, self._virtual_target_qubits)
+        ]
+        if layout is not None:
+            if isinstance(layout, Layout):
+                layout = [layout]
+            if len(layout) != len(circuit_context):
+                raise ValueError("Layout should be provided for each circuit in the context")
+        else:
+            if any(circ.num_qubits > gate.num_qubits for circ in circuit_context):
+                raise ValueError(
+                    "If circuit context is larger than target gate, layout must be provided"
                 )
-                filtered_contexts.append(filtered_context)
-                filtered_qubits.append(filtered_qbs)
-
-            self._causal_cone_qubits = filtered_qubits
-            self._causal_cone_circuit = filtered_contexts
-
-        else:  # If no context is provided, the causal cone is the target qubits
-            self._causal_cone_qubits = [self.target_circuit.qubits]
-            self._causal_cone_circuit = [self.target_circuit]
+            layout = [
+                Layout({tgt_reg[i]: physical_qubits[i] for i in range(len(physical_qubits))})
+                for tgt_reg in self._virtual_target_qubits
+            ]
+        super().__init__(
+            physical_qubits=physical_qubits, tgt_register=self._virtual_target_qubits, layout=layout
+        )
+        self._unbound_circuit_contexts = circuit_context
+        self._bound_circuit_contexts = [
+            circ if not circ.parameters else None for circ in circuit_context
+        ]
 
     def Chi(self, n_reps: int = 1):
         """
@@ -441,7 +471,7 @@ class GateTarget(BaseTarget):
         self,
         channel: QuantumChannel | Operator | Gate | QuantumCircuit,
         n_reps: int = 1,
-    ):
+    ) -> float:
         """
         Compute the average gate fidelity of the gate with the target gate
         If the target has a circuit context, the fidelity is computed with respect to the channel derived from the
@@ -460,7 +490,7 @@ class GateTarget(BaseTarget):
         if channel.num_qubits == self.causal_cone_size:
             circuit = self.causal_cone_circuit
         else:
-            circuit = self.target_circuit
+            circuit = self.circuit
 
         return average_gate_fidelity(channel, Operator(circuit).power(n_reps))
 
@@ -478,7 +508,7 @@ class GateTarget(BaseTarget):
         if state.num_qubits == self.causal_cone_size:
             circuit = self.causal_cone_circuit
         else:
-            circuit = self.target_circuit
+            circuit = self.circuit
         return state_fidelity(
             state,
             Statevector(circuit.power(n_reps, True, True)),
@@ -490,7 +520,7 @@ class GateTarget(BaseTarget):
         op: QuantumState | QuantumChannel | Operator,
         n_reps: int = 1,
         validate: bool = True,
-    ):
+    ) -> float:
         """
         Compute the fidelity of the input op with respect to the target circuit context channel/output state.
         :param op: Object to compare with the target. If QuantumState, computes state fidelity, if QuantumChannel or
@@ -514,39 +544,61 @@ class GateTarget(BaseTarget):
             )
 
     @property
-    def target_instruction(self):
+    def target_instruction(self) -> CircuitInstruction:
         """
         Get the target instruction
         """
-        return CircuitInstruction(self.gate, (q for q in self.tgt_register))
+        return CircuitInstruction(self.gate, (q for q in self.tgt_register[self._circuit_choice]))
 
     @property
-    def target_operator(self):
+    def target_instructions(self) -> List[CircuitInstruction]:
+        """
+        Get the target instructions in the circuit
+        """
+        return [CircuitInstruction(self.gate, (q for q in r)) for r in self.tgt_register]
+
+    @property
+    def target_operator(self) -> Operator:
         """
         Get the target unitary operator
         """
         return Operator(self.causal_cone_circuit)
 
     @property
-    def target_circuit(self):
+    def circuit(self) -> QuantumCircuit:
         """
         Get the target circuit (with context)
         """
-        return self._circuit_contexts[self._circuit_choice]
+        return (
+            self._unbound_circuit_contexts[self._circuit_choice]
+            if not self._bound_circuit_contexts[self._circuit_choice]
+            else self._bound_circuit_contexts[self._circuit_choice]
+        )
+
+    @circuit.setter
+    def circuit(self, circuit: QuantumCircuit):
+        """
+        Set the target circuit (with context)
+        """
+        self._unbound_circuit_contexts[self._circuit_choice] = circuit
+        if not circuit.parameters:
+            self._bound_circuit_contexts[self._circuit_choice] = circuit
+        else:
+            self._bound_circuit_contexts[self._circuit_choice] = None
 
     @property
-    def has_context(self):
+    def has_context(self) -> bool:
         """
         Check if the target has a circuit context attached or if only composed of the target gate
         """
         return self._has_context
 
     @property
-    def virtual_target_qubits(self):
+    def virtual_target_qubits(self) -> List[Qubit]:
         """
         Get the virtual target qubits for the context-aware calibration
         """
-        return self._virtual_target_qubits
+        return self._virtual_target_qubits[self._circuit_choice]
 
     @property
     def causal_cone_qubits(self) -> List[Qubit]:
@@ -554,28 +606,32 @@ class GateTarget(BaseTarget):
         Get the qubits forming the causal cone of the target gate
         (i.e., the qubits that are logically entangled with the target qubits)
         """
-        return self._causal_cone_qubits[self._circuit_choice]
+        return self.causal_cone_circuit.qubits
 
     @property
     def causal_cone_qubits_indices(self) -> List[int]:
         """
         Get the indices of the qubits forming the causal cone of the target gate
         """
-        return [self.target_circuit.find_bit(q).index for q in self.causal_cone_qubits]
+        return [self.circuit.find_bit(q).index for q in self.causal_cone_qubits]
 
     @property
     def causal_cone_circuit(self) -> QuantumCircuit:
         """
         Get the circuit forming the causal cone of the target gate
         """
-        return self._causal_cone_circuit[self._circuit_choice]
+        if self.has_context:
+            circuit, _ = causal_cone_circuit(self.circuit, self.virtual_target_qubits)
+            return circuit
+        else:
+            return self.circuit
 
     @property
     def causal_cone_size(self) -> int:
         """
         Get the size of the causal cone of the target gate
         """
-        return self._causal_cone_circuit[self._circuit_choice].num_qubits
+        return self.causal_cone_circuit.num_qubits
 
     def __repr__(self):
         return (
@@ -620,4 +676,127 @@ class GateTarget(BaseTarget):
         """
         Get the available circuit contexts for the target gate
         """
-        return self._circuit_contexts
+        return (
+            self._unbound_circuit_contexts
+            if any(circ is None for circ in self._bound_circuit_contexts)
+            else self._bound_circuit_contexts
+        )
+
+    @property
+    def layout(self) -> Layout:
+        """
+        Get the layout of the target gate
+        """
+        return self._layout[self._circuit_choice]
+
+    @property
+    def tgt_register(self) -> List[Qubit]:
+        """
+        Get the target register for the target gate
+        """
+        return self._tgt_register[self._circuit_choice]
+
+    @circuits.setter
+    def circuits(self, circuits: List[QuantumCircuit]):
+        """
+        Set the available circuit contexts for the target gate
+        """
+        self._circuit_contexts = circuits
+
+    def bind_parameters(self, params: dict[Parameter, float]):
+        """
+        Assign parameters to the target circuit context
+        """
+
+        self._bound_circuit_contexts[self._circuit_choice] = self._unbound_circuit_contexts[
+            self._circuit_choice
+        ].assign_parameters(params)
+
+    def clear_parameters(self):
+        """
+        Clear the parameters of the target circuit contexts
+        """
+        self._bound_circuit_contexts = [None for _ in self._bound_circuit_contexts]
+
+    @property
+    def all_bound_circuits(self) -> Sequence[Optional[QuantumCircuit]]:
+        """
+        Get all bound circuit contexts regardless of circuit choice
+        """
+        return self._bound_circuit_contexts
+
+    @property
+    def all_unbound_circuits(self) -> Sequence[QuantumCircuit]:
+        """
+        Get all unbound circuit contexts regardless of circuit choice
+        """
+        return self._unbound_circuit_contexts
+
+    @property
+    def all_virtual_target_qubits(self) -> Sequence[Sequence[Qubit]]:
+        """
+        Get all virtual target qubits lists regardless of circuit choice
+        """
+        return self._virtual_target_qubits
+
+    @property
+    def all_virtual_target_qubits_indices(self) -> Sequence[Sequence[int]]:
+        """
+        Get all virtual target qubit indices lists regardless of circuit choice
+        """
+        return self._virtual_target_qubits_indices
+
+    @property
+    def all_layouts(self) -> Sequence[Layout]:
+        """
+        Get all layouts regardless of circuit choice
+        """
+        return self._layout
+
+    @property
+    def all_target_registers(self) -> Sequence[Sequence[Qubit]]:
+        """
+        Get all target registers regardless of circuit choice
+        """
+        return self._tgt_register
+
+    @property
+    def causal_cone_circuits(self) -> List[QuantumCircuit]:
+        """
+        Get all causal cone circuits for each circuit context
+        """
+        return [
+            causal_cone_circuit(circ, vq)[0] if self.has_context else circ
+            for circ, vq in zip(self._unbound_circuit_contexts, self._virtual_target_qubits)
+        ]
+
+    @property
+    def all_causal_cone_qubit_indices(self) -> Sequence[Sequence[int]]:
+        """
+        Get all causal cone qubit indices for each circuit context
+        """
+        return [
+            [circ.find_bit(q).index for q in causal_cone_circuit(circ, vq)[0].qubits]
+            if self.has_context
+            else list(range(circ.num_qubits))
+            for circ, vq in zip(self._unbound_circuit_contexts, self._virtual_target_qubits)
+        ]
+
+    def get(self, item: str, default: Any = None):
+        """
+        Get method for dictionary-like access to the target
+        """
+        if item == "gate":
+            return self.gate
+        elif item == "physical_qubits":
+            return self.physical_qubits
+        elif item == "layout":
+            return self.layout
+        else:
+            return default
+
+    def __getitem__(self, item: str):
+        """
+        Get item method for dictionary-like access to the target
+        """
+        return self.get(item)

@@ -65,10 +65,6 @@ class QuantumEnvironment(BaseQuantumEnvironment):
     def circuit_choice(self) -> int:
         return 0
 
-    @property
-    def tgt_instruction_counts(self) -> int:
-        return 1
-
     def episode_length(self, global_step: int) -> int:
         return 1
 

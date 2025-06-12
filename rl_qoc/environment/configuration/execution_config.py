@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Literal
+from typing import Dict, List, Optional, Sequence, Tuple, Literal
 
 
 @dataclass
@@ -26,7 +26,7 @@ class ExecutionConfig:
     batch_size: int = 100
     sampling_paulis: int = 100
     n_shots: int = 10
-    n_reps: List[int] | int = 1
+    n_reps: Sequence[int] = (1,)
     c_factor: float = 1.0
     seed: int = 1234
     dfe_precision: Optional[Tuple[float, float]] = None

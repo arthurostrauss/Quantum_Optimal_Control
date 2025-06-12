@@ -78,7 +78,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._env_config = training_config
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
-        self._physical_target_qubits = training_config.target.get("physical_qubits", None)
+        self._physical_target_qubits = training_config.target.physical_qubits
 
         self._estimator, self._sampler = retrieve_primitives(
             self.backend,
@@ -86,7 +86,7 @@ class BaseQuantumEnvironment(ABC, Env):
             training_config.backend_config.as_dict().get("primitive_options", None),
         )
 
-        self.circuits, self.baseline_circuits = [], []
+        self.circuits = []
 
         self._mean_action = np.zeros(self.action_space.shape[-1])
         self._std_action = np.ones(self.action_space.shape[-1])
@@ -689,11 +689,16 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def backend(self) -> Optional[BackendV2]:
-        return self._env_config.backend
+        return self.config.backend
 
     @backend.setter
     def backend(self, backend: BackendV2):
         self.config.backend = backend
+        self._estimator, self._sampler = retrieve_primitives(
+            self.backend,
+            self.config.backend_config,
+            self.config.backend_config.as_dict().get("primitive_options", None),
+        )
 
     @property
     def estimator(self) -> BaseEstimatorV2:
@@ -755,18 +760,10 @@ class BaseQuantumEnvironment(ABC, Env):
         return self.config.target.circuits
 
     @property
-    @abstractmethod
-    def tgt_instruction_counts(self) -> int:
-        """
-        Number of occurrences of the target instruction in the circuit
-        """
-        raise NotImplementedError("Target instruction counts not implemented")
-
-    @property
     def fidelity_history(self):
         return (
             self.avg_fidelity_history
-            if self.target.target_type == "gate" and self.target.target_circuit.num_qubits <= 3
+            if self.target.target_type == "gate" and self.target.circuit.num_qubits <= 3
             else self.circuit_fidelity_history
         )
 

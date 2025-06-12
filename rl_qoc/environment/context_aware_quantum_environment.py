@@ -55,7 +55,7 @@ from ..helpers import (
     retrieve_primitives,
 )
 from ..helpers.circuit_utils import get_instruction_timings
-from .configuration.qconfig import QEnvConfig, GateTargetConfig
+from .configuration.qconfig import QEnvConfig
 from .base_q_env import (
     GateTarget,
     StateTarget,
@@ -134,18 +134,47 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
 
         super().__init__(training_config)
-        self._optimal_actions = None
-        self._param_values = None
+
         self.circ_tgt_register = None
-        self.target_instruction = None
-        self._circuit_context = None
         self.custom_instructions: List[Instruction] = []
         self.new_gates: List[Gate] = []
 
         self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
+        self._parameters = [
+            [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
+            for j in range(len(self.target.circuits))
+        ]
+
+        self._optimal_actions = [
+            np.zeros(self.config.n_actions) for _ in range(len(self.target.circuits))
+        ]
+        self.circuits = self.define_circuits()
 
     def define_circuits(self) -> list[QuantumCircuit]:
-        pass
+        """
+        Define the circuits to be used in the environment.
+        This method should be overridden by the subclass.
+
+        Returns:
+            list[QuantumCircuit]: A list of QuantumCircuit objects.
+        """
+        circuits = []
+        for i, circ in enumerate(self.target.circuits):
+            custom_circ = circ.copy(f"custom_circ_{circ.name}")
+            custom_circ.metadata["baseline_circuit"] = circ.copy(f"baseline_circ_{circ.name}")
+
+            pm = PassManager(
+                CustomGateReplacementPass(
+                    self.target.target_instructions[i],
+                    [self.parametrized_circuit_func],
+                    [self.parameters[i]],
+                    [self._func_args],
+                )
+            )
+            custom_circ = pm.run(circ)
+            circuits.append(custom_circ)
+
+        return circuits
 
     def define_target_and_circuits(self):
         """
@@ -290,11 +319,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """Reset the Environment, chooses a new input state"""
         super().reset(seed=seed)
 
-        new_obs = self._get_obs()
-        self._param_values = create_array(
-            self.tgt_instruction_counts, self.batch_size, self.action_space.shape[0]
-        )
-        self._inside_trunc_tracker = 0
+        new_obs: ObsType = self._get_obs()
         return new_obs, self._get_info()
 
     def modify_environment_params(self):
@@ -318,68 +343,38 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 self._get_info(),
             )
 
-        if self.circuit_choice >= self.tgt_instruction_counts:
-            # raise IndexError(f"Circuit does contain only {self.tgt_instruction_counts} target gates and step"
-            #                  f" function tries to access gate nb {trunc_index} ")
-            truncated = True
-            return (
-                self.reset()[0],
-                np.zeros(self.batch_size),
-                False,
-                truncated,
-                self._get_info(),
-            )
-
         params, batch_size = np.array(action), len(np.array(action))
         if batch_size != self.batch_size:
             raise ValueError(
                 f"Action batch size {batch_size} does not match environment batch size {self.batch_size}"
             )
-        self._param_values[self.circuit_choice][step_status] = params
-        params = np.reshape(
-            np.vstack([param_set for param_set in self._param_values[self.circuit_choice]]),
-            (self.batch_size, (self.circuit_choice + 1) * self.action_space.shape[-1]),
-        )
-        if step_status < self.circuit_choice:  # Intermediate step within the circuit truncation
-            self._inside_trunc_tracker += 1
-            terminated = False
+        terminated = self._episode_ended = True
+        reward = self.perform_action(params)
 
-            return (
-                self._get_obs(),
-                np.zeros(batch_size),
-                terminated,
-                False,
-                self._get_info(),
-            )
+        obs = self._get_obs()
 
-        else:
-            terminated = self._episode_ended = True
-            reward = self.perform_action(params)
+        # Using Negative Log Error as the Reward
+        if np.mean(reward) > self._max_return:
+            self._max_return = np.mean(reward)
+            self._optimal_actions[self.circuit_choice] = self.mean_action
 
-            obs = self._get_obs()
+        assert (
+            len(reward) == self.batch_size
+        ), f"Reward table size mismatch {len(reward)} != {self.batch_size} "
+        assert not np.any(np.isinf(reward)) and not np.any(
+            np.isnan(reward)
+        ), "Reward table contains NaN or Inf values"
+        optimal_error_precision = 1e-6
+        max_fidelity = 1.0 - optimal_error_precision
+        if self._fit_function is not None:
+            reward = self._fit_function(reward, self.n_reps)
+        reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
+        self.reward_history.append(reward)
+        reward = -np.log10(1.0 - reward)
 
-            # Using Negative Log Error as the Reward
-            if np.mean(reward) > self._max_return:
-                self._max_return = np.mean(reward)
-                self._optimal_actions[self.circuit_choice] = self.mean_action
+        return obs, reward, terminated, False, self._get_info()
 
-            assert (
-                len(reward) == self.batch_size
-            ), f"Reward table size mismatch {len(reward)} != {self.batch_size} "
-            assert not np.any(np.isinf(reward)) and not np.any(
-                np.isnan(reward)
-            ), "Reward table contains NaN or Inf values"
-            optimal_error_precision = 1e-6
-            max_fidelity = 1.0 - optimal_error_precision
-            if self._fit_function is not None:
-                reward = self._fit_function(reward, self.n_reps)
-            reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
-            self.reward_history.append(reward)
-            reward = -np.log10(1.0 - reward)
-
-            return obs, reward, terminated, False, self._get_info()
-
-    def _get_obs(self):
+    def _get_obs(self) -> ObsType:
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
@@ -393,8 +388,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             return np.array([0, self.circuit_choice])
 
     def compute_benchmarks(
-        self, qc: QuantumCircuit, params: np.array, update_env_history=True
-    ) -> np.array:
+        self, qc: QuantumCircuit, params: np.ndarray, update_env_history=True
+    ) -> np.ndarray:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         :param params: Batch of actions
@@ -471,14 +466,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return self._parameters
 
     @property
-    def tgt_instruction_counts(self) -> int:
-        """
-        Return number of target instructions present in circuit context
-        """
-        # return self.circuit_context.data.count(self.target_instruction)
-        return self.unbound_circuit_context.data.count(self.target_instruction)
-
-    @property
     def target(self) -> GateTarget | StateTarget:
         """
         Return current target to be calibrated
@@ -486,14 +473,14 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return self.config.target
 
     @property
-    def virtual_target_qubits(self) -> List[int]:
+    def virtual_target_qubits(self) -> List[Qubit] | QuantumRegister:
         """
         Return the virtual target qubits used in the circuit context
         """
         if isinstance(self.config.target, GateTarget):
-            return self.config.target.virtual_target_qubits
+            return self.config.target.virtual_target_qubits[self.circuit_choice]
         else:
-            return self.config.physical_qubits
+            return self.config.target.tgt_register
 
     @property
     def optimal_action(self):
@@ -522,63 +509,63 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """Reset all counters related to training"""
         super().clear_history()
 
-    # def set_unbound_circuit_context(self, new_context: QuantumCircuit, **kwargs):
-    #     """
-    #     Update the unbound circuit context
-    #     Keyword arguments can be used to assign values to parameters in the new context for immediate target calculation
-    #
-    #     """
-    #     self._unbound_circuit_context = new_context
-    #
-    #     # Define target register and nearest neighbor register for truncated circuits
-    #     self.circ_tgt_register = (
-    #         QuantumRegister(
-    #             bits=[self._unbound_circuit_context.qubits[i] for i in self.virtual_target_qubits],
-    #             name="tgt",
-    #         )
-    #         if self._unbound_circuit_context.num_qubits != len(self.virtual_target_qubits)
-    #         else self._unbound_circuit_context.qregs[0]
-    #     )
-    #
-    #     # Adjust target register to match it with circuit context
-    #     instruction = (
-    #         self.config.target.gate
-    #         if isinstance(self.config.target, GateTargetConfig)
-    #         else new_context.data[
-    #             0
-    #         ].operation  # Assuming first instruction is the target state preparation
-    #     )
-    #     self.target_instruction = CircuitInstruction(
-    #         instruction,
-    #         (qubit for qubit in self.circ_tgt_register),
-    #     )
-    #     tgt_instruction_counts = self.tgt_instruction_counts
-    #     if tgt_instruction_counts == 0:
-    #         raise ValueError("Target gate not found in circuit context")
-    #
-    #     self._parameters = [
-    #         [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
-    #         for j in range(tgt_instruction_counts)
-    #     ]
-    #
-    #     self._param_values = create_array(
-    #         tgt_instruction_counts,
-    #         self.batch_size,
-    #         self.action_space.shape[-1],
-    #     )
-    #
-    #     self._optimal_actions = [
-    #         np.zeros(self.config.n_actions) for _ in range(tgt_instruction_counts)
-    #     ]
-    #     if not new_context.parameters:
-    #         self.set_circuit_context(new_context.copy(), **kwargs)
+    def set_unbound_circuit_context(self, new_context: QuantumCircuit, **kwargs):
+        """
+        Update the unbound circuit context
+        Keyword arguments can be used to assign values to parameters in the new context for immediate target calculation
+
+        """
+        self._unbound_circuit_context = new_context
+
+        # Define target register and nearest neighbor register for truncated circuits
+        self.circ_tgt_register = (
+            QuantumRegister(
+                bits=[self._unbound_circuit_context.qubits[i] for i in self.virtual_target_qubits],
+                name="tgt",
+            )
+            if self._unbound_circuit_context.num_qubits != len(self.virtual_target_qubits)
+            else self._unbound_circuit_context.qregs[0]
+        )
+
+        # Adjust target register to match it with circuit context
+        instruction = (
+            self.config.target.gate
+            if isinstance(self.config.target, GateTargetConfig)
+            else new_context.data[
+                0
+            ].operation  # Assuming first instruction is the target state preparation
+        )
+        self.target_instruction = CircuitInstruction(
+            instruction,
+            (qubit for qubit in self.circ_tgt_register),
+        )
+        tgt_instruction_counts = self.tgt_instruction_counts
+        if tgt_instruction_counts == 0:
+            raise ValueError("Target gate not found in circuit context")
+
+        self._parameters = [
+            [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
+            for j in range(tgt_instruction_counts)
+        ]
+
+        self._param_values = create_array(
+            tgt_instruction_counts,
+            self.batch_size,
+            self.action_space.shape[-1],
+        )
+
+        self._optimal_actions = [
+            np.zeros(self.config.n_actions) for _ in range(tgt_instruction_counts)
+        ]
+        if not new_context.parameters:
+            self.set_circuit_context(new_context.copy(), **kwargs)
 
     @property
     def circuit_context(self) -> QuantumCircuit:
         """
         Return the current circuit context
         """
-        return self.target.target_circuit
+        return self.target.circuit
 
     @property
     def circuit_choice(self) -> int:
@@ -626,11 +613,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 self.pass_manager,
                 self.config.backend_config.skip_transpilation,
             )
-            self._estimator, self._sampler = retrieve_primitives(
-                self.backend,
-                self.config.backend_config,
-                self.config.backend_config.as_dict().get("primitive_options", None),
-            )
+
         self._target, self.circuits, self.baseline_circuits = self.define_target_and_circuits()
 
     def update_gate_calibration(self, gate_names: Optional[List[str]] = None):

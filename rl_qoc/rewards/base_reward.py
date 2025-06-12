@@ -57,7 +57,7 @@ class Reward(ABC):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: Target,
         env_config: QEnvConfig,
         *args,
@@ -82,7 +82,7 @@ class Reward(ABC):
         self,
         reward_data: RewardDataList,
         primitive: Primitive,
-    ) -> np.array:
+    ) -> np.ndarray:
         pass
 
     def get_shot_budget(self, pubs: List[Pub]):

@@ -279,7 +279,7 @@ class StateReward(Reward):
         n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
         if is_gate_target:
             causal_cone_qubits = target.causal_cone_qubits
-            causal_cone_size =  target.causal_cone_size
+            causal_cone_size = target.causal_cone_size
         else:
             causal_cone_qubits = qc.qubits
             causal_cone_size = target.n_qubits

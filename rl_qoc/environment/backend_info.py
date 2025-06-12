@@ -85,7 +85,7 @@ class QiskitBackendInfo(BackendInfo):
         self,
         backend: Optional[QiskitBackend] = None,
         custom_instruction_durations: Optional[InstructionDurations] = None,
-        pass_manager: PassManager = None,
+        pass_manager: Optional[PassManager] = None,
         skip_transpilation: bool = False,
         n_qubits: int = 0,
     ):

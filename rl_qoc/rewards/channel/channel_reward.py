@@ -75,7 +75,7 @@ class ChannelReward(Reward):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
@@ -305,7 +305,6 @@ class ChannelReward(Reward):
                         ),
                     )
 
-                    used_prep_indices[prep_indices].shots = max(dedicated_shots, ref_shots)
                     used_prep_indices[prep_indices].observables_indices = observables_to_indices(
                         new_obs
                     )
