@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Sequence, Literal
 
 from gymnasium.spaces import Box
 from qiskit import QuantumCircuit
@@ -6,7 +6,7 @@ from qiskit.transpiler import Layout
 
 from rl_qoc import ContextAwareQuantumEnvironment, QEnvConfig, GateTarget
 import numpy as np
-from .spillover_effect_on_subsystem import (
+from spillover_effect_on_subsystem import (
     noisy_backend,
     circuit_context,
     LocalSpilloverNoiseAerPass,
@@ -36,7 +36,7 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         self.gamma_matrix = gamma_matrix
         self.circuit_parameters = unbound_circuit_context.parameters
 
-        super().__init__(q_env_config, unbound_circuit_context)
+        super().__init__(q_env_config)
         self._rotation_angles_rng = np.random.default_rng(self.np_random.integers(2**32))
         self.observation_space = Box(
             low=np.array([0.0] * len(self.circuit_parameters)),
@@ -94,12 +94,15 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         # phi = np.random.uniform(0, 2 * np.pi, self.unbound_circuit_context.num_qubits)
 
         param_dict = {self.circuit_parameters[i].name: phi[i] for i in range(len(phi))}
-        circuit = self.unbound_circuit_context.assign_parameters(param_dict)
-        backend = noisy_backend(
+        self.config.target.clear_parameters()
+        self.config.target.bind_parameters(param_dict)
+        circuit = self.config.target.circuit
+        self.backend = noisy_backend(
             circuit, self.gamma_matrix, self.config.env_metadata["target_subsystem"]
         )
         # Generate the initial observation
-        self.set_circuit_context(None, backend=backend, **param_dict)
+
+        self.circuits = self.define_circuits()
         obs = phi
         print("Sampled angles: ", obs)
         # Return the initial observation and info
@@ -113,7 +116,7 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         phi = self._rotation_angles_rng.uniform(
             0,
             2 * np.pi,
-            self.unbound_circuit_context.num_qubits * self.tgt_instruction_counts,
+            self.target.circuit.num_qubits,
         )
         return phi
 

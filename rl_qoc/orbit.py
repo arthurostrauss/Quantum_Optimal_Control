@@ -83,8 +83,8 @@ class ORBIT:
     def orbit_circuits(self):
 
         circuits, ref_circuits = [], []
-        circuit = self.q_env.circuits[self.q_env.trunc_index]
-        circuit_ref = self.q_env.baseline_circuits[self.q_env.trunc_index]
+        circuit = self.q_env.circuits[self.q_env.circuit_choice]
+        circuit_ref = self.q_env.baseline_circuits[self.q_env.circuit_choice]
 
         for seq in range(self.num_sequences):
             run_qc = QuantumCircuit(*circuit.qregs)

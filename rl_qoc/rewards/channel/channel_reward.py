@@ -75,7 +75,7 @@ class ChannelReward(Reward):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
@@ -305,7 +305,6 @@ class ChannelReward(Reward):
                         ),
                     )
 
-                    used_prep_indices[prep_indices].shots = max(dedicated_shots, ref_shots)
                     used_prep_indices[prep_indices].observables_indices = observables_to_indices(
                         new_obs
                     )
@@ -357,7 +356,7 @@ class ChannelReward(Reward):
     def get_real_time_circuit(
         self,
         circuits: QuantumCircuit | List[QuantumCircuit],
-        target: GateTarget | List[GateTarget],
+        target: GateTarget,
         env_config: QEnvConfig,
         skip_transpilation: bool = False,
         *args,
@@ -367,9 +366,6 @@ class ChannelReward(Reward):
         all_n_reps = env_config.n_reps
 
         prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
-        targets = [target] if isinstance(target, GateTarget) else target
-        validate_circuit_and_target(prep_circuits, targets)
-        ref_target = targets[0]
         qubits = [qc.qubits for qc in prep_circuits]
         if not all(qc.qubits == qubits[0] for qc in prep_circuits):
             raise ValueError("All circuits must have the same qubits")
@@ -381,16 +377,16 @@ class ChannelReward(Reward):
         n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
 
         if not qc.clbits:
-            meas = ClassicalRegister(ref_target.causal_cone_size, name="meas")
+            meas = ClassicalRegister(target.causal_cone_size, name="meas")
             qc.add_register(meas)
         else:
             meas = qc.cregs[0]
-            if meas.size != ref_target.causal_cone_size:
+            if meas.size != target.causal_cone_size:
                 raise ValueError("Classical register size must match the target causal cone size")
 
         input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
         observables_vars = [
-            qc.add_input(f"observable_{i}", Uint(4)) for i in range(ref_target.causal_cone_size)
+            qc.add_input(f"observable_{i}", Uint(4)) for i in range(target.causal_cone_size)
         ]
         input_circuits = [circ.decompose() for circ in get_single_qubit_input_states("pauli6")]
 
@@ -412,7 +408,7 @@ class ChannelReward(Reward):
 
         # Local Basis rotation handling
         meas_basis = PauliMeasurementBasis()
-        for q, qubit in enumerate(ref_target.causal_cone_qubits):
+        for q, qubit in enumerate(target.causal_cone_qubits):
             with qc.switch(observables_vars[q]) as case_observable:
                 for i in range(3):
                     with case_observable(i):
@@ -423,7 +419,7 @@ class ChannelReward(Reward):
                         )
 
         # Measurement
-        qc.measure(ref_target.causal_cone_qubits, meas)
+        qc.measure(target.causal_cone_qubits, meas)
 
         if skip_transpilation:
             return qc
@@ -431,7 +427,7 @@ class ChannelReward(Reward):
         return env_config.backend_info.custom_transpile(
             qc,
             optimization_level=1,
-            initial_layout=ref_target.layout,
+            initial_layout=target.layout,
             scheduling=False,
             remove_final_measurements=False,
         )

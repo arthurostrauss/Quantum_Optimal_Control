@@ -17,7 +17,7 @@ from .backend_config import (
     QiskitConfig,
 )
 
-from .target_config import GateTargetConfig, StateTargetConfig
+from ..target import GateTarget, StateTarget
 from .execution_config import ExecutionConfig
 from .benchmark_config import BenchmarkConfig
 from ..backend_info import BackendInfo
@@ -46,21 +46,21 @@ class QEnvConfig:
         benchmark_config (BenchmarkConfig): Benchmark configuration
     """
 
-    target: GateTargetConfig | StateTargetConfig
+    target: GateTarget | StateTarget
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
     reward: Reward = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
-    _backend_info: BackendInfo = None
+    backend_info: BackendInfo = field(init=False)
 
     def __post_init__(self):
         if isinstance(self.target, Dict):
             if "gate" in self.target:
-                self.target = GateTargetConfig(**self.target)
+                self.target = GateTarget(**self.target)
             else:
-                self.target = StateTargetConfig(**self.target)
+                self.target = StateTarget(**self.target)
         if isinstance(self.reward, str):
             from ...rewards import reward_dict
 
@@ -73,7 +73,7 @@ class QEnvConfig:
         if self.backend_config.config_type in ["qiskit", "dynamics", "runtime", "qm"]:
             from ..backend_info import QiskitBackendInfo
 
-            self._backend_info = QiskitBackendInfo(
+            self.backend_info = QiskitBackendInfo(
                 self.backend_config.backend,
                 self.backend_config.instruction_durations,
                 self.backend_config.pass_manager,
@@ -82,7 +82,7 @@ class QEnvConfig:
         elif self.backend_config.config_type == "qibo":
             from ...qibo.qibo_config import QiboBackendInfo
 
-            self._backend_info = QiboBackendInfo(
+            self.backend_info = QiboBackendInfo(
                 self.backend_config.n_qubits, self.backend_config.coupling_map
             )
         else:
@@ -96,15 +96,7 @@ class QEnvConfig:
     def backend(self, backend: BackendV2):
         self.backend_config.backend = backend
         self.backend_config.parametrized_circuit_kwargs["backend"] = backend
-        self._backend_info._backend = backend
-
-    @property
-    def backend_info(self) -> BackendInfo:
-        return self._backend_info
-
-    @backend_info.setter
-    def backend_info(self, value: BackendInfo):
-        self._backend_info = value
+        self.backend_info._backend = backend
 
     @property
     def parametrized_circuit(self):
@@ -124,7 +116,7 @@ class QEnvConfig:
 
     @property
     def physical_qubits(self):
-        return self.target["physical_qubits"]
+        return self.target.physical_qubits
 
     @property
     def batch_size(self):
@@ -302,10 +294,10 @@ class QEnvConfig:
             "metadata": self.env_metadata,
         }
 
-        if isinstance(self.target, GateTargetConfig):
+        if isinstance(self.target, GateTarget):
             config["target"]["gate"] = self.target.gate.name
-        elif isinstance(self.target, StateTargetConfig) and not to_json:
-            config["target"]["state"] = self.target.state.data
+        elif isinstance(self.target, StateTarget) and not to_json:
+            config["target"]["state"] = self.target.dm.data
 
         return config
 

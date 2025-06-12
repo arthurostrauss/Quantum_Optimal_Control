@@ -31,7 +31,7 @@ class FidelityReward(Reward):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: Target,
         env_config: QEnvConfig,
         *args,
@@ -71,7 +71,7 @@ class FidelityReward(Reward):
         self,
         reward_data: FidelityRewardDataList,
         primitive: Primitive,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Compute the reward based on the primitive and the pubs
 
@@ -107,7 +107,7 @@ class FidelityReward(Reward):
     def get_fidelity(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: Target,
         backend_info: BackendInfo,
         n_reps: Optional[int] = 1,
@@ -173,7 +173,7 @@ class FidelityReward(Reward):
     def get_pulse_fidelity(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: Target,
         backend_info: BackendInfo,
         n_reps: Optional[int] = 1,

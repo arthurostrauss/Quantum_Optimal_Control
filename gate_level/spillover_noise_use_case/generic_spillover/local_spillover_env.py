@@ -3,7 +3,7 @@ from qiskit.transpiler import Layout
 from rl_qoc import GateTarget
 from rl_qoc.environment import ContextAwareQuantumEnvironment
 from rl_qoc.helpers import causal_cone_circuit
-from .spillover_effect_on_subsystem import noisy_backend
+from spillover_effect_on_subsystem import noisy_backend
 
 
 class LocalSpilloverEnvironment(ContextAwareQuantumEnvironment):

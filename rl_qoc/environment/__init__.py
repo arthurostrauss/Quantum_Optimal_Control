@@ -5,8 +5,6 @@ from .configuration import (
     BackendConfig,
     ExecutionConfig,
     QEnvConfig,
-    GateTargetConfig,
-    StateTargetConfig,
 )
 from .quantumenvironment import QuantumEnvironment
 from .context_aware_quantum_environment import ContextAwareQuantumEnvironment

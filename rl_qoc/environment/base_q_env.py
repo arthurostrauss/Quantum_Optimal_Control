@@ -78,7 +78,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._env_config = training_config
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
-        self._physical_target_qubits = training_config.target.get("physical_qubits", None)
+        self._physical_target_qubits = training_config.target.physical_qubits
 
         self._estimator, self._sampler = retrieve_primitives(
             self.backend,
@@ -86,7 +86,7 @@ class BaseQuantumEnvironment(ABC, Env):
             training_config.backend_config.as_dict().get("primitive_options", None),
         )
 
-        self._target, self.circuits, self.baseline_circuits = [], [], []
+        self.circuits = []
 
         self._mean_action = np.zeros(self.action_space.shape[-1])
         self._std_action = np.ones(self.action_space.shape[-1])
@@ -123,13 +123,9 @@ class BaseQuantumEnvironment(ABC, Env):
         self.config.reward.set_reward_seed(self.np_random.integers(2**32))
 
     @abstractmethod
-    def define_target_and_circuits(
+    def define_circuits(
         self,
-    ) -> tuple[
-        GateTarget | StateTarget | List[GateTarget],
-        List[QuantumCircuit],
-        List[QuantumCircuit],
-    ]:
+    ) -> list[QuantumCircuit]:
         """
         Define the target gate or state and the circuits to be executed on the quantum system.
         This method should be implemented by the user and called at construction of the environment.
@@ -394,7 +390,7 @@ class BaseQuantumEnvironment(ABC, Env):
             n_custom_instructions = 1
         else:  # List of ParameterVectors
             parameters = self.parameters
-            n_custom_instructions = self.trunc_index + 1
+            n_custom_instructions = self.circuit_choice + 1
 
         parameter_binds = [
             {
@@ -693,11 +689,16 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def backend(self) -> Optional[BackendV2]:
-        return self._env_config.backend
+        return self.config.backend
 
     @backend.setter
     def backend(self, backend: BackendV2):
         self.config.backend = backend
+        self._estimator, self._sampler = retrieve_primitives(
+            self.backend,
+            self.config.backend_config,
+            self.config.backend_config.as_dict().get("primitive_options", None),
+        )
 
     @property
     def estimator(self) -> BaseEstimatorV2:
@@ -752,18 +753,17 @@ class BaseQuantumEnvironment(ABC, Env):
         return None
 
     @property
-    @abstractmethod
-    def tgt_instruction_counts(self) -> int:
+    def baseline_circuits(self) -> List[QuantumCircuit]:
         """
-        Number of occurrences of the target instruction in the circuit
+        Return the baseline circuits
         """
-        raise NotImplementedError("Target instruction counts not implemented")
+        return self.config.target.circuits
 
     @property
     def fidelity_history(self):
         return (
             self.avg_fidelity_history
-            if self.target.target_type == "gate" and self.target.target_circuit.num_qubits <= 3
+            if self.target.target_type == "gate" and self.target.circuit.num_qubits <= 3
             else self.circuit_fidelity_history
         )
 
@@ -865,7 +865,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 "reset_stage": self._inside_trunc_tracker == 0,
                 "step": step,
                 "gate_index": self._inside_trunc_tracker,
-                "truncation_index": self.trunc_index,
+                "truncation_index": self.circuit_choice,
             }
         return info
 
@@ -947,7 +947,18 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the target object (GateTarget | StateTarget) of the environment
         """
-        raise NotImplementedError("Target not implemented")
+        return self.config.target
+
+    @property
+    def circuit_choice(self) -> int:
+        """
+        Return the index of the circuit to be used in the environment
+        """
+        return (
+            self.config.target.circuit_choice
+            if hasattr(self.config.target, "circuit_choice")
+            else 0
+        )
 
     @property
     def n_qubits(self):
@@ -1029,14 +1040,14 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the circuit used in the environment
         """
-        return self.circuits[self.trunc_index]
+        return self.circuits[self.circuit_choice]
 
     @property
     def baseline_circuit(self):
         """
         Return the baseline circuit used in the environment
         """
-        return self.baseline_circuits[self.trunc_index]
+        return self.baseline_circuits[self.circuit_choice]
 
     @property
     def pubs(self) -> List[EstimatorPub | SamplerPub]:
@@ -1087,14 +1098,6 @@ class BaseQuantumEnvironment(ABC, Env):
     @property
     def ident_str(self):
         return self.__str__()
-
-    @property
-    @abstractmethod
-    def trunc_index(self) -> int:
-        """
-        Index of the truncation to be applied
-        """
-        raise NotImplementedError("Truncation index not implemented")
 
     @property
     def metadata(self):
