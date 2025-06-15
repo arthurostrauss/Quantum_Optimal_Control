@@ -624,7 +624,7 @@ def observables_to_indices(
     return observable_indices
 
 
-def pauli_input_to_indices(prep: Pauli | str, inputs: List[int] | Tuple[int]):
+def pauli_input_to_indices(prep: Pauli | str, inputs: Sequence[int]):
     """
     Convert the input state to single qubit state indices for the reward computation
 
@@ -721,7 +721,7 @@ def pauli_weight(pauli_obj: Union[Pauli, SparsePauliOp, PauliList]) -> Union[int
     elif isinstance(pauli_obj, PauliList):
         return np.sum(pauli_obj.x | pauli_obj.z, axis=1).tolist()
     else:
-        raise TypeError("Input must be a Pauli or SparsePauliOp.")
+        raise TypeError(f"Input must be a Pauli or SparsePauliOp, got {type(pauli_obj)}")
 
 
 def are_qubit_wise_commuting(p1: Pauli, p2: Pauli) -> bool:
@@ -755,5 +755,37 @@ def group_input_paulis_by_qwc(input_paulis: PauliList, counts) -> List[PauliList
         for i in reversed(to_remove):
             sorted_paulis.pop(i)
         grouped.append(PauliList(group))  # Convert to PauliList
+
+    return grouped
+
+def group_pauli_pairs_by_qwc(pauli_pairs: List[Tuple[Pauli, Pauli]], probabilities: List[float]) -> List[Tuple[PauliList, PauliList]]:
+    """Group Pauli pairs by qubit-wise commutation (QWC), sorted by descending importance.
+
+    Args:
+        pauli_pairs: List of Pauli pairs
+        probabilities: List of probabilities for each Pauli pair
+
+    Returns:
+        List of tuples containing (PauliList of input Paulis, PauliList of observable Paulis)
+        Each group is returned as a tuple of PauliList objects.
+    """
+    # Sort input Paulis by descending count importance
+    sorted_indices = sorted(range(len(probabilities)), key=lambda i: -probabilities[i])
+    sorted_pauli_pairs = [pauli_pairs[i] for i in sorted_indices]
+
+    grouped = []
+    while sorted_pauli_pairs:
+        ref = sorted_pauli_pairs.pop(0)
+        input_group = [ref[0]]
+        obs_group = [ref[1]]
+        to_remove = []
+        for i, other in enumerate(sorted_pauli_pairs):
+            if are_qubit_wise_commuting(ref[0], other[0]) and are_qubit_wise_commuting(ref[1], other[1]):
+                input_group.append(other[0])
+                obs_group.append(other[1])
+                to_remove.append(i)
+        for i in reversed(to_remove):
+            sorted_pauli_pairs.pop(i)
+        grouped.append((PauliList(input_group), PauliList(obs_group)))
 
     return grouped

@@ -1,3 +1,4 @@
+from itertools import product
 from typing import List, Tuple, Optional, Literal
 
 from qiskit import ClassicalRegister
@@ -20,6 +21,7 @@ from ...environment.configuration.qconfig import QEnvConfig
 from ...environment.target import GateTarget
 from ...helpers import get_single_qubit_input_states, group_input_paulis_by_qwc
 from ...helpers.circuit_utils import (
+    group_pauli_pairs_by_qwc,
     handle_n_reps,
     extend_observables,
     extend_input_state_prep,
@@ -111,16 +113,36 @@ class ChannelReward(Reward):
         c_factor = execution_config.c_factor
 
         Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
+        cutoff = 1e-4  # Cutoff for negligible probabilities
+        non_zero_indices = np.nonzero(np.abs(Chi) > cutoff)[0]
+        probabilities = Chi**2 / (dim**2)
+        probabilities = probabilities[non_zero_indices]  # Filter out zero probabilities
+        probabilities /= np.sum(probabilities)
+        basis = pauli_basis(num_qubits=n_qubits)
+        basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
+        sorted_indices = np.argsort(probabilities)[::-1]
+        non_zero_indices = non_zero_indices[sorted_indices]
+        pair_indices = [np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices]
+        pauli_pairs = [(basis[i], basis[j]) for (i, j) in pair_indices]
+    
+        grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs, probabilities)
+        grouped_indices = []
+        for group in grouped_pauli_pairs:
+            group_indices = [[], []]  # Prepare indices for each group
+            prep, obs = group
+            for p in prep:
+                group_indices[0].append(basis_to_indices[p])
+            for o in obs:
+                group_indices[1].append(basis_to_indices[o])
+            grouped_indices.append(group_indices)
+
+        grouped_Chi = [Chi[np.ravel_multi_index(indices, (dim**2, dim**2))] for indices in grouped_indices]
+        grouped_probabilities = [np.sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_Chi]
+        
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
         prep_basis = Pauli6PreparationBasis()  # Pauli6 basis for input state preparation
-
-        probabilities = Chi**2 / (dim**2)
-        cutoff = 1e-4  # Cutoff for negligible probabilities
-        non_zero_indices = np.nonzero(probabilities > cutoff)[0]
-        non_zero_probabilities = probabilities[non_zero_indices]
-        non_zero_probabilities /= np.sum(non_zero_probabilities)
 
         if dfe_precision is not None:
             # DFE precision guarantee, ϵ additive error, δ failure probability
@@ -133,83 +155,42 @@ class ChannelReward(Reward):
         # Sample a list of input/observable pairs
         # If one pair is sampled repeatedly, it increases number of shots used to estimate its expectation value
 
-        samples, counts = np.unique(
+        sampled_group_indices, counts= np.unique(
             self.fiducials_rng.choice(
-                non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
+                len(grouped_pauli_pairs), size=pauli_sampling, p=grouped_probabilities
             ),
             return_counts=True,
         )
-
-        # Sort samples in descending order based on probabilities
-        sorted_indices = np.argsort(counts)[::-1]
-        counts = counts[sorted_indices]
-        samples = samples[sorted_indices]
-
-        # Convert samples to a pair of indices in the Pauli basis
-        pauli_indices = np.array(
-            [np.unravel_index(sample, (dim**2, dim**2)) for sample in samples],
-            dtype=int,
-        )
-
-        # Filter out the case where identity ('I'*n_qubits) is sampled (trivial case)
-        identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
-        id_coeff = c_factor * np.sum(counts[identity_terms] / (Chi[samples[identity_terms]]))
-
-        pauli_indices = np.delete(pauli_indices, identity_terms, axis=0)
-        samples = np.delete(samples, identity_terms)
-        counts = np.delete(counts, identity_terms)
-
-        basis = pauli_basis(num_qubits=n_qubits)
-
-        reward_factor = c_factor * counts / (dim * Chi[samples])  # Based on DFE estimator
-        fiducials_list = [
-            (basis[p[0]], SparsePauliOp(basis[p[1]], r))
-            for p, r in zip(pauli_indices, reward_factor)
+        sampled_grouped_pauli_pairs = [
+            grouped_pauli_pairs[i] for i in sampled_group_indices
         ]
-        # Regroup qubit-wise commuting input Paulis
-        input_paulis, input_counts = PauliList([prep for prep, _ in fiducials_list]).unique(
-            return_counts=True
-        )
-        if self.sorting == "default":
-            input_pauli_commuting_groups = input_paulis.group_qubit_wise_commuting()
-        else:
-            input_pauli_commuting_groups = group_input_paulis_by_qwc(input_paulis, input_counts)
 
-        # Regroup qubit-wise commuting observables
-        filtered_fiducials_list = [
-            (group, [SparsePauliOp("I" * n_qubits, 0.0) for _ in range(len(group))])
-            for group in input_pauli_commuting_groups
-        ]
-        pauli_counts = [[] for _ in range(len(input_pauli_commuting_groups))]
-        for i, (prep, obs) in enumerate(fiducials_list):
-            for j, group in enumerate(input_pauli_commuting_groups):
-                if prep in group:
-                    prep_idx = list(group).index(prep)
-                    filtered_fiducials_list[j][1][prep_idx] += obs
-                    pauli_counts[j].append(counts[i])
-                    break
+        # Calculate reward factors for each group
+        reward_factors = []
+        for i, idx in enumerate(sampled_group_indices):
+            chi_group = grouped_Chi[idx]
+            chi_squared_sum = sum(chi**2 for chi in chi_group)
+            reward_factor = c_factor * counts[i] * chi_group / (dim * chi_squared_sum)
+            reward_factors.append(reward_factor)
 
-        filtered_fiducials_list = [
-            [group, [obs.simplify() for obs in obs_list]]
-            for group, obs_list in filtered_fiducials_list
-        ]
-        pauli_counts = [max(c) for c in pauli_counts]
+        for i in range(len(sampled_grouped_pauli_pairs)):
+            prep, obs_list = sampled_grouped_pauli_pairs[i]
+            obs_list = SparsePauliOp(obs_list, reward_factors[i])
+            sampled_grouped_pauli_pairs[i] = (prep, obs_list)
 
-        fiducials = filtered_fiducials_list
+      
         reward_data = []
-        for (prep, obs_list), c in zip(fiducials, pauli_counts):
+        for (prep_group, obs_group), c in zip(sampled_grouped_pauli_pairs, counts):
             # Each prep is a Pauli that we need to decompose in its pure eigenbasis.
             # Below, we select at random a subset of pure input states to prepare for each prep
             # If nb_states = dim, we prepare all pure input states for each Pauli prep (no random selection)
 
-            # self._fiducials_indices.append(([], observables_to_indices(obs_list)))
-            # self._full_fiducials.append(([], obs_list))
             selected_input_states, counts_input_states = np.unique(
                 self.input_states_rng.choice(dim, size=c), return_counts=True
             )
             # Build representative of qubit-wise commuting Pauli group (the one with the highest weight)
-            pauli_rep = Pauli((np.logical_or.reduce(prep.z), np.logical_or.reduce(prep.x)))
-            prep_label = [pauli.to_label() for pauli in prep]
+            pauli_rep = Pauli((np.logical_or.reduce(prep_group.z), np.logical_or.reduce(prep_group.x)))
+            prep_label = [pauli.to_label() for pauli in prep_group]
             dedicated_shots = (
                 counts_input_states * n_shots
             )  # Number of shots per Pauli eigenstate (divided equally)
@@ -258,7 +239,7 @@ class ChannelReward(Reward):
                     optimization_level=0,
                 )
 
-                obs_ = [p * o for p, o in zip(parity, obs_list)]
+                obs_ = [p * o for p, o in zip(parity, obs_group)]
                 pub_obs = extend_observables(
                     sum(obs_).simplify(), prep_circuit, target.causal_cone_qubits_indices
                 )
@@ -285,7 +266,7 @@ class ChannelReward(Reward):
                     )
                 )
 
-        reward_data = ChannelRewardDataList(reward_data, pauli_sampling, id_coeff)
+        reward_data = ChannelRewardDataList(reward_data, pauli_sampling, 0)
         return reward_data
 
     def get_reward_with_primitive(
