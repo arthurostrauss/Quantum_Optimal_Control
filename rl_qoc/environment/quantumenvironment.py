@@ -232,9 +232,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             else:  # Pulse simulation
                 fids = self.simulate_pulse_circuit(qc, params, update_env_history)
             if self.target.target_type == "state":
-                print("State fidelity:", self.circuit_fidelity_history[-1])
+                print("State fidelity:", fids)
             else:
-                print("Avg gate fidelity:", self.avg_fidelity_history[-1])
+                print("Avg gate fidelity:", fids)
             print("Finished simulation benchmark")
         return fids
 

@@ -30,7 +30,7 @@ from qiskit.circuit import (
     Parameter,
 )
 from itertools import product
-from typing import Any, List, Optional, Literal, Sequence
+from typing import Any, List, Optional, Literal, Sequence, Union
 from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
@@ -800,3 +800,5 @@ class GateTarget(BaseTarget):
         Get item method for dictionary-like access to the target
         """
         return self.get(item)
+
+Target = Union[StateTarget, GateTarget]
