@@ -22,7 +22,6 @@ from qiskit.quantum_info import (
     Operator,
     SparsePauliOp,
     Pauli,
-    pauli_basis,
     PauliList,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState

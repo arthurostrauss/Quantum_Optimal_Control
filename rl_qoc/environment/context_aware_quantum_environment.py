@@ -160,8 +160,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         circuits = []
         for i, circ in enumerate(self.target.circuits):
-            custom_circ = circ.copy(f"custom_circ_{circ.name}")
-            custom_circ.metadata["baseline_circuit"] = circ.copy(f"baseline_circ_{circ.name}")
 
             pm = PassManager(
                 CustomGateReplacementPass(
@@ -172,6 +170,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 )
             )
             custom_circ = pm.run(circ)
+            custom_circ.metadata["baseline_circuit"] = circ.copy(f"baseline_circ_{circ.name}")
             circuits.append(custom_circ)
 
         return circuits

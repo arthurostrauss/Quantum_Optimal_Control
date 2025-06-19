@@ -276,12 +276,11 @@ def handle_real_time_n_reps(
         apply_real_time_n_reps(n_reps_var, qc, prep_circuit)
     elif isinstance(n_reps_var, Var):
         try:
-            from qiskit.circuit.controlflow.for_loop import DynamicRange
-
-            n_reps_var_range = DynamicRange(n_reps_var)
+            from qiskit.circuit.classical import expr, types
+            n_reps_var_range = expr.Range(1, n_reps_var)
             with qc.for_loop(n_reps_var_range):
                 qc &= prep_circuit
-        except ImportError:
+        except AttributeError:
             # TODO: When Qiskit will support variable range in for loop, replace
             # this with a for loop with appropriate range object
             with qc.switch(n_reps_var) as case_reps:
