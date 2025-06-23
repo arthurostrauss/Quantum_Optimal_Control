@@ -288,5 +288,3 @@ def handle_real_time_n_reps(
                 for n in n_reps:
                     with case_reps(n):
                         apply_real_time_n_reps(n, qc, prep_circuit)
-            # with qc.for_loop([n_reps_var]):
-            #     qc.compose(prep_circuit, inplace=True)

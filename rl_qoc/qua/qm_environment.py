@@ -69,12 +69,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
     ):
         ParameterPool.reset()
         super().__init__(training_config)
-        if not isinstance(self.config.backend_config, QMConfig) or not isinstance(
-            self.backend, QMBackend
-        ):
-            raise ValueError(
-                "The backend should be a QMBackend object and the config should be a QMConfig object"
-            )
 
         if not self.config.reward_method in ["state", "channel", "cafe"]:
             raise ValueError(
@@ -179,10 +173,15 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             ParameterPool.patch_opnic_wrapper(self.qm_backend_config.opnic_dev_path)
 
         self._qm_job: Optional[RunningQmJob] = job
-        self._qm: Optional[QuantumMachine] = None
-        self.backend.update_compiler_from_target(self.input_type)
-        if hasattr(self.real_time_circuit, "calibrations") and self.real_time_circuit.calibrations:
-            self.backend.update_calibrations(qc=self.real_time_circuit, input_type=self.input_type)
+        if self.backend is not None:
+            self.backend.update_compiler_from_target(self.input_type)
+            if (
+                hasattr(self.real_time_circuit, "calibrations")
+                and self.real_time_circuit.calibrations
+            ):
+                self.backend.update_calibrations(
+                    qc=self.real_time_circuit, input_type=self.input_type
+                )
         self._step_indices = {}
         self._total_data_points = 0
 
@@ -559,6 +558,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.backend.update_calibrations(qc=self.real_time_circuit, input_type=self.input_type)
         self.backend.update_compiler_from_target()
         prog = self.rl_qoc_training_qua_prog(num_updates=self.qm_backend_config.num_updates)
+        self.backend.close_all_qms()
         self._qm_job = self.qm.execute(
             prog, compiler_options=self.qm_backend_config.compiler_options
         )
@@ -598,4 +598,4 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         """
         Get the QM object
         """
-        return self.backend.qm
+        return self.backend.qm if self.backend is not None else None

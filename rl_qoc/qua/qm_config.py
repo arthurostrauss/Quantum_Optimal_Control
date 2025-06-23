@@ -35,3 +35,11 @@ class QMConfig(BackendConfig):
         self.input_type = (
             InputType(self.input_type) if isinstance(self.input_type, str) else self.input_type
         )
+
+    def as_dict(self):
+        return {
+            "input_type": str(self.input_type),
+            "verbosity": self.verbosity,
+            "num_updates": self.num_updates,
+            "opnic_dev_path": self.opnic_dev_path,
+        }

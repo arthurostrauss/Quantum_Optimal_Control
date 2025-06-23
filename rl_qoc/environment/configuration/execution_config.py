@@ -20,7 +20,7 @@ class ExecutionConfig:
         dfe_precision: Precision for the DFE. Defaults to None.
             Should be a tuple indicating expected additive error and failure probability.
         control_flow_enabled: Flag to enable control flow design of runnable circuit (relevant for involving
-            real time control flow). Defaults to False.
+            real time control-flow). Defaults to True.
     """
 
     batch_size: int = 100
@@ -30,7 +30,7 @@ class ExecutionConfig:
     c_factor: float = 1.0
     seed: int = 1234
     dfe_precision: Optional[Tuple[float, float]] = None
-    control_flow_enabled: bool = False
+    control_flow_enabled: bool = True
     n_reps_mode: Literal["joint", "sequential"] = "sequential"
 
     def __post_init__(self):

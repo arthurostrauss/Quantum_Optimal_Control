@@ -6,11 +6,11 @@ from rl_qoc.qua import QMEnvironment, QMConfig, CustomQMPPO
 from quam_libs.components import QuAM, Transmon
 from qiskit_qm_provider import (
     FluxTunableTransmonBackend,
-    FluxChannel,
     QMInstructionProperties,
     InputType,
+    ParameterPool,
 )
-from qiskit_qm_provider.backend_utils import add_basic_macros_to_machine
+from qiskit_qm_provider.backend.backend_utils import add_basic_macros_to_machine
 from rl_qoc.agent.ppo_config import (
     WandBConfig,
     PPOConfig,
@@ -20,14 +20,16 @@ from rl_qoc.agent.ppo_config import (
 )
 from rl_qoc import (
     RescaleAndClipAction,
-    GateTargetConfig,
     ChannelReward,
     StateReward,
     CAFEReward,
     ExecutionConfig,
     QEnvConfig,
     BenchmarkConfig,
+    StateTarget,
+    GateTarget,
 )
+from rl_qoc.helpers import add_custom_gate
 from iqcc_cloud_client import IQCC_Cloud
 import json
 import os
@@ -53,36 +55,30 @@ machine = QuAM.load()
 if not machine.active_qubits[0].macros:
     add_basic_macros_to_machine(machine)
 backend = FluxTunableTransmonBackend(machine)
-target_qubit = machine.active_qubits[0]
-drive_channel = backend.get_pulse_channel(target_qubit.xy)
-baseline_x_op = target_qubit.xy.operations["x180"].get_raw_value()
 
 
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: List[Parameter], q_reg: QuantumRegister, **kwargs
 ):
-    try:
-        physical_qubits: List[int] = kwargs["physical_qubits"]
-        backend: FluxTunableTransmonBackend = kwargs["backend"]
-    except KeyError:
-        raise KeyError(
-            "Missing one of the required keys for the parametric circuit ('backend' and 'physical_qubits'"
-        )
-    custom_x = Gate("x_cal", 1, params)
-    qc.append(custom_x, [q_reg[0]])
 
+    physical_qubits: List[int] = kwargs["physical_qubits"]
+    backend: FluxTunableTransmonBackend = kwargs["backend"]
+
+    # TODO: Enter your custom parametric QUA macro here
     def qua_macro(amp):
         qubit: Transmon = backend.get_qubit(physical_qubits[0])
-        qubit.xy.play("x180", amplitude_scale=amp)
+        qubit.xy.play("x180_DragCosine", amplitude_scale=amp)
 
+    # Create a custom gate with the QUA macro
+    custom_x = Gate("x_cal", 1, params)
     instruction_prop = QMInstructionProperties(qua_pulse_macro=qua_macro)
-    backend.target.add_instruction(custom_x, {tuple(physical_qubits): instruction_prop})
+    qc = add_custom_gate(qc, custom_x, q_reg, params, physical_qubits, backend, instruction_prop)
     return qc
 
 
 physical_qubits = (0,)
 target_gate = "x"
-gate_target = GateTargetConfig(physical_qubits, gate=target_gate)
+gate_target = GateTarget(gate=target_gate, physical_qubits=physical_qubits)
 reward = ChannelReward()
 
 # Action space specification
@@ -91,8 +87,8 @@ param_bounds = [(-1.98, 2.0)]  # Can be any number of bounds
 
 # Environment execution parameters
 seed = 1203  # Master seed to make training reproducible
-batch_size = 10  # Number of actions to evaluate per policy evaluation
-n_shots = 10  # Minimum number of shots per fiducial evaluation
+batch_size = 32  # Number of actions to evaluate per policy evaluation
+n_shots = 100  # Minimum number of shots per fiducial evaluation
 pauli_sampling = 100  # Number of fiducials to compute for fidelity estimation (DFE only)
 n_reps = 1  # Number of repetitions of the cycle circuit
 num_updates = TotalUpdates(50)
@@ -122,7 +118,6 @@ execution_config = ExecutionConfig(
     n_shots=n_shots,
     n_reps=n_reps,
     seed=seed,
-    control_flow_enabled=True,
 )
 q_env_config = QEnvConfig(
     target=gate_target,
@@ -136,4 +131,13 @@ q_env_config = QEnvConfig(
 q_env = QMEnvironment(training_config=q_env_config)
 rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
 
-job = q_env.start_program(num_updates.total_updates)
+prog = q_env.rl_qoc_training_qua_prog(num_updates=num_updates.total_updates)
+if input_type == InputType.DGX:
+    ParameterPool.configure_stream()
+if hasattr(q_env.real_time_circuit, "calibrations") and q_env.real_time_circuit.calibrations:
+    backend.update_calibrations(qc=q_env.real_time_circuit, input_type=input_type)
+backend.update_compiler_from_target()
+
+run_data = iqcc.execute(
+    prog, backend.qm_config, terminal_output=True, options={"sync_hook": "sync_hook.py"}
+)

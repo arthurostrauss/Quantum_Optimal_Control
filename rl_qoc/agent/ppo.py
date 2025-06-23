@@ -387,7 +387,7 @@ class CustomPPO:
                     "reward_method": u_env.config.reward.reward_method,
                 }
                 training_results = {
-                    "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],
+                    "avg_reward": np.mean(u_env.reward_history, axis=1)[-1].tolist(),
                     "total_shots": int(u_env.reward_data.total_shots),
                 }
                 if u_env.backend_info.instruction_durations is not None:
@@ -404,9 +404,9 @@ class CustomPPO:
                     write_to_wandb(summary, training_results)
                 for key, value in training_results.items():
                     self._training_results[key].append(value)
-                self._training_results["mean_action"] = mean_action[0].cpu().numpy()
-                self._training_results["std_action"] = std_action[0].cpu().numpy()
-                self._training_results["clipped_mean_action"] = env.action(mean_action[0])
+                self._training_results["mean_action"] = mean_action[0].cpu().numpy().tolist()
+                self._training_results["std_action"] = std_action[0].cpu().numpy().tolist()
+                self._training_results["clipped_mean_action"] = env.action(mean_action[0]).tolist()
                 iteration += 1
 
                 if check_convergence_std_actions(std_action, self.std_actions_eps):

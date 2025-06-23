@@ -139,9 +139,11 @@ def retrieve_primitives(
         )
         sampler = RuntimeSamplerV2(mode=estimator.mode)
 
-    # elif config.config_type == 'qua':
-    #     estimator = QMEstimator(backend=backend, options=estimator_options)
-    #     sampler = QMSampler(backend=backend)
+    elif config.config_type == "qm":
+        from qiskit_qm_provider.primitives import QMSamplerV2, QMEstimatorV2
+
+        estimator = QMEstimatorV2(backend=backend, options=estimator_options)
+        sampler = QMSamplerV2(backend=backend)
     else:
         estimator = BackendEstimatorV2(backend=backend, options=estimator_options)
         sampler = BackendSamplerV2(backend=backend)

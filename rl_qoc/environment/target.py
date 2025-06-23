@@ -163,6 +163,10 @@ class StateTarget(BaseTarget):
                 self.circuit = QuantumCircuit(tgt_register)
                 self.circuit.prepare_state(state)
         else:
+            try:  # Try to convert to DensityMatrix
+                state = DensityMatrix(state)
+            except Exception as e:
+                raise ValueError("Input could not be converted to DensityMatrix") from e
             if not isinstance(state, DensityMatrix):
                 raise ValueError(
                     "State should be a DensityMatrix, Statevector or QuantumCircuit object"
@@ -251,6 +255,27 @@ class StateTarget(BaseTarget):
     def __repr__(self):
         return f"StateTarget({self.dm} on qubits {self.physical_qubits})"
 
+    def as_dict(self):
+        """
+        Convert the target state to a dictionary representation
+        """
+        return {
+            "state": self.dm.data.tolist(),
+            "physical_qubits": self.physical_qubits,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        """
+        Create a StateTarget from a dictionary representation
+        :param data: Dictionary representation of the target state
+        :return: StateTarget object
+        :raises ValueError: If the data does not contain a valid density matrix or physical qubits
+        """
+        dm = DensityMatrix(np.array(data["dm"]))
+        physical_qubits = data.get("physical_qubits", list(range(dm.num_qubits)))
+        return cls(state=dm, physical_qubits=physical_qubits)
+
 
 class InputState(StateTarget):
     """
@@ -325,7 +350,7 @@ class GateTarget(BaseTarget):
     def __init__(
         self,
         gate: Gate | str,
-        physical_qubits: Optional[List[int]] = None,
+        physical_qubits: Optional[Sequence[int]] = None,
         circuit_context: Optional[QuantumCircuit | List[QuantumCircuit]] = None,
         virtual_target_qubits: Optional[Sequence[int | Qubit]] = None,
         layout: Optional[Layout | List[Layout]] = None,
@@ -337,25 +362,17 @@ class GateTarget(BaseTarget):
         :param circuit_context: Circuit to be used for context-aware calibration (default is the gate to be calibrated).
         :param virtual_target_qubits: Virtual target qubits to be used for the context-aware calibration.
         :param layout: Specify layout if already declared
-        :param input_states_choice: Type of input states to be used for
-            the calibration (relevant only for state and CAFE rewards)
         """
         gate = get_gate(gate)
         if physical_qubits is None:
             physical_qubits = list(range(gate.num_qubits))
         self.gate = gate
-        # super().__init__(
-        #     gate.num_qubits if physical_qubits is None else physical_qubits,
-        #     "gate",
-        #     tgt_register,
-        #     layout,
-        # )
         self._circuit_choice = 0
         if circuit_context is None:  # If no context is provided, use the gate itself
             self._has_context = False
             tgt_register = QuantumRegister(gate.num_qubits, "tgt")
             circuit_context = QuantumCircuit(tgt_register)
-            circuit_context.append(gate, tgt_register)
+            circuit_context.append(gate, tuple(q for q in tgt_register))
             circuit_context = [circuit_context]
             self._virtual_target_qubits = [tgt_register]
             self._virtual_target_qubits_indices = list(range(gate.num_qubits))
@@ -802,6 +819,26 @@ class GateTarget(BaseTarget):
         Get item method for dictionary-like access to the target
         """
         return self.get(item)
+
+    def as_dict(self):
+        """
+        Convert the target gate to a dictionary representation
+        """
+        return {
+            "gate": self.gate.name,
+            "physical_qubits": self.physical_qubits,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        """
+        Create a GateTarget from a dictionary representation
+        :param data: Dictionary representation of the target gate
+        :return: GateTarget object
+        :raises ValueError: If the data does not contain a valid gate or physical qubits
+        """
+
+        return cls(**data)
 
 
 Target = Union[StateTarget, GateTarget]

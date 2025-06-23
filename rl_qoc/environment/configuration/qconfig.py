@@ -100,7 +100,16 @@ class QEnvConfig:
 
     @property
     def parametrized_circuit(self):
-        return self.backend_config.parametrized_circuit
+        if self.backend_config.parametrized_circuit is not None:
+            return self.backend_config.parametrized_circuit
+        else:
+            op_name = self.target.gate.name if isinstance(self.target, GateTarget) else "state_prep"
+            custom_op = op_name + "_cal"
+            from ...helpers.circuit_utils import add_custom_gate
+
+            return lambda qc, params, q_reg, **kwargs: add_custom_gate(
+                qc, custom_op, q_reg, params, self.target.physical_qubits, self.backend
+            )
 
     @property
     def parametrized_circuit_kwargs(self):
@@ -262,16 +271,10 @@ class QEnvConfig:
     def pass_manager(self, value: PassManager):
         self.backend_config.pass_manager = value
 
-    def as_dict(self, to_json: bool = False):
+    def as_dict(self):
         config = {
-            "target": {
-                "physical_qubits": self.physical_qubits,
-            },
-            "backend_config": {
-                "backend": (
-                    self.backend.name if isinstance(self.backend, BackendV2) else self.backend
-                ),
-            },
+            "target": self.target.as_dict(),
+            "backend_config": self.backend_config.as_dict(),
             "action_space": {
                 "low": self.action_space.low.tolist(),
                 "high": self.action_space.high.tolist(),
@@ -294,25 +297,22 @@ class QEnvConfig:
             "metadata": self.env_metadata,
         }
 
-        if isinstance(self.target, GateTarget):
-            config["target"]["gate"] = self.target.gate.name
-        elif isinstance(self.target, StateTarget) and not to_json:
-            config["target"]["state"] = self.target.dm.data
-
         return config
 
     @classmethod
     def from_yaml(
         cls,
         config_file_path: str,
-        parametrized_circ_func: Callable[
-            [
-                QuantumCircuit,
-                ParameterVector | List[Parameter],
-                QuantumRegister,
-                Dict[str, Any],
-            ],
-            None,
+        parametrized_circ_func: Optional[
+            Callable[
+                [
+                    QuantumCircuit,
+                    ParameterVector | List[Parameter],
+                    QuantumRegister,
+                    Dict[str, Any],
+                ],
+                None,
+            ]
         ],
         backend: Optional[BackendV2 | Callable[[Any], BackendV2]] = None,
         pass_manager: Optional[PassManager] = None,
@@ -372,3 +372,93 @@ class QEnvConfig:
             raise ValueError("Backend type not recognized")
 
         return cls(backend_config=backend_config, **params)
+
+    @classmethod
+    def from_dict(
+        cls,
+        config_dict: Dict[str, Any],
+        backend_config_type: Literal["qiskit", "dynamics", "runtime", "qm"] = "qiskit",
+        parametrized_circ_func: Optional[
+            Callable[
+                [
+                    QuantumCircuit,
+                    ParameterVector | List[Parameter],
+                    QuantumRegister,
+                    Dict[str, Any],
+                ],
+                None,
+            ]
+        ] = None,
+        backend: Optional[BackendV2 | Callable[[Any], BackendV2]] = None,
+        pass_manager: Optional[PassManager] = None,
+        instruction_durations: Optional[InstructionDurations] = None,
+        **backend_callback_kwargs: Any,
+    ) -> QEnvConfig:
+        """
+        Get Quantum Environment configuration from a dictionary and additional parameters.
+        """
+        import numpy as np
+
+        if "target" not in config_dict:
+            raise ValueError("Configuration dictionary must contain a 'target' key")
+        if "backend_config" not in config_dict:
+            raise ValueError("Configuration dictionary must contain a 'backend_config' key")
+
+        target = config_dict["target"]
+        backend_config = config_dict["backend_config"]
+
+        if isinstance(target, dict):
+            if "gate" in target:
+                target = GateTarget(**target)
+            else:
+                target = StateTarget(**target)
+
+        if isinstance(backend_config, dict):
+            if backend_config_type == "qiskit":
+                backend_config = QiskitConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+            elif backend_config_type == "dynamics":
+                backend_config = DynamicsConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+            elif backend_config_type == "runtime":
+                backend_config = QiskitRuntimeConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+            elif backend_config_type == "qm":
+                from ...qua.qm_config import QMConfig
+
+                backend_config = QMConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+
+        return cls(
+            target=target,
+            backend_config=backend_config,
+            action_space=Box(
+                low=np.array(config_dict["action_space"]["low"]),
+                high=np.array(config_dict["action_space"]["high"]),
+                dtype=np.float32,
+            ),
+            execution_config=ExecutionConfig(**config_dict["execution_config"]),
+            reward=config_dict.get("reward", "state"),
+            benchmark_config=BenchmarkConfig(**config_dict.get("benchmark_config", {})),
+            env_metadata=config_dict.get("metadata", {}),
+        )

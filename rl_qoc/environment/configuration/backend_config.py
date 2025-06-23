@@ -36,15 +36,17 @@ class BackendConfig(ABC):
 
     """
 
-    parametrized_circuit: Callable[
-        [
-            QuantumCircuit,
-            ParameterVector | List[Parameter],
-            QuantumRegister,
-            ...,
-        ],
-        None,
-    ]
+    parametrized_circuit: Optional[
+        Callable[
+            [
+                QuantumCircuit,
+                ParameterVector | List[Parameter],
+                QuantumRegister,
+                ...,
+            ],
+            None,
+        ]
+    ] = None
     backend: Optional[Any] = None
     parametrized_circuit_kwargs: Dict = field(default_factory=dict)
     skip_transpilation: bool = False

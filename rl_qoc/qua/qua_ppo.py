@@ -6,7 +6,8 @@ from gymnasium import Wrapper, ActionWrapper
 # Torch imports for building RL agent and framework
 import torch
 from torch.distributions import Normal
-from ..agent import CustomPPO
+
+from ..agent import CustomPPO, PPOConfig
 from ..environment.base_q_env import BaseQuantumEnvironment as QuantumEnvironment
 from qiskit_qm_provider import FixedPoint
 
@@ -71,7 +72,7 @@ rounding = 8
 class CustomQMPPO(CustomPPO):
     def __init__(
         self,
-        agent_config: Dict,
+        agent_config: Dict | PPOConfig,
         env: QuantumEnvironment | Wrapper,
         chkpt_dir: Optional[str] = "tmp/agent",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",

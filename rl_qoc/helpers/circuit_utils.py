@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import keyword
 import re
-from typing import Tuple, Optional, Sequence, List, Union, Dict
+from inspect import signature
+from typing import Tuple, Optional, Sequence, List, Union, Dict, Callable
 
 import numpy as np
 from qiskit.circuit import (
@@ -104,19 +105,35 @@ def add_custom_gate(
     if isinstance(gate, str):
         gate = Gate(
             gate.lower(),
-            num_qubits=len(physical_qubits),
+            num_qubits=len(qubits),
             params=parameters.params if isinstance(parameters, ParameterVector) else parameters,
         )
     elif isinstance(gate, QuantumCircuit):
+        if gate.num_qubits != len(qubits):
+            raise ValueError(
+                f"QuantumCircuit gate must have {len(qubits)} qubits, but has {gate.num_qubits}."
+            )
         gate = gate.to_gate()
 
     qc.append(gate, qubits)
+
+    if instruction_properties and hasattr(instruction_properties, "qua_pulse_macro"):
+        qua_pulse_macro = instruction_properties.qua_pulse_macro
+        if qua_pulse_macro:
+            if not callable(qua_pulse_macro):
+                raise TypeError(
+                    "`qua_pulse_macro` must be a callable function implementing the QUA macro."
+                )
+            if len(signature(qua_pulse_macro).parameters) != len(parameters):
+                raise ValueError(
+                    "Mismatch between expected and provided parameters for the QUA macro."
+                )
     if backend is not None and physical_qubits is not None:
         if gate.name not in backend.target.operation_names:
             backend.target.add_instruction(gate, {tuple(physical_qubits): instruction_properties})
         else:
             backend.target.update_instruction_properties(
-                gate.name, {tuple(physical_qubits): instruction_properties}
+                gate.name, tuple(physical_qubits), instruction_properties
             )
     return qc
 
