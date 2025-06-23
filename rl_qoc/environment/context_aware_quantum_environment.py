@@ -12,18 +12,15 @@ from __future__ import annotations
 
 import sys
 from typing import (
-    Dict,
     Optional,
     List,
     Any,
     TypeVar,
     SupportsFloat,
-    Union,
-    Sequence,
 )
 
 import numpy as np
-from gymnasium.spaces import Box
+from gymnasium.spaces import Box, Discrete
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -35,12 +32,11 @@ from qiskit.circuit import (
     Instruction,
     Parameter,
 )
-from qiskit.circuit.library import StatePreparation
 from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
 from qiskit.providers import BackendV2
-from qiskit.quantum_info import Operator, DensityMatrix
+from qiskit.quantum_info import Operator
 from qiskit.transpiler import (
     Layout,
     InstructionProperties,
@@ -52,7 +48,6 @@ from qiskit_experiments.library import ProcessTomography
 from ..helpers import (
     MomentAnalysisPass,
     CustomGateReplacementPass,
-    retrieve_primitives,
 )
 from ..helpers.circuit_utils import get_instruction_timings
 from .configuration.qconfig import QEnvConfig
@@ -139,7 +134,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.custom_instructions: List[Instruction] = []
         self.new_gates: List[Gate] = []
 
-        self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
+        self.observation_space = Box(0.0, 1.0, shape=(1,), dtype=np.float32, seed=self.seed + 98)
         self._parameters = [
             [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
             for j in range(len(self.target.circuits))
@@ -223,17 +218,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return obs, reward, terminated, False, self._get_info()
 
     def _get_obs(self) -> ObsType:
-        if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
-            return np.array(
-                [
-                    0.0,
-                    self.circuit_choice,
-                ]
-                + list(self._observable_to_observation()),
-                dtype=np.float32,
-            )
-        else:
-            return np.array([0, self.circuit_choice])
+        return np.zeros(self.observation_space.shape, dtype=np.float32)
 
     def compute_benchmarks(
         self, qc: QuantumCircuit, params: np.ndarray, update_env_history=True

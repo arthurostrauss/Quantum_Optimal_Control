@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import keyword
 import re
+from typing import Tuple, Optional, Sequence, List, Union, Dict
 
 import numpy as np
 from qiskit.circuit import (
@@ -25,13 +26,12 @@ from qiskit.quantum_info import (
     PauliList,
 )
 from qiskit.quantum_info.states.quantum_state import QuantumState
-from qiskit.transpiler import PassManager, CouplingMap
-from qiskit.providers import BackendV2, Backend
+from qiskit.transpiler import PassManager, CouplingMap, InstructionProperties
+from qiskit.providers import BackendV2
+
+# Qiskit Experiments imports
 from qiskit_experiments.framework import BaseAnalysis, BatchExperiment
 from qiskit_experiments.library import ProcessTomography, StateTomography
-
-from typing import Tuple, Optional, Sequence, List, Union, Dict
-
 from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
@@ -79,6 +79,46 @@ def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flo
     else:
         prep_circuit = qc.repeat(n_reps).decompose()
     return prep_circuit
+
+
+def add_custom_gate(
+    qc: QuantumCircuit,
+    gate: Gate | QuantumCircuit | str,
+    qubits: QuantumRegister | Sequence[Qubit | int],
+    parameters: Optional[ParameterVector | List[Parameter] | List[float]] = None,
+    physical_qubits: Optional[Sequence[int]] = None,
+    backend: Optional[BackendV2] = None,
+    instruction_properties: Optional[InstructionProperties] = None,
+) -> QuantumCircuit:
+    """
+    Add a custom gate to the Quantum Circuit and register it in the backend target.
+    Args:
+        qc: Quantum Circuit to which the gate is to be added
+        gate: Gate to be added (can be a Gate, QuantumCircuit, or string name of the gate)
+        qubits: Qubits on which the gate is to be applied
+        parameters: Parameters for the gate (if applicable)
+        physical_qubits: Physical qubits on which the gate is to be applied (if applicable)
+        backend: Backend instance to register the gate in the target
+        instruction_properties: Instruction properties for the gate (if applicable)
+    """
+    if isinstance(gate, str):
+        gate = Gate(
+            gate.lower(),
+            num_qubits=len(physical_qubits),
+            params=parameters.params if isinstance(parameters, ParameterVector) else parameters,
+        )
+    elif isinstance(gate, QuantumCircuit):
+        gate = gate.to_gate()
+
+    qc.append(gate, qubits)
+    if backend is not None and physical_qubits is not None:
+        if gate.name not in backend.target.operation_names:
+            backend.target.add_instruction(gate, {tuple(physical_qubits): instruction_properties})
+        else:
+            backend.target.update_instruction_properties(
+                gate.name, {tuple(physical_qubits): instruction_properties}
+            )
+    return qc
 
 
 def causal_cone_circuit(
@@ -203,7 +243,7 @@ def density_matrix_to_statevector(density_matrix: DensityMatrix):
 
 def fidelity_from_tomography(
     qc_input: List[QuantumCircuit] | QuantumCircuit,
-    backend: Optional[Backend],
+    backend: Optional[BackendV2],
     physical_qubits: Optional[Sequence[int]],
     target: Optional[QuantumTarget | List[QuantumTarget]] = None,
     analysis: Union[BaseAnalysis, None, str] = "default",
@@ -456,7 +496,7 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
 
 
 def observables_to_indices(
-    observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str
+    observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str,
 ):
     """
     Get single qubit indices of Pauli observables for the reward computation.

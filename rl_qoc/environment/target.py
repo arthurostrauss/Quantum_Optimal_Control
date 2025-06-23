@@ -776,9 +776,11 @@ class GateTarget(BaseTarget):
         Get all causal cone qubit indices for each circuit context
         """
         return [
-            [circ.find_bit(q).index for q in causal_cone_circuit(circ, vq)[0].qubits]
-            if self.has_context
-            else list(range(circ.num_qubits))
+            (
+                [circ.find_bit(q).index for q in causal_cone_circuit(circ, vq)[0].qubits]
+                if self.has_context
+                else list(range(circ.num_qubits))
+            )
             for circ, vq in zip(self._unbound_circuit_contexts, self._virtual_target_qubits)
         ]
 
@@ -800,5 +802,6 @@ class GateTarget(BaseTarget):
         Get item method for dictionary-like access to the target
         """
         return self.get(item)
+
 
 Target = Union[StateTarget, GateTarget]

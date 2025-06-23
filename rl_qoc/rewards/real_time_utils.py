@@ -277,6 +277,7 @@ def handle_real_time_n_reps(
     elif isinstance(n_reps_var, Var):
         try:
             from qiskit.circuit.classical import expr, types
+
             n_reps_var_range = expr.Range(1, n_reps_var)
             with qc.for_loop(n_reps_var_range):
                 qc &= prep_circuit

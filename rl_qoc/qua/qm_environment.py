@@ -130,7 +130,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 input_type=self.input_type,
                 direction=Direction.OUTGOING,
             )
-            if self.real_time_circuit.has_var("n_reps") else None
+            if self.real_time_circuit.has_var("n_reps")
+            else None
         )
 
         self.real_time_circuit_parameters = ParameterTable.from_qiskit(
@@ -146,7 +147,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 input_type=self.input_type,
                 direction=Direction.OUTGOING,
             )
-            if self.real_time_circuit.has_var("circuit_choice") else None
+            if self.real_time_circuit.has_var("circuit_choice")
+            else None
         )
 
         self.pauli_shots = QuaParameter(
@@ -205,7 +207,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         additional_input = (
             self.config.execution_config.dfe_precision if self.config.dfe else self.baseline_circuit
         )
-        reward_data: RewardDataType = self.config.reward.get_reward_data(
+        reward_data = self.config.reward.get_reward_data(
             self.circuit,
             np.zeros((1, self.n_actions)),
             self.target,
@@ -285,9 +287,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 num_obs = num_obs_per_input_state[i_idx]
                 for o_idx in range(num_obs):
                     formatted_counts[i_idx].append([])
-                    counts_array = np.array(
-                        collected_counts[count_idx], dtype=int
-                    )
+                    counts_array = np.array(collected_counts[count_idx], dtype=int)
                     formatted_counts[i_idx][o_idx] = counts_array
 
             # Now reshape the formatted_counts to put batch_size dimension as the first dimension
@@ -296,9 +296,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 for i_idx in range(max_input_state):
                     counts[batch_idx].append([])
                     for o_idx in range(num_obs_per_input_state[i_idx]):
-                        counts[batch_idx][i_idx].append(
-                            formatted_counts[i_idx][o_idx][batch_idx]
-                        )
+                        counts[batch_idx][i_idx].append(formatted_counts[i_idx][o_idx][batch_idx])
 
         else:
             shape = (max_input_state, self.batch_size, dim)
@@ -477,7 +475,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 counts, state_int = self._run_circuit(state_int, self.reward.var)
                 # qua_print("counts", counts, "state_int", state_int)
                 self.reward.stream_back()
-                return state_int
 
     def _run_circuit(self, state_int: QuaVariableInt, counts: QuaArrayVariable):
         """
@@ -495,7 +492,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 self.real_time_circuit_parameters,
                 self.circuit_choice_var,
                 self.n_reps_var,
-                self.observable_vars if self.config.dfe else None,
+                self.observable_vars,
             ]
             param_inputs = [param for param in param_inputs if param is not None]
 
@@ -602,62 +599,3 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         Get the QM object
         """
         return self.backend.qm
-
-    # Add this method to your QMEnvironment class
-    def _reshape_and_reorganize_counts_dfe(
-        self,
-        collected_counts_list_of_arrays: list[Union[np.ndarray, list[Union[int, float]]]],
-        reward_data: RewardDataType,
-    ) -> list[list[list[np.ndarray]]]:
-        """
-        Reorganizes fetched counts for DFE into a batch-first nested list structure.
-        Assumes collected_counts_list_of_arrays is a list where each element
-        is a dim-sized array/list of counts, ordered by QUA execution flow
-        (input_state -> observable -> batch).
-
-        Output structure:
-        reorganized_counts[batch_idx][input_state_idx] = list_of_observable_counts_arrays
-        where each counts_array is a 1D NumPy array of size 'dim' (integers).
-        """
-        dim = 2**self.n_qubits
-        max_input_state = len(reward_data.input_indices)
-        reorganized_counts: list[list[list[np.ndarray]]] = [
-            [[] for _ in range(max_input_state)] for _ in range(self.batch_size)
-        ]
-
-        current_item_idx = 0
-
-        for i_idx_qua_loop in range(max_input_state):
-            # For DFE, the number of observables can vary per input state
-            num_obs_for_this_input_state = len(reward_data.observables_indices[i_idx_qua_loop])
-
-            for _o_idx_qua_loop in range(num_obs_for_this_input_state):
-                for batch_idx_qua_loop in range(self.batch_size):
-                    if current_item_idx >= len(collected_counts_list_of_arrays):
-                        raise ValueError(
-                            f"Not enough data in collected_counts_list_of_arrays for DFE. "
-                            f"Attempting to access index: {current_item_idx}, "
-                            f"Total items available: {len(collected_counts_list_of_arrays)}."
-                        )
-                    try:
-                        counts_array_for_instance = np.array(
-                            collected_counts_list_of_arrays[current_item_idx], dtype=int
-                        ).reshape(dim)
-                    except Exception as e:
-                        problematic_item = collected_counts_list_of_arrays[current_item_idx]
-                        raise ValueError(
-                            f"Error processing DFE counts at index {current_item_idx}. Item: {problematic_item}, Type: {type(problematic_item)}. "
-                            f"Expected a {dim}-element list/array of numbers."
-                        ) from e
-
-                    current_item_idx += 1
-                    reorganized_counts[batch_idx_qua_loop][i_idx_qua_loop].append(
-                        counts_array_for_instance
-                    )
-
-        if current_item_idx != len(collected_counts_list_of_arrays):
-            print(
-                f"Warning (DFE): Mismatch in consumed items from collected_counts_list_of_arrays. "
-                f"Consumed: {current_item_idx}, Total available: {len(collected_counts_list_of_arrays)}."
-            )
-        return reorganized_counts
