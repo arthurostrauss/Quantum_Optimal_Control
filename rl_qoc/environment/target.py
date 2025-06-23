@@ -142,7 +142,7 @@ class StateTarget(BaseTarget):
     def __init__(
         self,
         state: DensityMatrix | Statevector | QuantumCircuit | str,
-        physical_qubits: Optional[List[int]] = None,
+        physical_qubits: Optional[Sequence[int]] = None,
     ):
         """
         Initialize the state target for the quantum environment
