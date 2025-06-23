@@ -98,9 +98,7 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironment):
         circuit.unitary(rx_phi_gamma_op, [1], label="RX(gamma*phi)")
 
         # Model custom CX gate
-        optimal_params_noise_free = np.pi * np.array(
-            [0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5]
-        )
+        optimal_params_noise_free = np.pi * np.array([0.0, 0.0, 0.5, 0.5, -0.5, 0.5, -0.5])
         circuit.u(
             optimal_params_noise_free[0],
             optimal_params_noise_free[1],
@@ -126,9 +124,7 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironment):
         noise_model = noise.NoiseModel()
 
         coherent_crx_noise = noise.coherent_unitary_error(ident_rx_op)
-        noise_model.add_quantum_error(
-            coherent_crx_noise, [custom_rx_gate_label], [0, 1]
-        )
+        noise_model.add_quantum_error(coherent_crx_noise, [custom_rx_gate_label], [0, 1])
         noise_model.add_basis_gates(["unitary"])
 
         backend = AerSimulator(noise_model=noise_model)
@@ -168,9 +164,9 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironment):
         ideal_circ.cx(0, 1)
         return ideal_circ
 
-    def _ident_str(self):
+    def __str__(self):
         """This is a one-line description of the environment with some key parameters."""
-        base_ident_str = super()._ident_str()
+        base_ident_str = super().__str__()
         return f"SpilloverNoise_phi-{self.phi / np.pi}pi_gamma-{self.gamma}_{base_ident_str}"
 
     def __repr__(self):

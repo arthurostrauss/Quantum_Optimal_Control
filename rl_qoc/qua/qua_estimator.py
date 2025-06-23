@@ -21,15 +21,12 @@ from qiskit.primitives.containers.observables_array import ObservablesArray
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.transpiler.passes import Optimize1qGatesDecomposition
 
-from qm_backend import QMBackend
-from qualang_tools.video_mode import ParameterTable
+from qiskit_qm_provider import QMBackend, ParameterTable
 from qiskit.transpiler import PassManager, PassManagerConfig
 from qiskit.pulse.library import SymbolicPulse
 from typing import List
 from qm.qua import *
 from qm import QuantumMachinesManager, QuantumMachine, QmJob, Program
-
-from rl_qoc.qua.qua_utils import add_parameter_table_to_circuit
 
 pauli_mapping = {"I": 0, "X": 1, "Y": 2, "Z": 3}
 
@@ -45,9 +42,7 @@ def numbers_to_pauli_string(pauli_numbers: List[int]):
     """
     This function converts a list of numbers that represent the Pauli operators to a Pauli string
     """
-    return "".join(
-        [key for key, value in pauli_mapping.items() if value in pauli_numbers]
-    )
+    return "".join([key for key, value in pauli_mapping.items() if value in pauli_numbers])
 
 
 def pad_pauli_numbers(pauli_numbers: List[int], n_qubits: int):
@@ -142,7 +137,6 @@ class QMEstimator(BaseEstimatorV2):
                     f"The {i}-th pub has precision less than or equal to 0 ({pub.precision}). ",
                     "But precision should be larger than 0.",
                 )
-            pub._circuit, _ = add_parameter_table_to_circuit(pub.circuit)
             self.backend.update_calibrations(pub.circuit)
 
     def estimator_qua_program(

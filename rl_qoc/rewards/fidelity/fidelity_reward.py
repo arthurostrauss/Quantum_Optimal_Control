@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -31,7 +31,7 @@ class FidelityReward(Reward):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: Target,
         env_config: QEnvConfig,
         *args,
@@ -71,7 +71,7 @@ class FidelityReward(Reward):
         self,
         reward_data: FidelityRewardDataList,
         primitive: Primitive,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Compute the reward based on the primitive and the pubs
 
@@ -92,14 +92,10 @@ class FidelityReward(Reward):
             try:
                 n_reps = qc.metadata["n_reps"]
             except KeyError:
-                raise ValueError(
-                    "Number of repetitions is required for computing the reward"
-                )
-            if qc.calibrations:
+                raise ValueError("Number of repetitions is required for computing the reward")
+            if hasattr(qc, "calibrations") and qc.calibrations:
                 fidelities.append(
-                    self.get_pulse_fidelity(
-                        qc, params, target, backend_info, n_reps=n_reps
-                    )
+                    self.get_pulse_fidelity(qc, params, target, backend_info, n_reps=n_reps)
                 )
             else:
                 fidelities.append(
@@ -111,7 +107,7 @@ class FidelityReward(Reward):
     def get_fidelity(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: Target,
         backend_info: BackendInfo,
         n_reps: Optional[int] = 1,
@@ -140,20 +136,14 @@ class FidelityReward(Reward):
             # Ideal simulation
             noise_model = None
             # Isolate the output that is present in ideal_sim_methods from outputs
-            output = next(
-                output for output in outputs if output in self._ideal_sim_methods
-            )
+            output = next(output for output in outputs if output in self._ideal_sim_methods)
 
         else:
             # Noisy simulation
             noise_model = (
-                backend.options.noise_model
-                if is_aer_sim
-                else NoiseModel.from_backend(backend)
+                backend.options.noise_model if is_aer_sim else NoiseModel.from_backend(backend)
             )
-            output = next(
-                output for output in outputs if output in self._noisy_sim_methods
-            )
+            output = next(output for output in outputs if output in self._noisy_sim_methods)
 
         getattr(circuit, f"save_{output}")()  # Aer Save method
 
@@ -165,9 +155,7 @@ class FidelityReward(Reward):
         #     remove_final_measurements=False,
         # )
         parameters = circuit.parameters
-        parameter_binds = [
-            {parameters[j]: params[:, j] for j in range(len(parameters))}
-        ]
+        parameter_binds = [{parameters[j]: params[:, j] for j in range(len(parameters))}]
         if backend is None:
             backend = AerSimulator()
         job = backend.run(
@@ -185,7 +173,7 @@ class FidelityReward(Reward):
     def get_pulse_fidelity(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: Target,
         backend_info: BackendInfo,
         n_reps: Optional[int] = 1,
@@ -207,9 +195,7 @@ class FidelityReward(Reward):
 
         backend = backend_info.backend
         if not isinstance(backend, DynamicsBackend):
-            raise ValueError(
-                "Pulse fidelity can only be computed for a DynamicsBackend"
-            )
+            raise ValueError("Pulse fidelity can only be computed for a DynamicsBackend")
         target_type = target.target_type
         # Filter out qubits with dimension 1 (trivial dimension stated for DynamicsBackend)
         subsystem_dims = list(filter(lambda x: x > 1, backend.options.subsystem_dims))

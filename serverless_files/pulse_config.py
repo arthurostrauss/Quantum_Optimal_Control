@@ -51,10 +51,10 @@ def custom_schedule(
     ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
     sq_pulse_features = ["amp", "angle"]  # For single qubit gates
     sq_name = "x"  # Name of the single qubit gate baseline to pick
-    keep_symmetry = True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
-    include_baseline = (
-        False  # Choose if the baseline shall be included in the parametrization
+    keep_symmetry = (
+        True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
     )
+    include_baseline = False  # Choose if the baseline shall be included in the parametrization
     include_duration = (
         False  # Choose if the pulse duration shall be included in the parametrization
     )
@@ -105,9 +105,7 @@ def custom_schedule(
 
     basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
-    if isinstance(
-        backend, BackendV1
-    ):  # Convert to BackendV2 if needed (to access Target)
+    if isinstance(backend, BackendV1):  # Convert to BackendV2 if needed (to access Target)
         backend = BackendV2Converter(backend)
 
     # Choose which gate to build here
@@ -213,9 +211,7 @@ env_backend = get_backend(**backend_params)
 backend_config = QiskitConfig(
     apply_parametrized_circuit,
     env_backend,
-    estimator_options=(
-        estimator_options if isinstance(env_backend, RuntimeBackend) else None
-    ),
+    estimator_options=(estimator_options if isinstance(env_backend, RuntimeBackend) else None),
     parametrized_circuit_kwargs={
         "target": env_params["target"],
         "backend": env_backend,

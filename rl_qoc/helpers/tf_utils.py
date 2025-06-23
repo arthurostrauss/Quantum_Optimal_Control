@@ -69,9 +69,7 @@ def generate_model(
             name=f"hidden_{i}",
         )(Net)
 
-    mean_param = Dense(n_actions, activation="tanh", name="mean_vec")(
-        Net
-    )  # Mean vector output
+    mean_param = Dense(n_actions, activation="tanh", name="mean_vec")(Net)  # Mean vector output
     sigma_param = Dense(n_actions, activation="softplus", name="sigma_vec")(
         Net
     )  # Diagonal elements of cov matrix
@@ -79,13 +77,9 @@ def generate_model(
 
     if actor_critic_together:
         critic_output = Dense(1, activation="linear", name="critic_output")(Net)
-        return Model(
-            inputs=input_layer, outputs=[mean_param, sigma_param, critic_output]
-        )
+        return Model(inputs=input_layer, outputs=[mean_param, sigma_param, critic_output])
     else:
-        assert (
-            hidden_units_critic is not None
-        ), "Network structure for critic network not provided"
+        assert hidden_units_critic is not None, "Network structure for critic network not provided"
         input_critic = Input(shape=input_shape)
         Critic_Net = Dense(
             hidden_units_critic[0],
@@ -103,9 +97,7 @@ def generate_model(
                 bias_initializer=RandomNormal(stddev=0.5),
                 name=f"hidden_{i}",
             )(Critic_Net)
-            critic_output = Dense(1, activation="linear", name="critic_output")(
-                Critic_Net
-            )
+            critic_output = Dense(1, activation="linear", name="critic_output")(Critic_Net)
             return Model(inputs=input_layer, outputs=[mean_param, sigma_param]), Model(
                 inputs=input_critic, outputs=critic_output
             )

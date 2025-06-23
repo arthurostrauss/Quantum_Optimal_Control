@@ -49,9 +49,7 @@ def validate_args(
     if not isinstance(rotation_axes, list):
         raise ValueError("rotation_axis must be a list of strings")
     if not all(axis in ["rx", "ry", "rz"] for axis in rotation_axes):
-        raise ValueError(
-            "rotation_axis must be a list of strings containing only 'rx', 'ry', 'rz'"
-        )
+        raise ValueError("rotation_axis must be a list of strings containing only 'rx', 'ry', 'rz'")
     if len(rotation_axes) != num_qubits:
         raise ValueError("rotation_axis must have the same length as num_qubits")
     if (
@@ -218,10 +216,7 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
         """
         new_dag = dag.copy_empty_like()
         subsystem_mapping = {q: i for i, q in enumerate(self.target_subsystem)}
-        if (
-            self.target_subsystem is None
-            or len(self.target_subsystem) == dag.num_qubits()
-        ):
+        if self.target_subsystem is None or len(self.target_subsystem) == dag.num_qubits():
             subsystem_qubits = dag.qubits
 
         else:
@@ -232,17 +227,19 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                 if node.name in ["rx", "ry", "rz"]:
                     if node.qargs[0] not in subsystem_qubits:
                         # continue
-                        new_dag.apply_operation_back(
-                            node.op, qargs=node.qargs, cargs=node.cargs
-                        )
+                        new_dag.apply_operation_back(node.op, qargs=node.qargs, cargs=node.cargs)
                     else:
                         qubit = node.qargs[0]
                         qubit_index = dag.find_bit(qubit).index
                         angle = node.op.params[0]
                         rotation_gate = type(node.op)(angle)
                         op = Operator(rotation_gate)
-                        if self.spillover_rate_matrix is not None and np.any(self.spillover_rate_matrix[:, qubit_index] != 0.0):
-                            gate_label = f"{node.name}({angle:.2f}, {subsystem_mapping[qubit_index]})"
+                        if self.spillover_rate_matrix is not None and np.any(
+                            self.spillover_rate_matrix[:, qubit_index] != 0.0
+                        ):
+                            gate_label = (
+                                f"{node.name}({angle:.2f}, {subsystem_mapping[qubit_index]})"
+                            )
                             new_dag.apply_operation_back(
                                 UnitaryGate(op, label=gate_label),
                                 qargs=[qubit],
@@ -251,7 +248,7 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                             new_dag.apply_operation_back(
                                 node.op, qargs=node.qargs, cargs=node.cargs
                             )
-                        
+
                 # elif all([q in subsystem_qubits for q in node.qargs]):
                 #     new_dag.apply_operation_back(node.op, qargs=node.qargs, cargs=node.cargs)
                 #     if node.cargs:
@@ -269,9 +266,7 @@ class LocalSpilloverNoiseAerPass(TransformationPass):
                         node.cargs,
                     )
                 else:
-                    new_dag.apply_operation_back(
-                        node.op, qargs=node.qargs, cargs=node.cargs
-                    )
+                    new_dag.apply_operation_back(node.op, qargs=node.qargs, cargs=node.cargs)
 
         # new_dag.remove_qubits(
         #     *[q for q in new_dag.qubits if q not in subsystem_qubits]
@@ -330,10 +325,9 @@ def create_spillover_noise_model_from_circuit(
     ), "spillover_rate_matrix must be a square matrix"
 
     qubit_index_mapping = {q: i for i, q in enumerate(target_subsystem)}
-    
+
     noisy_ops = {
-        qubit_index_mapping[q]: {"noise_op": Operator.from_label("I"),
-        "label": ""}
+        qubit_index_mapping[q]: {"noise_op": Operator.from_label("I"), "label": ""}
         for q in target_subsystem
     }
 
@@ -342,26 +336,22 @@ def create_spillover_noise_model_from_circuit(
             assert len(instruction.qubits) == 1, "Only single qubit operations are supported"
             main_qubit = qc.find_bit(instruction.qubits[0]).index  # Main qubit undergoing rotation
             qubit_index_in_subcircuit = qubit_index_mapping[main_qubit]
-            
+
             instruction_label: str = instruction.operation.label
             new_instruction_label = instruction_label[: instruction_label.index(" ")]
             new_instruction_label += " "
             new_instruction_label += str(qubit_index_in_subcircuit)
-            new_instruction_label += ')'
+            new_instruction_label += ")"
             noisy_ops[qubit_index_in_subcircuit]["label"] = new_instruction_label
 
-            noise_op = Operator.from_label('I')
+            noise_op = Operator.from_label("I")
             for q, angle in enumerate(rotation_angles):
                 gamma = spillover_rate_matrix[q, main_qubit]
                 if np.abs(gamma * angle) > 1e-8:
-                    noisy_unitary = Operator(
-                        type(gate_map()[rotation_axes[q]])(gamma * angle)
-                    )
-                    noise_op = noise_op.compose(
-                        noisy_unitary)
-            
+                    noisy_unitary = Operator(type(gate_map()[rotation_axes[q]])(gamma * angle))
+                    noise_op = noise_op.compose(noisy_unitary)
+
             noisy_ops[qubit_index_in_subcircuit]["noise_op"] = noise_op
-                
 
     for q in target_subsystem:
         q_ = qubit_index_mapping[q]

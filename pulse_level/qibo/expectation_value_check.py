@@ -15,9 +15,7 @@ from rl_qoc.qibo import QiboConfig
 from gymnasium.wrappers import ClipAction
 
 
-def param_circuit(
-    qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
-):
+def param_circuit(qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs):
     target = kwargs["target"]
     gate: Gate = target.get("gate", "x")
     if gate == "x":
@@ -55,9 +53,7 @@ q_env_config = QEnvConfig(
     action_space=action_space,
     reward=StateRewardConfig(),
     benchmark_config=BenchmarkConfig(0),
-    execution_config=ExecutionConfig(
-        batch_size=10, sampling_paulis=50, n_shots=1000, n_reps=1
-    ),
+    execution_config=ExecutionConfig(batch_size=10, sampling_paulis=50, n_shots=1000, n_reps=1),
 )
 
 env = QuantumEnvironment(q_env_config)

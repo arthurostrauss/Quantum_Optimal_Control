@@ -63,9 +63,7 @@ def fidelity_function(params, phi_val, backend):
         float: The negative fidelity between the ideal and noisy output states.
     """
 
-    input_circuits = [
-        PauliPreparationBasis().circuit(s) for s in product(range(4), repeat=2)
-    ]
+    input_circuits = [PauliPreparationBasis().circuit(s) for s in product(range(4), repeat=2)]
 
     avg_gate_fid = []
     for input_circ in input_circuits:
@@ -185,9 +183,7 @@ def get_nelder_mead_result(optimal_noise_free_params, phi_val, backend):
     )
 
 
-def get_optimized_params(
-    optimal_noise_free_params, phi_val, gamma_val, backend
-) -> dict:
+def get_optimized_params(optimal_noise_free_params, phi_val, gamma_val, backend) -> dict:
     """
     Optimize quantum circuit parameters for a given phi and gamma value using both Nelder-Mead and CMA-ES.
 
@@ -201,9 +197,7 @@ def get_optimized_params(
         dict: Dictionary containing optimization results.
     """
     results_NM = get_nelder_mead_result(optimal_noise_free_params, phi_val, backend)
-    result_CMA = get_cma_es_result(
-        optimal_noise_free_params, phi_val, gamma_val, backend
-    )
+    result_CMA = get_cma_es_result(optimal_noise_free_params, phi_val, gamma_val, backend)
 
     return {
         # Plugging in the optimal parameters for the noise-free case while having noise leads to the uncorrected fidelity
@@ -215,9 +209,7 @@ def get_optimized_params(
     }
 
 
-def main(
-    optimal_noise_free_params, phis, gammas, save_file_name: Optional[str] = None
-) -> dict:
+def main(optimal_noise_free_params, phis, gammas, save_file_name: Optional[str] = None) -> dict:
     """
     Main function to optimize the quantum circuit parameters to maximize state fidelity.
 
@@ -238,9 +230,7 @@ def main(
             gamma_val = round(gamma_val, 4)
             key = (phi_val, gamma_val)
             logging.warning(
-                "Parameter Pair: phi = {}pi; gamma = {}".format(
-                    phi_val / np.pi, gamma_val
-                )
+                "Parameter Pair: phi = {}pi; gamma = {}".format(phi_val / np.pi, gamma_val)
             )
 
             backend = get_noisy_backend(gamma_val, phi_val)

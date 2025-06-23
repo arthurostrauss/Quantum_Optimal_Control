@@ -27,10 +27,7 @@ class CAFERewardData(RewardData):
             raise ValueError(
                 f"Number of qubits in input circuit ({num_qubits}) does not match number of qubits in input indices ({len(self.input_indices)})"
             )
-        if (
-            self.inverse_circuit is not None
-            and self.inverse_circuit.num_qubits != num_qubits
-        ):
+        if self.inverse_circuit is not None and self.inverse_circuit.num_qubits != num_qubits:
             raise ValueError(
                 f"Number of qubits in input circuit ({num_qubits}) does not match number of qubits in inverse circuit ({self.inverse_circuit.num_qubits})"
             )

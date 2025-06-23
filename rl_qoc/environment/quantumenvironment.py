@@ -16,18 +16,14 @@ from typing import List, Any, SupportsFloat, Tuple, Optional
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
-from qiskit import schedule, pulse, QuantumRegister
 
 # Qiskit imports
-from qiskit.circuit import (
-    QuantumCircuit,
-    ParameterVector,
-)
+from qiskit.circuit import QuantumCircuit, ParameterVector, Parameter, QuantumRegister
 
 # Qiskit Quantum Information, for fidelity benchmarking
-from qiskit.quantum_info import DensityMatrix, Operator
+from qiskit.quantum_info import Operator
 from qiskit.transpiler import InstructionProperties
-from qiskit_dynamics import DynamicsBackend
+
 from qiskit_experiments.library import ProcessTomography
 
 from .base_q_env import (
@@ -35,12 +31,9 @@ from .base_q_env import (
     GateTarget,
     StateTarget,
 )
-from ..helpers import (
-    simulate_pulse_input,
-    get_optimal_z_rotation,
-)
+
 from ..helpers.circuit_utils import fidelity_from_tomography
-from .configuration.qconfig import QEnvConfig, GateTargetConfig
+from .configuration.qconfig import QEnvConfig
 
 
 class QuantumEnvironment(BaseQuantumEnvironment):
@@ -51,86 +44,52 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         Args:
             training_config: QEnvConfig object containing the training configuration
         """
-        self._parameters = ParameterVector("θ", training_config.n_actions)
+        # self._parameters = ParameterVector("θ", training_config.n_actions)
+        self._parameters = [Parameter(f"a_{i}") for i in range(training_config.n_actions)]
 
         super().__init__(training_config)
 
-        self._target, self.circuits, self.baseline_circuits = (
-            self.define_target_and_circuits()
-        )
+        self.circuits = self.define_circuits()
         # self.observation_space = Box(
         #     low=np.array([0, 0] + [-5] * (2 ** self.n_qubits) ** 2),
         #     high=np.array([1, 1] + [5] * (2 ** self.n_qubits) ** 2),
         #     dtype=np.float32,
         # )
-        self.observation_space = Box(
-            low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32
-        )
+        self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
 
     @property
     def parameters(self):
         return self._parameters
 
     @property
-    def trunc_index(self) -> int:
+    def circuit_choice(self) -> int:
         return 0
-
-    @property
-    def tgt_instruction_counts(self) -> int:
-        return 1
-
-    @property
-    def target(self) -> GateTarget:
-        """
-        Return current target to be calibrated
-        """
-        return self._target
 
     def episode_length(self, global_step: int) -> int:
         return 1
 
-    def define_target_and_circuits(
+    def define_circuits(
         self,
-    ) -> Tuple[
-        GateTarget | StateTarget,
-        List[QuantumCircuit],
-        List[QuantumCircuit | DensityMatrix],
-    ]:
+    ) -> List[QuantumCircuit]:
         """
         Define the target to be used in the environment
         Returns:
             target: GateTarget or StateTarget object
         """
-        input_states_choice = getattr(
-            self.config.reward.reward_args, "input_states_choice", "pauli4"
-        )
-        q_reg = QuantumRegister(len(self.config.target.physical_qubits))
-        if isinstance(self.config.target, GateTargetConfig):
-            target = GateTarget(
-                **self.config.target.as_dict(),
-                input_states_choice=input_states_choice,
-                tgt_register=q_reg,
-            )
 
-        else:
-            target = StateTarget(**asdict(self.config.target), tgt_register=q_reg)
-
-        custom_circuit = QuantumCircuit(q_reg, name="custom_circuit")
+        custom_circuit = QuantumCircuit(self.config.target.tgt_register, name="custom_circuit")
 
         self.parametrized_circuit_func(
             custom_circuit,
             self.parameters,
-            q_reg,
+            self.config.target.tgt_register,
             **self._func_args,
         )
 
-        if isinstance(target, StateTarget):
-            ref_circuit = target.circuit.copy(name="baseline_circuit")
-        else:
-            ref_circuit = target.target_circuit.copy(name="baseline_circuit")
-
-        custom_circuit.metadata["baseline_circuit"] = ref_circuit.copy()
-        return target, [custom_circuit], [ref_circuit]
+        custom_circuit.metadata["baseline_circuit"] = self.config.target.circuits[0].copy(
+            "baseline_circuit"
+        )
+        return [custom_circuit]
 
     def _get_obs(self):
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
@@ -147,10 +106,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
     def modify_environment_params(self, **kwargs):
         print(f"\n Number of repetitions: {self.n_reps}")
 
-    def step(
-        self, action: ActType
-    ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
-        self._step_tracker += 1
+    def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         if self._episode_ended:
             print("Resetting environment")
             terminated = True
@@ -270,17 +226,15 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
             print("Starting simulation benchmark...")
             if not self.config.reward_method == "fidelity":
-                params = np.array(
-                    [self.mean_action]
-                )  # Benchmark policy only through mean action
+                params = np.array([self.mean_action])  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":  # Circuit simulation
                 fids = self.simulate_circuit(qc, params, update_env_history)
             else:  # Pulse simulation
                 fids = self.simulate_pulse_circuit(qc, params, update_env_history)
             if self.target.target_type == "state":
-                print("State fidelity:", self.circuit_fidelity_history[-1])
+                print("State fidelity:", fids)
             else:
-                print("Avg gate fidelity:", self.avg_fidelity_history[-1])
+                print("Avg gate fidelity:", fids)
             print("Finished simulation benchmark")
         return fids
 
@@ -293,6 +247,18 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
         :return: Pulse calibration for the custom gate
         """
+        try:
+            from qiskit import schedule, pulse
+            from qiskit_dynamics import DynamicsBackend
+            from ..helpers.pulse_utils import (
+                simulate_pulse_input,
+                get_optimal_z_rotation,
+            )
+        except ImportError as e:
+            raise ImportError(
+                "Pulse calibration requires Qiskit Pulse, Qiskit Dynamics and Qiskit Experiments below 0.10."
+                "Please set your Qiskit version to 1.x to use this feature."
+            )
         if not isinstance(self.target, GateTarget):
             raise ValueError("Target type should be a gate for gate calibration task.")
 
@@ -324,10 +290,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     rz_cal = self.backend.target.get_calibration("rz", (i,))
                     pulse.call(
                         rz_cal,
-                        value_dict={
-                            parameter: optimal_rots[i]
-                            for parameter in rz_cal.parameters
-                        },
+                        value_dict={parameter: optimal_rots[i] for parameter in rz_cal.parameters},
                     )
                 pulse.call(schedule_)
                 for i in range(self.n_qubits):
@@ -335,8 +298,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                     pulse.call(
                         rz_cal,
                         value_dict={
-                            parameter: optimal_rots[-1 - i]
-                            for parameter in rz_cal.parameters
+                            parameter: optimal_rots[-1 - i] for parameter in rz_cal.parameters
                         },
                     )
 
@@ -362,6 +324,4 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                 gate_name, tuple(self.physical_target_qubits)
             )
         else:
-            return self.circuits[0].assign_parameters(
-                {self.parameters[0]: self.optimal_action}
-            )
+            return self.circuits[0].assign_parameters({self.parameters[0]: self.optimal_action})

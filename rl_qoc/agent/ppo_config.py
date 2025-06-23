@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional, Union, Callable
 from dataclasses import field
@@ -140,9 +142,7 @@ class TrainingConfig:
     training_constraint: Union[TotalUpdates, HardwareRuntime] = field(
         default_factory=lambda: TotalUpdates(250)
     )
-    target_fidelities: Optional[list] = field(
-        default_factory=lambda: [0.999, 0.9999, 0.99999]
-    )
+    target_fidelities: Optional[list] = field(default_factory=lambda: [0.999, 0.9999, 0.99999])
     lookback_window: Optional[int] = 10
     anneal_learning_rate: Optional[bool] = False
     std_actions_eps: Optional[float] = 1e-2
@@ -237,14 +237,10 @@ class PPOConfig:
         Check validity of the configuration
         """
         if not len(self.hidden_layers) == len(self.hidden_activation_functions):
-            raise ValueError(
-                "Number of hidden layers and activation functions must be the same"
-            )
+            raise ValueError("Number of hidden layers and activation functions must be the same")
         if isinstance(self.optimizer, str):
             self.optimizer = get_optimizer(self.optimizer)
-        if self.wandb_config is not None and not isinstance(
-            self.wandb_config, WandBConfig
-        ):
+        if self.wandb_config is not None and not isinstance(self.wandb_config, WandBConfig):
             self.wandb_config = WandBConfig.from_dict(self.wandb_config)
         else:
             self.wandb_config = WandBConfig()
@@ -285,15 +281,9 @@ class PPOConfig:
                 reverse_module_dict[type(activation)]
                 for activation in self.hidden_activation_functions
             ],
-            "input_activation_function": reverse_module_dict[
-                type(self.input_activation_function)
-            ],
-            "output_activation_mean": reverse_module_dict[
-                type(self.output_activation_mean)
-            ],
-            "output_activation_std": reverse_module_dict[
-                type(self.output_activation_std)
-            ],
+            "input_activation_function": reverse_module_dict[type(self.input_activation_function)],
+            "output_activation_mean": reverse_module_dict[type(self.output_activation_mean)],
+            "output_activation_std": reverse_module_dict[type(self.output_activation_std)],
             "optimizer": reverse_optim_dict[self.optimizer],
             "minibatch_size": self.minibatch_size,
             "checkpoint_dir": self.checkpoint_dir,

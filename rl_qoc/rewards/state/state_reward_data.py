@@ -17,7 +17,6 @@ class StateRewardData(RewardData):
     id_coeff: float
     input_circuit: QuantumCircuit
     observables: SparsePauliOp | List[SparsePauliOp]
-    shots: int
     n_reps: int
     input_indices: Optional[Tuple[int]] = None
     observables_indices: Optional[List[Tuple[int]]] = None
@@ -40,9 +39,7 @@ class StateRewardData(RewardData):
         """
         num_qubits = self.input_circuit.num_qubits
         if isinstance(self.observables, SparsePauliOp):
-            ham = (
-                SparsePauliOp("I" * num_qubits, coeffs=self.id_coeff) + self.observables
-            )
+            ham = SparsePauliOp("I" * num_qubits, coeffs=self.id_coeff) + self.observables
         else:
             ham = SparsePauliOp("I" * num_qubits, coeffs=self.id_coeff)
             ham += sum(self.observables)
@@ -93,11 +90,11 @@ class StateRewardDataList(RewardDataList):
     reward_data: List[StateRewardData]
 
     @property
-    def shots(self) -> int:
+    def shots(self) -> List[int]:
         """
         Return the number of shots.
         """
-        return self.reward_data[0].shots
+        return [self.reward_data[0].shots]
 
     @property
     def n_reps(self) -> int:
@@ -111,9 +108,7 @@ class StateRewardDataList(RewardDataList):
         """
         Return the Hamiltonian to be estimated.
         """
-        return sum(
-            [reward_data.hamiltonian for reward_data in self.reward_data]
-        ).simplify()
+        return sum([reward_data.hamiltonian for reward_data in self.reward_data]).simplify()
 
     @property
     def pauli_sampling(self) -> int:
@@ -141,9 +136,7 @@ class StateRewardDataList(RewardDataList):
         """
         Return the list of EstimatorPubs.
         """
-        return [
-            EstimatorPub.coerce(reward_data.pub) for reward_data in self.reward_data
-        ]
+        return [EstimatorPub.coerce(reward_data.pub) for reward_data in self.reward_data]
 
     @property
     def input_indices(self) -> List[Tuple[int]]:

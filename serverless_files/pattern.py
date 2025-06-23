@@ -27,9 +27,7 @@ else:
     circuit_context = gate_circuit_context
 
 if use_context:
-    q_env = ContextAwareQuantumEnvironment(
-        config, circuit_context, training_steps_per_gate=250
-    )
+    q_env = ContextAwareQuantumEnvironment(config, circuit_context, training_steps_per_gate=250)
 else:
     q_env = QuantumEnvironment(config)
 rescaled_env = RescaleAction(ClipAction(q_env), -1.0, 1.0)

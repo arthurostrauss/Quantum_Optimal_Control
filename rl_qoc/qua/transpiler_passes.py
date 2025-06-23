@@ -26,9 +26,7 @@ class QuaParameterTablePass(AnalysisPass):
                     isinstance(parameter, ParameterVectorElement)
                     and parameter.vector.name not in param_dict
                 ):
-                    param_dict[parameter.vector.name] = [
-                        0.0 for _ in range(len(parameter.vector))
-                    ]
+                    param_dict[parameter.vector.name] = [0.0 for _ in range(len(parameter.vector))]
                 elif isinstance(parameter, Parameter):
                     param_dict[parameter.name] = 0.0
 

@@ -14,9 +14,7 @@ from rl_qoc.qibo import QiboConfig
 from gymnasium.wrappers import ClipAction
 
 
-def param_circuit(
-    qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs
-):
+def param_circuit(qc: QuantumCircuit, params: ParameterVector, qreg: QuantumRegister, **kwargs):
     target = kwargs["target"]
     gate: Gate = target["gate"]
     physical_qubits = target["physical_qubits"]
@@ -32,12 +30,8 @@ def get_backend():
 
 target = {"gate": CZGate(), "physical_qubits": [0, 1]}
 instruction_durations = {}
-action_space_low = np.array(
-    [0.0, 16], dtype=np.float32
-)  # [amp, phase, phase, duration]
-action_space_high = np.array(
-    [1.0, 160], dtype=np.float32
-)  # [amp, phase, phase, duration]
+action_space_low = np.array([0.0, 16], dtype=np.float32)  # [amp, phase, phase, duration]
+action_space_high = np.array([1.0, 160], dtype=np.float32)  # [amp, phase, phase, duration]
 action_space = Box(action_space_low, action_space_high)
 qibo_config = QiboConfig(
     param_circuit,
@@ -54,9 +48,7 @@ q_env_config = QEnvConfig(
     action_space=action_space,
     reward=ChannelRewardConfig(),
     benchmark_config=BenchmarkConfig(0),
-    execution_config=ExecutionConfig(
-        batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1
-    ),
+    execution_config=ExecutionConfig(batch_size=32, sampling_paulis=50, n_shots=1000, n_reps=1),
 )
 
 env = QuantumEnvironment(q_env_config)

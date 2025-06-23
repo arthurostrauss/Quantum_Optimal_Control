@@ -74,9 +74,7 @@ def write_to_tensorboard(
     """
     Writes various metrics and losses to TensorBoard.
     """
-    writer.add_scalar(
-        "charts/learning_rate", optimizer.param_groups[0]["lr"], global_step
-    )
+    writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
     writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
     writer.add_scalar(
         "losses/avg_return",
@@ -115,9 +113,7 @@ def check_convergence_std_actions(std_action, std_actions_eps):
         bool: True if the standard deviation of actions has converged to the desired value, False otherwise.
     """
     if np.allclose(np.mean(std_action.numpy()), std_actions_eps):
-        logging.warning(
-            "Standard deviation of actions converged to {}".format(std_actions_eps)
-        )
+        logging.warning("Standard deviation of actions converged to {}".format(std_actions_eps))
         logging.warning("Stop training")
         return True
     return False
@@ -141,10 +137,7 @@ def update_fidelity_info(
         for fidelity in target_fidelities:
             info = fidelity_info[fidelity]
             # Sliding window lookback to check if target fidelity has been surpassed
-            if (
-                not info["achieved"]
-                and np.mean(fidelities[-lookback_window:]) > fidelity
-            ):
+            if not info["achieved"] and np.mean(fidelities[-lookback_window:]) > fidelity:
                 info.update(
                     {
                         "achieved": True,
@@ -154,30 +147,19 @@ def update_fidelity_info(
                         "hardware_runtime": np.sum(env.hardware_runtime),
                         "simulation_train_time": time.time() - start_time,
                         "shots_used": (
-                            np.cumsum(env.total_shots)[update_step - 1]
-                            if env.total_shots
-                            else 0
+                            np.cumsum(env.total_shots)[update_step - 1] if env.total_shots else 0
                         ),
                         "shots_per_updates": (
-                            int(
-                                np.ceil(
-                                    np.cumsum(env.total_shots)[update_step - 1]
-                                    / update_step
-                                )
-                            )
+                            int(np.ceil(np.cumsum(env.total_shots)[update_step - 1] / update_step))
                             if env.total_shots
                             else 0
                         ),
                     }
                 )
-                logging.warning(
-                    f"Target fidelity {fidelity} surpassed at update {update_step}"
-                )
+                logging.warning(f"Target fidelity {fidelity} surpassed at update {update_step}")
 
 
-def print_debug_info(
-    env: BaseQuantumEnvironment, mean_action, std_action, b_returns, b_advantages
-):
+def print_debug_info(env: BaseQuantumEnvironment, mean_action, std_action, b_returns, b_advantages):
     """
     Print debug information for the training process.
     """

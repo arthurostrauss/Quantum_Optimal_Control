@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rl_qoc"
 version = "0.1.0"
+requires-python = ">=3.12"
 description = "Reinforcement Learning for Quantum Optimal Control"
 readme = "README.md"
 authors = [
@@ -20,27 +21,53 @@ classifiers = [
 
 dependencies = [
     "matplotlib>=3.5.2",
+    "matplotlib-inline",
+    "jupyterlab",
     "qiskit>=1.0.2",
-    "qiskit_aer>=0.13.3",
-    "qiskit_algorithms>=0.3.0",
-    "qiskit_dynamics>=0.5.0",
-    "qiskit_experiments>=0.6.0",
-    "qiskit_ibm_runtime>=0.22.0",
-    "scipy>=1.8.1",
+    "qiskit_aer>=0.17.1",
+    "qiskit-experiments",
+    "qiskit_ibm_runtime>=0.28.0",
+    "scipy>=1.13.0",
     "tqdm>=4.64.0",
     "torch>=2.0.1",
     "gymnasium>=0.29.1",
-    "jax<=0.4.30",
-    "sympy2jax>=0.0.5",
     "pyyaml>=6.0.1",
-    "optuna~=3.5.0",
-    "qualang-tools>=0.16.0",
+    "optuna>=3.5.0",
     "chardet",
     "tensorboard",
+    "pylatexenc",
+    "wandb"
 ]
+
+[project.optional-dependencies]
+qibo = [
+    "qibo",
+    "qibolab",
+    "qibocal"
+]
+qua = [
+    "qualang-tools",
+    "qm-qua>=1.2.2",
+    "quam>=0.4.1",
+    "quam-builder @ git+https://github.com/qua-platform/quam-builder.git",
+    "openqasm3",
+    "qm-saas"
+]
+qiskit-pulse = [
+    "qiskit-dynamics",
+    "qiskit-experiments",
+    "qiskit<=1.4.3",
+    "jax",
+    "sympy2jax"
+]
+qiskit-qm-provider = []
+oqc = []
 
 [tool.setuptools]
 packages = ["rl_qoc"]
+
+[tool.uv]
+prerelease = "allow"
 
 [tool.setuptools.package-data]
 rl_qoc = ["*.py"]

@@ -97,9 +97,7 @@ def get_couplings(
         couplings[(j, i)] = couplings[(i, j)]
     for n, (qubits, coupling) in enumerate(couplings.items()):
         i, j = qubits
-        coupling_ham += (
-            2 * np.pi * coupling * ((a_ops[i] + adag_ops[i]) @ (a_ops[j] + adag_ops[j]))
-        )
+        coupling_ham += 2 * np.pi * coupling * ((a_ops[i] + adag_ops[i]) @ (a_ops[j] + adag_ops[j]))
         control_channels_freq[f"u{n}"] = freqs[j]
         control_channel_map[(i, j)] = n
         ecr_ops.append(drive_ops[i])
@@ -184,10 +182,7 @@ def get_pulse_spillover_noise(
             if (qbit, neighbour) in pulse_spillover_rates:
                 noise_strength = pulse_spillover_rates[(qbit, neighbour)]
                 noise_contribution = noise_strength * (
-                    2
-                    * np.pi
-                    * rabi_freqs[qbit]
-                    * (a_ops[neighbour] + adag_ops[neighbour])
+                    2 * np.pi * rabi_freqs[qbit] * (a_ops[neighbour] + adag_ops[neighbour])
                 )
                 errors[qbit].append(noise_contribution)
                 drive_ops[qbit] += noise_contribution
@@ -227,9 +222,7 @@ def get_pulse_spillover_noise_neighbours(noise_couplings: Dict = None) -> Dict:
 
     # Populate the neighbor lists based on the adjacency dictionary
     for (qubit1, qubit2), coupling_strength in noise_couplings.items():
-        if (
-            coupling_strength > 0
-        ):  # Assuming a positive coupling strength indicates a connection
+        if coupling_strength > 0:  # Assuming a positive coupling strength indicates a connection
             if qubit1 != qubit2:
                 # Check if qubit2 is not already a neighbor of qubit1 before adding
                 if qubit2 not in neighbors[qubit1]:

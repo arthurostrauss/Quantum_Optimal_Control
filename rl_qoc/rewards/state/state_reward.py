@@ -1,14 +1,23 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import List, Tuple, Literal, Optional
+from typing import List, Tuple, Literal, Optional, Union
+
+from qiskit import ClassicalRegister
 from qiskit.circuit import QuantumCircuit
+from qiskit.circuit.classical.types import Uint
 from qiskit.primitives import BaseEstimatorV2
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.quantum_info import SparsePauliOp, pauli_basis
 import numpy as np
+from qiskit_experiments.library.tomography.basis import PauliMeasurementBasis
+
 from ..base_reward import Reward
 from .state_reward_data import StateRewardData, StateRewardDataList
+from ..real_time_utils import handle_real_time_n_reps
 from ...environment.configuration.qconfig import QEnvConfig
 from ...environment.target import StateTarget, GateTarget, InputState
+from ...helpers import validate_circuit_and_target
 from ...helpers.circuit_utils import (
     extend_input_state_prep,
     extend_observables,
@@ -17,9 +26,11 @@ from ...helpers.circuit_utils import (
     precision_to_shots,
     get_input_states_cardinality_per_qubit,
     handle_n_reps,
+    get_single_qubit_input_states,
 )
 
 Indices = Tuple[int]
+Target = Union[StateTarget, GateTarget]
 
 
 @dataclass
@@ -35,7 +46,6 @@ class StateReward(Reward):
     observables_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
-        super().__post_init__()
         self.input_states_rng = np.random.default_rng(self.input_state_seed)
         self.observables_rng = np.random.default_rng(self.observables_seed)
 
@@ -85,9 +95,7 @@ class StateReward(Reward):
 
         prep_circuit = qc
         target_instance = target
-        target_state = (
-            target_instance if isinstance(target_instance, StateTarget) else None
-        )
+        target_state = target_instance if isinstance(target_instance, StateTarget) else None
         n_reps = execution_config.current_n_reps
 
         if isinstance(target_instance, GateTarget):
@@ -97,17 +105,15 @@ class StateReward(Reward):
         input_state_indices = (0,) * num_qubits
         if isinstance(target_instance, GateTarget):
             # State reward: sample a random input state for target gate
-            input_state_index = self.input_states_rng.choice(
-                len(target_instance.input_states)
-            )
-
-            input_choice = target_instance.input_states_choice
+            input_choice = self.input_states_choice
+            input_states = target_instance.input_states(input_choice)
+            input_state_index = self.input_states_rng.choice(len(input_states))
             input_state_indices = np.unravel_index(
                 input_state_index,
                 (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
             )
 
-            input_state: InputState = target_instance.input_states[input_state_index]
+            input_state: InputState = input_states[input_state_index]
 
             # Modify target state to match input state and target gate
             target_state = input_state.target_state(n_reps)  # (Gate |input>=|target>)
@@ -144,36 +150,26 @@ class StateReward(Reward):
             pauli_sampling = execution_config.sampling_paulis
 
         pauli_indices, counts = np.unique(
-            self.observables_rng.choice(
-                non_zero_indices, pauli_sampling, p=non_zero_probabilities
-            ),
+            self.observables_rng.choice(non_zero_indices, pauli_sampling, p=non_zero_probabilities),
             return_counts=True,
         )
         identity_term = np.where(pauli_indices == 0)[0]
         c_factor = execution_config.c_factor
         if len(identity_term) > 0:
             id_coeff = c_factor * np.sum(
-                counts[identity_term]
-                / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
+                counts[identity_term] / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
             )
         else:
             id_coeff = 0.0
 
         pauli_indices = np.delete(pauli_indices, identity_term)
         counts = np.delete(counts, identity_term)
-        reward_factor = (
-            execution_config.c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
-        )
+        reward_factor = execution_config.c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
 
         if dfe_precision is not None:
             eps, delta = dfe_precision
             pauli_shots = np.ceil(
-                2
-                * np.log(2 / delta)
-                / (eps**2)
-                * dim
-                * Chi[pauli_indices] ** 2
-                * pauli_sampling
+                2 * np.log(2 / delta) / (eps**2) * dim * Chi[pauli_indices] ** 2 * pauli_sampling
             )
         else:
             pauli_shots = execution_config.n_shots * counts
@@ -183,9 +179,7 @@ class StateReward(Reward):
 
         shots_per_basis = []
         # Group observables by qubit-wise commuting groups to reduce the number of PUBs
-        for i, commuting_group in enumerate(
-            observables.paulis.group_qubit_wise_commuting()
-        ):
+        for i, commuting_group in enumerate(observables.paulis.group_qubit_wise_commuting()):
             max_pauli_shots = 0
             for pauli in commuting_group:
                 pauli_index = list(basis).index(pauli)
@@ -198,13 +192,15 @@ class StateReward(Reward):
             prep_circuit, initial_layout=target_instance.layout, scheduling=False
         )
         if isinstance(target_instance, GateTarget):
-            observables = extend_observables(observables, prep_circuit, target_instance)
+            pub_obs = extend_observables(
+                observables, prep_circuit, target_instance.causal_cone_qubits_indices
+            )
         else:
-            observables = observables.apply_layout(prep_circuit.layout)
+            pub_obs = observables.apply_layout(prep_circuit.layout)
 
         pub = (
             prep_circuit,
-            observables,
+            pub_obs,
             params,
             shots_to_precision(max(pauli_shots)),
         )
@@ -217,7 +213,6 @@ class StateReward(Reward):
             observables=observables,
             input_indices=input_state_indices,
             observables_indices=observable_indices,
-            shots=max(pauli_shots),
             n_reps=n_reps,
         )
 
@@ -258,16 +253,91 @@ class StateReward(Reward):
 
         return reward
 
-    @property
-    def observables(self) -> SparsePauliOp:
-        """
-        Pauli observables to sample
-        """
-        return self._observables
+    def get_real_time_circuit(
+        self,
+        circuits: QuantumCircuit | List[QuantumCircuit],
+        target: Target | List[Target],
+        env_config: QEnvConfig,
+        skip_transpilation: bool = False,
+        *args,
+    ) -> QuantumCircuit:
 
-    @property
-    def pauli_shots(self) -> List[int]:
-        """
-        Number of shots per Pauli for the fidelity estimation
-        """
-        return self._pauli_shots
+        n_reps = env_config.current_n_reps
+        all_n_reps = env_config.n_reps
+
+        prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
+
+        is_gate_target = isinstance(target, GateTarget)
+
+        qubits = [qc.qubits for qc in prep_circuits]
+        if not all(qc.qubits == qubits[0] for qc in prep_circuits):
+            raise ValueError("All circuits must be defined on the same qubits")
+
+        qc = prep_circuits[0].copy_empty_like("real_time_state_qc")
+        qc.reset(qc.qubits)
+        num_qubits = qc.num_qubits
+        n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
+        if is_gate_target:
+            causal_cone_qubits = target.causal_cone_qubits
+            causal_cone_size = target.causal_cone_size
+        else:
+            causal_cone_qubits = qc.qubits
+            causal_cone_size = target.n_qubits
+
+        if not qc.clbits:
+            meas = ClassicalRegister(causal_cone_size, name="meas")
+            qc.add_register(meas)
+        else:
+            meas = qc.cregs[0]
+            if meas.size != causal_cone_size:
+                raise ValueError("Classical register size must match the target causal cone size")
+
+        observables_vars = [
+            qc.add_input(f"observable_{i}", Uint(4)) for i in range(causal_cone_size)
+        ]
+        input_circuits = [
+            circ.decompose() for circ in get_single_qubit_input_states(self.input_states_choice)
+        ]
+
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
+        for q, qubit in enumerate(qc.qubits):
+            # Input state prep (over all qubits of the circuit context)
+            with qc.switch(input_state_vars[q]) as case_input_state:
+                for i, input_circuit in enumerate(input_circuits):
+                    with case_input_state(i):
+                        qc.compose(input_circuit, qubit, inplace=True)
+
+        if len(prep_circuits) > 1:  # Switch over possible contexts
+            circuit_choice = qc.add_input("circuit_choice", Uint(8))
+            with qc.switch(circuit_choice) as case_circuit:
+                for i, prep_circuit in enumerate(prep_circuits):
+                    with case_circuit(i):
+                        handle_real_time_n_reps(all_n_reps, n_reps_var, prep_circuit, qc)
+        else:
+            handle_real_time_n_reps(all_n_reps, n_reps_var, prep_circuits[0], qc)
+
+        # Local Basis rotation handling
+        meas_basis = PauliMeasurementBasis()
+        for q, qubit in enumerate(causal_cone_qubits):
+            with qc.switch(observables_vars[q]) as case_observable:
+                for i in range(3):
+                    with case_observable(i):
+                        qc.compose(
+                            meas_basis.circuit([i]).decompose().remove_final_measurements(False),
+                            qubit,
+                            inplace=True,
+                        )
+
+        # Measurement
+        qc.measure(causal_cone_qubits, meas)
+
+        if skip_transpilation:
+            return qc
+
+        return env_config.backend_info.custom_transpile(
+            qc,
+            optimization_level=1,
+            initial_layout=ref_target.layout,
+            scheduling=False,
+            remove_final_measurements=False,
+        )

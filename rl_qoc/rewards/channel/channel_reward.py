@@ -1,4 +1,7 @@
 from typing import List, Tuple, Optional
+
+from qiskit import ClassicalRegister
+from qiskit.circuit.classical.types import Uint
 from qiskit.primitives import BaseEstimatorV2
 
 from ..base_reward import Reward
@@ -6,11 +9,16 @@ from dataclasses import dataclass, field
 from qiskit.circuit import QuantumCircuit
 from qiskit.quantum_info import Pauli, SparsePauliOp, pauli_basis
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
-from qiskit_experiments.library.tomography.basis import Pauli6PreparationBasis
+from qiskit_experiments.library.tomography.basis import (
+    Pauli6PreparationBasis,
+    PauliMeasurementBasis,
+)
 import numpy as np
 
+from ..real_time_utils import handle_real_time_n_reps
 from ...environment.configuration.qconfig import QEnvConfig
 from ...environment.target import GateTarget
+from ...helpers import get_single_qubit_input_states
 from ...helpers.circuit_utils import (
     handle_n_reps,
     extend_observables,
@@ -20,6 +28,7 @@ from ...helpers.circuit_utils import (
     precision_to_shots,
     shots_to_precision,
 )
+from ...helpers.helper_functions import validate_circuit_and_target
 from .channel_reward_data import ChannelRewardData, ChannelRewardDataList
 
 
@@ -36,7 +45,6 @@ class ChannelReward(Reward):
     input_states_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
-        super().__post_init__()
         self.fiducials_rng = np.random.default_rng(self.fiducials_seed)
         self.input_states_rng = np.random.default_rng(self.input_states_seed)
 
@@ -67,7 +75,7 @@ class ChannelReward(Reward):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
@@ -107,9 +115,7 @@ class ChannelReward(Reward):
         control_flow = execution_config.control_flow_enabled
         c_factor = execution_config.c_factor
 
-        Chi = target.Chi(
-            n_reps
-        )  # Characteristic function for cycle circuit repeated n_reps times
+        Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
 
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
@@ -121,9 +127,7 @@ class ChannelReward(Reward):
         non_zero_probabilities = probabilities[non_zero_indices]
         non_zero_probabilities /= np.sum(non_zero_probabilities)
 
-        basis = pauli_basis(
-            num_qubits=n_qubits
-        )  # all n_fold tensor-product single qubit Paulis
+        basis = pauli_basis(num_qubits=n_qubits)  # all n_fold tensor-product single qubit Paulis
 
         if dfe_precision is not None:
             # DFE precision guarantee, ϵ additive error, δ failure probability
@@ -154,15 +158,11 @@ class ChannelReward(Reward):
         # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
         identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
         id_coeff = (
-            c_factor
-            * dim
-            * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
+            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
         )
         # Additional dim factor to account for all eigenstates of identity input state
         self.id_coeff = (
-            c_factor
-            * dim
-            * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
+            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
         )  # Additional dim factor to account for all eigenstates of identity input state
         self._id_count = len(identity_terms)
 
@@ -170,9 +170,7 @@ class ChannelReward(Reward):
         samples = np.delete(samples, identity_terms)
         counts = np.delete(counts, identity_terms)
 
-        reward_factor = (
-            c_factor * counts / (dim * Chi[samples])
-        )  # Based on DFE estimator
+        reward_factor = c_factor * counts / (dim * Chi[samples])  # Based on DFE estimator
         fiducials_list = [
             (basis[p[0]], SparsePauliOp(basis[p[1]], r))
             for p, r in zip(pauli_indices, reward_factor)
@@ -205,8 +203,8 @@ class ChannelReward(Reward):
         used_prep_indices = {}
 
         for (prep, obs_list), shots in zip(fiducials, pauli_shots):
-            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis
-            # Below, we select at random a subset of pure input states to prepare for each prep
+            # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis.
+            # Below, we select at random a subset of pure input states to prepare for each prep.
             # If nb_states = 1, we prepare all pure input states for each Pauli prep (no random selection)
 
             # self._fiducials_indices.append(([], observables_to_indices(obs_list)))
@@ -265,7 +263,7 @@ class ChannelReward(Reward):
                 )
 
                 obs_ = parity * obs_list
-                pub_obs = extend_observables(obs_, prep_circuit, target)
+                pub_obs = extend_observables(obs_, prep_circuit, target.causal_cone_qubits_indices)
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 if prep_indices not in used_prep_indices:  # Add new PUB
                     # Add PUB
@@ -278,13 +276,12 @@ class ChannelReward(Reward):
                     used_prep_indices[prep_indices] = ChannelRewardData(
                         pub,
                         input_circuit,
-                        pub_obs,
-                        dedicated_shots,
+                        obs_,
                         n_reps,
                         target.causal_cone_qubits_indices,
                         prep,
                         extended_prep_indices,
-                        observables_to_indices(pub_obs),
+                        observables_to_indices(obs_),
                     )
 
                 else:  # Update PUB (regroup observables for same input circuit, redundant for I/Z terms)
@@ -294,22 +291,26 @@ class ChannelReward(Reward):
 
                     ref_shots = precision_to_shots(ref_precision)
                     new_precision = shots_to_precision(dedicated_shots)
-                    new_obs = (ref_obs + pub_obs).simplify()
+                    new_obs = (ref_obs + obs_).simplify()
 
                     used_prep_indices[prep_indices].observables = new_obs
                     used_prep_indices[prep_indices].pub = EstimatorPub.coerce(
-                        (ref_prep, new_obs, params, min(ref_precision, new_precision)),
+                        (
+                            ref_prep,
+                            extend_observables(
+                                new_obs, prep_circuit, target.causal_cone_qubits_indices
+                            ),
+                            params,
+                            min(ref_precision, new_precision),
+                        ),
                     )
 
-                    used_prep_indices[prep_indices].shots = max(
-                        dedicated_shots, ref_shots
-                    )
-                    used_prep_indices[prep_indices].observables_indices = (
-                        observables_to_indices(new_obs)
+                    used_prep_indices[prep_indices].observables_indices = observables_to_indices(
+                        new_obs
                     )
 
         reward_data = []
-        for prep_indices_, data in used_prep_indices.items():
+        for data in used_prep_indices.values():
             reward_data.append(data)
 
         reward_data = ChannelRewardDataList(reward_data, pauli_sampling, id_coeff)
@@ -352,6 +353,85 @@ class ChannelReward(Reward):
             )
         return total_shots
 
+    def get_real_time_circuit(
+        self,
+        circuits: QuantumCircuit | List[QuantumCircuit],
+        target: GateTarget,
+        env_config: QEnvConfig,
+        skip_transpilation: bool = False,
+        *args,
+    ) -> QuantumCircuit:
+
+        n_reps = env_config.current_n_reps
+        all_n_reps = env_config.n_reps
+
+        prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
+        qubits = [qc.qubits for qc in prep_circuits]
+        if not all(qc.qubits == qubits[0] for qc in prep_circuits):
+            raise ValueError("All circuits must have the same qubits")
+
+        qc = prep_circuits[0].copy_empty_like("real_time_channel_qc")
+        qc.reset(qc.qubits)
+        num_qubits = qc.num_qubits
+
+        n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
+
+        if not qc.clbits:
+            meas = ClassicalRegister(target.causal_cone_size, name="meas")
+            qc.add_register(meas)
+        else:
+            meas = qc.cregs[0]
+            if meas.size != target.causal_cone_size:
+                raise ValueError("Classical register size must match the target causal cone size")
+
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
+        observables_vars = [
+            qc.add_input(f"observable_{i}", Uint(4)) for i in range(target.causal_cone_size)
+        ]
+        input_circuits = [circ.decompose() for circ in get_single_qubit_input_states("pauli6")]
+
+        for q, qubit in enumerate(qc.qubits):
+            # Input state prep (over all qubits of the circuit context)
+            with qc.switch(input_state_vars[q]) as case_input_state:
+                for i, input_circuit in enumerate(input_circuits):
+                    with case_input_state(i):
+                        qc.compose(input_circuit, qubit, inplace=True)
+
+        if len(prep_circuits) > 1:  # Switch over possible contexts
+            circuit_choice = qc.add_input("circuit_choice", Uint(8))
+            with qc.switch(circuit_choice) as case_circuit:
+                for i, prep_circuit in enumerate(prep_circuits):
+                    with case_circuit(i):
+                        handle_real_time_n_reps(all_n_reps, n_reps_var, prep_circuit, qc)
+        else:
+            handle_real_time_n_reps(all_n_reps, n_reps_var, prep_circuits[0], qc)
+
+        # Local Basis rotation handling
+        meas_basis = PauliMeasurementBasis()
+        for q, qubit in enumerate(target.causal_cone_qubits):
+            with qc.switch(observables_vars[q]) as case_observable:
+                for i in range(3):
+                    with case_observable(i):
+                        qc.compose(
+                            meas_basis.circuit([i]).decompose().remove_final_measurements(False),
+                            qubit,
+                            inplace=True,
+                        )
+
+        # Measurement
+        qc.measure(target.causal_cone_qubits, meas)
+
+        if skip_transpilation:
+            return qc
+
+        return env_config.backend_info.custom_transpile(
+            qc,
+            optimization_level=1,
+            initial_layout=target.layout,
+            scheduling=False,
+            remove_final_measurements=False,
+        )
+
     def compute_expectation_values(
         self,
         qc: QuantumCircuit,
@@ -388,9 +468,7 @@ class ChannelReward(Reward):
         control_flow = execution_config.control_flow_enabled
         c_factor = execution_config.c_factor
         dim = 2**n_qubits
-        Chi = target.Chi(
-            n_reps
-        )  # Characteristic function for cycle circuit repeated n_reps times
+        Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
 
         # Reset storage variables
         self._fiducials_indices = []
@@ -413,9 +491,7 @@ class ChannelReward(Reward):
         non_zero_indices = np.nonzero(probabilities)[0]  # Filter out zero probabilities
         non_zero_probabilities = probabilities[non_zero_indices]
 
-        basis = pauli_basis(
-            num_qubits=n_qubits
-        )  # all n_fold tensor-product single qubit Paulis
+        basis = pauli_basis(num_qubits=n_qubits)  # all n_fold tensor-product single qubit Paulis
 
         if (
             dfe_precision is not None
@@ -486,9 +562,7 @@ class ChannelReward(Reward):
                     prep,
                     (ref_obs + obs).simplify(),
                 )
-                filtered_pauli_shots[index] = max(
-                    filtered_pauli_shots[index], counts[i]
-                )
+                filtered_pauli_shots[index] = max(filtered_pauli_shots[index], counts[i])
 
         for i, (prep, obs) in enumerate(filtered_fiducials_list):
             filtered_fiducials_list[i] = (prep, obs.group_commuting(qubit_wise=True))
@@ -553,9 +627,7 @@ class ChannelReward(Reward):
                 # Prepare the input state vector
                 input_unitary = Operator(input_circuit)
                 output_state = Statevector.from_int(0, (2,) * n_qubits)
-                output_state = output_state.evolve(input_unitary).evolve(
-                    repeated_unitary
-                )
+                output_state = output_state.evolve(input_unitary).evolve(repeated_unitary)
 
                 ideal_exp_value = output_state.expectation_value(parity * sum(obs_list))
                 expectation_values.append(ideal_exp_value)

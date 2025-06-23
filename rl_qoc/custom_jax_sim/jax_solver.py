@@ -78,9 +78,7 @@ class JaxSolver(Solver):
         array_library: Optional[str] = None,
         vectorized: Optional[bool] = None,
         rwa_cutoff_freq: Optional[float] = None,
-        rwa_carrier_freqs: Optional[
-            Union[ArrayLike, Tuple[ArrayLike, ArrayLike]]
-        ] = None,
+        rwa_carrier_freqs: Optional[Union[ArrayLike, Tuple[ArrayLike, ArrayLike]]] = None,
         validate: bool = True,
         schedule_func: Optional[Callable[[], Schedule]] = None,
     ):
@@ -175,10 +173,7 @@ class JaxSolver(Solver):
         model_sigs = self.model.signals
         if parametrized_schedule.is_parameterized():
             parametrized_schedule.assign_parameters(
-                {
-                    param_obj: param
-                    for (param_obj, param) in zip(self._param_names, params)
-                }
+                {param_obj: param for (param_obj, param) in zip(self._param_names, params)}
             )
         signals = self._schedule_to_signals(parametrized_schedule)
         self._set_new_signals(signals)
@@ -194,9 +189,7 @@ class JaxSolver(Solver):
         def run_sim_function(t_span, y0, params, y0_input, y0_cls):
             original_signals = self.model.signals
             model_sigs = self.get_signals(params)
-            results = solve_lmde(
-                generator=self.model, t_span=t_span, y0=y0, **self._kwargs
-            )
+            results = solve_lmde(generator=self.model, t_span=t_span, y0=y0, **self._kwargs)
             results.y = format_final_states(results.y, self.model, y0_input, y0_cls)
             self.model.signals = original_signals
 
@@ -235,15 +228,9 @@ class JaxSolver(Solver):
         It assumes that a DynamicsEstimator job has been run previously
         """
         if self.circuit_macro is None:
-            raise ValueError(
-                "No circuit macro has been provided, please provide a circuit macro"
-            )
-        assert isinstance(
-            self.model, HamiltonianModel
-        ), "Model must be a HamiltonianModel"
-        batch_results_t, batch_results_y = self._unitary_jit_func(
-            self._t_span, param_values
-        )
+            raise ValueError("No circuit macro has been provided, please provide a circuit macro")
+        assert isinstance(self.model, HamiltonianModel), "Model must be a HamiltonianModel"
+        batch_results_t, batch_results_y = self._unitary_jit_func(self._t_span, param_values)
 
         return np.array(batch_results_y)
 
@@ -276,8 +263,7 @@ class JaxSolver(Solver):
             if "observables" in kwargs and "subsystem_dims" in kwargs:
                 estimator_usage = True
                 observables_circuits: List[QuantumCircuit] = [
-                    circ.remove_final_measurements(inplace=False)
-                    for circ in kwargs["observables"]
+                    circ.remove_final_measurements(inplace=False) for circ in kwargs["observables"]
                 ]
 
                 pauli_rotations = [
@@ -349,8 +335,7 @@ class JaxSolver(Solver):
                         results = OdeResult(t=results_t, y=results_y)
                         if y0_cls is not None and convert_results:
                             results.y = [
-                                y0_cls(np.array(yi), dims=subsystem_dims)
-                                for yi in results.y
+                                y0_cls(np.array(yi), dims=subsystem_dims) for yi in results.y
                             ]
 
                             # Rotate final state with Pauli basis rotations to sample all corresponding Pauli observables

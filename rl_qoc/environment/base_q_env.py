@@ -1,10 +1,10 @@
 """
 Class to generate a RL environment suitable for usage with PyTorch, leveraging Qiskit modules to simulate
-quantum system (could also include QUA code in the future)
+a quantum system (could also include QUA code in the future)
 
 Author: Arthur Strauss
 Created on 28/11/2022
-Last updated: 25/02/2025
+Last updated: 30/04/2025
 """
 
 from __future__ import annotations
@@ -48,9 +48,6 @@ from qiskit.providers import BackendV2
 from qiskit_aer.noise import NoiseModel
 from qiskit_aer import AerSimulator
 
-# Qiskit dynamics for pulse simulation (& benchmarking)
-from qiskit_dynamics import DynamicsBackend
-
 # Qiskit Experiments for generating reliable baseline for complex gate calibrations / state preparations
 from qiskit_ibm_runtime import (
     EstimatorV2 as RuntimeEstimatorV2,
@@ -60,19 +57,13 @@ import matplotlib.pyplot as plt
 from .backend_info import QiskitBackendInfo, BackendInfo
 from .configuration.qconfig import QEnvConfig, ExecutionConfig
 from .target import GateTarget, StateTarget
-from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
+
 from ..helpers.helper_functions import (
     retrieve_primitives,
     get_hardware_runtime_single_circuit,
     has_noise_model,
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
-from ..helpers.pulse_utils import (
-    handle_virtual_rotations,
-    projected_state,
-    qubit_projection,
-    rotate_frame,
-)
 from ..rewards.reward_data import RewardDataList
 
 
@@ -87,9 +78,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._env_config = training_config
         self.parametrized_circuit_func: Callable = training_config.parametrized_circuit
         self._func_args = training_config.parametrized_circuit_kwargs
-        self._physical_target_qubits = training_config.target.get(
-            "physical_qubits", None
-        )
+        self._physical_target_qubits = training_config.target.physical_qubits
 
         self._estimator, self._sampler = retrieve_primitives(
             self.backend,
@@ -97,7 +86,7 @@ class BaseQuantumEnvironment(ABC, Env):
             training_config.backend_config.as_dict().get("primitive_options", None),
         )
 
-        self._target, self.circuits, self.baseline_circuits = [], [], []
+        self.circuits = []
 
         self._mean_action = np.zeros(self.action_space.shape[-1])
         self._std_action = np.ones(self.action_space.shape[-1])
@@ -134,13 +123,9 @@ class BaseQuantumEnvironment(ABC, Env):
         self.config.reward.set_reward_seed(self.np_random.integers(2**32))
 
     @abstractmethod
-    def define_target_and_circuits(
+    def define_circuits(
         self,
-    ) -> tuple[
-        GateTarget | StateTarget | List[GateTarget],
-        List[QuantumCircuit],
-        List[QuantumCircuit],
-    ]:
+    ) -> list[QuantumCircuit]:
         """
         Define the target gate or state and the circuits to be executed on the quantum system.
         This method should be implemented by the user and called at construction of the environment.
@@ -227,9 +212,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         # Create a figure and return it to the user
         fig, ax = plt.subplots()
-        ax.plot(
-            self.config.execution_config.n_reps, reward_data, label="Data", marker="o"
-        )
+        ax.plot(self.config.execution_config.n_reps, reward_data, label="Data", marker="o")
         ax.plot(
             self.config.execution_config.n_reps,
             [fit_function(n, *popt) for n in self.config.execution_config.n_reps],
@@ -247,9 +230,7 @@ class BaseQuantumEnvironment(ABC, Env):
         if reward_method is not None:
             self.config.reward_method = initial_reward_method
         if update_fit_params:
-            self._fit_function = lambda reward, n: inverse_fit_function(
-                reward, n, *popt
-            )
+            self._fit_function = lambda reward, n: inverse_fit_function(reward, n, *popt)
             self._fit_params = popt
         return fig
 
@@ -261,10 +242,8 @@ class BaseQuantumEnvironment(ABC, Env):
         :return: Reward table (reward for each action in the batch)
         """
         if not actions.shape[-1] == self.n_actions:
-            raise ValueError(
-                f"Action shape mismatch: {actions.shape[-1]} != {self.n_actions}"
-            )
-        qc = self.circuits[self.trunc_index].copy()
+            raise ValueError(f"Action shape mismatch: {actions.shape[-1]} != {self.n_actions}")
+        qc = self.circuit.copy()
         params, batch_size = np.array(actions), actions.shape[0]
         if len(params.shape) == 1:
             params = np.expand_dims(params, axis=0)
@@ -284,9 +263,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         # Check if the reward method exists in the dictionary
         additional_input = (
-            self.config.execution_config.dfe_precision
-            if self.config.dfe
-            else self.baseline_circuits[self.trunc_index]
+            self.config.execution_config.dfe_precision if self.config.dfe else self.baseline_circuit
         )
         if self.config.execution_config.n_reps_mode == "sequential":
             reward_data = rewarder.get_reward_data(
@@ -324,16 +301,15 @@ class BaseQuantumEnvironment(ABC, Env):
         super().reset(seed=seed)
         self._episode_tracker += 1
         self._episode_ended = False
-        self.modify_environment_params()
+        options = options or {}
+        self.modify_environment_params(**options)
         if len(self.config.execution_config.n_reps) > 1:
             self.config.execution_config.n_reps_index = self._n_reps_rng.integers(
                 0, len(self.config.execution_config.n_reps)
             )
 
         if isinstance(self.estimator, RuntimeEstimatorV2):
-            self.estimator.options.environment.job_tags = [
-                f"rl_qoc_step{self._step_tracker}"
-            ]
+            self.estimator.options.environment.job_tags = [f"rl_qoc_step{self._step_tracker}"]
 
         return self._get_obs(), self._get_info()
 
@@ -366,18 +342,14 @@ class BaseQuantumEnvironment(ABC, Env):
         qc_state_nreps = qc.repeat(self.n_reps).decompose()
         names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
 
-        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = (
-            self.backend_info.custom_transpile(
-                [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
-                optimization_level=0,
-                initial_layout=self.target.layout,
-                scheduling=False,
-                remove_final_measurements=False,
-            )
+        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = self.backend_info.custom_transpile(
+            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
+            optimization_level=0,
+            initial_layout=self.target.layout,
+            scheduling=False,
+            remove_final_measurements=False,
         )
-        for circ, name in zip(
-            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names
-        ):
+        for circ, name in zip([qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names):
             circ.name = name
 
         returned_fidelity_type = (
@@ -418,7 +390,7 @@ class BaseQuantumEnvironment(ABC, Env):
             n_custom_instructions = 1
         else:  # List of ParameterVectors
             parameters = self.parameters
-            n_custom_instructions = self.trunc_index + 1
+            n_custom_instructions = self.circuit_choice + 1
 
         parameter_binds = [
             {
@@ -448,9 +420,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         for circ, method, fid_array in zip(circuits, methods, fid_arrays):
             # Avoid channel simulation for more than 3 qubits
-            if (
-                method == "superop" or method == "unitary"
-            ) and self.target.causal_cone_size > 3:
+            if (method == "superop" or method == "unitary") and self.target.causal_cone_size > 3:
                 fidelities = [0.0] * data_length
                 n_reps = 1
             else:
@@ -462,12 +432,8 @@ class BaseQuantumEnvironment(ABC, Env):
                 ).result()
                 outputs = [result.data(i)[method] for i in range(data_length)]
                 n_reps = self.n_reps if "nreps" in circ.name else 1
-                fidelities = [
-                    self.target.fidelity(output, n_reps) for output in outputs
-                ]
-            if (
-                method == "superop" or method == "unitary"
-            ) and returned_fidelity_type == "gate":
+                fidelities = [self.target.fidelity(output, n_reps) for output in outputs]
+            if (method == "superop" or method == "unitary") and returned_fidelity_type == "gate":
                 if output_fidelity == "cycle" and n_reps == 1:
                     returned_fidelities = fidelities
                 elif output_fidelity == "nreps" and n_reps > 1:
@@ -515,18 +481,29 @@ class BaseQuantumEnvironment(ABC, Env):
         :param params: List of Action vectors to execute on quantum system
         :param update_env_history: Boolean to update the environment history
         """
+        try:
+            # Qiskit dynamics for pulse simulation (& benchmarking)
+            from qiskit_dynamics import DynamicsBackend
+            from ..custom_jax_sim import PulseEstimatorV2, simulate_pulse_level
+            from ..helpers.pulse_utils import (
+                handle_virtual_rotations,
+                projected_state,
+                qubit_projection,
+                rotate_frame,
+            )
+        except ImportError:
+            raise ImportError(
+                "Qiskit Dynamics is required for pulse simulation, as well as "
+                "Qiskit version below 2.0.0 for Qiskit Pulse. "
+            )
         if self.abstraction_level != "pulse":
             raise ValueError(
                 "This method should only be called when the abstraction level is 'pulse'"
             )
         if not isinstance(self.backend, DynamicsBackend):
-            raise ValueError(
-                f"Pulse simulation requires a DynamicsBackend; got {self.backend}"
-            )
+            raise ValueError(f"Pulse simulation requires a DynamicsBackend; got {self.backend}")
         returned_fidelity_type = (
-            "gate"
-            if isinstance(self.target, GateTarget) and qc.num_qubits <= 3
-            else "state"
+            "gate" if isinstance(self.target, GateTarget) and qc.num_qubits <= 3 else "state"
         )  # Fidelity type to return (gate or state fidelity metric)
         returned_fidelities = []
         subsystem_dims = list(
@@ -559,9 +536,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 params = np.expand_dims(params, axis=0)
             circuits = [qc.assign_parameters(p) for p in params]
             circuits_n_reps = (
-                [qc_nreps.assign_parameters(p) for p in params]
-                if qc_nreps is not None
-                else []
+                [qc_nreps.assign_parameters(p) for p in params] if qc_nreps is not None else []
             )
             data_length = len(params)
         circuits_list = circuits + circuits_n_reps
@@ -590,8 +565,7 @@ class BaseQuantumEnvironment(ABC, Env):
             # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
 
             output_data = [
-                output_data[i * data_length : (i + 1) * data_length]
-                for i in range(n_benchmarks)
+                output_data[i * data_length : (i + 1) * data_length] for i in range(n_benchmarks)
             ]
             # Reorder data to match the order of the circuits
             qc_data_mapping = {"qc_state": output_data[0], "qc_channel": output_data[1]}
@@ -606,26 +580,20 @@ class BaseQuantumEnvironment(ABC, Env):
                 "qc_channel_nreps",
             ]
             new_output_data = [
-                qc_data_mapping.get(name, None)
-                for name in circuit_order
-                if name in qc_data_mapping
+                qc_data_mapping.get(name, None) for name in circuit_order if name in qc_data_mapping
             ]
             output_data = new_output_data
 
         else:  # Standard Dynamics simulation
 
-            y0_list = (
-                [y0_state] * n_benchmarks * data_length
-            )  # Initial state for each benchmark
+            y0_list = [y0_state] * n_benchmarks * data_length  # Initial state for each benchmark
 
             if qc.num_qubits < 3 and isinstance(
                 self.target, GateTarget
             ):  # Benchmark channel only for 1-2 qubits
                 y0_list += [y0_gate] * n_benchmarks * data_length
                 circuits_list += circuits + circuits_n_reps
-                n_benchmarks *= (
-                    2  # Double the number of benchmarks to include channel fidelity
-                )
+                n_benchmarks *= 2  # Double the number of benchmarks to include channel fidelity
             # Simulate all circuits
             output_data = []
             results = self.backend.solve(circuits_list, y0=y0_list)
@@ -638,8 +606,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
                 # Reshape data to isolate benchmarks (Output type can be either State or Channel, and for both qc and qc_nreps)
             output_data = [
-                output_data[i * data_length : (i + 1) * data_length]
-                for i in range(n_benchmarks)
+                output_data[i * data_length : (i + 1) * data_length] for i in range(n_benchmarks)
             ]
 
         if self.n_reps > 1:  # Benchmark both qc and qc_nreps
@@ -708,15 +675,19 @@ class BaseQuantumEnvironment(ABC, Env):
         :param gate_name: Name of custom gate to add to target (if None,
          use target gate and update its attached calibration)
         """
-        raise NotImplementedError(
-            "Gate calibration not implemented for this environment"
-        )
+        raise NotImplementedError("Gate calibration not implemented for this environment")
 
     def modify_environment_params(self, **kwargs):
         """
         Modify environment parameters (can be overridden by subclasses to modify specific parameters)
         """
-        pass
+        for key, value in kwargs.items():
+            try:
+                setattr(self.config, key, value)
+            except AttributeError:
+                raise AttributeError(f"Invalid attribute {key} for environment config")
+            except Exception as e:
+                raise ValueError(f"Error setting {key} to {value}: {e}")
 
     @property
     def config(self) -> QEnvConfig:
@@ -724,11 +695,16 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def backend(self) -> Optional[BackendV2]:
-        return self._env_config.backend
+        return self.config.backend
 
     @backend.setter
     def backend(self, backend: BackendV2):
         self.config.backend = backend
+        self._estimator, self._sampler = retrieve_primitives(
+            self.config.backend,
+            self.config.backend_config,
+            self.config.backend_config.as_dict().get("primitive_options", None),
+        )
 
     @property
     def estimator(self) -> BaseEstimatorV2:
@@ -759,9 +735,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def physical_neighbor_qubits(self):
-        return retrieve_neighbor_qubits(
-            self.backend_info.coupling_map, self.physical_target_qubits
-        )
+        return retrieve_neighbor_qubits(self.backend_info.coupling_map, self.physical_target_qubits)
 
     @property
     def physical_next_neighbor_qubits(self):
@@ -771,32 +745,31 @@ class BaseQuantumEnvironment(ABC, Env):
         )
 
     @property
-    def transpiled_circuits(self)->Optional[List[QuantumCircuit]]:
+    def transpiled_circuits(self) -> Optional[List[QuantumCircuit]]:
         """
         Return the transpiled circuits
         """
         if self.circuits:
-            return self.backend_info.custom_transpile(self.circuits,
-                                                      initial_layout=self.target.layout,
-                                                      optimization_level=0,
-                                                      remove_final_measurements=False,
-                                                      )
+            return self.backend_info.custom_transpile(
+                self.circuits,
+                initial_layout=self.target.layout,
+                optimization_level=0,
+                remove_final_measurements=False,
+            )
         return None
-    
+
     @property
-    @abstractmethod
-    def tgt_instruction_counts(self) -> int:
+    def baseline_circuits(self) -> List[QuantumCircuit]:
         """
-        Number of occurrences of the target instruction in the circuit
+        Return the baseline circuits
         """
-        raise NotImplementedError("Target instruction counts not implemented")
+        return self.config.target.circuits
 
     @property
     def fidelity_history(self):
         return (
             self.avg_fidelity_history
-            if self.target.target_type == "gate"
-            and self.target.target_circuit.num_qubits <= 3
+            if self.target.target_type == "gate" and self.target.circuit.num_qubits <= 3
             else self.circuit_fidelity_history
         )
 
@@ -809,7 +782,11 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the abstraction level of the environment (can be 'circuit' or 'pulse')
         """
-        return "pulse" if self.circuits[0].calibrations else "circuit"
+        return (
+            "pulse"
+            if hasattr(self.circuit, "calibrations") and self.circuit.calibrations
+            else "circuit"
+        )
 
     @step_tracker.setter
     def step_tracker(self, step: int):
@@ -894,11 +871,11 @@ class BaseQuantumEnvironment(ABC, Env):
                 "reset_stage": self._inside_trunc_tracker == 0,
                 "step": step,
                 "gate_index": self._inside_trunc_tracker,
-                "truncation_index": self.trunc_index,
+                "truncation_index": self.circuit_choice,
             }
         return info
 
-    def _ident_str(self):
+    def __str__(self):
         """This is a one-line description of the environment with some key parameters."""
         if isinstance(self.target, GateTarget):
             ident_str = f"gate_calibration_{self.target.gate.name}-gate_physical_qubits_{'-'.join(map(str, self.target.physical_qubits))}"
@@ -949,6 +926,10 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def n_reps(self) -> int:
+        """
+        Number of repetitions of the cycle circuit
+        :return: Number of repetitions
+        """
         return self.config.execution_config.current_n_reps
 
     @property
@@ -972,7 +953,18 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         Return the target object (GateTarget | StateTarget) of the environment
         """
-        raise NotImplementedError("Target not implemented")
+        return self.config.target
+
+    @property
+    def circuit_choice(self) -> int:
+        """
+        Return the index of the circuit to be used in the environment
+        """
+        return (
+            self.config.target.circuit_choice
+            if hasattr(self.config.target, "circuit_choice")
+            else 0
+        )
 
     @property
     def n_qubits(self):
@@ -980,9 +972,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @n_qubits.setter
     def n_qubits(self, n_qubits):
-        assert (
-            isinstance(n_qubits, int) and n_qubits > 0
-        ), "n_qubits must be a positive integer"
+        assert isinstance(n_qubits, int) and n_qubits > 0, "n_qubits must be a positive integer"
         self.target.n_qubits = n_qubits
 
     @property
@@ -1052,6 +1042,20 @@ class BaseQuantumEnvironment(ABC, Env):
         return self._total_shots
 
     @property
+    def circuit(self):
+        """
+        Return the circuit used in the environment
+        """
+        return self.circuits[self.circuit_choice]
+
+    @property
+    def baseline_circuit(self):
+        """
+        Return the baseline circuit used in the environment
+        """
+        return self.baseline_circuits[self.circuit_choice]
+
+    @property
     def pubs(self) -> List[EstimatorPub | SamplerPub]:
         """
         Return the current PUBs used in the environment
@@ -1099,15 +1103,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def ident_str(self):
-        return self._ident_str()
-
-    @property
-    @abstractmethod
-    def trunc_index(self) -> int:
-        """
-        Index of the truncation to be applied
-        """
-        raise NotImplementedError("Truncation index not implemented")
+        return self.__str__()
 
     @property
     def metadata(self):

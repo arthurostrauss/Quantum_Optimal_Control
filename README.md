@@ -43,7 +43,7 @@ where the expectation value is evaluated on the state $\rho$.
 Since those Pauli operators form an orthogonal basis for the density operators under the Hilbert-Schmidt product, one can see that:
 $$F(\rho, \sigma)=\mathrm{tr}(\rho \sigma)=\sum_k\chi_\rho(k)\chi_\sigma(k)=\sum_k\frac{\langle W_k\rangle_\rho\langle W_k\rangle_\sigma}{d}$$.
 
-Note that for our target state $\rho$, we supposedly are able to evaluate analytically the expected value of each Pauli operator $\langle W_k\rangle_\rho$. However, we would have to experimentally sample from the quantum computer to deduce the value of $\langle W_k\rangle_\sigma$.
+Note that for our target state $\rho$, we supposedly are able to evaluate analytically the expected value of each Pauli operator $\langle W_k\rangle_\rho$. However, we would have to experimentally sample from the quantum computer to deduce the value of $\langle W_k\rangle_\sigma`.
 In the original DFE paper, the idea was to provide an estimation of the required number of samples to reach a certain accuracy on the fidelity estimation. However, in our RL case, we are not interested in systematically getting an accurate estimation, as we would like the agent to rather explore multiple trajectories in parameter space (for one fixed policy) in order to quickly evaluate if the chosen policy should be discarded, or if it should try to fine-tune it to push the reward even further. This fact is commonly known in RL as the exploration/exploitation tradeoff. What we do, in line with the protocol is to build an estimator for the fidelity by selecting a set of random Pauli observables $W_k$ to sample from the quantum computer by choosing $k\in\{1,...,d^2\}$ such that:
 
 $$\mathrm{Pr}(k)=[\chi_\rho(k)]^2$$
@@ -146,3 +146,28 @@ For this, we first declare the ```TorchQuantumEnvironment``` as follows:
 [1] V. V. Sivak, A. Eickbusch, H. Liu, B. Royer, I. Tsioutsios, and M. H. Devoret, “Model Free Quantum Control with Reinforcement Learning”, Physical Review X, vol. 12, no. 1, p. 011 059, Mar. 2022
 
 [2] S. T. Flammia and Y.-K. Liu, “Direct Fidelity Estimation from Few Pauli Measurements”, Physical Review Letters, vol. 106, no. 23, p. 230 501, Jun. 2011, Publisher: American Physical Society. DOI: 10.1103/PhysRevLett.106.230501. [Online]. Available: https://link.aps.org/doi/10.1103/PhysRevLett.106.230501
+
+## Installation of optional dependencies
+
+Some optional dependencies, especially for integration with other hardware or software platforms, are available as extras in the `pyproject.toml` file:
+
+- `qibo`: qibo, qibolab, qibocal
+- `qua`: qualang-tools, qm-qua, quam, quam-builder
+- `qiskit-pulse`: qiskit-dynamics, qiskit-experiments
+
+To install an extra, for example:
+
+```bash
+pip install .[qua]
+```
+
+### Private dependencies
+
+Two optional dependencies, `qiskit-qm-provider` and `oqc`, are private GitHub repositories and cannot be installed automatically. If you have access, install them manually:
+
+```bash
+pip install git+ssh://git@github.com:YOUR_ORG/qiskit-qm-provider.git
+pip install git+ssh://git@github.com:YOUR_ORG/oqc.git
+```
+
+Contact the maintainers to obtain access to these repositories if needed.

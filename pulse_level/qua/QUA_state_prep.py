@@ -89,12 +89,12 @@ def qua_prog(n_qubits, param_table, batchsize, n_shots, schedule):
                 state_streams[i].boolean_to_int().buffer(
                     len(states.keys()), len(readout_ops.keys())
                 ).save_all(state_strings[i])
-                I_streams[i].buffer(
-                    len(states.keys()), len(readout_ops.keys())
-                ).save_all(I_strings[i])
-                Q_streams[i].buffer(
-                    len(states.keys()), len(readout_ops.keys())
-                ).save_all(Q_strings[i])
+                I_streams[i].buffer(len(states.keys()), len(readout_ops.keys())).save_all(
+                    I_strings[i]
+                )
+                Q_streams[i].buffer(len(states.keys()), len(readout_ops.keys())).save_all(
+                    Q_strings[i]
+                )
 
     return model_free_rl_state_prep
 
@@ -134,9 +134,7 @@ def AGI(params):  # Calculate cost function
     for m in range(n):
         output_states.append(results.get("state" + str(m)).fetch_all()["value"])
 
-    counts = (
-        {}
-    )  # Dictionary containing statistics of measurement of each bitstring obtained
+    counts = {}  # Dictionary containing statistics of measurement of each bitstring obtained
     expectation_values = {}
 
     for i in range(N_shots):

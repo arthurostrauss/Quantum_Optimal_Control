@@ -53,26 +53,22 @@ def fixed_frequency_transmon_backend(
     # Construct the static part of the Hamiltonian
     static_ham = construct_static_hamiltonian(dims, freqs, anharmonicities, N_ops)
 
-    drive_ops = [
-        2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_qubits)
-    ]
+    drive_ops = [2 * np.pi * rabi_freqs[i] * (a_ops[i] + adag_ops[i]) for i in range(n_qubits)]
     channels = {f"d{i}": freqs[i] for i in range(n_qubits)}
     ecr_ops = []
     num_controls = 0
     control_channel_map = None
     if couplings is not None:
-        static_ham, channels, ecr_ops, num_controls, control_channel_map = (
-            get_couplings(
-                couplings,
-                static_ham,
-                a_ops,
-                adag_ops,
-                channels,
-                freqs,
-                ecr_ops,
-                drive_ops,
-                num_controls,
-            )
+        static_ham, channels, ecr_ops, num_controls, control_channel_map = get_couplings(
+            couplings,
+            static_ham,
+            a_ops,
+            adag_ops,
+            channels,
+            freqs,
+            ecr_ops,
+            drive_ops,
+            num_controls,
         )
 
     # Pulse-spillover noise

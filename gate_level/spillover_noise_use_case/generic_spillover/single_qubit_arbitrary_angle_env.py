@@ -25,12 +25,8 @@ def noisy_backend(circuit: QuantumCircuit, γ: float):
             rotation_axis = inst.operation.name
             break
     noisy_unitary = type(gate_map[rotation_axis])(rotation_angle * γ).to_matrix()
-    noise_model = NoiseModel(
-        basis_gates=["h", "rx", "rz", "t", "s", "sdg", "tdg", "u", "x", "z"]
-    )
-    noise_model.add_all_qubit_quantum_error(
-        coherent_unitary_error(noisy_unitary), rotation_axis
-    )
+    noise_model = NoiseModel(basis_gates=["h", "rx", "rz", "t", "s", "sdg", "tdg", "u", "x", "z"])
+    noise_model.add_all_qubit_quantum_error(coherent_unitary_error(noisy_unitary), rotation_axis)
     config = AerBackendConfiguration(
         backend_name="overrotation_backend",
         backend_version="2",
@@ -67,9 +63,7 @@ class ArbitraryAngleCoherentEnv(ContextAwareQuantumEnvironment):
         self.circuit_parameters = unbound_circuit_context.parameters
 
         super().__init__(q_env_config, unbound_circuit_context)
-        self._rotation_angles_rng = np.random.default_rng(
-            self.np_random.integers(2**32)
-        )
+        self._rotation_angles_rng = np.random.default_rng(self.np_random.integers(2**32))
         self.observation_space = Box(
             low=np.array([0.0] * len(self.circuit_parameters)),
             high=np.array([2 * np.pi] * len(self.circuit_parameters)),

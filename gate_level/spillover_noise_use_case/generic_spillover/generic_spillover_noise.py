@@ -49,9 +49,7 @@ def validate_args(
     if not isinstance(rotation_axes, list):
         raise ValueError("rotation_axis must be a list of strings")
     if not all(axis in ["rx", "ry", "rz"] for axis in rotation_axes):
-        raise ValueError(
-            "rotation_axis must be a list of strings containing only 'rx', 'ry', 'rz'"
-        )
+        raise ValueError("rotation_axis must be a list of strings containing only 'rx', 'ry', 'rz'")
     if len(rotation_axes) != num_qubits:
         raise ValueError("rotation_axis must have the same length as num_qubits")
     if (
@@ -227,9 +225,7 @@ class SpilloverNoiseAerPass(TransformationPass):
                             self.spillover_rate_matrix[qubit_index] != 0.0
                         )[0].tolist()
 
-                        involved_qubits = [
-                            dag.qubits[q] for q in involved_qubits_indices
-                        ]
+                        involved_qubits = [dag.qubits[q] for q in involved_qubits_indices]
                         gate_op = Operator.from_label(
                             "I" * len(involved_qubits)
                         )  # Identity operator
@@ -243,18 +239,14 @@ class SpilloverNoiseAerPass(TransformationPass):
                     else:  # Transform the rotation gate to a generic n-qubit operation
                         involved_qubits = dag.qubits
                         gate_op = Operator.from_label("I" * dag.num_qubits())
-                        gate_op = gate_op.compose(
-                            Operator(rotation_gate), qargs=[qubit_index]
-                        )
+                        gate_op = gate_op.compose(Operator(rotation_gate), qargs=[qubit_index])
 
                     gate_label = f"{node.name}({angle:.2f}, {qubit_index})"
                     new_dag.apply_operation_back(
                         UnitaryGate(gate_op, label=gate_label), qargs=involved_qubits
                     )
                 else:
-                    new_dag.apply_operation_back(
-                        node.op, qargs=node.qargs, cargs=node.cargs
-                    )
+                    new_dag.apply_operation_back(node.op, qargs=node.qargs, cargs=node.cargs)
         return new_dag
 
 
@@ -332,9 +324,7 @@ def create_spillover_noise_model_from_circuit(
                 gate.label[-2]
             )  # Extract the main qubit from the gate label (e.g., 'ry(0.25π, 0)')
             gate_name = gate.label[:2]  # Extract gate name from the label (e.g., 'ry')
-            gate_type = type(
-                gate_map()[gate_name]
-            )  # Get the gate type from the gate name
+            gate_type = type(gate_map()[gate_name])  # Get the gate type from the gate name
             instruction_index = custom_instructions_counter[main_qubit_index]
             phi = rotation_angles[main_qubit_index][
                 instruction_index

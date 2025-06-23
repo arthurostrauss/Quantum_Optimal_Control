@@ -18,7 +18,6 @@ class ChannelRewardData(RewardData):
     pub: EstimatorPub | EstimatorPubLike
     input_circuit: QuantumCircuit
     observables: SparsePauliOp | List[SparsePauliOp]
-    shots: int
     n_reps: int
     causal_cone_qubits_indices: List[int]
     input_pauli: Optional[Pauli] = None
@@ -97,9 +96,7 @@ class ChannelRewardData(RewardData):
         """
         state = "|"
         if self.input_pauli is not None and self.input_indices is not None:
-            input_indices = [
-                self.input_indices[i] for i in self.causal_cone_qubits_indices
-            ]
+            input_indices = [self.input_indices[i] for i in self.causal_cone_qubits_indices]
             for i, term in enumerate(reversed(self.input_pauli.to_label())):
                 if term == "Z" or term == "I":
                     if input_indices[i] % 2 == 0:
@@ -156,9 +153,7 @@ class ChannelRewardDataList(RewardDataList):
         """
         Return the list of EstimatorPubs.
         """
-        return [
-            EstimatorPub.coerce(reward_data.pub) for reward_data in self.reward_data
-        ]
+        return [EstimatorPub.coerce(reward_data.pub) for reward_data in self.reward_data]
 
     @property
     def shots(self) -> List[int]:
@@ -192,8 +187,7 @@ class ChannelRewardDataList(RewardDataList):
             if reward_data.input_pauli.to_label() not in used_labels and all(
                 index % 2 == 0
                 for index in [
-                    reward_data.input_indices[i]
-                    for i in reward_data.causal_cone_qubits_indices
+                    reward_data.input_indices[i] for i in reward_data.causal_cone_qubits_indices
                 ]
             ):
                 ham += reward_data.hamiltonian

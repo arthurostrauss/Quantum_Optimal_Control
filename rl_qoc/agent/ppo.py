@@ -6,12 +6,11 @@ from gymnasium import ActionWrapper
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+from torch.optim import Optimizer
+
 from .agent import Agent
 from .ppo_config import TotalUpdates, TrainFunctionSettings, TrainingConfig, PPOConfig
-from .ppo_initialization import (
-    get_environment_specs,
-    initialize_networks,
-)
+from .ppo_initialization import initialize_networks
 from .ppo_logging import *
 
 import sys
@@ -80,14 +79,6 @@ class CustomPPO:
             writer = None
 
         self.writer = writer
-
-        # Initialize environment parameters
-        (
-            self.seed,
-            self.min_action,
-            self.max_action,
-        ) = get_environment_specs(env.unwrapped)
-
         torch.manual_seed(self.seed)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Initialize networks
@@ -105,7 +96,7 @@ class CustomPPO:
         )
         self.agent.to(self.device)
         # Initialize optimizer
-        self.optimizer = self.agent_config.optimizer(
+        self.optimizer: Optimizer = self.agent_config.optimizer(
             self.agent.parameters(), lr=self.agent_config.learning_rate, eps=1e-5
         )
 
@@ -136,23 +127,11 @@ class CustomPPO:
         std_action = probs.stddev
 
         if isinstance(self.env, ActionWrapper):
-            self.unwrapped_env.mean_action = self.env.action(
-                mean_action[0].cpu().numpy()
-            )
+            self.unwrapped_env.mean_action = self.env.action(mean_action[0].cpu().numpy())
         else:
             self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
 
         self.unwrapped_env.std_action = std_action[0].cpu().numpy()
-        return action, logprob
-
-    def post_process_action(
-        self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor
-    ):
-        """
-        Decide how actions should be processed after being sent to environment.
-        For certain environments such as QUA, actions should be streamed back from the environment directly.
-        Default implementation returns the action and logprob as is.
-        """
         return action, logprob
 
     def process_std(self, std_action):
@@ -216,9 +195,7 @@ class CustomPPO:
         action_space = env.action_space.shape
 
         obs = torch.zeros((num_time_steps, batch_size) + obs_space, device=self.device)
-        actions = torch.zeros(
-            (num_time_steps, batch_size) + action_space, device=self.device
-        )
+        actions = torch.zeros((num_time_steps, batch_size) + action_space, device=self.device)
         logprobs = torch.zeros((num_time_steps, batch_size), device=self.device)
         rewards = torch.zeros((num_time_steps, batch_size), device=self.device)
         dones = torch.zeros((num_time_steps, batch_size), device=self.device)
@@ -235,25 +212,23 @@ class CustomPPO:
             ### Training Loop ###
             if isinstance(self.training_constraint, TotalUpdates):
                 end_condition = self.training_constraint.total_updates
-                step_tracker = lambda i: i
+                step_tracker = lambda x: x
             elif isinstance(self.training_constraint, HardwareRuntime):
                 end_condition = self.training_constraint.hardware_runtime
-                step_tracker = lambda i: np.sum(self.unwrapped_env.hardware_runtime)
+                step_tracker = lambda x: np.sum(self.unwrapped_env.hardware_runtime)
             else:
                 raise ValueError(
                     "Invalid training constraint. Please provide either TotalUpdates or HardwareRuntime."
                 )
 
-            iteration = 1
+            iteration = 0
             while step_tracker(iteration) < end_condition:
                 if self.anneal_learning_rate:  # Anneal learning rate
                     self.learning_rate_annealing(iteration=iteration)
 
                 # Reset the environment
                 next_obs, _ = env.reset()
-                batch_obs = torch.tile(
-                    torch.Tensor(next_obs, device=self.device), (batch_size, 1)
-                )
+                batch_obs = torch.tile(torch.Tensor(next_obs, device=self.device), (batch_size, 1))
                 batch_done = torch.zeros_like(dones[0], device=self.device)
 
                 for step in range(num_time_steps):
@@ -268,17 +243,13 @@ class CustomPPO:
                         action, logprob = self.process_action(probs)
                         values[step] = critic_value.flatten()
 
-                    next_obs, reward, terminated, truncated, infos = env.step(
-                        action.cpu().numpy()
-                    )
+                    next_obs, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
                     next_obs = torch.Tensor(next_obs, device=self.device)
                     done = int(np.logical_or(terminated, truncated))
                     reward = torch.Tensor(reward, device=self.device)
                     rewards[step] = reward
 
-                    actions[step], logprobs[step] = self.post_process_action(
-                        probs, action, logprob
-                    )
+                    actions[step], logprobs[step] = action, logprob
 
                     batch_obs = torch.tile(next_obs, (batch_size, 1))
                     next_done = done * torch.ones_like(dones[0], device=self.device)
@@ -296,11 +267,7 @@ class CustomPPO:
                         else:
                             nextnonterminal = 1.0 - dones[t + 1]
                             nextvalues = values[t + 1]
-                        delta = (
-                            rewards[t]
-                            + gamma * nextvalues * nextnonterminal
-                            - values[t]
-                        )
+                        delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
                         advantages[t] = lastgaelam = (
                             delta + gamma * gae_lambda * nextnonterminal * lastgaelam
                         )
@@ -334,12 +301,7 @@ class CustomPPO:
                             # calculate approx_kl http://joschu.net/blog/kl-approx.html
                             old_approx_kl = (-logratio).mean()
                             approx_kl = ((ratio - 1) - logratio).mean()
-                            clipfracs += [
-                                ((ratio - 1.0).abs() > ppo_epsilon)
-                                .float()
-                                .mean()
-                                .item()
-                            ]
+                            clipfracs += [((ratio - 1.0).abs() > ppo_epsilon).float().mean().item()]
 
                         mb_advantages = b_advantages[mb_inds]
                         if normalize_advantage:  # Normalize advantage
@@ -367,16 +329,10 @@ class CustomPPO:
                             v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                             v_loss = 0.5 * v_loss_max.mean()
                         else:
-                            v_loss = (
-                                0.5 * ((new_value - b_returns[mb_inds]) ** 2).mean()
-                            )
+                            v_loss = 0.5 * ((new_value - b_returns[mb_inds]) ** 2).mean()
 
                         entropy_loss = entropy.mean()
-                        loss = (
-                            pg_loss
-                            - ent_coef * entropy_loss
-                            + v_loss * critic_loss_coef
-                        )
+                        loss = pg_loss - ent_coef * entropy_loss + v_loss * critic_loss_coef
 
                         optimizer.zero_grad()
                         loss.backward()
@@ -385,15 +341,11 @@ class CustomPPO:
 
                 y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
                 var_y = np.var(y_true)
-                explained_var = (
-                    np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-                )
+                explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
                 # Print debug information
                 if self.print_debug:
-                    print_debug_info(
-                        u_env, mean_action, std_action, b_returns, b_advantages
-                    )
+                    print_debug_info(u_env, mean_action, std_action, b_returns, b_advantages)
 
                 if self.target_fidelities is not None:
                     update_fidelity_info(
@@ -435,8 +387,8 @@ class CustomPPO:
                     "reward_method": u_env.config.reward.reward_method,
                 }
                 training_results = {
-                    "avg_reward": np.mean(u_env.reward_history, axis=1)[-1],
-                    "total_shots": int(u_env.total_shots[-1]),
+                    "avg_reward": np.mean(u_env.reward_history, axis=1)[-1].tolist(),
+                    "total_shots": int(u_env.reward_data.total_shots),
                 }
                 if u_env.backend_info.instruction_durations is not None:
                     training_results["hardware_runtime"] = u_env.hardware_runtime[-1]
@@ -444,9 +396,7 @@ class CustomPPO:
                     training_results["fidelity_history"] = u_env.fidelity_history[-1]
 
                 for i in range(u_env.n_actions):
-                    training_results[f"clipped_mean_action_{i}"] = env.action(
-                        mean_action[0]
-                    )[i]
+                    training_results[f"clipped_mean_action_{i}"] = env.action(mean_action[0])[i]
                     training_results[f"mean_action_{i}"] = mean_action[0][i]
                     training_results[f"std_action_{i}"] = std_action[0][i]
 
@@ -454,11 +404,9 @@ class CustomPPO:
                     write_to_wandb(summary, training_results)
                 for key, value in training_results.items():
                     self._training_results[key].append(value)
-                self._training_results["mean_action"] = mean_action[0].cpu().numpy()
-                self._training_results["std_action"] = std_action[0].cpu().numpy()
-                self._training_results["clipped_mean_action"] = env.action(
-                    mean_action[0]
-                )
+                self._training_results["mean_action"] = mean_action[0].cpu().numpy().tolist()
+                self._training_results["std_action"] = std_action[0].cpu().numpy().tolist()
+                self._training_results["clipped_mean_action"] = env.action(mean_action[0]).tolist()
                 iteration += 1
 
                 if check_convergence_std_actions(std_action, self.std_actions_eps):
@@ -542,6 +490,31 @@ class CustomPPO:
         if not isinstance(value, int):
             raise ValueError("global_step must be an integer")
         self.unwrapped_env.step_tracker = value
+
+    @property
+    def seed(self):
+        """
+        The seed of the environment
+        """
+        return self.unwrapped_env.seed
+
+    @property
+    def min_action(self):
+        """
+        The minimum action value in the environment
+        """
+        if hasattr(self.unwrapped_env, "min_action"):
+            return self.unwrapped_env.min_action
+        return self.unwrapped_env.action_space.low
+
+    @property
+    def max_action(self):
+        """
+        The maximum action value in the environment
+        """
+        if hasattr(self.unwrapped_env, "max_action"):
+            return self.unwrapped_env.max_action
+        return self.unwrapped_env.action_space.high
 
     @property
     def training_results(self):
@@ -814,9 +787,7 @@ def take_step(
 
     # print(f"global_step={global_step}, episodic_return={np.mean(reward)}")
     if writer is not None:
-        writer.add_scalar(
-            "charts/episodic_return", np.mean(reward.numpy()), global_step
-        )
+        writer.add_scalar("charts/episodic_return", np.mean(reward.numpy()), global_step)
         writer.add_scalar("charts/episodic_length", num_steps, global_step)
         for i in range(env.unwrapped.mean_action.shape[0]):
             writer.add_scalar(
@@ -824,11 +795,7 @@ def take_step(
                 env.unwrapped.mean_action[i],
                 global_step,
             )
-            writer.add_scalar(
-                f"charts/std_action_{i}", np.array(std_action)[i], global_step
-            )
-            writer.add_scalar(
-                f"charts/unclipped_action_{i}", np.array(action)[i], global_step
-            )
+            writer.add_scalar(f"charts/std_action_{i}", np.array(std_action)[i], global_step)
+            writer.add_scalar(f"charts/unclipped_action_{i}", np.array(action)[i], global_step)
 
     return next_obs, next_done, mean_action, std_action

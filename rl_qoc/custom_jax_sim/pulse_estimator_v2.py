@@ -64,9 +64,7 @@ def simulate_pulse_level(
     if parameter_values:
 
         def jittable_sim(t_span, y0, y0_input, y0_cls, param_dict):
-            return pulse_level_core_sim(
-                sched, backend, t_span, y0, y0_input, y0_cls, param_dict
-            )
+            return pulse_level_core_sim(sched, backend, t_span, y0, y0_input, y0_cls, param_dict)
 
         param_vmap = vmap(jittable_sim, in_axes=(None, None, None, None, 0))
         jit_sim = jit(param_vmap, static_argnums=(3,))
@@ -81,12 +79,8 @@ def simulate_pulse_level(
     if y0 is None:
         y0 = backend.options.initial_state
         if isinstance(y0, str) and y0 == "ground_state":
-            y0 = Statevector(
-                backend._dressed_states[:, 0], dims=backend.options.subsystem_dims
-            )
-    y0, y0_input, y0_cls, state_type_wrapper = validate_and_format_initial_state(
-        y0, model
-    )
+            y0 = Statevector(backend._dressed_states[:, 0], dims=backend.options.subsystem_dims)
+    y0, y0_input, y0_cls, state_type_wrapper = validate_and_format_initial_state(y0, model)
 
     # jax.config.update('jax_disable_jit', True)
     if parameter_values:
@@ -214,9 +208,7 @@ class PulseEstimatorV2(BaseEstimatorV2):
         return job
 
     def _run(self, pubs: list[EstimatorPub]) -> PrimitiveResult[PubResult]:
-        return PrimitiveResult(
-            [self._run_pub(pub) for pub in pubs], metadata={"version": 2}
-        )
+        return PrimitiveResult([self._run_pub(pub) for pub in pubs], metadata={"version": 2})
 
     def _run_pub(self, pub: EstimatorPub) -> PubResult:
         """
@@ -235,9 +227,7 @@ class PulseEstimatorV2(BaseEstimatorV2):
 
         # calculate broadcasting of parameters and observables
         param_shape = parameter_values.shape
-        param_indices = np.fromiter(np.ndindex(param_shape), dtype=object).reshape(
-            param_shape
-        )
+        param_indices = np.fromiter(np.ndindex(param_shape), dtype=object).reshape(param_shape)
         bc_param_ind, bc_obs = np.broadcast_arrays(param_indices, observables)
 
         subsystem_dims: List[int] = list(
@@ -263,9 +253,7 @@ class PulseEstimatorV2(BaseEstimatorV2):
         if precision > 0:
             rng = np.random.default_rng(self.options.seed_simulator)
             if not np.all(np.isreal(evs)):
-                raise ValueError(
-                    "Given operator is not Hermitian and noise cannot be added."
-                )
+                raise ValueError("Given operator is not Hermitian and noise cannot be added.")
             evs = rng.normal(evs, precision, evs.shape)
         return PubResult(
             DataBin(evs=evs, stds=stds, shape=evs.shape),
@@ -292,18 +280,14 @@ class PulseEstimatorV2(BaseEstimatorV2):
                     "But precision should be larger than 0.",
                 )
             if pub.circuit.cregs:
-                raise QiskitError(
-                    "PulseEstimatorV2 does not support classical registers."
-                )
+                raise QiskitError("PulseEstimatorV2 does not support classical registers.")
             if pub.circuit.num_vars > 0:
                 raise QiskitError("PulseEstimatorV2 does not support dynamic circuits.")
             for op in pub.circuit.data:
                 if op.operation.name == "measure":
                     raise QiskitError("PulseEstimatorV2 does not support measurements.")
                 if isinstance(op.operation, ControlFlowOp):
-                    raise QiskitError(
-                        "PulseEstimatorV2 does not support control flow operations."
-                    )
+                    raise QiskitError("PulseEstimatorV2 does not support control flow operations.")
 
 
 def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
@@ -325,14 +309,10 @@ def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
         input_dims=tuple(initial_subsystem_dims),
         output_dims=output_dims,
     )  # Projector initialized in the qudit space
-    for i in range(
-        total_dim
-    ):  # Loop over all computational basis states in the qudit space
+    for i in range(total_dim):  # Loop over all computational basis states in the qudit space
         s = Statevector.from_int(i, initial_subsystem_dims)  # Computational qudit state
         for key in s.to_dict().keys():  # Loop over all computational basis states
-            if all(
-                c in "01" for c in key
-            ):  # Check if basis state is in the qubit space
+            if all(c in "01" for c in key):  # Check if basis state is in the qubit space
                 s_qubit = Statevector.from_label(key)  # Computational qubit state
                 projector += Operator(
                     s_qubit.data.reshape(total_qubit_dim, 1)
@@ -361,9 +341,7 @@ def projected_state(
     """
     if not isinstance(state, (np.ndarray, QuantumState)):
         raise TypeError("State must be either numpy array or QuantumState object")
-    proj = build_qubit_space_projector(
-        subsystem_dims
-    )  # Projector on qubit space (in qudit space)
+    proj = build_qubit_space_projector(subsystem_dims)  # Projector on qubit space (in qudit space)
     if isinstance(state, np.ndarray):
         state_type = DensityMatrix if state.ndim == 2 else Statevector
         output_state: Statevector | DensityMatrix = state_type(state)
@@ -383,9 +361,7 @@ def projected_state(
     return qubitized_state
 
 
-def qubit_projection(
-    unitary: np.ndarray | Operator, subsystem_dims: List[int]
-) -> Operator:
+def qubit_projection(unitary: np.ndarray | Operator, subsystem_dims: List[int]) -> Operator:
     """
     Project unitary on qubit space
 
@@ -396,19 +372,13 @@ def qubit_projection(
     Returns: unitary projected on qubit space as a Qiskit Operator object
     """
 
-    proj = build_qubit_space_projector(
-        subsystem_dims
-    )  # Projector on qubit space (in qudit space)
+    proj = build_qubit_space_projector(subsystem_dims)  # Projector on qubit space (in qudit space)
     unitary_op = (
-        Operator(
-            unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims)
-        )
+        Operator(unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims))
         if isinstance(unitary, np.ndarray)
         else unitary
     )  # Unitary operator (in qudit space)
 
-    qubitized_op = (
-        proj @ unitary_op @ proj.adjoint()
-    )  # Projected unitary (in qubit space)
+    qubitized_op = proj @ unitary_op @ proj.adjoint()  # Projected unitary (in qubit space)
     # (Note that is actually not unitary at this point, it's a Channel on the multi-qubit system)
     return qubitized_op

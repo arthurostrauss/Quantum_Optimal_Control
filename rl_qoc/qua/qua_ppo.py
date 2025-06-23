@@ -1,24 +1,15 @@
 from __future__ import annotations
-
-import time
 import numpy as np
 from typing import Optional, Dict
-import tqdm
-import warnings
-from IPython.display import clear_output
 from gymnasium import Wrapper, ActionWrapper
 
 # Torch imports for building RL agent and framework
-from gymnasium.spaces import Box
 import torch
-import torch.nn as nn
-from matplotlib import pyplot as plt
-from torch.utils.tensorboard import SummaryWriter
-import torch.optim as optim
 from torch.distributions import Normal
-from ..agent import CustomPPO
-from ..environment import QuantumEnvironment
-from .fixed_point import FixedPoint
+
+from ..agent import CustomPPO, PPOConfig
+from ..environment.base_q_env import BaseQuantumEnvironment as QuantumEnvironment
+from qiskit_qm_provider import FixedPoint
 
 import sys
 import logging
@@ -81,7 +72,7 @@ rounding = 8
 class CustomQMPPO(CustomPPO):
     def __init__(
         self,
-        agent_config: Dict,
+        agent_config: Dict | PPOConfig,
         env: QuantumEnvironment | Wrapper,
         chkpt_dir: Optional[str] = "tmp/agent",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
@@ -109,9 +100,7 @@ class CustomQMPPO(CustomPPO):
         std_action = probs.stddev
         batch_size = mean_action.size(0)
         if isinstance(self.env, ActionWrapper):
-            self.unwrapped_env.mean_action = self.env.action(
-                mean_action[0].cpu().numpy()
-            )
+            self.unwrapped_env.mean_action = self.env.action(mean_action[0].cpu().numpy())
         else:
             self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
         self.unwrapped_env.std_action = std_action[0].cpu().numpy()
@@ -120,14 +109,11 @@ class CustomQMPPO(CustomPPO):
         μ_f = [FixedPoint(μ[i]) for i in range(self.n_actions)]
         σ_f = [FixedPoint(σ[i]) for i in range(self.n_actions)]
         action = np.zeros((batch_size, self.n_actions))
-        seed = self.seed
+        seed = self.seed + self.global_step - 1
         n_lookup = 512
-        cos_array = [
-            FixedPoint(np.cos(2 * np.pi * x / n_lookup)) for x in range(n_lookup)
-        ]
+        cos_array = [FixedPoint(np.cos(2 * np.pi * x / n_lookup)) for x in range(n_lookup)]
         ln_array = [
-            FixedPoint(np.sqrt(-2 * np.log(x / (n_lookup + 1))))
-            for x in range(1, n_lookup + 1)
+            FixedPoint(np.sqrt(-2 * np.log(x / (n_lookup + 1)))) for x in range(1, n_lookup + 1)
         ]
         for b in range(0, batch_size, 2):
             for j in range(self.n_actions):
@@ -135,26 +121,20 @@ class CustomQMPPO(CustomPPO):
                 uniform_sample = FixedPoint(uniform_sample)
                 u1 = (uniform_sample >> 19).to_unsafe_int()
                 u2 = uniform_sample.to_unsafe_int() & ((1 << 19) - 1)
-                temp_action1 = (
-                    μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
-                )
+                temp_action1 = μ_f[j] + σ_f[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)]
                 temp_action2 = (
                     μ_f[j]
-                    + σ_f[j]
-                    * ln_array[u1]
-                    * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
+                    + σ_f[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)]
                 )
                 action[b][j] = temp_action1.to_float()
                 action[b + 1][j] = temp_action2.to_float()
-        action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+
+        action = np.clip(action, self.min_action, self.max_action)
         torch_action = torch.tensor(action, device=self.device)
         logprob = probs.log_prob(torch_action).sum(1)
-
         return torch_action, logprob
 
-    def post_process_action(
-        self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor
-    ):
+    def post_process_action(self, probs: Normal, action: torch.Tensor, logprob: torch.Tensor):
         """
         Post-process the action taken by the agent
         :param probs: Probabilities of the action distribution

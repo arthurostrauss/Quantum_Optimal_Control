@@ -55,15 +55,11 @@ def qibo_execute(
         The result
     """
     qasm_circuits = [qasm3_dumps(circuit) for circuit in circuits]
-    qibo_circuits = [
-        QiboCircuit.from_qasm(qasm_circuit) for qasm_circuit in qasm_circuits
-    ]
+    qibo_circuits = [QiboCircuit.from_qasm(qasm_circuit) for qasm_circuit in qasm_circuits]
 
     set_backend("qibolab", platform=platform)
     print("QIBO", qibo.get_backend())
-    hardware_qubit_pair = run_options.get(
-        "qubits", (0, 1)
-    )  # TODO: Figure out how to retrieve it
+    hardware_qubit_pair = run_options.get("qubits", (0, 1))  # TODO: Figure out how to retrieve it
 
     # for parameter_value in parameter_values:
     param_shape = parameter_values[0].shape
@@ -75,9 +71,7 @@ def qibo_execute(
     for param_set in unique_params:
         batch = []
         for qiskit_circ, qibo_circ in zip(circuits, qibo_circuits):
-            if np.allclose(
-                qiskit_circ.metadata["parameter_values"], param_set, atol=1e-6
-            ):
+            if np.allclose(qiskit_circ.metadata["parameter_values"], param_set, atol=1e-6):
                 batch.append(qibo_circ)
         circuit_batches.append(batch)
 
@@ -136,9 +130,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
 
         self._platform = platform
         self._options = QiboOptions(**options) if options else QiboOptions()
-        opt1q = Optimize1qGatesDecomposition(
-            basis=["h", "x", "y", "z", "t", "s", "sdg", "tdg"]
-        )
+        opt1q = Optimize1qGatesDecomposition(basis=["h", "x", "y", "z", "t", "s", "sdg", "tdg"])
         self._passmanager = PassManager([opt1q])
 
     def run(
@@ -208,9 +200,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
             )
             new_circuits2 = []
             for circ in new_circuits:
-                circ.metadata["parameter_values"] = parameter_values[
-                    param_index
-                ].as_array()
+                circ.metadata["parameter_values"] = parameter_values[param_index].as_array()
                 new_circ = from_custom_to_baseline_circuit(circ)
                 new_circuits2.append(new_circ)
             circuits.extend(new_circuits2)
@@ -263,9 +253,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
 
         # calculate broadcasting of parameters and observables
         param_shape = parameter_values.shape
-        param_indices = np.fromiter(np.ndindex(param_shape), dtype=object).reshape(
-            param_shape
-        )
+        param_indices = np.fromiter(np.ndindex(param_shape), dtype=object).reshape(param_shape)
         bc_param_ind, bc_obs = np.broadcast_arrays(param_indices, observables)
 
         param_obs_map = defaultdict(set)
@@ -273,9 +261,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
             param_index = bc_param_ind[index]
             param_obs_map[param_index].update(bc_obs[index])
 
-        bound_circuits = self._bind_and_add_measurements(
-            circuit, parameter_values, param_obs_map
-        )
+        bound_circuits = self._bind_and_add_measurements(circuit, parameter_values, param_obs_map)
         return _PreprocessedData(bound_circuits, bc_param_ind, bc_obs)
 
     def _postprocess_pub(
@@ -371,9 +357,7 @@ class QiboEstimatorV2(BaseEstimatorV2):
         meas_circuits: list[QuantumCircuit] = []
         if self._options.abelian_grouping:
             for obs in observable.group_commuting(qubit_wise=True):
-                basis = Pauli(
-                    (np.logical_or.reduce(obs.z), np.logical_or.reduce(obs.x))
-                )
+                basis = Pauli((np.logical_or.reduce(obs.z), np.logical_or.reduce(obs.x)))
                 meas_circuit, indices = _measurement_circuit(circuit.num_qubits, basis)
                 paulis = PauliList.from_symplectic(
                     obs.z[:, indices],

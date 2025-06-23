@@ -99,15 +99,12 @@ class CAFE:
         n_qubits = self.q_env.n_qubits
 
         input_circuits = [
-            PauliPreparationBasis().circuit(s)
-            for s in product(range(4), repeat=n_qubits)
+            PauliPreparationBasis().circuit(s) for s in product(range(4), repeat=n_qubits)
         ]
 
         for input_circ in input_circuits:
             run_qc = QuantumCircuit(n_qubits)  # Circuit with the custom target gate
-            ref_qc = QuantumCircuit(
-                n_qubits
-            )  # Circuit with the ideal gate for reference
+            ref_qc = QuantumCircuit(n_qubits)  # Circuit with the ideal gate for reference
 
             # Bind input states to the circuits
             for qc in [run_qc, ref_qc]:
@@ -162,16 +159,12 @@ class CAFE:
             counts = [result.data.meas.get_counts() for result in results]
             for count in counts:
                 for key in [
-                    bin(i)[2:].zfill(self.q_env.n_qubits)
-                    for i in range(2**self.q_env.n_qubits)
+                    bin(i)[2:].zfill(self.q_env.n_qubits) for i in range(2**self.q_env.n_qubits)
                 ]:
                     if key not in count.keys():
                         count[key] = 0
             fidelity = np.mean(
-                [
-                    count["0" * self.q_env.n_qubits] / self.q_env.n_shots
-                    for count in counts
-                ]
+                [count["0" * self.q_env.n_qubits] / self.q_env.n_shots for count in counts]
             )
 
         else:

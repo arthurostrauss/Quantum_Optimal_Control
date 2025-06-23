@@ -1,16 +1,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, List, Literal
+from typing import Dict, Optional, List, Literal, Callable, Any, TYPE_CHECKING
 from gymnasium.spaces import Box
+from qiskit import QuantumCircuit, QuantumRegister
+from qiskit.circuit import ParameterVector, Parameter
 from qiskit.providers import BackendV2
 from qiskit.transpiler import InstructionDurations, PassManager
-from .backend_config import BackendConfig
+from qiskit.version import get_version_info
+from qiskit_ibm_runtime import IBMBackend
 
-from .target_config import GateTargetConfig, StateTargetConfig
+from .backend_config import (
+    BackendConfig,
+    QiskitRuntimeConfig,
+    DynamicsConfig,
+    QiskitConfig,
+)
+
+from ..target import GateTarget, StateTarget
 from .execution_config import ExecutionConfig
 from .benchmark_config import BenchmarkConfig
 from ..backend_info import BackendInfo
+from ...helpers import load_q_env_from_yaml_file, select_backend
+
+if TYPE_CHECKING:
+    from ...rewards import Reward
 
 
 def default_benchmark_config():
@@ -32,23 +46,21 @@ class QEnvConfig:
         benchmark_config (BenchmarkConfig): Benchmark configuration
     """
 
-    target: GateTargetConfig | StateTargetConfig
+    target: GateTarget | StateTarget
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward: (
-        Literal["channel", "orbit", "state", "cafe", "xeb", "fidelity"] | "Reward"
-    ) = "state"
+    reward: Reward = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
-    _backend_info: BackendInfo = None
+    backend_info: BackendInfo = field(init=False)
 
     def __post_init__(self):
         if isinstance(self.target, Dict):
             if "gate" in self.target:
-                self.target = GateTargetConfig(**self.target)
+                self.target = GateTarget(**self.target)
             else:
-                self.target = StateTargetConfig(**self.target)
+                self.target = StateTarget(**self.target)
         if isinstance(self.reward, str):
             from ...rewards import reward_dict
 
@@ -57,13 +69,11 @@ class QEnvConfig:
             from ...rewards import Reward
 
             if not isinstance(self.reward, Reward):
-                raise ValueError(
-                    "Reward configuration must be a string or a Reward instance"
-                )
-        if self.backend_config.config_type in ["qiskit", "dynamics", "runtime"]:
+                raise ValueError("Reward configuration must be a string or a Reward instance")
+        if self.backend_config.config_type in ["qiskit", "dynamics", "runtime", "qm"]:
             from ..backend_info import QiskitBackendInfo
 
-            self._backend_info = QiskitBackendInfo(
+            self.backend_info = QiskitBackendInfo(
                 self.backend_config.backend,
                 self.backend_config.instruction_durations,
                 self.backend_config.pass_manager,
@@ -72,7 +82,7 @@ class QEnvConfig:
         elif self.backend_config.config_type == "qibo":
             from ...qibo.qibo_config import QiboBackendInfo
 
-            self._backend_info = QiboBackendInfo(
+            self.backend_info = QiboBackendInfo(
                 self.backend_config.n_qubits, self.backend_config.coupling_map
             )
         else:
@@ -86,18 +96,20 @@ class QEnvConfig:
     def backend(self, backend: BackendV2):
         self.backend_config.backend = backend
         self.backend_config.parametrized_circuit_kwargs["backend"] = backend
-
-    @property
-    def backend_info(self) -> BackendInfo:
-        return self._backend_info
-
-    @backend_info.setter
-    def backend_info(self, value: BackendInfo):
-        self._backend_info = value
+        self.backend_info._backend = backend
 
     @property
     def parametrized_circuit(self):
-        return self.backend_config.parametrized_circuit
+        if self.backend_config.parametrized_circuit is not None:
+            return self.backend_config.parametrized_circuit
+        else:
+            op_name = self.target.gate.name if isinstance(self.target, GateTarget) else "state_prep"
+            custom_op = op_name + "_cal"
+            from ...helpers.circuit_utils import add_custom_gate
+
+            return lambda qc, params, q_reg, **kwargs: add_custom_gate(
+                qc, custom_op, q_reg, params, self.target.physical_qubits, self.backend
+            )
 
     @property
     def parametrized_circuit_kwargs(self):
@@ -113,7 +125,7 @@ class QEnvConfig:
 
     @property
     def physical_qubits(self):
-        return self.target["physical_qubits"]
+        return self.target.physical_qubits
 
     @property
     def batch_size(self):
@@ -153,9 +165,7 @@ class QEnvConfig:
         if isinstance(value, int):
             assert value > 0, "Number of repetitions must be greater than 0"
         else:
-            assert all(
-                v > 0 for v in value
-            ), "Number of repetitions must be greater than 0"
+            assert all(v > 0 for v in value), "Number of repetitions must be greater than 0"
         self.execution_config.n_reps = [value] if isinstance(value, int) else value
 
     @property
@@ -212,9 +222,7 @@ class QEnvConfig:
         return self.reward.reward_method
 
     @reward_method.setter
-    def reward_method(
-        self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]
-    ):
+    def reward_method(self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]):
         try:
             from ...rewards import reward_dict
 
@@ -263,18 +271,10 @@ class QEnvConfig:
     def pass_manager(self, value: PassManager):
         self.backend_config.pass_manager = value
 
-    def as_dict(self, to_json: bool = False):
+    def as_dict(self):
         config = {
-            "target": {
-                "physical_qubits": self.physical_qubits,
-            },
-            "backend_config": {
-                "backend": (
-                    self.backend.name
-                    if isinstance(self.backend, BackendV2)
-                    else self.backend
-                ),
-            },
+            "target": self.target.as_dict(),
+            "backend_config": self.backend_config.as_dict(),
             "action_space": {
                 "low": self.action_space.low.tolist(),
                 "high": self.action_space.high.tolist(),
@@ -297,9 +297,168 @@ class QEnvConfig:
             "metadata": self.env_metadata,
         }
 
-        if isinstance(self.target, GateTargetConfig):
-            config["target"]["gate"] = self.target.gate.name
-        elif isinstance(self.target, StateTargetConfig) and not to_json:
-            config["target"]["state"] = self.target.state.data
-
         return config
+
+    @classmethod
+    def from_yaml(
+        cls,
+        config_file_path: str,
+        parametrized_circ_func: Optional[
+            Callable[
+                [
+                    QuantumCircuit,
+                    ParameterVector | List[Parameter],
+                    QuantumRegister,
+                    Dict[str, Any],
+                ],
+                None,
+            ]
+        ],
+        backend: Optional[BackendV2 | Callable[[Any], BackendV2]] = None,
+        pass_manager: Optional[PassManager] = None,
+        instruction_durations: Optional[InstructionDurations] = None,
+        **backend_callback_kwargs: Any,
+    ) -> QEnvConfig:
+        """
+        Get Quantum Environment configuration from a YAML file and additional parameters.
+
+        Args:
+            config_file_path (str): Path to the YAML configuration file
+            parametrized_circ_func (Callable): Function to create the parametrized circuit
+            backend (BackendV2 or Callable): Optional custom backend or function to create a backend (if None,
+                                              backend will be created from the backend_config in the YAML file)
+            pass_manager (PassManager): Pass manager instance for custom transpilation
+            instruction_durations (InstructionDurations): Instruction durations to specify durations for custom gates
+            **backend_callback_kwargs: Additional keyword arguments to pass to the backend callback function
+
+        Returns:
+            QEnvConfig: Quantum Environment configuration object
+        """
+
+        params, backend_params, runtime_options = load_q_env_from_yaml_file(config_file_path)
+
+        if isinstance(backend, Callable):
+            backend = backend(**backend_callback_kwargs)
+        elif backend is None:
+            backend = select_backend(**backend_params)
+        if get_version_info() < "2.0.0":
+            from qiskit_dynamics import DynamicsBackend
+
+            if isinstance(backend, DynamicsBackend):
+                backend_config = DynamicsConfig(
+                    parametrized_circ_func,
+                    backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+                return cls(backend_config=backend_config, **params)
+        if isinstance(backend, IBMBackend):
+            backend_config = QiskitRuntimeConfig(
+                parametrized_circ_func,
+                backend,
+                pass_manager=pass_manager,
+                instruction_durations=instruction_durations,
+                primitive_options=runtime_options,
+            )
+        elif isinstance(backend, BackendV2):
+            backend_config = QiskitConfig(
+                parametrized_circ_func,
+                backend,
+                pass_manager=pass_manager,
+                instruction_durations=instruction_durations,
+            )
+
+        else:
+            raise ValueError("Backend type not recognized")
+
+        return cls(backend_config=backend_config, **params)
+
+    @classmethod
+    def from_dict(
+        cls,
+        config_dict: Dict[str, Any],
+        backend_config_type: Literal["qiskit", "dynamics", "runtime", "qm"] = "qiskit",
+        parametrized_circ_func: Optional[
+            Callable[
+                [
+                    QuantumCircuit,
+                    ParameterVector | List[Parameter],
+                    QuantumRegister,
+                    Dict[str, Any],
+                ],
+                None,
+            ]
+        ] = None,
+        backend: Optional[BackendV2 | Callable[[Any], BackendV2]] = None,
+        pass_manager: Optional[PassManager] = None,
+        instruction_durations: Optional[InstructionDurations] = None,
+        **backend_callback_kwargs: Any,
+    ) -> QEnvConfig:
+        """
+        Get Quantum Environment configuration from a dictionary and additional parameters.
+        """
+        import numpy as np
+
+        if "target" not in config_dict:
+            raise ValueError("Configuration dictionary must contain a 'target' key")
+        if "backend_config" not in config_dict:
+            raise ValueError("Configuration dictionary must contain a 'backend_config' key")
+
+        target = config_dict["target"]
+        backend_config = config_dict["backend_config"]
+
+        if isinstance(target, dict):
+            if "gate" in target:
+                target = GateTarget(**target)
+            else:
+                target = StateTarget(**target)
+
+        if isinstance(backend_config, dict):
+            if backend_config_type == "qiskit":
+                backend_config = QiskitConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+            elif backend_config_type == "dynamics":
+                backend_config = DynamicsConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+            elif backend_config_type == "runtime":
+                backend_config = QiskitRuntimeConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+            elif backend_config_type == "qm":
+                from ...qua.qm_config import QMConfig
+
+                backend_config = QMConfig(
+                    **backend_config,
+                    parametrized_circuit=parametrized_circ_func,
+                    backend=backend,
+                    pass_manager=pass_manager,
+                    instruction_durations=instruction_durations,
+                )
+
+        return cls(
+            target=target,
+            backend_config=backend_config,
+            action_space=Box(
+                low=np.array(config_dict["action_space"]["low"]),
+                high=np.array(config_dict["action_space"]["high"]),
+                dtype=np.float32,
+            ),
+            execution_config=ExecutionConfig(**config_dict["execution_config"]),
+            reward=config_dict.get("reward", "state"),
+            benchmark_config=BenchmarkConfig(**config_dict.get("benchmark_config", {})),
+            env_metadata=config_dict.get("metadata", {}),
+        )
