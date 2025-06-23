@@ -5,7 +5,7 @@ from oqc import CompilationResult
 from qiskit.quantum_info import SparsePauliOp
 from qiskit.circuit import QuantumCircuit, Parameter
 from qiskit.primitives.containers.bit_array import BitArray
-from qm import QuantumMachine, Program, CompilerOptionArguments
+from qm import QuantumMachine, Program
 from qm.qua._expressions import QuaArrayVariable
 from quam.utils.qua_types import QuaVariableInt
 
@@ -130,8 +130,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 input_type=self.input_type,
                 direction=Direction.OUTGOING,
             )
-            if self.real_time_circuit.get_var("n_reps", None) is not None
-            else None
+            if self.real_time_circuit.has_var("n_reps") else None
         )
 
         self.real_time_circuit_parameters = ParameterTable.from_qiskit(
@@ -147,8 +146,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                 input_type=self.input_type,
                 direction=Direction.OUTGOING,
             )
-            if self.real_time_circuit.get_var("circuit_choice", None) is not None
-            else None
+            if self.real_time_circuit.has_var("circuit_choice") else None
         )
 
         self.pauli_shots = QuaParameter(
@@ -275,21 +273,34 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         # The counts are a flattened list of counts from the initial shape (max_input_state, max_observables, batch_size)
         # Reshape the counts to the original shape
         if self.config.dfe:
-            reshaped_counts = [[[] for _ in range(max_input_state)] for _ in range(self.batch_size)]
-
+            counts = []
+            # collected_counts is an array containing a flat dimension of size np.cumsum(num_obs_per_input_state)
+            # each item of this flat array is an array of shape (batch_size, dim)
+            # We need to reshape it in such a way that the batch_size is the first dimension,
+            # the input state is the second dimension, and the observables per input are the third dimension
+            formatted_counts = []
+            count_idx = 0
             for i_idx in range(max_input_state):
-                for o_idx in range(num_obs_per_input_state[i_idx]):
-                    reshaped_counts[i_idx].append(
-                        np.array(
-                            collected_counts[
-                                i_idx * self.batch_size * dim
-                                + o_idx * self.batch_size : (i_idx + 1) * self.batch_size * dim
-                                + o_idx * self.batch_size
-                            ]
-                        ).reshape((self.batch_size, dim))
+                formatted_counts.append([])
+                num_obs = num_obs_per_input_state[i_idx]
+                for o_idx in range(num_obs):
+                    formatted_counts[i_idx].append([])
+                    counts_array = np.array(
+                        collected_counts[count_idx], dtype=int
                     )
+                    formatted_counts[i_idx][o_idx] = counts_array
+
+            # Now reshape the formatted_counts to put batch_size dimension as the first dimension
+            for batch_idx in range(self.batch_size):
+                counts.append([])
+                for i_idx in range(max_input_state):
+                    counts[batch_idx].append([])
+                    for o_idx in range(num_obs_per_input_state[i_idx]):
+                        counts[batch_idx][i_idx].append(
+                            formatted_counts[i_idx][o_idx][batch_idx]
+                        )
+
         else:
-            # Traitement pour le cas non-DFE (reste inchangé)
             shape = (max_input_state, self.batch_size, dim)
             transpose_shape = (1, 0, 2)
             counts = np.transpose(np.array(collected_counts).reshape(shape), transpose_shape)
@@ -306,14 +317,16 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
                             for i in range(dim)
                         }
                         obs = reward_data[i_idx].hamiltonian.group_commuting(True)[o_idx]
+                        # Build a null SparsePauliOp (coeff set to 0.)
                         diag_obs = SparsePauliOp("I" * self.n_qubits, 0.0)
-                        for obs_, coeff in zip((obs.paulis, obs.coeffs)):
+                        for obs_, coeff in zip(obs.paulis, obs.coeffs):
                             diag_obs_label = ""
                             for char in obs_.to_label():
+                                # Convert each non-trivial Pauli term to Z term
                                 diag_obs_label += char if char == "I" else "Z"
                             diag_obs += SparsePauliOp(diag_obs_label, coeff)
                         bit_array = BitArray.from_counts(counts_dict, num_bits=self.n_qubits)
-                        exp_value += bit_array.expectation_values(diag_obs)
+                        exp_value += bit_array.expectation_values(diag_obs.simplify())
                 exp_value /= reward_data.pauli_sampling
                 reward[batch_idx] = exp_value
             else:
