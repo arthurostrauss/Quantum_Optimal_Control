@@ -542,14 +542,12 @@ def observables_to_indices(
         for pauli_term in reversed(
             reference_pauli.to_label()
         ):  # Get individual qubit indices for each Pauli term
-            if pauli_term == "I":
+            if pauli_term == "I" or pauli_term == "Z":
                 current_indices.append(0)
             elif pauli_term == "X":
                 current_indices.append(1)
             elif pauli_term == "Y":
                 current_indices.append(2)
-            elif pauli_term == "Z":
-                current_indices.append(3)
         observable_indices.append(tuple(current_indices))
     return observable_indices
 
