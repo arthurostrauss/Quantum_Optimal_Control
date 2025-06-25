@@ -29,7 +29,7 @@ dependencies = [
     "qiskit_ibm_runtime>=0.40.1",
     "scipy",
     "tqdm",
-    "torch>=2.0.1+cpu",
+    "torch>=2.0.1",
     "gymnasium",
     "pyyaml",
     "optuna",
