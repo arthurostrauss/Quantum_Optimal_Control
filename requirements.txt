@@ -6,7 +6,7 @@ qiskit_experiments<0.9.0
 qiskit_ibm_runtime>=0.28.0
 scipy>=1.13.0
 tqdm>=4.64.0
-torch>=2.0.1
+torch>=2.0.1+cpu
 gymnasium>=0.29.1
 jax<=0.4.34
 sympy2jax>=0.0.5

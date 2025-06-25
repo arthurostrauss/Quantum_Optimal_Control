@@ -25,9 +25,6 @@ class Reward(ABC):
     Configuration for how to compute the reward in the RL workflow
     """
 
-    print_debug = False
-    _total_shots: int = 0
-
     @property
     def reward_args(self):
         return {}
@@ -39,13 +36,6 @@ class Reward(ABC):
         String identifier for the reward method
         """
         raise NotImplementedError
-
-    @property
-    def total_shots(self) -> int:
-        """
-        Total number of shots involved for the last call of the reward computation
-        """
-        return self._total_shots
 
     @property
     def dfe(self) -> bool:

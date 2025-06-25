@@ -1,8 +1,8 @@
 import numpy as np
 from qiskit.circuit import QuantumCircuit, QuantumRegister, Parameter, Gate
-from typing import List, Tuple, Union, Dict
+from typing import List
 from gymnasium.spaces import Box
-from rl_qoc.qua import QMEnvironment, QMConfig, CustomQMPPO
+from rl_qoc.qua import QMEnvironment, QMConfig
 from quam_libs.components import QuAM, Transmon
 from qiskit_qm_provider import (
     FluxTunableTransmonBackend,
@@ -12,10 +12,6 @@ from qiskit_qm_provider import (
 )
 from qiskit_qm_provider.backend.backend_utils import add_basic_macros_to_machine
 from rl_qoc.agent.ppo_config import (
-    WandBConfig,
-    PPOConfig,
-    TrainingConfig,
-    TrainFunctionSettings,
     TotalUpdates,
 )
 from rl_qoc import (
@@ -33,8 +29,6 @@ from rl_qoc.helpers import add_custom_gate
 from iqcc_cloud_client import IQCC_Cloud
 import json
 import os
-import inspect
-import pickle
 
 backend_name = "gilboa"
 iqcc = IQCC_Cloud(quantum_computer_backend=backend_name)
@@ -78,22 +72,12 @@ def apply_parametrized_circuit(
     return qc
 
 
-# Variables de configuration
 physical_qubits = (0,)
-target_type = "gate"  # Peut être "gate" ou "state"
-target_name = "x"  # Nom de la porte ou de l'état cible
+target_name = "1"
 
-# Création de la cible en fonction du type spécifié
-if target_type == "gate":
-    target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
-elif target_type == "state":
-    # Vous pouvez remplacer cette valeur par une représentation d'état réelle
-    target_state = "1"
-    target = StateTarget(state=target_state, physical_qubits=physical_qubits)
-else:
-    raise ValueError(f"Type de cible inconnu: {target_type}")
-
-reward = ChannelReward()
+# target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
+target = StateTarget(state=target_name, physical_qubits=physical_qubits)
+reward = StateReward()
 
 # Action space specification
 param_bounds = [(-1.98, 2.0)]  # Can be any number of bounds
@@ -104,13 +88,8 @@ batch_size = 32  # Number of actions to evaluate per policy evaluation
 n_shots = 100  # Minimum number of shots per fiducial evaluation
 pauli_sampling = 100  # Number of fiducials to compute for fidelity estimation (DFE only)
 n_reps = 1  # Number of repetitions of the cycle circuit
-num_updates = TotalUpdates(50)
-
+num_updates = TotalUpdates(5)
 input_type = InputType.INPUT_STREAM
-
-# Contextes de circuits supplémentaires (à utiliser dans le futur)
-additional_circuits = {}
-# Exemple: additional_circuits["my_circuit"] = QuantumCircuit(2)
 
 
 def create_action_space(param_bounds):
@@ -162,7 +141,9 @@ def generate_sync_hook():
         """
     elif isinstance(target, StateTarget):
         # Convertir l'état cible en chaîne de caractères pour le code généré
-        state_str = np.array2string(target.dm.data, precision=8, separator=", ", suppress_small=True)
+        state_str = np.array2string(
+            target.dm.data, precision=8, separator=", ", suppress_small=True
+        )
         target_initialization_code = f"""
 physical_qubits = {physical_qubits}
 target_state = np.array({state_str}, dtype=complex)
@@ -201,7 +182,7 @@ n_shots = {n_shots}  # Minimum number of shots per fiducial evaluation
 pauli_sampling = {pauli_sampling}  # Number of fiducials to compute for fidelity estimation (DFE only)
 n_reps = {n_reps}  # Number of repetitions of the cycle circuit
 num_updates = TotalUpdates({num_updates.total_updates})
-input_type = {str(input_type)}
+input_type = "{str(input_type)}"
 backend_config = QMConfig(
     num_updates=num_updates.total_updates,
     input_type=input_type,
@@ -268,3 +249,6 @@ backend.update_compiler_from_target()
 run_data = iqcc.execute(
     prog, backend.qm_config, terminal_output=True, options={"sync_hook": sync_hook_path}
 )
+
+print("Job submitted successfully.")
+print(f"Run data: {run_data}")

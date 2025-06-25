@@ -12,7 +12,7 @@
 
 # pylint: disable=invalid-name
 
-""""Management of pulse program parameters.
+""" "Management of pulse program parameters.
 
 Background
 ==========

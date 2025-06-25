@@ -16,7 +16,7 @@ def substitute_target_gate(
     target_gate: Gate,
     parametrized_circuit_func: Callable,
     params: ParameterVector,
-    **kwargs
+    **kwargs,
 ):
     """
     Substitute a target gate in a circuit with a parametrized version of the gate.
@@ -70,7 +70,7 @@ class ORBIT:
                     q_env.target.gate,
                     q_env.parametrized_circuit_func,
                     q_env.parameters[0],
-                    **q_env._func_args
+                    **q_env._func_args,
                 )
                 for circuit in self.ref_interleaved_circuits
             ]

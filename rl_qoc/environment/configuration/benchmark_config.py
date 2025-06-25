@@ -13,7 +13,7 @@ class BenchmarkConfig:
         benchmark_cycle: benchmark_cycle (int, optional): Number of epochs between two fidelity benchmarking.
     """
 
-    benchmark_cycle: int = 1
+    benchmark_cycle: int = 0  # 0 means no benchmarking
     benchmark_batch_size: int = 1
     check_on_exp: bool = False
     tomography_analysis: str = "default"

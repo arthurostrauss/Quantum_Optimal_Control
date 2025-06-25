@@ -362,6 +362,8 @@ class ChannelReward(Reward):
         *args,
     ) -> QuantumCircuit:
 
+        if not isinstance(target, GateTarget):
+            raise ValueError("Channel reward can only be computed for a target gate")
         n_reps = env_config.current_n_reps
         all_n_reps = env_config.n_reps
 
