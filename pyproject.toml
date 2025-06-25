@@ -1,11 +1,14 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [project]
 name = "rl_qoc"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.12"
 description = "Reinforcement Learning for Quantum Optimal Control"
 readme = "README.md"
 authors = [
@@ -29,14 +32,13 @@ dependencies = [
     "qiskit_ibm_runtime>=0.40.1",
     "scipy",
     "tqdm",
-    "torch>=2.0.1+cpu",
     "gymnasium",
     "pyyaml",
     "optuna",
     "chardet",
     "tensorboard",
     "pylatexenc",
-    "wandb"
+    "wandb",
 ]
 
 [project.optional-dependencies]
@@ -63,14 +65,8 @@ qiskit-pulse = [
 qiskit-qm-provider = []
 oqc = []
 
-[tool.setuptools]
-packages = ["rl_qoc"]
-
 [tool.uv]
 prerelease = "allow"
 
-[tool.setuptools.package-data]
-rl_qoc = ["*.py"]
-
-[tool.setuptools.exclude-package-data]
-rl_qoc = ["gate_level/*", "pulse_level/*"]
+#[tool.setuptools.exclude-package-data]
+#rl_qoc = ["gate_level/*", "pulse_level/*"]
