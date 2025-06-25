@@ -1,10 +1,3 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [project]
 name = "rl_qoc"
 version = "0.1.0"
@@ -27,19 +20,35 @@ dependencies = [
     "matplotlib-inline",
     "jupyterlab",
     "qiskit",
-    "qiskit_aer",
-    "qiskit-experiments",
+    "qiskit_aer>=0.16.1",
+    "qiskit-experiments<0.9.0",
     "qiskit_ibm_runtime>=0.40.1",
-    "scipy",
-    "tqdm",
-    "gymnasium",
+    "scipy>=1.13.0",
+    "tqdm>=4.64.0",
+    "gymnasium>=0.29.1",
     "pyyaml",
     "optuna",
     "chardet",
     "tensorboard",
     "pylatexenc",
     "wandb",
+    "torch==2.7.1; sys_platform != 'linux'",
+    "torch==2.7.1+cpu ; sys_platform =='linux'",
 ]
+
+[tool.uv]
+prerelease = "allow"
+
+[tool.uv.pip]
+prerelease = "allow"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu"}
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [project.optional-dependencies]
 qibo = [
@@ -56,17 +65,20 @@ qua = [
     "qm-saas"
 ]
 qiskit-pulse = [
-    "qiskit-dynamics",
+    "qiskit-dynamics >= 0.5.0",
     "qiskit-experiments<=0.9.0",
     "qiskit<=1.4.3",
-    "jax",
-    "sympy2jax"
+    "jax<=0.4.34",
+    "sympy2jax>=0.0.5"
 ]
 qiskit-qm-provider = []
 oqc = []
 
-[tool.uv]
-prerelease = "allow"
 
-#[tool.setuptools.exclude-package-data]
-#rl_qoc = ["gate_level/*", "pulse_level/*"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
