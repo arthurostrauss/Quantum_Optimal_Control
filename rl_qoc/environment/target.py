@@ -604,6 +604,13 @@ class GateTarget(BaseTarget):
             self._bound_circuit_contexts[self._circuit_choice] = None
 
     @property
+    def unbound_circuit(self) -> QuantumCircuit:
+        """
+        Get the unbound circuit context for the target gate
+        """
+        return self._unbound_circuit_contexts[self._circuit_choice]
+
+    @property
     def has_context(self) -> bool:
         """
         Check if the target has a circuit context attached or if only composed of the target gate

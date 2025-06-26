@@ -27,7 +27,6 @@ from qiskit_qm_provider import (
     ParameterPool,
     QMBackend,
 )
-from qualang_tools.callable_from_qua import callable_from_qua, patch_qua_program_addons
 from ..rewards import CAFERewardDataList, ChannelRewardDataList, StateRewardDataList
 
 ALL_MEASUREMENTS_TAG = "measurements"
