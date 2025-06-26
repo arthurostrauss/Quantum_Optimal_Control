@@ -136,3 +136,9 @@ pulse_level/qiskit_pulse/CustomDynamicsBackend.json
 gate_level/spillover_noise_use_case/runs/
 
 gate_level/spillover_noise_use_case/use_case_x_gate/runs/
+
+pyrightconfig.json
+
+pulse_level/qua/quam_state/
+
+pulse_level/qua/quam_state_ref/
