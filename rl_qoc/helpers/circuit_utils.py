@@ -758,34 +758,25 @@ def group_input_paulis_by_qwc(input_paulis: PauliList, counts) -> List[PauliList
 
     return grouped
 
-def group_pauli_pairs_by_qwc(pauli_pairs: List[Tuple[Pauli, Pauli]], probabilities: List[float]) -> List[Tuple[PauliList, PauliList]]:
-    """Group Pauli pairs by qubit-wise commutation (QWC), sorted by descending importance.
-
-    Args:
-        pauli_pairs: List of Pauli pairs
-        probabilities: List of probabilities for each Pauli pair
-
-    Returns:
-        List of tuples containing (PauliList of input Paulis, PauliList of observable Paulis)
-        Each group is returned as a tuple of PauliList objects.
+def group_pauli_pairs_by_qwc(pauli_pairs: List[Tuple[Pauli, Pauli]]) -> List[Tuple[PauliList, PauliList]]:
     """
-    # Sort input Paulis by descending count importance
-    sorted_indices = sorted(range(len(probabilities)), key=lambda i: -probabilities[i])
-    sorted_pauli_pairs = [pauli_pairs[i] for i in sorted_indices]
+    Group pairs of Pauli operators by qubit-wise commutation (QWC). Sorting is assumed to be done a priori and the
+    group creation is done greedyly, i.e., the first pair is always added to the group, and then
+    later pairs are added if they commute with all existing pairs in the group.
+    """
 
-    grouped = []
-    while sorted_pauli_pairs:
-        ref = sorted_pauli_pairs.pop(0)
-        input_group = [ref[0]]
-        obs_group = [ref[1]]
-        to_remove = []
-        for i, other in enumerate(sorted_pauli_pairs):
-            if are_qubit_wise_commuting(ref[0], other[0]) and are_qubit_wise_commuting(ref[1], other[1]):
-                input_group.append(other[0])
-                obs_group.append(other[1])
-                to_remove.append(i)
-        for i in reversed(to_remove):
-            sorted_pauli_pairs.pop(i)
-        grouped.append((PauliList(input_group), PauliList(obs_group)))
+    groups = []
 
-    return grouped
+    for p1, p2 in pauli_pairs:
+        placed = False
+        for group_p1, group_p2 in groups:
+            if all(are_qubit_wise_commuting(p1, p1_) for p1_ in group_p1) and all(are_qubit_wise_commuting(p2, p2_) for p2_ in group_p2):
+                group_p1.append(p1)
+                group_p2.append(p2)
+                placed = True
+                break
+        if not placed:
+            groups.append(([p1], [p2]))
+
+    return [(PauliList(g1), PauliList(g2)) for g1, g2 in groups]  # Convert to PauliList
+

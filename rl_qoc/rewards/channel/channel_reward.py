@@ -126,7 +126,7 @@ class ChannelReward(Reward):
         pair_indices = [np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices]
         pauli_pairs = [(basis[i], basis[j]) for (i, j) in pair_indices]
     
-        grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs, probabilities)
+        grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
         grouped_indices = []
         for group in grouped_pauli_pairs:
             group_indices = [[], []]  # Prepare indices for each group
@@ -241,10 +241,12 @@ class ChannelReward(Reward):
 
                 obs_ = [p * o for p, o in zip(parity, obs_group)]
                 pub_obs = extend_observables(
-                    sum(obs_).simplify(), prep_circuit, target.causal_cone_qubits_indices
+                    SparsePauliOp.sum(obs_).simplify(), prep_circuit, target.causal_cone_qubits_indices
                 )
+                # Check if coeff array is all 0. If so, skip this pub
+                if np.all(pub_obs.coeffs <= 1e-6):
+                    continue
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
-
                 # Add PUB
                 pub = (
                     prep_circuit,
@@ -262,7 +264,7 @@ class ChannelReward(Reward):
                         target.causal_cone_qubits_indices,
                         pauli_rep,
                         extended_prep_indices,
-                        observables_to_indices(sum(obs_).simplify()),
+                        observables_to_indices(SparsePauliOp.sum(obs_).simplify()),
                     )
                 )
 
