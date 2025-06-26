@@ -266,7 +266,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             fetching_index=fetching_index,
             fetching_size=fetching_size,
             verbosity=self.qm_backend_config.verbosity,
-            time_out=self.backend.options.timeout,
+            time_out=self.qm_backend_config.timeout,
         )
 
         # The counts are a flattened list of counts from the initial shape (max_input_state, max_observables, batch_size)

@@ -26,6 +26,7 @@ class QMConfig(BackendConfig):
     num_updates: int = 1000
     compiler_options: Optional[CompilerOptionArguments] = None
     opnic_dev_path: str = "/home/dpoulos/opnic-dev"
+    timeout: int = 60
 
     @property
     def config_type(self):

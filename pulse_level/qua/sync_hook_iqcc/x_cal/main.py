@@ -24,8 +24,10 @@ from rl_qoc import (
     BenchmarkConfig,
     StateTarget,
     GateTarget,
+    PPOConfig,
 )
 from rl_qoc.helpers import add_custom_gate
+from rl_qoc.helpers import load_from_yaml_file
 from iqcc_cloud_client import IQCC_Cloud
 import json
 import os
@@ -52,6 +54,7 @@ if not machine.active_qubits[0].macros:
     add_basic_macros_to_machine(machine)
 backend = FluxTunableTransmonBackend(machine)
 
+ppo_config = load_from_yaml_file("agent_config.yaml")
 
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: List[Parameter], q_reg: QuantumRegister, **kwargs
@@ -161,6 +164,8 @@ from rl_qoc import (
     GateTarget,
     StateTarget,
     ChannelReward,
+    StateReward,
+    CAFEReward,
     ExecutionConfig,
     QEnvConfig,
     BenchmarkConfig,
@@ -170,7 +175,7 @@ from gymnasium.spaces import Box
 
 job = get_qm_job()
 {target_initialization_code}
-reward = ChannelReward()
+reward = {reward.__class__.__name__}()  # Use the class name to instantiate the reward
 
 # Action space specification
 param_bounds = {param_bounds}  # Can be any number of bounds
@@ -215,7 +220,7 @@ q_env_config = QEnvConfig(
 )
 q_env = QMEnvironment(q_env_config, job=job)
 rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
-ppo_config = PPOConfig()
+ppo_config = PPOConfig.from_dict({ppo_config})
 
 ppo_agent = CustomQMPPO(ppo_config, rescaled_env)
 
