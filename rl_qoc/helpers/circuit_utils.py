@@ -92,12 +92,13 @@ def add_custom_gate(
     instruction_properties: Optional[InstructionProperties] = None,
 ) -> QuantumCircuit:
     """
-    Add a custom gate to the Quantum Circuit and register it in the backend target.
+    Add a custom gate to the Quantum Circuit and register it in the backend target for the specified physical qubits
+    (if provided).
     Args:
         qc: Quantum Circuit to which the gate is to be added
         gate: Gate to be added (can be a Gate, QuantumCircuit, or string name of the gate)
-        qubits: Qubits on which the gate is to be applied
-        parameters: Parameters for the gate (if applicable)
+        qubits: Virtual qubits on which the gate is to be applied (within qc.qubits)
+        parameters: Parameters of the gate (if applicable, e.g., for parametrized gates)
         physical_qubits: Physical qubits on which the gate is to be applied (if applicable)
         backend: Backend instance to register the gate in the target
         instruction_properties: Instruction properties for the gate (if applicable)
@@ -114,10 +115,27 @@ def add_custom_gate(
                 f"QuantumCircuit gate must have {len(qubits)} qubits, but has {gate.num_qubits}."
             )
         gate = gate.to_gate()
-
+    validate_qubits(qc, qubits)
     qc.append(gate, qubits)
 
-    if instruction_properties and hasattr(instruction_properties, "qua_pulse_macro"):
+    if instruction_properties:
+        validate_qm_instruction_properties(instruction_properties, parameters)
+    if backend is not None and physical_qubits is not None:
+        if gate.name not in backend.target.operation_names:
+            backend.target.add_instruction(gate, {tuple(physical_qubits): instruction_properties})
+        else:
+            backend.target.update_instruction_properties(
+                gate.name, tuple(physical_qubits), instruction_properties
+            )
+    return qc
+
+
+def validate_qm_instruction_properties(
+    instruction_properties: InstructionProperties,
+    parameters: ParameterVector | List[Parameter] | List[float],
+):
+    # Validate the qua_pulse_macro if provided
+    if hasattr(instruction_properties, "qua_pulse_macro"):
         qua_pulse_macro = instruction_properties.qua_pulse_macro
         if qua_pulse_macro:
             if not callable(qua_pulse_macro):
@@ -128,14 +146,25 @@ def add_custom_gate(
                 raise ValueError(
                     "Mismatch between expected and provided parameters for the QUA macro."
                 )
-    if backend is not None and physical_qubits is not None:
-        if gate.name not in backend.target.operation_names:
-            backend.target.add_instruction(gate, {tuple(physical_qubits): instruction_properties})
-        else:
-            backend.target.update_instruction_properties(
-                gate.name, tuple(physical_qubits), instruction_properties
+
+
+def validate_qubits(qc: QuantumCircuit, qubits: QuantumRegister | Sequence[Qubit | int]):
+    """
+    Validate that the specified qubits are part of the QuantumCircuit.
+    """
+    if isinstance(qubits, QuantumRegister):
+        if not all(q in qc.qubits for q in qubits):
+            raise ValueError(
+                "All qubits in the QuantumRegister must be part of the QuantumCircuit."
             )
-    return qc
+    elif isinstance(qubits, Sequence) and all(isinstance(q, Qubit) for q in qubits):
+        if not all(q in qc.qubits for q in qubits):
+            raise ValueError("All qubits in the sequence must be part of the QuantumCircuit.")
+    elif isinstance(qubits, Sequence) and all(isinstance(q, int) for q in qubits):
+        if any(q < 0 or q >= qc.num_qubits for q in qubits):
+            raise ValueError(
+                "All qubit indices in the sequence must be within the range of the QuantumCircuit."
+            )
 
 
 def causal_cone_circuit(
