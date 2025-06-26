@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-from oqc import CompilationResult
 from qiskit.quantum_info import SparsePauliOp
 from qiskit.circuit import QuantumCircuit, Parameter
 from qiskit.primitives.containers.bit_array import BitArray
@@ -44,7 +43,7 @@ RewardDataType = Union[CAFERewardDataList, ChannelRewardDataList, StateRewardDat
 #     print(text)
 
 
-def _get_state_int(qc: QuantumCircuit, result: CompilationResult, state_int: QuaVariableInt):
+def _get_state_int(qc: QuantumCircuit, result, state_int: QuaVariableInt):
     for c, clbit in enumerate(qc.clbits):
         bit = qc.find_bit(clbit)
         if len(bit.registers) == 0:
