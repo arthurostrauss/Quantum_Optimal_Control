@@ -20,7 +20,8 @@ from rl_qoc.agent.ppo_config import (
 )
 from rl_qoc import (
     RescaleAndClipAction,
-    GateTargetConfig,
+    GateTarget,
+    StateTarget,
     ChannelReward,
     StateReward,
     CAFEReward,
@@ -92,7 +93,9 @@ def apply_parametrized_circuit(
         qubit: Transmon = backend.get_qubit(physical_qubits[0])
         qubit.xy.play("x180", amplitude_scale=amp)
 
-    instruction_prop = QMInstructionProperties(qua_pulse_macro=qua_macro)
+    x_duration = backend.target["x"][tuple(physical_qubits)].duration
+    instruction_prop = QMInstructionProperties(duration=x_duration,
+                                               qua_pulse_macro=qua_macro)
     backend.target.add_instruction(custom_x, {tuple(physical_qubits): instruction_prop})
     return qc
 
@@ -104,9 +107,11 @@ def apply_parametrized_circuit(
 # 2. Choose which reward scheme you want. You can choose among three methods that are carefully implemented within the QOP: Direct Channel/State Fidelity Estimation (DFE), and Context-Aware Fidelity Estimation (CAFE)
 # %%
 physical_qubits = (0,)
-target_gate = "x"
-gate_target = GateTargetConfig(physical_qubits, gate=target_gate)
-reward = ChannelReward()
+# target_gate = "x"
+# target = GateTarget(physical_qubits, gate=target_gate)
+target_state = '1'
+target = StateTarget(state=target_state, physical_qubits=physical_qubits)
+reward = StateReward()
 # %% md
 # 3. Decide which action space to create
 # 4. Decide how the parameters should be passed to the QOP (Choose between Input Stream, DGX Quantum, IO variables)
@@ -153,7 +158,7 @@ execution_config = ExecutionConfig(
     control_flow_enabled=True,
 )
 q_env_config = QEnvConfig(
-    target=gate_target,
+    target=target,
     backend_config=backend_config,
     action_space=action_space,
     execution_config=execution_config,
@@ -164,21 +169,11 @@ q_env_config = QEnvConfig(
 q_env = QMEnvironment(training_config=q_env_config)
 rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
 # %%
-q_env.real_time_circuit.draw("mpl")
-# %%
-q_env.real_time_transpiled_circuit.draw("mpl")
-# %%
-print(backend.target)
-# %%
-from qm import generate_qua_script
-
-print(generate_qua_script(q_env.rl_qoc_training_qua_prog()))
-# %%
 ppo_config = PPOConfig.from_yaml("agent_config.yaml")
 ppo_agent = CustomQMPPO(ppo_config, rescaled_env)
 
 ppo_training = TrainingConfig(num_updates)
-ppo_settings = TrainFunctionSettings(plot_real_time=True, print_debug=True)
+ppo_settings = TrainFunctionSettings(plot_real_time=False, print_debug=True)
 # %%
 job = q_env.start_program()
 # %%
@@ -186,10 +181,7 @@ print(job.status)
 # %%
 results = ppo_agent.train()
 # %%
-# %%
-q_env.qm_job
-# %%
 q_env.close()
 # %%
-q_env.backend.qm.get_jobs(status=["Running"])
 # %%
+print(json.dumps(results, indent=4))

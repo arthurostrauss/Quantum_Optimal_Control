@@ -10,6 +10,8 @@ from rl_qoc import (
     GateTarget,
     StateTarget,
     ChannelReward,
+    StateReward,
+    CAFEReward,
     ExecutionConfig,
     QEnvConfig,
     BenchmarkConfig,
@@ -20,10 +22,11 @@ from gymnasium.spaces import Box
 job = get_qm_job()
 
 physical_qubits = (0,)
-target_state = np.array([[0.0 + 0.0j, 0.0 + 0.0j], [0.0 + 0.0j, 1.0 + 0.0j]], dtype=complex)
+target_state = np.array([[0.+0.j, 0.+0.j],
+ [0.+0.j, 1.+0.j]], dtype=complex)
 target = StateTarget(state=target_state, physical_qubits=physical_qubits)
 
-reward = ChannelReward()
+reward = StateReward()  # Use the class name to instantiate the reward
 
 # Action space specification
 param_bounds = [(-1.98, 2.0)]  # Can be any number of bounds
@@ -68,7 +71,7 @@ q_env_config = QEnvConfig(
 )
 q_env = QMEnvironment(q_env_config, job=job)
 rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
-ppo_config = PPOConfig()
+ppo_config = PPOConfig.from_dict({'WANDB_CONFIG': {'ENABLED': False, 'PROJECT': None, 'ENTITY': None, 'API_KEY': None}, 'RUN_NAME': 'test', 'OPTIMIZER': 'adam', 'NUM_UPDATES': 1, 'N_EPOCHS': 8, 'MINIBATCH_SIZE': 16, 'LEARNING_RATE': 0.0005, 'GAMMA': 0.99, 'GAE_LAMBDA': 0.95, 'ENTROPY_COEF': 0.05, 'VALUE_LOSS_COEF': 0.5, 'GRADIENT_CLIP': 0.5, 'CLIP_VALUE_LOSS': True, 'CLIP_VALUE_COEF': 0.2, 'CLIP_RATIO': 0.2, 'INPUT_ACTIVATION_FUNCTION': 'identity', 'HIDDEN_lAYERS': [64, 64], 'HIDDEN_ACTIVATION_FUNCTIONS': ['tanh', 'tanh'], 'OUTPUT_ACTIVATION_MEAN': 'tanh', 'OUTPUT_ACTIVATION_STD': 'sigmoid', 'INCLUDE_CRITIC': True, 'NORMALIZE_ADVANTAGE': True})
 
 ppo_agent = CustomQMPPO(ppo_config, rescaled_env)
 
