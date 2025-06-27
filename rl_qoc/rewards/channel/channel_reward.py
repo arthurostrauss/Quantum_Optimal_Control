@@ -115,12 +115,15 @@ class ChannelReward(Reward):
         Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
         cutoff = 1e-4  # Cutoff for negligible probabilities
         non_zero_indices = np.nonzero(np.abs(Chi) > cutoff)[0]
+        # Remove index 0 from non_zero_indices as it corresponds to the identity Pauli
+        non_zero_indices = non_zero_indices[non_zero_indices != 0]
         probabilities = Chi**2 / (dim**2)
         probabilities = probabilities[non_zero_indices]  # Filter out zero probabilities
         probabilities /= np.sum(probabilities)
         basis = pauli_basis(num_qubits=n_qubits)
         basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
+        id_coeff = c_factor * (Chi[0] /dim) # Coefficient for the identity Pauli
         sorted_indices = np.argsort(probabilities)[::-1]
         non_zero_indices = non_zero_indices[sorted_indices]
         pair_indices = [np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices]
@@ -139,6 +142,7 @@ class ChannelReward(Reward):
 
         grouped_Chi = [Chi[np.ravel_multi_index(indices, (dim**2, dim**2))] for indices in grouped_indices]
         grouped_probabilities = [np.sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_Chi]
+        grouped_probabilities = np.array(grouped_probabilities)/ np.sum(grouped_probabilities)
         
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
@@ -201,6 +205,7 @@ class ChannelReward(Reward):
                 if shots == 0:
                     continue
                 inputs = np.unravel_index(pure_eig_state, (2,) * n_qubits)
+                inputs = tuple(int(i) for i in inputs)  # Convert to tuple for indexing
                 parity = [
                     np.prod(
                         [
@@ -262,13 +267,13 @@ class ChannelReward(Reward):
                         obs_,
                         n_reps,
                         target.causal_cone_qubits_indices,
-                        pauli_rep,
+                        prep_group,
                         extended_prep_indices,
                         observables_to_indices(SparsePauliOp.sum(obs_).simplify()),
                     )
                 )
 
-        reward_data = ChannelRewardDataList(reward_data, pauli_sampling, 0)
+        reward_data = ChannelRewardDataList(reward_data, pauli_sampling, id_coeff)
         return reward_data
 
     def get_reward_with_primitive(
@@ -280,11 +285,12 @@ class ChannelReward(Reward):
         Retrieve the reward from the PUBs and the primitive
         """
         job = estimator.run(reward_data.pubs)
+        dim = 2**reward_data.num_qubits
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward += reward_data.id_coeff
+        reward *= (dim**2-1)/dim**2
         reward /= reward_data.pauli_sampling
-        dim = 2**reward_data.num_qubits
+        reward += reward_data.id_coeff
         reward = (dim * reward + 1) / (dim + 1)
 
         return reward
