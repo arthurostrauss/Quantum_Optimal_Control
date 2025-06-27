@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import signal
-from typing import Callable, Any, Optional, List, Literal
+from typing import Callable, Any, Optional, List, Literal, Sequence
 import numpy as np
 from gymnasium import Env
 from gymnasium.core import ObsType
@@ -65,6 +65,8 @@ from ..helpers.helper_functions import (
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
 from ..rewards.reward_data import RewardDataList
+
+rewards = Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity"]
 
 
 class BaseQuantumEnvironment(ABC, Env):
@@ -166,73 +168,90 @@ class BaseQuantumEnvironment(ABC, Env):
         self,
         params: np.array,
         execution_config: Optional[ExecutionConfig] = None,
+        reward_method: Optional[Sequence[rewards]] = None,
         fit_function: Optional[Callable] = None,
         inverse_fit_function: Optional[Callable] = None,
-        update_fit_params: bool = True,
-        reward_method: Optional[
-            Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity"]
-        ] = None,
-    ) -> plt.Figure:
+        update_fit_params: Optional[rewards] = None,
+    ):
         """
         Method to fit the initial reward function to the first set of actions in the environment
-        with respect to the number of repetitions of the cycle circuit
-        """
+        with respect to the number of repetitions of the cycle circuit. Plots the fit and the data points.
 
+        Args:
+            params: Action parameters to fit the initial reward function
+            execution_config: Execution configuration to use for the fit
+            reward_method: Reward method(s) to plot
+            fit_function: Function to fit the data points (default is a quadratic function)
+            inverse_fit_function: Function to compute the inverse of the fit function
+            update_fit_params: Method from which to update the fit parameters (e.g., "cafe", "channel", "state")
+
+        """
+        fig, ax = plt.subplots()
+        ax.set_title("Initial reward fit (for varying number of repetitions)")
+        ax.set_xlabel("Number of repetitions")
+        ax.set_ylabel("Reward")
         initial_execution_config = self.config.execution_config
         initial_reward_method = self.config.reward_method
         if execution_config is not None:
             self.config.execution_config = execution_config
         if reward_method is not None:
-            self.config.reward_method = reward_method
+            if isinstance(reward_method, str):
+                reward_method = [reward_method]
+
+        else:
+            reward_method = [self.config.reward_method]
         reward_data = []
-        for i in range(len(self.config.execution_config.n_reps)):
-            self.config.execution_config.n_reps_index = i
-            print("Number of repetitions:", self.n_reps)
-            reward = self.perform_action(params, update_env_history=False)
-            reward_data.append(np.mean(reward))
-        if fit_function is None or inverse_fit_function is None:
+        for m, method in enumerate(reward_method):
+            reward_data.append([])
+            self.config.reward_method = method
+            for i in range(len(self.config.execution_config.n_reps)):
+                self.config.execution_config.n_reps_index = i
+                print("Number of repetitions:", self.n_reps)
+                reward = self.perform_action(params, update_env_history=False)
+                reward_data[m].append(np.mean(reward))
+            if fit_function is None or inverse_fit_function is None:
 
-            def fit_function(n, spam, eps_lin, eps_quad):
-                return 1 - spam - eps_lin * n - eps_quad * n**2
+                def fit_function(n, spam, eps_lin, eps_quad):
+                    return 1 - spam - eps_lin * n - eps_quad * n**2
 
-            def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
-                return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
+                def inverse_fit_function(reward, n, spam, eps_lin, eps_quad):
+                    return reward + eps_lin * (n - 1) + eps_quad * (n**2 - 1)
 
-        p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
-        lower_bounds = [0.0, 0.0, 0.0]
-        upper_bounds = [0.1, 0.2, 0.1]
+            p0 = [0.0, 0.0, 0.0]  # Initial guess for the parameters
+            lower_bounds = [0.0, 0.0, 0.0]
+            upper_bounds = [0.1, 0.2, 0.1]
 
-        popt, pcov = curve_fit(
-            fit_function,
-            self.config.execution_config.n_reps,
-            reward_data,
-            p0=p0,
-            bounds=(lower_bounds, upper_bounds),
-        )
+            popt, pcov = curve_fit(
+                fit_function,
+                self.config.execution_config.n_reps,
+                reward_data[m],
+                p0=p0,
+                bounds=(lower_bounds, upper_bounds),
+            )
 
-        # Create a figure and return it to the user
-        fig, ax = plt.subplots()
-        ax.plot(self.config.execution_config.n_reps, reward_data, label="Data", marker="o")
-        ax.plot(
-            self.config.execution_config.n_reps,
-            [fit_function(n, *popt) for n in self.config.execution_config.n_reps],
-            label="Fit",
-        )
-        ax.set_xlabel("Number of repetitions")
-        ax.set_ylabel("Reward")
-        ax.legend()
-        ax.set_title("Initial reward fit (for varying number of repetitions)")
-        # Print found parameters
-        print("Found parameters:", popt)
+            ax.plot(
+                self.config.execution_config.n_reps,
+                reward_data[m],
+                label=f"Data ({method})",
+                marker="o",
+            )
+            ax.plot(
+                self.config.execution_config.n_reps,
+                [fit_function(n, *popt) for n in self.config.execution_config.n_reps],
+                label=f"Fit ({method})",
+            )
+            ax.legend()
+
+            # Print found parameters
+            print(f"Found parameters ({method} method):", popt)
+            if update_fit_params == method:
+                self._fit_function = lambda reward, n: inverse_fit_function(reward, n, *popt)
+                self._fit_params = popt
 
         if execution_config is not None:
             self.config.execution_config = initial_execution_config
-        if reward_method is not None:
-            self.config.reward_method = initial_reward_method
-        if update_fit_params:
-            self._fit_function = lambda reward, n: inverse_fit_function(reward, n, *popt)
-            self._fit_params = popt
-        return fig
+
+        self.config.reward_method = initial_reward_method
 
     def perform_action(self, actions: np.array, update_env_history: bool = True):
         """
