@@ -56,6 +56,7 @@ backend = FluxTunableTransmonBackend(machine)
 
 ppo_config = load_from_yaml_file("agent_config.yaml")
 
+
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: List[Parameter], q_reg: QuantumRegister, **kwargs
 ):
@@ -137,11 +138,10 @@ def generate_sync_hook():
     target_initialization_code = ""
 
     if isinstance(target, GateTarget):
-        target_initialization_code = f""" 
-        physical_qubits = {physical_qubits}
-        target_name = "{target.gate}"
-        target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
-        """
+        target_initialization_code = f"""physical_qubits = {physical_qubits}
+target_name = "{target.gate.name}"
+target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
+"""
     elif isinstance(target, StateTarget):
         # Convertir l'état cible en chaîne de caractères pour le code généré
         state_str = np.array2string(
@@ -175,7 +175,7 @@ from gymnasium.spaces import Box
 
 job = get_qm_job()
 {target_initialization_code}
-reward = {reward.__class__.__name__}()  # Use the class name to instantiate the reward
+reward = {reward.__class__.__name__}() 
 
 # Action space specification
 param_bounds = {param_bounds}  # Can be any number of bounds
@@ -192,6 +192,7 @@ backend_config = QMConfig(
     num_updates=num_updates.total_updates,
     input_type=input_type,
     verbosity=2,
+    timeout={backend_config.timeout}
 )
 
 execution_config = ExecutionConfig(

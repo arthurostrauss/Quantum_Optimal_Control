@@ -98,21 +98,17 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.config,
             skip_transpilation=True,
         )
-        self.input_state_vars = ParameterTable.from_qiskit(
+        self.input_state_vars: Optional[ParameterTable] = ParameterTable.from_qiskit(
             self.real_time_circuit,
             input_type=self.input_type,
             filter_function=lambda x: "input" in x.name,
             name="input_state_vars",
         )
-        self.observable_vars: Optional[ParameterTable] = (
-            ParameterTable.from_qiskit(
-                self.real_time_circuit,
-                input_type=self.input_type,
-                filter_function=lambda x: "observable" in x.name,
-                name="observable_vars",
-            )
-            if self.config.dfe
-            else None
+        self.observable_vars: Optional[ParameterTable] = ParameterTable.from_qiskit(
+            self.real_time_circuit,
+            input_type=self.input_type,
+            filter_function=lambda x: "observable" in x.name,
+            name="observable_vars",
         )
 
         self.n_reps_var: Optional[QuaParameter] = (
@@ -126,7 +122,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             else None
         )
 
-        self.real_time_circuit_parameters = ParameterTable.from_qiskit(
+        self.real_time_circuit_parameters: Optional[ParameterTable] = ParameterTable.from_qiskit(
             self.real_time_circuit,
             input_type=None,
             filter_function=lambda x: isinstance(x, Parameter),

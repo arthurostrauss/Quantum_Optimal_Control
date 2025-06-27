@@ -276,7 +276,10 @@ class CAFEReward(Reward):
             with qc.switch(input_state_vars[q]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):
-                        qc.compose(input_circuit, qubit, inplace=True)
+                        if input_circuit.data:
+                            qc.compose(input_circuit, qubit, inplace=True)
+                        else:
+                            qc.delay(16, qubit)
 
         if len(prep_circuits) > 1:  # Switch over possible contexts
             circuit_choice = qc.add_input("circuit_choice", Uint(8))
@@ -327,40 +330,55 @@ class CAFEReward(Reward):
                                 with qc.switch(n_reps_var) as case_n_reps:
                                     for j, n in enumerate(all_n_reps):
                                         with case_n_reps(n):
-                                            qc.compose(
-                                                inverse_circuit[j],
-                                                target.causal_cone_qubits,
-                                                inplace=True,
-                                            )
+                                            if inverse_circuit[j].data:
+                                                qc.compose(
+                                                    inverse_circuit[j],
+                                                    target.causal_cone_qubits,
+                                                    inplace=True,
+                                                )
+                                            else:
+                                                qc.delay(16, target.causal_cone_qubits)
                             else:
-                                qc.compose(
-                                    inverse_circuit[0],
-                                    target.causal_cone_qubits,
-                                    inplace=True,
-                                )
+                                if inverse_circuit[0].data:
+                                    qc.compose(
+                                        inverse_circuit[0],
+                                        target.causal_cone_qubits,
+                                        inplace=True,
+                                    )
+                                else:
+                                    qc.delay(16, target.causal_cone_qubits)
             else:
                 if len(all_n_reps) > 1:
                     with qc.switch(n_reps_var) as case_n_reps:
                         for j, n in enumerate(all_n_reps):
                             with case_n_reps(n):
-                                qc.compose(
-                                    cycle_circuit_inverses[0][j],
-                                    target.causal_cone_qubits,
-                                    inplace=True,
-                                )
+                                if cycle_circuit_inverses[0][j].data:
+                                    qc.compose(
+                                        cycle_circuit_inverses[0][j],
+                                        target.causal_cone_qubits,
+                                        inplace=True,
+                                    )
+                                else:
+                                    qc.delay(16, target.causal_cone_qubits)
                 else:
-                    qc.compose(
-                        cycle_circuit_inverses[0][0],
-                        target.causal_cone_qubits,
-                        inplace=True,
-                    )
+                    if cycle_circuit_inverses[0][0].data:
+                        qc.compose(
+                            cycle_circuit_inverses[0][0],
+                            target.causal_cone_qubits,
+                            inplace=True,
+                        )
+                    else:
+                        qc.delay(16, target.causal_cone_qubits)
 
             # Revert the input state prep
             for q, qubit in enumerate(target.causal_cone_qubits):
                 with qc.switch(input_state_vars[q]) as case_input_state:
                     for i, input_circuit in enumerate(input_state_inverses):
                         with case_input_state(i):
-                            qc.compose(input_circuit, qubit, inplace=True)
+                            if input_circuit.data:
+                                qc.compose(input_circuit, qubit, inplace=True)
+                            else:
+                                qc.delay(16, qubit)
         # Measure the causal cone qubits
         qc.measure(target.causal_cone_qubits, meas)
 

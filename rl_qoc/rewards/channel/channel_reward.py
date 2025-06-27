@@ -397,7 +397,10 @@ class ChannelReward(Reward):
             with qc.switch(input_state_vars[q]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):
-                        qc.compose(input_circuit, qubit, inplace=True)
+                        if input_circuit.data:
+                            qc.compose(input_circuit, qubit, inplace=True)
+                        else:
+                            qc.delay(16, qubit)
 
         if len(prep_circuits) > 1:  # Switch over possible contexts
             circuit_choice = qc.add_input("circuit_choice", Uint(8))
@@ -413,12 +416,15 @@ class ChannelReward(Reward):
         for q, qubit in enumerate(target.causal_cone_qubits):
             with qc.switch(observables_vars[q]) as case_observable:
                 for i in range(3):
+                    basis_rot_circuit = (
+                        meas_basis.circuit([i]).decompose().remove_final_measurements(False)
+                    )
                     with case_observable(i):
-                        qc.compose(
-                            meas_basis.circuit([i]).decompose().remove_final_measurements(False),
-                            qubit,
-                            inplace=True,
-                        )
+                        if basis_rot_circuit.data:
+                            # Apply the measurement basis circuit to the qubit
+                            qc.compose(basis_rot_circuit, qubit, inplace=True)
+                        else:
+                            qc.delay(16, qubit)
 
         # Measurement
         qc.measure(target.causal_cone_qubits, meas)

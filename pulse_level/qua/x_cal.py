@@ -94,8 +94,7 @@ def apply_parametrized_circuit(
         qubit.xy.play("x180", amplitude_scale=amp)
 
     x_duration = backend.target["x"][tuple(physical_qubits)].duration
-    instruction_prop = QMInstructionProperties(duration=x_duration,
-                                               qua_pulse_macro=qua_macro)
+    instruction_prop = QMInstructionProperties(duration=x_duration, qua_pulse_macro=qua_macro)
     backend.target.add_instruction(custom_x, {tuple(physical_qubits): instruction_prop})
     return qc
 
@@ -109,7 +108,7 @@ def apply_parametrized_circuit(
 physical_qubits = (0,)
 # target_gate = "x"
 # target = GateTarget(physical_qubits, gate=target_gate)
-target_state = '1'
+target_state = "1"
 target = StateTarget(state=target_state, physical_qubits=physical_qubits)
 reward = StateReward()
 # %% md
@@ -179,7 +178,7 @@ job = q_env.start_program()
 # %%
 print(job.status)
 # %%
-results = ppo_agent.train()
+results = ppo_agent.train(ppo_training, ppo_settings)
 # %%
 q_env.close()
 # %%
