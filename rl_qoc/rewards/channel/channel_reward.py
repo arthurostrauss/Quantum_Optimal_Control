@@ -184,20 +184,26 @@ class ChannelReward(Reward):
 
       
         reward_data = []
-        for (prep_group, obs_group), c in zip(sampled_grouped_pauli_pairs, counts):
+        for g, group_info in enumerate(zip(sampled_grouped_pauli_pairs, counts)):
             # Each prep is a Pauli that we need to decompose in its pure eigenbasis.
             # Below, we select at random a subset of pure input states to prepare for each prep
             # If nb_states = dim, we prepare all pure input states for each Pauli prep (no random selection)
-
+            (prep_group, obs_group), c = group_info
             selected_input_states, counts_input_states = np.unique(
                 self.input_states_rng.choice(dim, size=c), return_counts=True
             )
             # Build representative of qubit-wise commuting Pauli group (the one with the highest weight)
             pauli_rep = Pauli((np.logical_or.reduce(prep_group.z), np.logical_or.reduce(prep_group.x)))
             prep_label = [pauli.to_label() for pauli in prep_group]
-            dedicated_shots = (
-                counts_input_states * n_shots
-            )  # Number of shots per Pauli eigenstate (divided equally)
+            if dfe_precision is None:
+                dedicated_shots = (
+                    counts_input_states * n_shots
+                )  # Number of shots per Pauli eigenstate (divided equally)
+            else:
+                dedicated_shots = 2 * np.log(2/delta) / (pauli_sampling * eps**2)
+                dedicated_shots *= np.sum(grouped_Chi[sampled_group_indices[g]]) ** 2
+                dedicated_shots /= np.sum(grouped_Chi[sampled_group_indices[g]] ** 2) **2
+
 
             for pure_eig_state, shots in zip(selected_input_states, dedicated_shots):
                 # Convert input state to Pauli6 basis:
@@ -228,7 +234,6 @@ class ChannelReward(Reward):
                 input_circuit, extended_prep_indices = extend_input_state_prep(
                     input_circuit, qc, target, prep_indices
                 )  # Add random input state on other qubits
-                prep_indices = tuple(prep_indices)
                 input_circuit.metadata["indices"] = extended_prep_indices
                 # Prepend input state to custom circuit with front composition
                 prep_circuit = repeated_circuit.compose(
@@ -237,7 +242,7 @@ class ChannelReward(Reward):
                     inplace=False,
                 )
                 # Transpile circuit to decompose input state preparation
-                prep_circuit = backend_info.custom_transpile(
+                prep_circuit: QuantumCircuit = backend_info.custom_transpile(
                     prep_circuit,
                     initial_layout=target.layout,
                     scheduling=False,
