@@ -1,4 +1,4 @@
-from typing import List, Union, Sequence
+from typing import List, Union, Sequence, Optional
 
 from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.parametervector import (
@@ -7,9 +7,10 @@ from qiskit.circuit.parametervector import (
     ParameterVector,
 )
 
-from qm.qua import declare, assign, while_, if_, fixed, Cast, Util
+from qm.qua import declare, assign, while_, if_, fixed, Cast, Util, for_, Random
 
 import numpy as np
+from qm.qua._expressions import QuaArrayVariable
 from quam.components.quantum_components import Qubit, QubitPair
 from quam.utils.qua_types import QuaVariableInt, Scalar, ScalarInt
 
@@ -74,20 +75,31 @@ def get_gaussian_sampling_input():
     return n_lookup, cos_array, ln_array
 
 
-def rand_gauss_moller_box(z1, z2, mean, std, rand):
+def rand_gauss_moller_box(mean: QuaArrayVariable,
+                          std: QuaArrayVariable,
+                          rand: Random,
+                          z1: QuaArrayVariable,
+                          z2: QuaArrayVariable,
+                          lower_bound: Optional[QuaArrayVariable]=None,
+                          upper_bound: Optional[QuaArrayVariable]=None) -> (QuaArrayVariable, QuaArrayVariable):
     """
     Return two random numbers using muller box
     """
     n_lookup, cos_array, ln_array = get_gaussian_sampling_input()
-
-    tmp = declare(fixed)
+    i = declare(int)
     u1 = declare(int)
     u2 = declare(int)
-    assign(tmp, rand.rand_fixed())
-    assign(u1, Cast.unsafe_cast_int(tmp >> 19))
-    assign(u2, Cast.unsafe_cast_int(tmp) & ((1 << 19) - 1))
-    assign(z1, mean + std * ln_array[u1] * cos_array[u2 & (n_lookup - 1)])
-    assign(z2, mean + std * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)])
+    u = declare(fixed)
+    with for_(i, 0, i<mean.length(), i + 1):
+        assign(u, rand.rand_fixed())
+        assign(u1, Cast.unsafe_cast_int(u >> 19))
+        assign(u2, Cast.unsafe_cast_int(u) & ((1 << 19) - 1))
+        assign(z1[i], mean[i] + std[i] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)])
+        assign(z2[i], mean[i] + std[i] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)])
+        if lower_bound is not None and upper_bound is not None:
+            clip_qua(z1[i], lower_bound[i], upper_bound[i])
+            clip_qua(z2[i], lower_bound[i], upper_bound[i])
+
     return z1, z2
 
 

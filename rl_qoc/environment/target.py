@@ -141,7 +141,7 @@ class StateTarget(BaseTarget):
 
     def __init__(
         self,
-        state: DensityMatrix | Statevector | QuantumCircuit | str,
+        state: DensityMatrix | Statevector | QuantumCircuit | str | np.ndarray,
         physical_qubits: Optional[Sequence[int]] = None,
     ):
         """
@@ -162,25 +162,26 @@ class StateTarget(BaseTarget):
                 tgt_register = QuantumRegister(state.num_qubits, "tgt")
                 self.circuit = QuantumCircuit(tgt_register)
                 self.circuit.prepare_state(state)
-        else:
-            try:  # Try to convert to DensityMatrix
-                state = DensityMatrix(state)
-            except Exception as e:
-                raise ValueError("Input could not be converted to DensityMatrix") from e
-            if not isinstance(state, DensityMatrix):
-                raise ValueError(
-                    "State should be a DensityMatrix, Statevector or QuantumCircuit object"
-                )
-            if state.num_qubits != len(physical_qubits):
-                raise ValueError(
-                    "Number of qubits in the state should match the number of physical qubits"
-                )
-            if state.purity() - 1 > 1e-6:
-                raise ValueError("Density matrix should be pure")
+        elif isinstance(state, DensityMatrix):
             self.dm = state
             tgt_register = QuantumRegister(self.dm.num_qubits, "tgt")
             self.circuit = QuantumCircuit(tgt_register)
             self.circuit.prepare_state(density_matrix_to_statevector(state))
+        else:
+            try:  # Try to convert to DensityMatrix
+                state = DensityMatrix(state)
+                if physical_qubits is not None and state.num_qubits != len(physical_qubits):
+                    raise ValueError(
+                        "Number of qubits in the state should match the number of physical qubits"
+                    )
+                if state.purity() - 1 > 1e-6:
+                    raise ValueError("Density matrix should be pure")
+                self.dm = state
+                tgt_register = QuantumRegister(self.dm.num_qubits, "tgt")
+                self.circuit = QuantumCircuit(tgt_register)
+                self.circuit.prepare_state(density_matrix_to_statevector(state))
+            except Exception as e:
+                raise ValueError("Input could not be converted to DensityMatrix") from e
         if physical_qubits is None:
             physical_qubits = list(range(self.dm.num_qubits))
 
@@ -273,6 +274,8 @@ class StateTarget(BaseTarget):
         :raises ValueError: If the data does not contain a valid density matrix or physical qubits
         """
         dm = DensityMatrix(np.array(data["dm"]))
+        if dm.num_qubits is None:
+            raise ValueError("DensityMatrix num_qubits is None")
         physical_qubits = data.get("physical_qubits", list(range(dm.num_qubits)))
         return cls(state=dm, physical_qubits=physical_qubits)
 

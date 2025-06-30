@@ -13,7 +13,7 @@ from ..environment import (
     QEnvConfig,
 )
 
-from .qua_utils import binary, get_gaussian_sampling_input, clip_qua
+from .qua_utils import binary, get_gaussian_sampling_input, clip_qua, rand_gauss_moller_box
 from .qm_config import QMConfig
 from qm.qua import *
 from qm.jobs.running_qm_job import RunningQmJob
@@ -88,7 +88,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.reward = QuaParameter(
             "reward",
             [0] * 2**self.n_qubits,
-            input_type=self.input_type,
+            input_type=self.input_type if self.input_type == InputType.DGX else None,
             direction=Direction.INCOMING,
         )
 
@@ -428,13 +428,9 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         state_int: QuaVariableInt,
         n_u: QuaVariableInt,
     ):
-
         # Declare variables for efficient Gaussian random sampling
         b = declare(int)
         j = declare(int)
-        n_lookup, cos_array, ln_array = get_gaussian_sampling_input()
-        uniform_r = declare(fixed)
-        u1, u2 = declare(int), declare(int)
         tmp1 = declare(fixed, size=self.n_actions)
         tmp2 = declare(fixed, size=self.n_actions)
         lower_bound = declare(fixed, value=self.action_space.low)
@@ -444,23 +440,17 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         batch_r.set_seed(self.seed + n_u)
         with for_(b, 0, b < self.batch_size, b + 2):
             # Sample from a multivariate Gaussian distribution (Muller-Box method)
-            with for_(j, 0, j < self.n_actions, j + 1):
-                assign(uniform_r, batch_r.rand_fixed())
-                assign(u1, Cast.unsafe_cast_int(uniform_r >> 19))
-                assign(u2, Cast.unsafe_cast_int(uniform_r) & ((1 << 19) - 1))
-                assign(
-                    tmp1[j],
-                    mu[j] + sigma[j] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)],
-                )
-                assign(
-                    tmp2[j],
-                    mu[j]
-                    + sigma[j] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
-                )
-                clip_qua(tmp1[j], lower_bound[j], upper_bound[j])
-                clip_qua(tmp2[j], lower_bound[j], upper_bound[j])
-
-            with for_(j, 0, j < 2, j + 1):
+            tmp1, tmp2 = rand_gauss_moller_box(
+                mu,
+                sigma,
+                batch_r,
+                tmp1,
+                tmp2,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
+            )
+            # Assign 1 or 2 depending on batch_size being even or odd (only relevant at last iteration)
+            with for_(j, 0, j < Util.cond(b == self.batch_size - 1, 1, 2), j + 1):
                 # Assign the sampled actions to the action batch
                 for i, parameter in enumerate(self.real_time_circuit_parameters.parameters):
                     parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
