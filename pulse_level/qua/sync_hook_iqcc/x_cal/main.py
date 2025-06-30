@@ -53,8 +53,8 @@ machine = QuAM.load()
 if not machine.active_qubits[0].macros:
     add_basic_macros_to_machine(machine)
 backend = FluxTunableTransmonBackend(machine)
-
-ppo_config = load_from_yaml_file("agent_config.yaml")
+path = os.path.join(os.path.dirname(__file__), "agent_config.yaml")
+ppo_config = load_from_yaml_file(path)
 
 
 def apply_parametrized_circuit(

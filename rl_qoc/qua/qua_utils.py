@@ -75,13 +75,15 @@ def get_gaussian_sampling_input():
     return n_lookup, cos_array, ln_array
 
 
-def rand_gauss_moller_box(mean: QuaArrayVariable,
-                          std: QuaArrayVariable,
-                          rand: Random,
-                          z1: QuaArrayVariable,
-                          z2: QuaArrayVariable,
-                          lower_bound: Optional[QuaArrayVariable]=None,
-                          upper_bound: Optional[QuaArrayVariable]=None) -> (QuaArrayVariable, QuaArrayVariable):
+def rand_gauss_moller_box(
+    mean: QuaArrayVariable,
+    std: QuaArrayVariable,
+    rand: Random,
+    z1: QuaArrayVariable,
+    z2: QuaArrayVariable,
+    lower_bound: Optional[QuaArrayVariable] = None,
+    upper_bound: Optional[QuaArrayVariable] = None,
+) -> (QuaArrayVariable, QuaArrayVariable):
     """
     Return two random numbers using muller box
     """
@@ -90,12 +92,15 @@ def rand_gauss_moller_box(mean: QuaArrayVariable,
     u1 = declare(int)
     u2 = declare(int)
     u = declare(fixed)
-    with for_(i, 0, i<mean.length(), i + 1):
+    with for_(i, 0, i < mean.length(), i + 1):
         assign(u, rand.rand_fixed())
         assign(u1, Cast.unsafe_cast_int(u >> 19))
         assign(u2, Cast.unsafe_cast_int(u) & ((1 << 19) - 1))
         assign(z1[i], mean[i] + std[i] * ln_array[u1] * cos_array[u2 & (n_lookup - 1)])
-        assign(z2[i], mean[i] + std[i] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)])
+        assign(
+            z2[i],
+            mean[i] + std[i] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
+        )
         if lower_bound is not None and upper_bound is not None:
             clip_qua(z1[i], lower_bound[i], upper_bound[i])
             clip_qua(z2[i], lower_bound[i], upper_bound[i])
