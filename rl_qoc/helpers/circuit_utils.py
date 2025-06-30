@@ -758,7 +758,10 @@ def group_input_paulis_by_qwc(input_paulis: PauliList, counts) -> List[PauliList
 
     return grouped
 
-def group_pauli_pairs_by_qwc(pauli_pairs: List[Tuple[Pauli, Pauli]]) -> List[Tuple[PauliList, PauliList]]:
+
+def group_pauli_pairs_by_qwc(
+    pauli_pairs: List[Tuple[Pauli, Pauli]],
+) -> List[Tuple[PauliList, PauliList]]:
     """
     Group pairs of Pauli operators by qubit-wise commutation (QWC). Sorting is assumed to be done a priori and the
     group creation is done greedyly, i.e., the first pair is always added to the group, and then
@@ -770,7 +773,9 @@ def group_pauli_pairs_by_qwc(pauli_pairs: List[Tuple[Pauli, Pauli]]) -> List[Tup
     for p1, p2 in pauli_pairs:
         placed = False
         for group_p1, group_p2 in groups:
-            if all(are_qubit_wise_commuting(p1, p1_) for p1_ in group_p1) and all(are_qubit_wise_commuting(p2, p2_) for p2_ in group_p2):
+            if all(are_qubit_wise_commuting(p1, p1_) for p1_ in group_p1) and all(
+                are_qubit_wise_commuting(p2, p2_) for p2_ in group_p2
+            ):
                 group_p1.append(p1)
                 group_p2.append(p2)
                 placed = True
@@ -779,4 +784,3 @@ def group_pauli_pairs_by_qwc(pauli_pairs: List[Tuple[Pauli, Pauli]]) -> List[Tup
             groups.append(([p1], [p2]))
 
     return [(PauliList(g1), PauliList(g2)) for g1, g2 in groups]  # Convert to PauliList
-

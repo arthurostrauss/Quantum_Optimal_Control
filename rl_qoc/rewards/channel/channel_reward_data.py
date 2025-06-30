@@ -20,7 +20,7 @@ class ChannelRewardData(RewardData):
     observables: SparsePauliOp | List[SparsePauliOp]
     n_reps: int
     causal_cone_qubits_indices: List[int]
-    input_pauli: Optional[Pauli|PauliList] = None
+    input_pauli: Optional[Pauli | PauliList] = None
     input_indices: Optional[Tuple[int]] = None
     observables_indices: Optional[List[Tuple[int]]] = None
 
@@ -101,7 +101,13 @@ class ChannelRewardData(RewardData):
                 input_pauli = self.input_pauli
             else:
                 import numpy as np
-                input_pauli = Pauli((np.logical_or.reduce(self.input_pauli.z), np.logical_or.reduce(self.input_pauli.x)))
+
+                input_pauli = Pauli(
+                    (
+                        np.logical_or.reduce(self.input_pauli.z),
+                        np.logical_or.reduce(self.input_pauli.x),
+                    )
+                )
             for i, term in enumerate(reversed(input_pauli.to_label())):
                 if term == "Z" or term == "I":
                     if input_indices[i] % 2 == 0:
@@ -128,12 +134,14 @@ class ChannelRewardData(RewardData):
         """
         if isinstance(self.input_pauli, PauliList):
             import numpy as np
-            return Pauli((np.logical_or.reduce(self.input_pauli.z), np.logical_or.reduce(self.input_pauli.x)))
+
+            return Pauli(
+                (np.logical_or.reduce(self.input_pauli.z), np.logical_or.reduce(self.input_pauli.x))
+            )
         elif isinstance(self.input_pauli, Pauli):
             return self.input_pauli
         else:
             raise TypeError("input_pauli not set or not of type Pauli or PauliList")
-
 
 
 @dataclass

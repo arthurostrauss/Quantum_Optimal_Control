@@ -123,12 +123,14 @@ class ChannelReward(Reward):
         basis = pauli_basis(num_qubits=n_qubits)
         basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
-        id_coeff = c_factor * (Chi[0] /dim) # Coefficient for the identity Pauli
+        id_coeff = c_factor * (Chi[0] / (dim**2))  # Coefficient for the identity Pauli
         sorted_indices = np.argsort(probabilities)[::-1]
         non_zero_indices = non_zero_indices[sorted_indices]
-        pair_indices = [np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices]
+        pair_indices = [
+            np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices
+        ]
         pauli_pairs = [(basis[i], basis[j]) for (i, j) in pair_indices]
-    
+
         grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
         grouped_indices = []
         for group in grouped_pauli_pairs:
@@ -140,10 +142,12 @@ class ChannelReward(Reward):
                 group_indices[1].append(basis_to_indices[o])
             grouped_indices.append(group_indices)
 
-        grouped_Chi = [Chi[np.ravel_multi_index(indices, (dim**2, dim**2))] for indices in grouped_indices]
-        grouped_probabilities = [np.sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_Chi]
-        grouped_probabilities = np.array(grouped_probabilities)/ np.sum(grouped_probabilities)
-        
+        grouped_chi = [
+            Chi[np.ravel_multi_index(indices, (dim**2, dim**2))] for indices in grouped_indices
+        ]
+        grouped_probabilities = [np.sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_chi]
+        grouped_probabilities = np.array(grouped_probabilities) / np.sum(grouped_probabilities)
+
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
         prep_basis = Pauli6PreparationBasis()  # Pauli6 basis for input state preparation
@@ -159,20 +163,18 @@ class ChannelReward(Reward):
         # Sample a list of input/observable pairs
         # If one pair is sampled repeatedly, it increases number of shots used to estimate its expectation value
 
-        sampled_group_indices, counts= np.unique(
+        sampled_group_indices, counts = np.unique(
             self.fiducials_rng.choice(
                 len(grouped_pauli_pairs), size=pauli_sampling, p=grouped_probabilities
             ),
             return_counts=True,
         )
-        sampled_grouped_pauli_pairs = [
-            grouped_pauli_pairs[i] for i in sampled_group_indices
-        ]
+        sampled_grouped_pauli_pairs = [grouped_pauli_pairs[i] for i in sampled_group_indices]
 
         # Calculate reward factors for each group
         reward_factors = []
         for i, idx in enumerate(sampled_group_indices):
-            chi_group = grouped_Chi[idx]
+            chi_group = grouped_chi[idx]
             chi_squared_sum = sum(chi**2 for chi in chi_group)
             reward_factor = c_factor * counts[i] * chi_group / (dim * chi_squared_sum)
             reward_factors.append(reward_factor)
@@ -182,7 +184,6 @@ class ChannelReward(Reward):
             obs_list = SparsePauliOp(obs_list, reward_factors[i])
             sampled_grouped_pauli_pairs[i] = (prep, obs_list)
 
-      
         reward_data = []
         for g, group_info in enumerate(zip(sampled_grouped_pauli_pairs, counts)):
             # Each prep is a Pauli that we need to decompose in its pure eigenbasis.
@@ -193,17 +194,17 @@ class ChannelReward(Reward):
                 self.input_states_rng.choice(dim, size=c), return_counts=True
             )
             # Build representative of qubit-wise commuting Pauli group (the one with the highest weight)
-            pauli_rep = Pauli((np.logical_or.reduce(prep_group.z), np.logical_or.reduce(prep_group.x)))
+            pauli_rep = Pauli(
+                (np.logical_or.reduce(prep_group.z), np.logical_or.reduce(prep_group.x))
+            )
             prep_label = [pauli.to_label() for pauli in prep_group]
             if dfe_precision is None:
-                dedicated_shots = (
-                    counts_input_states * n_shots
-                )  # Number of shots per Pauli eigenstate (divided equally)
+                # Number of shots per Pauli eigenstate (divided equally)
+                dedicated_shots = counts_input_states * n_shots
             else:
-                dedicated_shots = 2 * np.log(2/delta) / (pauli_sampling * eps**2)
-                dedicated_shots *= np.sum(grouped_Chi[sampled_group_indices[g]]) ** 2
-                dedicated_shots /= np.sum(grouped_Chi[sampled_group_indices[g]] ** 2) **2
-
+                dedicated_shots = 2 * np.log(2 / delta) / (pauli_sampling * eps**2)
+                dedicated_shots *= np.sum(grouped_chi[sampled_group_indices[g]]) ** 2
+                dedicated_shots /= np.sum(grouped_chi[sampled_group_indices[g]] ** 2) ** 2
 
             for pure_eig_state, shots in zip(selected_input_states, dedicated_shots):
                 # Convert input state to Pauli6 basis:
@@ -251,7 +252,9 @@ class ChannelReward(Reward):
 
                 obs_ = [p * o for p, o in zip(parity, obs_group)]
                 pub_obs = extend_observables(
-                    SparsePauliOp.sum(obs_).simplify(), prep_circuit, target.causal_cone_qubits_indices
+                    SparsePauliOp.sum(obs_).simplify(),
+                    prep_circuit,
+                    target.causal_cone_qubits_indices,
                 )
                 # Check if coeff array is all 0. If so, skip this pub
                 if np.all(pub_obs.coeffs <= 1e-6):
@@ -293,9 +296,10 @@ class ChannelReward(Reward):
         dim = 2**reward_data.num_qubits
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward *= (dim**2-1)/dim**2
-        reward /= reward_data.pauli_sampling
+        reward *= (dim**2 - 1) / dim**2
         reward += reward_data.id_coeff
+        reward /= reward_data.pauli_sampling
+
         reward = (dim * reward + 1) / (dim + 1)
 
         return reward
