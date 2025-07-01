@@ -297,8 +297,8 @@ class ChannelReward(Reward):
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
         reward *= (dim**2 - 1) / dim**2
-        reward += reward_data.id_coeff
         reward /= reward_data.pauli_sampling
+        reward += reward_data.id_coeff
 
         reward = (dim * reward + 1) / (dim + 1)
 
