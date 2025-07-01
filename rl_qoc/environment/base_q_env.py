@@ -54,7 +54,7 @@ from qiskit_ibm_runtime import (
 )
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-from .backend_info import QiskitBackendInfo, BackendInfo
+from .backend_info import BackendInfo
 from .configuration.qconfig import QEnvConfig, ExecutionConfig
 from .target import GateTarget, StateTarget
 
