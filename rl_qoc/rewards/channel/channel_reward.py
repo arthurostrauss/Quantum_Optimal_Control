@@ -117,33 +117,35 @@ class ChannelReward(Reward):
         non_zero_indices = np.nonzero(np.abs(Chi) > cutoff)[0]
         # Remove index 0 from non_zero_indices as it corresponds to the identity Pauli
         non_zero_indices = non_zero_indices[non_zero_indices != 0]
-        probabilities = Chi**2 / (dim**2)
-        probabilities = probabilities[non_zero_indices]  # Filter out zero probabilities
-        probabilities /= np.sum(probabilities)
+        sorted_indices = np.argsort(np.abs(Chi[non_zero_indices]))[
+            ::-1
+        ]  # Sort indices by Chi value
+
         basis = pauli_basis(num_qubits=n_qubits)
         basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
         id_coeff = c_factor * (Chi[0] / (dim**2))  # Coefficient for the identity Pauli
-        sorted_indices = np.argsort(probabilities)[::-1]
         non_zero_indices = non_zero_indices[sorted_indices]
         pair_indices = [
             np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices
         ]
         pauli_pairs = [(basis[i], basis[j]) for (i, j) in pair_indices]
-
+        # Build dictionary of Pauli pairs with their respective Chi values
+        Chi_dict = {
+            pair: {
+                "chi": Chi[non_zero_indices[i]],
+                "indices": pair_indices[i],
+                "index": non_zero_indices[i],
+            }
+            for i, pair in enumerate(pauli_pairs)
+        }
         grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
-        grouped_indices = []
-        for group in grouped_pauli_pairs:
-            group_indices = [[], []]  # Prepare indices for each group
-            prep, obs = group
-            for p in prep:
-                group_indices[0].append(basis_to_indices[p])
-            for o in obs:
-                group_indices[1].append(basis_to_indices[o])
-            grouped_indices.append(group_indices)
 
         grouped_chi = [
-            Chi[np.ravel_multi_index(indices, (dim**2, dim**2))] for indices in grouped_indices
+            np.array(
+                [Chi_dict[(pauli_in, pauli_obs)]["chi"] for pauli_in, pauli_obs in zip(*group)]
+            )
+            for group in grouped_pauli_pairs
         ]
         grouped_probabilities = [np.sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_chi]
         grouped_probabilities = np.array(grouped_probabilities) / np.sum(grouped_probabilities)
@@ -169,22 +171,17 @@ class ChannelReward(Reward):
             ),
             return_counts=True,
         )
-        sampled_grouped_pauli_pairs = [grouped_pauli_pairs[i] for i in sampled_group_indices]
 
         # Calculate reward factors for each group
-        reward_factors = []
-        for i, idx in enumerate(sampled_group_indices):
-            chi_group = grouped_chi[idx]
-            chi_squared_sum = sum(chi**2 for chi in chi_group)
-            reward_factor = c_factor * counts[i] * chi_group / (dim * chi_squared_sum)
-            reward_factors.append(reward_factor)
-
-        for i in range(len(sampled_grouped_pauli_pairs)):
-            prep, obs_list = sampled_grouped_pauli_pairs[i]
-            obs_list = SparsePauliOp(obs_list, reward_factors[i])
-            sampled_grouped_pauli_pairs[i] = (prep, obs_list)
-
         reward_data = []
+        sampled_grouped_pauli_pairs = []
+        for c, idx in zip(counts, sampled_group_indices):
+            chi_group = grouped_chi[idx]
+            chi_squared_sum = np.sum([chi**2 for chi in chi_group])
+            reward_factor = c_factor * c * chi_group / (dim * chi_squared_sum)
+            prep, obs_list = grouped_pauli_pairs[idx]
+            sampled_grouped_pauli_pairs.append((prep, SparsePauliOp(obs_list, reward_factor)))
+
         for g, group_info in enumerate(zip(sampled_grouped_pauli_pairs, counts)):
             # Each prep is a Pauli that we need to decompose in its pure eigenbasis.
             # Below, we select at random a subset of pure input states to prepare for each prep

@@ -3,7 +3,7 @@ from __future__ import annotations
 import keyword
 import re
 from inspect import signature
-from typing import Tuple, Optional, Sequence, List, Union, Dict, Callable
+from typing import Tuple, Optional, Sequence, List, Union, Dict, Callable, TYPE_CHECKING
 
 import numpy as np
 from qiskit.circuit import (
@@ -40,6 +40,8 @@ from qiskit_experiments.library.tomography.basis import (
 
 from .transpiler_passes import CustomGateReplacementPass
 
+if TYPE_CHECKING:
+    from ..environment.target import GateTarget
 QuantumTarget = Union[Statevector, Operator, DensityMatrix]
 
 
@@ -647,8 +649,11 @@ def pauli_input_to_indices(prep: Pauli | str, inputs: Sequence[int]):
 
 
 def extend_input_state_prep(
-    input_circuit: QuantumCircuit, qc: QuantumCircuit, gate_target, indices
-) -> Tuple[QuantumCircuit, Tuple[int]]:
+    input_circuit: QuantumCircuit,
+    qc: QuantumCircuit,
+    gate_target: GateTarget,
+    indices: Sequence[int],
+) -> Tuple[QuantumCircuit, Tuple[int, ...]]:
     """
     Extend the input state preparation to all qubits in the quantum circuit if necessary
 
@@ -656,6 +661,7 @@ def extend_input_state_prep(
         input_circuit: Input state preparation circuit
         qc: Quantum circuit to be executed on quantum system
         gate_target: Target gate to prepare (possibly within a wider circuit context)
+        indices: Indices of the input state preparation (in Pauli6 basis)
     """
     if (
         qc.num_qubits > gate_target.causal_cone_size
