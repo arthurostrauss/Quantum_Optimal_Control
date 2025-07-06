@@ -212,7 +212,7 @@ def select_backend(
             service = QiskitRuntimeService(channel=channel, instance=instance)
             if backend_name is None:
                 backend = service.least_busy(
-                    min_num_qubits=2, simulator=False, operational=True, open_pulse=True
+                    min_num_qubits=2, operational=True
                 )
             else:
                 backend = service.backend(backend_name)
