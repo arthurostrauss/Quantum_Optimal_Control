@@ -290,22 +290,36 @@ pip install -e .[qiskit-pulse]
 ### Basic Usage
 
 ```python
-from rl_qoc import QuantumEnvironment, CustomPPO, PPOConfig, StateTarget, StateReward
+from rl_qoc import (
+    QuantumEnvironment, CustomPPO, PPOConfig, 
+    QEnvConfig, ExecutionConfig, RescaleAndClipAction
+)
+from qiskit.circuit.library import CXGate
+from gymnasium.spaces import Box
 
-# Configure quantum state preparation task
-config = QEnvConfig(
-    target=StateTarget(state_circuit=bell_state_circuit, target_qubits=[0, 1]),
-    reward_config=StateReward(sampling_pauli_space=50, n_shots=1024),
-    backend_config=BackendConfig(backend_name="aer_simulator")
+# Configure quantum gate calibration task
+q_env_config = QEnvConfig(
+    target={"gate": CXGate(), "physical_qubits": [0, 1]},
+    backend_config=backend_config,
+    action_space=Box(low=-0.1, high=0.1, shape=(n_actions,)),
+    execution_config=ExecutionConfig(
+        batchsize=300,
+        sampling_Paulis=50,
+        N_shots=200
+    )
 )
 
 # Create environment and agent
-env = QuantumEnvironment(config)
-agent = CustomPPO(PPOConfig(learning_rate=3e-4, batch_size=10), env)
+q_env = QuantumEnvironment(q_env_config)
+rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
+
+# Load agent configuration and train
+agent_config = PPOConfig.from_yaml("agent_config.yaml")
+agent = CustomPPO(agent_config, rescaled_env)
 
 # Train the agent
 results = agent.train()
-print(f"Final fidelity: {results['fidelity_history'][-1]:.3f}")
+print(f"Final fidelity: {results['circuit_fidelity_history'][-1]:.3f}")
 ```
 
 ### Real-time QUA Integration

@@ -52,29 +52,34 @@ def close(self) -> None:
 #### Usage Example
 
 ```python
-from rl_qoc import CustomPPO, PPOConfig, QuantumEnvironment
+from rl_qoc import CustomPPO, PPOConfig, RescaleAndClipAction
+from rl_qoc.agent import TrainingConfig, TotalUpdates, TrainFunctionSettings
 
-# Configure PPO agent
-ppo_config = PPOConfig(
-    learning_rate=3e-4,
-    batch_size=10,
-    n_epochs=4,
-    gamma=0.99,
-    gae_lambda=0.95,
-    ppo_epsilon=0.2,
-    entropy_coefficient=0.01
-)
+# Load PPO configuration from YAML file
+agent_config = PPOConfig.from_yaml("agent_config.yaml")
+
+# Create rescaled environment
+rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
 
 # Create agent
-agent = CustomPPO(ppo_config, env)
+ppo_agent = CustomPPO(agent_config, rescaled_env)
 
-# Train with different constraints
-results = agent.train(
-    training_config=TrainingConfig(
-        total_updates=1000,
-        target_fidelities=[0.95, 0.99]
-    )
+# Configure training constraints and settings
+training_config = TrainingConfig(
+    TotalUpdates(200),
+    target_fidelities=[0.9, 0.95],
+    lookback_window=20,
+    anneal_learning_rate=True
 )
+
+train_settings = TrainFunctionSettings(
+    plot_real_time=True,
+    print_debug=False,
+    num_prints=10
+)
+
+# Train the agent
+results = ppo_agent.train(training_config, train_settings)
 ```
 
 ### Agent (Neural Networks)

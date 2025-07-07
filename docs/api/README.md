@@ -66,29 +66,33 @@ Hyperparameter optimization capabilities:
 ```python
 from rl_qoc import (
     # Environments
-    BaseQuantumEnvironment,
     QuantumEnvironment, 
     ContextAwareQuantumEnvironment,
     
-    # Agents
+    # Agents  
     CustomPPO,
     Agent,
+    ActorNetwork,
+    CriticNetwork,
     PPOConfig,
     
     # Rewards
     StateReward,
-    ChannelReward,
+    ChannelReward, 
     CAFEReward,
     FidelityReward,
     ORBITReward,
+    XEBReward,
     
-    # Targets
-    GateTarget,
-    StateTarget,
+    # Configuration
+    QEnvConfig,
+    ExecutionConfig,
+    BenchmarkConfig,
     
-    # HPO
-    HyperparameterOptimizer,
-    HPOConfig,
+    # QUA Integration
+    QMEnvironment,
+    CustomQMPPO,
+    QMConfig,
     
     # Wrappers
     RescaleAndClipAction
@@ -96,31 +100,70 @@ from rl_qoc import (
 ```
 
 ### Configuration Classes
-- `QEnvConfig`: Environment configuration
-- `PPOConfig`: PPO algorithm configuration  
-- `QMConfig`: QUA backend configuration
-- `BackendConfig`: Backend-specific configuration
+- `QEnvConfig`: Main environment configuration
+- `ExecutionConfig`: Execution parameters (batch size, shots, etc.)
+- `PPOConfig`: PPO algorithm configuration loaded from YAML
+- `QMConfig`: QUA backend configuration for real-time control
+- `BackendConfig`: Backend-specific configuration (Qiskit, Dynamics)
 
 ## Usage Patterns
 
-### Basic Quantum Control
+### Basic Gate Calibration
 ```python
-# Create environment
-env = QuantumEnvironment(config)
+from rl_qoc import (
+    QuantumEnvironment, CustomPPO, PPOConfig, 
+    QEnvConfig, ExecutionConfig, RescaleAndClipAction
+)
 
-# Create PPO agent
-agent = CustomPPO(ppo_config, env)
+# Configure environment
+q_env_config = QEnvConfig(
+    target={"gate": CXGate(), "physical_qubits": [0, 1]},
+    backend_config=backend_config,
+    action_space=action_space,
+    execution_config=ExecutionConfig(
+        batchsize=300,
+        sampling_Paulis=50, 
+        N_shots=200
+    )
+)
+
+# Create environment and agent
+q_env = QuantumEnvironment(q_env_config)
+rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
+
+# Load PPO configuration from YAML
+agent_config = PPOConfig.from_yaml("agent_config.yaml")
+ppo_agent = CustomPPO(agent_config, rescaled_env)
 
 # Train
-results = agent.train()
+results = ppo_agent.train()
+```
+
+### Context-Aware Gate Calibration
+```python
+from rl_qoc import ContextAwareQuantumEnvironment
+
+# Configure for context-aware calibration
+q_env = ContextAwareQuantumEnvironment(
+    q_env_config, 
+    circuit_context, 
+    training_steps_per_gate=250
+)
+rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
+
+# Use same PPO setup
+ppo_agent = CustomPPO(agent_config, rescaled_env)
+results = ppo_agent.train()
 ```
 
 ### Real-time QUA Control
 ```python
-# Create QUA environment
+from rl_qoc.qua import QMEnvironment, CustomQMPPO
+
+# Configure QUA environment
 qm_env = QMEnvironment(qua_config)
 
-# Create QUA PPO agent
+# Create QUA PPO agent  
 qm_agent = CustomQMPPO(ppo_config, qm_env)
 
 # Start real-time program
@@ -128,18 +171,9 @@ qm_env.start_program()
 
 # Train with real-time control
 results = qm_agent.train()
-```
 
-### Context-Aware Calibration
-```python
-# Create context-aware environment
-ctx_env = ContextAwareQuantumEnvironment(config)
-
-# Configure for gate calibration with circuit context
-ctx_env.configure_context(circuit_contexts)
-
-# Train context-dependent calibrations
-results = agent.train()
+# Close environment
+qm_env.close()
 ```
 
 ## Advanced Features

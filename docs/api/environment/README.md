@@ -4,65 +4,9 @@ The environment module provides the foundation for quantum control experiments w
 
 ## Core Classes
 
-### BaseQuantumEnvironment
+### Core Environment Classes
 
-The base class for all quantum environments in the RL-QOC framework.
-
-```python
-class BaseQuantumEnvironment:
-    """
-    Base quantum environment for reinforcement learning-based quantum control.
-    
-    This environment provides the standard Gym interface adapted for quantum control tasks,
-    with support for batch execution, custom reward schemes, and multiple backend types.
-    """
-```
-
-#### Key Methods
-
-```python
-def __init__(self, config: QEnvConfig):
-    """Initialize the quantum environment with configuration."""
-
-def step(self, actions: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
-    """Execute actions on the quantum system and return observations and rewards."""
-
-def reset(self, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
-    """Reset the environment to initial state."""
-
-def close(self) -> None:
-    """Clean up environment resources."""
-
-def get_optimal_action(self) -> np.ndarray:
-    """Get theoretically optimal action if known."""
-
-def episode_length(self, global_step: int) -> int:
-    """Get current episode length based on curriculum."""
-```
-
-#### Key Properties
-
-```python
-@property
-def observation_space(self) -> gym.Space:
-    """Observation space of the environment."""
-
-@property  
-def action_space(self) -> gym.Space:
-    """Action space of the environment."""
-
-@property
-def n_actions(self) -> int:
-    """Number of action parameters."""
-
-@property
-def n_qubits(self) -> int:
-    """Number of qubits in the quantum system."""
-
-@property
-def backend_info(self) -> BackendInfo:
-    """Information about the quantum backend."""
-```
+The environment module provides quantum environments that interface between RL agents and quantum systems, supporting both simulation and real hardware execution.
 
 ### QuantumEnvironment
 
@@ -84,31 +28,30 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 #### Usage Example
 
 ```python
-from rl_qoc import QuantumEnvironment, QEnvConfig, StateTarget
+from rl_qoc import QuantumEnvironment, QEnvConfig, ExecutionConfig
+from qiskit.circuit.library import CXGate
+from gymnasium.spaces import Box
 
-# Configure environment
-config = QEnvConfig(
-    target=StateTarget(
-        state_circuit=target_circuit,
-        target_qubits=[0, 1]
-    ),
-    backend_config=BackendConfig(
-        backend_name="aer_simulator"
-    ),
-    reward_config=StateReward(),
+# Configure environment for gate calibration
+q_env_config = QEnvConfig(
+    target={"gate": CXGate(), "physical_qubits": [0, 1]},
+    backend_config=backend_config,
+    action_space=Box(low=-0.1, high=0.1, shape=(n_actions,)),
     execution_config=ExecutionConfig(
-        n_shots=1024,
-        batch_size=10
+        batchsize=300,
+        sampling_Paulis=50,
+        N_shots=200,
+        seed=10
     )
 )
 
 # Create environment
-env = QuantumEnvironment(config)
+q_env = QuantumEnvironment(q_env_config)
 
 # Use in RL training loop
-obs, _ = env.reset()
+obs, _ = q_env.reset()
 action = agent.get_action(obs)
-next_obs, reward, done, truncated, info = env.step(action)
+next_obs, reward, done, truncated, info = q_env.step(action)
 ```
 
 ### ContextAwareQuantumEnvironment
@@ -138,22 +81,17 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 #### Usage Example
 
 ```python
-from rl_qoc import ContextAwareQuantumEnvironment, GateTarget
+from rl_qoc import ContextAwareQuantumEnvironment
 
 # Configure for context-aware gate calibration
-config = QEnvConfig(
-    target=GateTarget(
-        gate=RXGate(Parameter('theta')),
-        target_qubits=[1]
-    ),
-    context_config=ContextConfig(
-        circuit_contexts=[circuit1, circuit2, circuit3],
-        context_aware=True,
-        noise_characterization=True
-    )
+q_env = ContextAwareQuantumEnvironment(
+    q_env_config,           # Same config as QuantumEnvironment
+    circuit_context,        # Circuit containing the target gate
+    training_steps_per_gate=250  # Steps per gate instance
 )
 
-env = ContextAwareQuantumEnvironment(config)
+# The environment automatically analyzes circuit context
+# and provides contextual calibration for the target gate
 ```
 
 ## Configuration Classes
@@ -163,109 +101,108 @@ env = ContextAwareQuantumEnvironment(config)
 Main configuration class for quantum environments.
 
 ```python
-@dataclass
 class QEnvConfig:
     """Configuration for quantum environments."""
     
-    target: Union[StateTarget, GateTarget]
-    backend_config: BackendConfig
-    reward_config: BaseReward
-    execution_config: ExecutionConfig
-    
-    # Optional configurations
-    context_config: Optional[ContextConfig] = None
-    dfe_config: Optional[DFEConfig] = None
-    curriculum_config: Optional[CurriculumConfig] = None
-```
-
-### BackendConfig
-
-Configuration for quantum backends.
-
-```python
-@dataclass  
-class BackendConfig:
-    """Backend configuration for quantum execution."""
-    
-    backend_name: str = "aer_simulator"
-    backend_options: Dict = field(default_factory=dict)
-    noise_model: Optional[NoiseModel] = None
-    
-    # Hardware-specific options
-    optimization_level: int = 1
-    resilience_level: int = 1
-    transpiler_options: Dict = field(default_factory=dict)
+    def __init__(
+        self,
+        target: Dict,                    # Target gate or state definition
+        backend_config: BackendConfig,   # Backend configuration
+        action_space: gym.Space,         # Action space for RL agent
+        execution_config: ExecutionConfig,  # Execution parameters
+        benchmark_config: Optional[BenchmarkConfig] = None,
+        training_with_cal: bool = False  # Whether to include calibration
+    ):
+        # Configuration for quantum control tasks
 ```
 
 ### ExecutionConfig
 
-Configuration for quantum circuit execution.
+Configuration for quantum execution parameters.
 
 ```python
-@dataclass
 class ExecutionConfig:
-    """Execution configuration for quantum circuits."""
+    """Execution configuration for quantum experiments."""
     
-    n_shots: int = 1024
-    batch_size: int = 10
-    n_reps: List[int] = field(default_factory=lambda: [1])
-    
-    # Parallel execution
-    max_parallel_experiments: int = 100
-    
-    # Optimization settings
-    optimization_level: int = 1
-    scheduling: bool = True
+    def __init__(
+        self,
+        batchsize: int,           # Batch size for RL training
+        sampling_Paulis: int,     # Number of Pauli observables to sample
+        N_shots: int,             # Shots per measurement
+        n_reps: int = 1,          # Circuit repetitions
+        seed: Optional[int] = None  # Random seed
+    ):
+        # Parameters for quantum measurements and execution
 ```
 
-## Target Classes
+### BackendConfig
 
-### StateTarget
-
-Configuration for quantum state preparation tasks.
+Configuration for different quantum backends.
 
 ```python
-@dataclass
-class StateTarget:
-    """Target configuration for state preparation."""
-    
-    # Target state specification (choose one)
-    state_circuit: Optional[QuantumCircuit] = None
-    density_matrix: Optional[np.ndarray] = None
-    state_vector: Optional[np.ndarray] = None
-    
-    # Qubit specification
-    target_qubits: List[int] = field(default_factory=list)
-    
-    # Additional options
-    normalize: bool = True
-    fidelity_threshold: float = 0.99
+# For Qiskit backends
+from rl_qoc.environment.configuration.backend_config import QiskitRuntimeConfig
+
+backend_config = QiskitRuntimeConfig(
+    parametrized_circuit=apply_parametrized_circuit,
+    backend=backend,
+    primitive_options=estimator_options
+)
+
+# For Dynamics backends (pulse-level)
+from rl_qoc.environment.configuration.backend_config import DynamicsConfig
+
+backend_config = DynamicsConfig(
+    parametrized_circuit=apply_parametrized_circuit,
+    backend=dynamics_backend
+)
 ```
 
-### GateTarget
+## Target Specification
 
-Configuration for quantum gate calibration tasks.
+In rl_qoc, targets are specified as dictionaries rather than dedicated classes, providing flexibility for different types of quantum control tasks.
+
+### Gate Calibration Target
 
 ```python
-@dataclass
-class GateTarget:
-    """Target configuration for gate calibration."""
-    
-    gate: Gate
-    target_qubits: List[int]
-    
-    # Input state configuration
-    input_states: Optional[List[QuantumCircuit]] = None
-    input_states_choice: str = "pauli6"  # or "pauli4", "random"
-    
-    # Calibration options
-    process_fidelity_threshold: float = 0.99
-    average_gate_fidelity_threshold: float = 0.99
-    
-    # Context specification
-    circuit_context: Optional[QuantumCircuit] = None
-    causal_cone_qubits: Optional[List[int]] = None
+from qiskit.circuit.library import CXGate, ECRGate
+
+# Basic gate target
+target = {
+    "gate": CXGate(),                # Target gate to calibrate
+    "physical_qubits": [0, 1]        # Physical qubits to apply gate on
+}
+
+# Alternative gates
+ecr_target = {
+    "gate": ECRGate(), 
+    "physical_qubits": [0, 1]
+}
 ```
+
+### State Preparation Target
+
+```python
+# State target using circuit preparation
+target = {
+    "circuit": bell_state_circuit,   # Circuit to prepare target state
+    "register": [0, 1]               # Qubits involved in state preparation
+}
+
+# Alternative: density matrix specification
+target = {
+    "dm": target_density_matrix,     # Target density matrix
+    "register": [0, 1, 2]           # Qubits for the state
+}
+```
+
+### Target Properties
+
+The environment automatically determines:
+- **Reward method**: Based on target type (gate → channel fidelity, state → state fidelity)
+- **Input states**: Automatically generated for gate calibration (Pauli-6 basis by default)
+- **Measurement observables**: Optimally sampled based on target
+- **Fidelity benchmarking**: Computed during training for performance tracking
 
 ## Backend Integration
 
