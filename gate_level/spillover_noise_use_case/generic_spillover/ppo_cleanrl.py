@@ -58,7 +58,11 @@ def plot_curves(env: BaseQuantumEnvironment):
     fidelity_range = [i * env.benchmark_cycle for i in range(len(env.fidelity_history))]
     num_qubits = len(env.unwrapped.applied_qubits)  # Number of qubits
     # Number of subplots: 2 for reward/fidelity, plus 2 per qubit for moving_discrete
-    num_plots = 2 + (2 * num_qubits if env.unwrapped.circuit_param_distribution == "moving_discrete" else 0)
+    num_plots = 2 + (
+        2 * num_qubits
+        if env.unwrapped.circuit_param_distribution == "moving_discrete"
+        else 0
+    )
     fig, ax = plt.subplots(num_plots, 1, figsize=(8.0, 6.0 * num_plots), squeeze=False)
     ax = ax.flatten()
 
@@ -76,7 +80,7 @@ def plot_curves(env: BaseQuantumEnvironment):
     ax[0].xaxis.set_major_locator(MaxNLocator(integer=True))
 
     # Plot RL reward history
-    ax[1].plot(np.mean(env.reward_history, axis=1), label="RL Reward")
+    ax[1].plot(-np.log10(1.0 - np.mean(env.reward_history, axis=1)), label="RL Reward")
     ax[1].set_title("RL Reward History")
     ax[1].legend()
     ax[1].set_xlabel("Iteration")
@@ -95,19 +99,34 @@ def plot_curves(env: BaseQuantumEnvironment):
             marginal_std = np.zeros(num_vals)
             for i, val in enumerate(single_qubit_vals):
                 # Find indices where this qubit has the given value
-                mask = np.isclose(env.unwrapped.discrete_obs_vals_raw[:, qubit_idx], val, rtol=1e-5, atol=1e-8)
-                marginal_rewards[i] = np.mean(env.unwrapped.discrete_reward_history[:, mask]) if np.any(mask) else 0
-                marginal_std[i] = np.std(env.unwrapped.discrete_reward_history[:, mask]) if np.any(mask) else 0
+                mask = np.isclose(
+                    env.unwrapped.discrete_obs_vals_raw[:, qubit_idx],
+                    val,
+                    rtol=1e-5,
+                    atol=1e-8,
+                )
+                marginal_rewards[i] = (
+                    np.mean(env.unwrapped.discrete_reward_history[:, mask])
+                    if np.any(mask)
+                    else 0
+                )
+                marginal_std[i] = (
+                    np.std(env.unwrapped.discrete_reward_history[:, mask])
+                    if np.any(mask)
+                    else 0
+                )
 
             # Plot marginal reward history with error bars
             ax[2 + qubit_idx * 2].errorbar(
                 angles,
                 marginal_rewards,
                 yerr=marginal_std,
-                fmt='-o',
+                fmt="-o",
                 label=f"Qubit {qubit_idx} Reward History",
             )
-            ax[2 + qubit_idx * 2].set_title(f"Marginal Reward History (Qubit {qubit_idx})")
+            ax[2 + qubit_idx * 2].set_title(
+                f"Marginal Reward History (Qubit {qubit_idx})"
+            )
             ax[2 + qubit_idx * 2].legend()
             ax[2 + qubit_idx * 2].set_xlabel("Observation Value (Angles)")
             ax[2 + qubit_idx * 2].set_ylabel("Reward")
@@ -115,8 +134,15 @@ def plot_curves(env: BaseQuantumEnvironment):
             # Compute marginal probability distribution
             marginal_probs = np.zeros(num_vals)
             for i, val in enumerate(single_qubit_vals):
-                mask = np.isclose(env.unwrapped.discrete_obs_vals_raw[:, qubit_idx], val, rtol=1e-5, atol=1e-8)
-                marginal_probs[i] = np.sum(env.unwrapped.prob_weights[mask]) if np.any(mask) else 0
+                mask = np.isclose(
+                    env.unwrapped.discrete_obs_vals_raw[:, qubit_idx],
+                    val,
+                    rtol=1e-5,
+                    atol=1e-8,
+                )
+                marginal_probs[i] = (
+                    np.sum(env.unwrapped.prob_weights[mask]) if np.any(mask) else 0
+                )
 
             # Plot marginal probability weights
             ax[3 + qubit_idx * 2].scatter(
@@ -124,11 +150,13 @@ def plot_curves(env: BaseQuantumEnvironment):
                 marginal_probs,
                 label=f"Qubit {qubit_idx} Probability Weights",
             )
-            ax[3 + qubit_idx * 2].set_title(f"Marginal Probability Weights (Qubit {qubit_idx})")
+            ax[3 + qubit_idx * 2].set_title(
+                f"Marginal Probability Weights (Qubit {qubit_idx})"
+            )
             ax[3 + qubit_idx * 2].legend()
             ax[3 + qubit_idx * 2].set_xlabel("Observation Value (Angles)")
             ax[3 + qubit_idx * 2].set_ylabel("Probability")
-    
+
     plt.show()
 
 
