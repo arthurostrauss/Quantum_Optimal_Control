@@ -18,6 +18,13 @@ class QMConfig(BackendConfig):
     Args:
         parametrized_circuit: Function applying parametrized transformation to a QUA program
         backend: Quantum Machine backend
+        input_type: Type of input for the QUA program
+        verbosity: Verbosity level for the QUA program
+        num_updates: Number of updates for the QUA program
+        compiler_options: Compiler options for the QUA program
+        opnic_dev_path: Path to the Opnic development directory
+        timeout: Timeout for the QUA program execution
+        test_mode: Whether to run in test mode (saves everything in streams)
     """
 
     backend: QMBackend = None
@@ -27,6 +34,7 @@ class QMConfig(BackendConfig):
     compiler_options: Optional[CompilerOptionArguments] = None
     opnic_dev_path: str = "/home/dpoulos/opnic-dev"
     timeout: int = 60
+    test_mode: bool = False
 
     @property
     def config_type(self):

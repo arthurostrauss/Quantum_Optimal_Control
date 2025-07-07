@@ -108,6 +108,22 @@ def rand_gauss_moller_box(
     return z1, z2
 
 
+def get_state_int(qc: QuantumCircuit, result, state_int: QuaVariableInt):
+    _QASM3_DUMP_LOOSE_BIT_PREFIX = "_bit"
+    for c, clbit in enumerate(qc.clbits):
+        bit = qc.find_bit(clbit)
+        if len(bit.registers) == 0:
+            bit_output = result.result_program[f"{_QASM3_DUMP_LOOSE_BIT_PREFIX}{c}"]
+        else:
+            creg, creg_index = bit.registers[0]
+            bit_output = result.result_program[creg.name][creg_index]
+        assign(
+            state_int,
+            state_int + (1 << c) * Cast.to_int(bit_output),
+        )
+    return state_int
+
+
 def reset_qubit(method: str, qubit: Qubit, **kwargs):
     """
     Macro to reset the qubit state.

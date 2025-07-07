@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Union, Optional
+from typing import List, Union, Optional, TYPE_CHECKING
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
@@ -12,6 +12,11 @@ from .reward_data import RewardData, RewardDataList
 from ..environment.configuration.qconfig import QEnvConfig
 from ..environment.target import StateTarget, GateTarget
 import numpy as np
+
+if TYPE_CHECKING:
+    from qiskit_qm_provider.parameter_table import ParameterTable, Parameter as QuaParameter
+    from ..qua.circuit_params import CircuitParams
+    from qm import Program
 
 PubLike = Union[SamplerPubLike, EstimatorPubLike]
 Pub = Union[SamplerPub, EstimatorPub]
@@ -114,3 +119,27 @@ class Reward(ABC):
         raise NotImplementedError(
             "get_real_time_circuit is not implemented for this reward method."
         )
+
+    def qm_step(
+        self,
+        reward_data: RewardDataList,
+        fetching_index: int,
+        fetching_size: int,
+        circuit_params: CircuitParams,
+        reward: QuaParameter,
+        config: QEnvConfig,
+        **push_args,
+    ):
+        raise NotImplementedError("This reward method does not support QM step")
+
+    def rl_qoc_training_qua_prog(
+        self,
+        qc: QuantumCircuit,
+        policy: ParameterTable,
+        reward: QuaParameter,
+        circuit_params: CircuitParams,
+        config: QEnvConfig,
+        num_updates: int = 1000,
+        test: bool = False,
+    ) -> Program:
+        raise NotImplementedError("This reward method does not have a QUA program for training")

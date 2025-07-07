@@ -1,8 +1,9 @@
-from typing import List, Tuple, Optional
+from __future__ import annotations
+from typing import List, Tuple, Optional, TYPE_CHECKING
 
 from qiskit import ClassicalRegister
 from qiskit.circuit.classical.types import Uint
-from qiskit.primitives import BaseEstimatorV2
+from qiskit.primitives import BaseEstimatorV2, BitArray
 
 from ..base_reward import Reward
 from dataclasses import dataclass, field
@@ -30,6 +31,11 @@ from ...helpers.circuit_utils import (
 )
 from ...helpers.helper_functions import validate_circuit_and_target
 from .channel_reward_data import ChannelRewardData, ChannelRewardDataList
+
+if TYPE_CHECKING:
+    from qiskit_qm_provider.parameter_table import ParameterTable, Parameter as QuaParameter
+    from ...qua.circuit_params import CircuitParams
+    from qm import Program
 
 
 @dataclass
@@ -439,6 +445,258 @@ class ChannelReward(Reward):
             scheduling=False,
             remove_final_measurements=False,
         )
+
+    def qm_step(
+        self,
+        reward_data: ChannelRewardDataList,
+        fetching_index: int,
+        fetching_size: int,
+        circuit_params: CircuitParams,
+        reward: QuaParameter,
+        config: QEnvConfig,
+        **push_args,
+    ):
+
+        reward_array = np.zeros(shape=(config.batch_size,))
+        num_qubits = config.target.n_qubits
+        dim = 2**num_qubits
+        binary = lambda n, l: bin(n)[2:].zfill(l)
+        input_indices = reward_data.input_indices
+        max_input_state = len(input_indices)
+        num_obs_per_input_state = tuple(
+            len(reward_data.observables_indices[i]) for i in range(max_input_state)
+        )
+
+        if circuit_params.circuit_choice_var is not None and isinstance(config.target, GateTarget):
+            circuit_params.circuit_choice_var.push_to_opx(config.target.circuit_choice, **push_args)
+        if circuit_params.n_reps_var is not None:
+            circuit_params.n_reps_var.push_to_opx(config.current_n_reps, **push_args)
+
+        circuit_params.max_input_state.push_to_opx(max_input_state, **push_args)
+        for i, input_state in enumerate(input_indices):
+            input_state_dict = {
+                input_var: input_state_val
+                for input_var, input_state_val in zip(
+                    circuit_params.input_state_vars.parameters, input_state
+                )
+            }
+            circuit_params.input_state_vars.push_to_opx(input_state_dict, **push_args)
+            observables = reward_data.observables_indices[i]
+            num_obs = len(observables)
+
+            circuit_params.max_observables.push_to_opx(num_obs, **push_args)
+            circuit_params.n_shots.push_to_opx(reward_data.shots[i], **push_args)
+            for j, observable in enumerate(observables):
+                observable_dict = {
+                    observable_var: observable_val
+                    for observable_var, observable_val in zip(
+                        circuit_params.observable_vars.parameters, observable
+                    )
+                }
+                circuit_params.observable_vars.push_to_opx(observable_dict, **push_args)
+        collected_counts = reward.fetch_from_opx(
+            push_args["job"],
+            fetching_index=fetching_index,
+            fetching_size=fetching_size,
+            verbosity=push_args.get("verbosity", 0),
+            time_out=push_args.get("time_out", 10),
+        )
+        counts = []
+        formatted_counts = []
+        count_idx = 0
+        # Format the counts
+        for i_idx in range(max_input_state):
+            formatted_counts.append([])
+            num_obs = num_obs_per_input_state[i_idx]
+            for o_idx in range(num_obs):
+                formatted_counts[i_idx].append([])
+                counts_array = np.array(collected_counts[count_idx], dtype=int)
+                formatted_counts[i_idx][o_idx] = counts_array
+                count_idx += 1
+        # Reshape the counts
+        for batch_idx in range(config.batch_size):
+            counts.append([])
+            for i_idx in range(max_input_state):
+                counts.append([])
+                for o_idx in range(num_obs_per_input_state[i_idx]):
+                    counts[batch_idx].append(formatted_counts[i_idx][o_idx][batch_idx])
+        # Compute the expectation values
+        for batch_idx in range(config.batch_size):
+            for i_idx in range(max_input_state):
+                for o_idx in range(num_obs_per_input_state[i_idx]):
+                    counts_dict = {
+                        binary(i, num_qubits): counts[batch_idx][i_idx][o_idx][i]
+                        for i in range(dim)
+                    }
+                    obs = reward_data[i_idx].observables.group_commuting(True)[o_idx]
+                    diag_obs = SparsePauliOp("I" * num_qubits, 0.0)
+                    for obs_, coeff in zip(obs.paulis, obs.coeffs):
+                        diag_obs_label = ""
+                        for char in obs_.to_label():
+                            diag_obs_label += char if char == "I" else "Z"
+                        diag_obs += SparsePauliOp(diag_obs_label, coeff)
+                    bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
+                    exp_value = bit_array.expectation_values(diag_obs.simplify())
+                    exp_value /= reward_data.pauli_sampling
+                    reward_array[batch_idx] += exp_value
+        return reward_array
+
+    def rl_qoc_training_qua_prog(
+        self,
+        qc: QuantumCircuit,
+        policy: ParameterTable,
+        reward: QuaParameter,
+        circuit_params: CircuitParams,
+        config: QEnvConfig,
+        num_updates: int = 1000,
+        test: bool = False,
+    ) -> Program:
+        from qm.qua import (
+            program,
+            declare,
+            Random,
+            for_,
+            Util,
+            stream_processing,
+            assign,
+            save,
+            fixed,
+        )
+        from qiskit_qm_provider import QMBackend
+        from ...qua.qua_utils import rand_gauss_moller_box, get_state_int
+
+        if not isinstance(config.backend, QMBackend):
+            raise ValueError("Backend must be a QMBackend")
+
+        if circuit_params.max_input_state is None:
+            raise ValueError("max_input_state should be set for Channel reward")
+        if circuit_params.input_state_vars is None:
+            raise ValueError("input_state_vars should be set for Channel reward")
+        if circuit_params.n_shots is None:
+            raise ValueError("n_shots should be set for Channel reward")
+        if circuit_params.max_observables is None:
+            raise ValueError("max_observables should be set for Channel reward")
+        if circuit_params.observable_vars is None:
+            raise ValueError("observable_vars should be set for Channel reward")
+
+        policy.reset()
+        reward.reset()
+        circuit_params.reset()
+
+        dim = int(2**qc.num_qubits)
+        for clbit in qc.clbits:
+            if len(qc.find_bit(clbit).registers) >= 2:
+                raise ValueError("Overlapping classical registers are not supported")
+
+        with program() as rl_qoc_training_prog:
+            # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
+            circuit_params.declare_variables()
+            policy.declare_variables()
+            reward.declare_variable()
+            reward.declare_stream()
+
+            n_u = declare(int)
+            shots = declare(int)
+            i_idx = declare(int)
+            o_idx = declare(int)
+            state_int = declare(int, value=0)
+            b = declare(int)
+            j = declare(int)
+            tmp1 = declare(fixed, size=config.n_actions)
+            tmp2 = declare(fixed, size=config.n_actions)
+            lower_bound = declare(fixed, value=config.action_space.low.tolist())
+            upper_bound = declare(fixed, value=config.action_space.high.tolist())
+            mu = policy.get_variable("mu")
+            sigma = policy.get_variable("sigma")
+            counts = reward.var
+            batch_r = Random(config.seed)
+
+            if test:
+                circuit_params.declare_streams()
+                policy.declare_streams()
+
+            if config.backend.init_macro is not None:
+                config.backend.init_macro()
+
+            with for_(n_u, 0, n_u < num_updates, n_u + 1):
+                policy.load_input_values()
+                if test:
+                    policy.save_to_stream()
+
+                for var in [circuit_params.circuit_choice_var, circuit_params.n_reps_var]:
+                    if var is not None and var.input_type is not None:
+                        var.load_input_value()
+                        if test:
+                            var.save_to_stream()
+                circuit_params.max_input_state.load_input_value()
+                if test:
+                    circuit_params.max_input_state.save_to_stream()
+                with for_(i_idx, 0, i_idx < circuit_params.max_input_state.var, i_idx + 1):
+                    circuit_params.input_state_vars.load_input_values()
+                    if test:
+                        circuit_params.input_state_vars.save_to_stream()
+                    circuit_params.max_observables.load_input_value()
+                    circuit_params.n_shots.load_input_value()
+                    if test:
+                        circuit_params.max_observables.save_to_stream()
+                        circuit_params.n_shots.save_to_stream()
+                    with for_(o_idx, 0, o_idx < circuit_params.max_observables.var, o_idx + 1):
+                        circuit_params.observable_vars.load_input_values()
+                        if test:
+                            circuit_params.observable_vars.save_to_stream()
+                        batch_r.set_seed(config.seed + n_u)
+                        with for_(b, 0, b < config.batch_size, b + 2):
+                            # Sample from a multivariate Gaussian distribution (Muller-Box method)
+                            if test:
+                                for i, parameter in enumerate(
+                                    circuit_params.real_time_circuit_parameters.parameters
+                                ):
+                                    parameter.assign(mu[i])
+                            else:
+                                tmp1, tmp2 = rand_gauss_moller_box(
+                                    mu,
+                                    sigma,
+                                    batch_r,
+                                    tmp1,
+                                    tmp2,
+                                    lower_bound=lower_bound,
+                                    upper_bound=upper_bound,
+                                )
+                            # Assign 1 or 2 depending on batch_size being even or odd (only relevant at last iteration)
+                            with for_(j, 0, j < 2, j + 1):
+                                # Assign the sampled actions to the action batch
+                                for i, parameter in enumerate(
+                                    circuit_params.real_time_circuit_parameters.parameters
+                                ):
+                                    if test:
+                                        parameter.assign(mu[i])
+                                    else:
+                                        parameter.assign(
+                                            tmp1[i], condition=(j == 0), value_cond=tmp2[i]
+                                        )
+                                if test:
+                                    circuit_params.real_time_circuit_parameters.save_to_stream()
+
+                                with for_(shots, 0, shots < circuit_params.n_shots.var, shots + 1):
+                                    result = config.backend.quantum_circuit_to_qua(
+                                        qc, circuit_params.circuit_variables
+                                    )
+                                    state_int = get_state_int(qc, result, state_int)
+                                    if test:
+                                        save(state_int, "state_int")
+                                    assign(counts[state_int], counts[state_int] + 1)
+                                    assign(state_int, 0)  # Reset state_int for the next shot
+
+                            reward.stream_back()
+
+            with stream_processing():
+                buffer = (config.batch_size, dim)
+                reward.stream_processing(buffer=buffer)
+                if test:
+                    circuit_params.stream_processing()
+                    policy.stream_processing()
+
+        return rl_qoc_training_prog
 
     def compute_expectation_values(
         self,

@@ -31,7 +31,7 @@ from qiskit.circuit import (
     Gate,
     Instruction,
     Parameter,
-    Qubit
+    Qubit,
 )
 from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.converters import circuit_to_dag, dag_to_circuit
