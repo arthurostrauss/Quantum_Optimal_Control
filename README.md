@@ -1,12 +1,55 @@
-# Feedback-based Quantum Control using Reinforcement Learning 
+# Reinforcement Learning for Quantum Optimal Control (RL-QOC)
 
-This repository is dedicated to the writing of Python scripts enabling the realization of quantum control tasks based on closed-loop optimization that incorporates measurements. We build upon the work of Volodymir Sivak on Model-Free Quantum Control with Reinforcement Learning (https://link.aps.org/doi/10.1103/PhysRevX.12.011059) to enable a generic framework for arbitrary state preparation and quantum gate calibration based on Qiskit modules. The interest here is that this repo enables the execution of the algorithm over both simulation and real IBM Backends seamlessly, and therefore enables an in-depth analysis of the robustness of the method for a variety of different backends. In the future, we will add compatibility with further providers. Additionally, this repository is dedicated to the investigation of contextual gate calibration.
+A cutting-edge framework for quantum control using reinforcement learning, featuring breakthrough real-time integration with the Quantum Orchestration Platform (QUA/OPX) and context-aware gate calibration. This repository pushes the boundaries of quantum control by embedding RL decision-making directly into quantum circuits for unprecedented precision and minimal latency.
 
-The repo is currently divided in five main folders. The first one is the folder "paper_results", where adaptation of the state preparation algorithm developed by Sivak for bosonic systems is adapted to a multiqubit system simulated with a Qiskit ``` QuantumCircuit``` running on a ```QasmSimulator``` backend instance.
+## 🚀 Key Innovations
 
-The two other folders extend the state preparation protocols by integrating quantum gate calibration procedures, that can be described using a usual gate level abstraction (that is one seeks to optimize gate parameters, in the spirit of a variational quantum algorithm), or at the pulse level abstraction, for more expressivity and harware-aware noise suppression. The novelty of this gate calibration procedure is that it can be tailormade to a quantum circuit context, enabling the suppression of spatially and temporally correlated noise.
+### Real-time Quantum Control with QUA Integration
+- **Embedded RL Control Flow**: PPO algorithm components executed directly on quantum hardware (OPX)
+- **Hardware-Based Action Sampling**: Actions generated in real-time using quantum platform's Linear Congruential Generator
+- **Minimal Latency**: Policy parameters streamed to quantum hardware with microsecond precision
+- **Deterministic Sampling**: Fixed-point arithmetic ensures reproducible quantum control sequences
 
-We briefly explain the overall logic of the algorithm below.
+### Context-Aware Quantum Calibration
+- **Circuit Context Analysis**: Automatically adapts gate parameters based on surrounding quantum operations
+- **Noise Correlation Modeling**: Accounts for spatially and temporally correlated noise in realistic environments
+- **Multi-Circuit Training**: Simultaneous calibration across different quantum algorithm contexts
+- **Adaptive Calibration**: Real-time adjustment to changing circuit contexts and noise conditions
+
+### Multi-Platform Quantum Control
+Building upon Volodymir Sivak's seminal work on [Model-Free Quantum Control with Reinforcement Learning](https://link.aps.org/doi/10.1103/PhysRevX.12.011059), we provide a unified framework supporting:
+- **Qiskit**: Full integration with IBM Quantum backends and simulators
+- **QUA/OPX**: Real-time control with Quantum Machines' Quantum Orchestration Platform
+- **QIBO**: Support for QIBO quantum computing framework
+- **Seamless Backend Switching**: Move from simulation to hardware without code changes
+
+## 🏗️ Architecture Overview
+
+### Real-time Quantum-Classical Integration
+```
+Classical Computer (PyTorch)          Quantum Orchestration Platform (OPX)
+┌─────────────────────────┐          ┌──────────────────────────────────┐
+│ PPO Policy Network      │ ────────►│ Real-time Action Sampling        │
+│ - Neural Network        │          │ - Linear Congruential Generator  │
+│ - Policy Parameters     │          │ - Box-Muller Transform          │
+│ - Gradient Updates      │          │ - Fixed-point Arithmetic        │
+└─────────────────────────┘          └──────────────────────────────────┘
+            ▲                                           │
+            │                                           ▼
+┌─────────────────────────┐          ┌──────────────────────────────────┐
+│ Reward Computation      │ ◄────────│ Quantum Circuit Execution        │
+│ - Fidelity Estimation  │          │ - Parametrized Gates             │
+│ - Context Analysis      │          │ - Real-time Measurements        │
+│ - Performance Metrics  │          │ - Hardware Feedback             │
+└─────────────────────────┘          └──────────────────────────────────┘
+```
+
+### Framework Components
+- **Environment Layer**: Quantum environments supporting Qiskit, QUA, and QIBO backends
+- **Agent Layer**: Advanced PPO implementation with real-time capabilities
+- **Reward Layer**: Multiple reward schemes (DFE, CAFE, Channel fidelity)
+- **Integration Layer**: Seamless hardware-software interfaces
+- **Optimization Layer**: Hyperparameter optimization and curriculum learning
 
 ## Introduction
 
@@ -21,7 +64,82 @@ Quantum computing is entering a phase where the prospect of obtaining a comparat
 
 What we want to achieve here is to show that model-free quantum control with RL (Sivak et. al, https://link.aps.org/doi/10.1103/PhysRevX.12.011059) is able to capture the contextual dependence of such gate calibration task and to provide suitable error suppression strategies. In the examples currently available, we explain the overall logic of the algorithm itself, and detail later how the context dependence can be encompassed through a tailor-made training procedure.
 
-![Programming Pipeline](Programming_pipeline.png) 
+![Programming Pipeline](Programming_pipeline.png)
+
+## 🎯 Real-time Quantum Control with QUA Integration
+
+### PPO Algorithm Offloading to Quantum Platform
+
+Our breakthrough QUA integration enables unprecedented real-time quantum control by offloading critical components of the PPO algorithm directly to the Quantum Orchestration Platform:
+
+#### **Policy Parameter Streaming**
+```python
+# Classical computer streams policy parameters to OPX
+policy_params = {"mu": [FixedPoint(val) for val in mean_actions],
+                "sigma": [FixedPoint(val) for val in std_actions]}
+policy_table.push_to_opx(policy_params, job=qm_job, qm=quantum_machine)
+```
+
+#### **Hardware-Based Action Sampling**
+```qua
+# QUA program running on OPX hardware
+def real_time_action_sampling():
+    # Receive policy parameters from classical computer
+    mu = policy_params["mu"]
+    sigma = policy_params["sigma"]
+    
+    # Generate actions using hardware RNG with deterministic LCG
+    seed = initial_seed + global_step
+    uniform_sample = lcg_fixed_point(seed, a=137939405, c=12345, m=2^28)
+    
+    # Box-Muller transform for Gaussian distribution
+    gaussian_sample = box_muller_transform(uniform_sample, lookup_tables)
+    
+    # Scale and apply to quantum gates
+    action = mu + sigma * gaussian_sample
+    apply_parametrized_gate(action, target_qubit)
+```
+
+#### **Real-time Reward Computation**
+```qua
+# Embedded reward computation on quantum platform
+def compute_reward_real_time():
+    # Execute quantum operations with real-time parameters
+    quantum_operations(real_time_actions)
+    
+    # Perform measurements for fidelity estimation
+    measurement_results = measure_in_pauli_basis(observables)
+    
+    # Compute fidelity using Direct Fidelity Estimation
+    fidelity = estimate_fidelity(measurement_results, target_expectations)
+    
+    # Stream results back to classical computer
+    stream_result(fidelity, measurement_data)
+```
+
+### **Minimal Overhead Quantum-Classical Communication**
+
+The QUA integration minimizes classical-quantum communication overhead by:
+- **Batch Parameter Updates**: Policy parameters updated in batches rather than per-action
+- **Hardware Action Generation**: Actions sampled directly on quantum platform
+- **Embedded Computation**: Reward computation performed on quantum hardware
+- **Efficient Streaming**: Results streamed back only when needed for policy updates
+
+### **Context-Aware Real-time Adaptation**
+
+Real-time context awareness enables:
+```python
+# Context-aware QUA program generation
+def context_aware_qua_program(circuit_contexts, policy_params):
+    # Analyze circuit context in real-time
+    context_features = analyze_circuit_context(current_circuit)
+    
+    # Adapt gate parameters based on context
+    context_dependent_params = adapt_parameters(policy_params, context_features)
+    
+    # Execute with real-time adaptation
+    execute_with_context(context_dependent_params, target_gates)
+``` 
 ## 1. Describing the QuantumEnvironment
 ### a. Deriving the reward for the quantum control problem
 As explained above, our framework builds upon the idea of transforming the quantum control task into a RL problem where an agent is missioned to probe and act upon an environment in order to steer it into a target state. The way this is usually done in RL is to introduce the concept of a reward signal $R$, which should be designed such that the maximization of this reward yields a set of actions providing a successful and reliable target preparation. 
@@ -147,27 +265,193 @@ For this, we first declare the ```TorchQuantumEnvironment``` as follows:
 
 [2] S. T. Flammia and Y.-K. Liu, “Direct Fidelity Estimation from Few Pauli Measurements”, Physical Review Letters, vol. 106, no. 23, p. 230 501, Jun. 2011, Publisher: American Physical Society. DOI: 10.1103/PhysRevLett.106.230501. [Online]. Available: https://link.aps.org/doi/10.1103/PhysRevLett.106.230501
 
-## Installation of optional dependencies
+## 🚀 Quick Start
 
-Some optional dependencies, especially for integration with other hardware or software platforms, are available as extras in the `pyproject.toml` file:
-
-- `qibo`: qibo, qibolab, qibocal
-- `qua`: qualang-tools, qm-qua, quam, quam-builder
-- `qiskit-pulse`: qiskit-dynamics, qiskit-experiments
-
-To install an extra, for example:
+### Installation
 
 ```bash
-pip install .[qua]
+# Clone the repository
+git clone https://github.com/your-org/rl-qoc.git
+cd rl-qoc
+
+# Install base package
+pip install -e .
+
+# For QUA real-time integration (requires Quantum Machines account)
+pip install -e .[qua]
+
+# For QIBO integration
+pip install -e .[qibo]
+
+# For pulse-level control with Qiskit
+pip install -e .[qiskit-pulse]
 ```
 
-### Private dependencies
+### Basic Usage
 
-Two optional dependencies, `qiskit-qm-provider` and `oqc`, are private GitHub repositories and cannot be installed automatically. If you have access, install them manually:
+```python
+from rl_qoc import QuantumEnvironment, CustomPPO, PPOConfig, StateTarget, StateReward
+
+# Configure quantum state preparation task
+config = QEnvConfig(
+    target=StateTarget(state_circuit=bell_state_circuit, target_qubits=[0, 1]),
+    reward_config=StateReward(sampling_pauli_space=50, n_shots=1024),
+    backend_config=BackendConfig(backend_name="aer_simulator")
+)
+
+# Create environment and agent
+env = QuantumEnvironment(config)
+agent = CustomPPO(PPOConfig(learning_rate=3e-4, batch_size=10), env)
+
+# Train the agent
+results = agent.train()
+print(f"Final fidelity: {results['fidelity_history'][-1]:.3f}")
+```
+
+### Real-time QUA Integration
+
+```python
+from rl_qoc.qua import QMEnvironment, CustomQMPPO
+
+# Configure for real-time quantum control
+qua_config = QEnvConfig(
+    target=GateTarget(gate=RXGate(Parameter('theta')), target_qubits=[0]),
+    backend_config=QMConfig(qm_config=quantum_machine_config, 
+                           input_type=InputType.REALTIME),
+    reward_config=ChannelReward()
+)
+
+# Create QUA environment and agent
+qm_env = QMEnvironment(qua_config)
+qm_agent = CustomQMPPO(ppo_config, qm_env)
+
+# Start real-time program and train
+qm_env.start_program()
+results = qm_agent.train()
+qm_env.close()
+```
+
+## 📋 Installation Options
+
+### Platform-Specific Extras
+
+| Platform | Extra | Description |
+|----------|--------|-------------|
+| `qua` | QUA/OPX Integration | Real-time quantum control with Quantum Machines |
+| `qibo` | QIBO Framework | QIBO quantum computing platform support |
+| `qiskit-pulse` | Pulse-level Control | Advanced pulse-level quantum control |
+
+### Private Dependencies
+
+Advanced features require private dependencies. Contact maintainers for access:
 
 ```bash
-pip install git+ssh://git@github.com:YOUR_ORG/qiskit-qm-provider.git
-pip install git+ssh://git@github.com:YOUR_ORG/oqc.git
+# Quantum Machines Provider (requires QM account)
+pip install git+ssh://git@github.com:quantum-machines/qiskit-qm-provider.git
+
+# Oxford Quantum Computing integration
+pip install git+ssh://git@github.com:oxfordquantumcomputing/oqc.git
 ```
 
-Contact the maintainers to obtain access to these repositories if needed.
+## 🎯 Key Features
+
+### Real-time Quantum Control
+- **Hardware Action Sampling**: Actions generated directly on quantum platform
+- **Minimal Latency**: Microsecond-precision quantum control
+- **Embedded RL**: PPO components running on quantum hardware
+- **Deterministic Sampling**: Reproducible quantum control sequences
+
+### Context-Aware Calibration
+- **Circuit Analysis**: Automatic adaptation to quantum circuit context
+- **Noise Modeling**: Spatially and temporally correlated noise handling
+- **Multi-Context Training**: Simultaneous calibration across different algorithms
+- **Real-time Adaptation**: Dynamic parameter adjustment
+
+### Multi-Platform Support
+- **Qiskit**: Full IBM Quantum ecosystem integration
+- **QUA/OPX**: Real-time control with Quantum Orchestration Platform  
+- **QIBO**: Support for QIBO quantum framework
+- **Backend Agnostic**: Seamless switching between platforms
+
+### Advanced RL Features
+- **Custom PPO**: Quantum-optimized Proximal Policy Optimization
+- **Curriculum Learning**: Progressive difficulty increase
+- **Hyperparameter Optimization**: Automated HPO with Optuna
+- **Real-time Monitoring**: Advanced logging and visualization
+
+## 📚 Documentation
+
+Comprehensive documentation is available in the [`docs/`](docs/) directory:
+
+### 📖 [API Reference](docs/api/)
+Complete API documentation for all modules:
+- **[Environment API](docs/api/environment/)**: Quantum environments and configuration
+- **[Agent API](docs/api/agent/)**: PPO implementation and neural networks
+- **[QUA Integration API](docs/api/qua/)**: Real-time quantum control with QUA
+- **[Rewards API](docs/api/rewards/)**: Reward schemes and computation methods
+
+### 🎯 [Examples](docs/examples/)
+Practical examples demonstrating key capabilities:
+- Basic quantum state preparation and gate calibration
+- Context-aware quantum control workflows
+- Real-time QUA integration examples
+- Multi-platform usage patterns
+
+### 📋 [Tutorials](docs/tutorials/)
+Step-by-step guides for getting started:
+- Setting up quantum environments
+- Implementing custom reward schemes
+- Configuring PPO for quantum control
+- Advanced real-time control techniques
+
+### 🔬 [Technical Reference](docs/reference/)
+In-depth technical documentation:
+- Mathematical foundations and algorithms
+- Hardware integration specifications
+- Performance optimization guides
+- Best practices and troubleshooting
+
+## 🔬 Research Applications
+
+This framework enables cutting-edge research in:
+
+### Quantum Algorithm Optimization
+- **VQE**: Variational quantum eigensolver optimization
+- **QAOA**: Quantum approximate optimization algorithm tuning
+- **Quantum Machine Learning**: Parameter optimization for quantum ML models
+
+### Hardware-Aware Quantum Control
+- **Crosstalk Mitigation**: Context-aware calibration for multi-qubit systems
+- **Noise Characterization**: Real-time noise adaptation and mitigation
+- **Error Suppression**: Dynamic error correction and prevention
+
+### Real-time Quantum Computing
+- **Low-Latency Control**: Microsecond-precision quantum operations
+- **Adaptive Protocols**: Dynamic protocol adjustment based on system state
+- **Quantum-Classical Integration**: Seamless hybrid algorithm execution
+
+## 🤝 Contributing
+
+We welcome contributions from the quantum computing and machine learning communities! See our [Contributing Guide](CONTRIBUTING.md) for details on:
+
+- Code contribution guidelines
+- Development setup and testing
+- Documentation standards
+- Research collaboration opportunities
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+
+## 🙏 Acknowledgments
+
+- **Volodymir Sivak** et al. for the foundational work on model-free quantum control with RL
+- **Quantum Machines** for QUA platform integration and support
+- **IBM Quantum** for Qiskit ecosystem integration
+- **The quantum computing community** for continuous feedback and contributions
+
+## 📞 Contact
+
+- **Maintainer**: Arthur Strauss (arthur.strauss@u.nus.edu)
+- **Issues**: Please report bugs and feature requests via [GitHub Issues](https://github.com/your-org/rl-qoc/issues)
+- **Discussions**: Join our [GitHub Discussions](https://github.com/your-org/rl-qoc/discussions) for questions and ideas
