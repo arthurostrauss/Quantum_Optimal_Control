@@ -4,7 +4,7 @@ import numpy as np
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import BaseSamplerV2
 
-from .shadow_reward_data import SHADOWRewardData, SHADOWRewardDataList
+from .shadow_reward_data import ShadowRewardData, ShadowRewardDataList
 from ...environment.target import GateTarget, StateTarget
 from ...environment.configuration.qconfig import QEnvConfig
 from ..base_reward import Reward
@@ -17,9 +17,9 @@ from qiskit_aer import AerSimulator
 
 
 @dataclass
-class SHADOWReward(Reward):
+class ShadowReward(Reward):
     """
-    Configuration for computing the reward based on (SHADOW) 
+    Configuration for computing the reward based on (Shadow) 
     all data in GRD and all calculations in GRWP
     """
 
@@ -57,7 +57,7 @@ class SHADOWReward(Reward):
         target: StateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
-    ) -> SHADOWRewardDataList:
+    ) -> ShadowRewardDataList:
         """
         Compute pubs related to the reward method
 
@@ -71,7 +71,7 @@ class SHADOWReward(Reward):
         """
 
         if not isinstance(target, GateTarget):
-            raise ValueError("SHADOW reward can only be computed for a target gate")
+            raise ValueError("Shadow reward can only be computed for a target gate")
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
 
@@ -94,17 +94,17 @@ class SHADOWReward(Reward):
             pub = (qc, params, unique_u_count)  
             
             reward_data.append(
-                SHADOWRewardData(
+                ShadowRewardData(
                     pub,
                     u                    
                 )
             )
 
-        return SHADOWRewardDataList(reward_data)
+        return ShadowRewardDataList(reward_data)
 
     def get_reward_with_primitive(
         self,
-        reward_data: SHADOWRewardDataList,
+        reward_data: ShadowRewardDataList,
         primitive: BaseSamplerV2,
         shadow_size: int,  #does it need to be here, or calculated in main instead?
         error: float,

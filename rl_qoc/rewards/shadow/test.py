@@ -1,13 +1,13 @@
 import numpy as np
 from qiskit.circuit import QuantumCircuit
 from qiskit_aer import AerSimulator
-from shadow import SHADOWReward
+from shadow import ShadowReward
 from qiskit.quantum_info import Statevector
-from shadow import SHADOWRewardData, SHADOWRewardDataList
+from shadow import ShadowRewardData, ShadowRewardDataList
 from ...environment.target import GateTarget, StateTarget
 from ...environment.configuration.qconfig import QEnvConfig
 
-shadow_reward = SHADOWReward()
+shadow_reward = ShadowReward()
 primitive = ...
 dm_target = Statevector([1/np.sqrt(2), 0, 0, 1/np.sqrt(2)])  #bell state for 2 qubits
 qubits = [0,1]  #2 QUBITS
