@@ -22,18 +22,15 @@ class ShadowReward(Reward):
     Configuration for computing the reward based on (Shadow) 
     all data in GRD and all calculations in GRWP
     """
-
-    #input_states_choice: Literal["pauli4", "pauli6", "2-design"] = "pauli4"
-    input_states_seed: int = 2000
-    input_states_rng: np.random.Generator = field(init=False)
+    unitary_seed: int = 2000
+    unitary_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
-        super().__post_init__()
-        self.input_states_rng = np.random.default_rng(self.input_states_seed)
+        self.unitary_rng = np.random.default_rng(self.unitary_seed)
 
     @property
     def reward_args(self):
-        return {"input_states_choice": self.input_states_choice}
+        return {"unitary_seed": self.unitary_seed}
 
     @property
     def reward_method(self):
@@ -43,44 +40,35 @@ class ShadowReward(Reward):
         """
         Set the seed for the random number generator
         """
-        self.input_states_seed = seed + 357
-        self.input_states_rng = np.random.default_rng(self.input_states_seed)
+        self.unitary_seed = seed + 357
+        self.unitary_rng = np.random.default_rng(self.unitary_seed)
 
     
     def get_reward_data(
         self,
         qc: QuantumCircuit, #simulate imperfect gate
-        unitary: List[List[int]],  #do i need this here?
-        shadow_size: int,
-
-        params: np.array,
+        params: np.ndarray,
         target: StateTarget,
         env_config: QEnvConfig,
-        baseline_circuit: Optional[QuantumCircuit] = None,
     ) -> ShadowRewardDataList:
         """
         Compute pubs related to the reward method
 
         Args: 
             qc: Quantum circuit to be executed on quantum system
-            unitary: String of Paulis to run with the gate
             params: Parameters to feed the parametrized circuit
             target: Target gate or state to prepare
             env_config: QEnvConfig containing the backend information and execution configuration
             baseline_circuit: Ideal circuit that qc should implement
         """
 
-        if not isinstance(target, GateTarget):
-            raise ValueError("Shadow reward can only be computed for a target gate")
+        if not isinstance(target, StateTarget):
+            raise ValueError("Shadow reward can only be computed for a target state")
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
-
-        if baseline_circuit is not None:
-            circuit_ref = baseline_circuit.copy()
-        else:
-            circuit_ref = qc.metadata["baseline_circuit"].copy()
-        # num_qubits = target.causal_cone_size # not a property in statetarget
-        
+        shadow_size = execution_config.sampling_paulis
+        n_shots = execution_config.n_shots
+        seed = execution_config.seed
         
         num_qubits = len(target.physical_qubits)
         reward_data = [] 

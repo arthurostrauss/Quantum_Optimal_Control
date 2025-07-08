@@ -1,34 +1,43 @@
-import numpy as np
-from qiskit.circuit import QuantumCircuit
-from qiskit_aer import AerSimulator
-from shadow import ShadowReward
+
+from rl_qoc import QuantumEnvironment, QiskitConfig, QEnvConfig, ExecutionConfig, StateTarget, ShadowReward
+from qiskit.circuit import QuantumCircuit, ParameterVector, QuantumRegister
+from qiskit.circuit.library import RXGate, UGate, RZXGate
 from qiskit.quantum_info import Statevector
-from shadow import ShadowRewardData, ShadowRewardDataList
-from ...environment.target import GateTarget, StateTarget
-from ...environment.configuration.qconfig import QEnvConfig
 
-shadow_reward = ShadowReward()
-primitive = ...
-dm_target = Statevector([1/np.sqrt(2), 0, 0, 1/np.sqrt(2)])  #bell state for 2 qubits
-qubits = [0,1]  #2 QUBITS
-target = StateTarget(dm_target, qubits) #STATE TARGET
-env_config = QEnvConfig(target, )
+from gymnasium.spaces import Box
+import numpy as np
 
-rewards = []
-qc = QuantumCircuit(2)  # append as required
-
-for _ in range(50):  # 50 epochs
+def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
+    qc.h(qr[0])
+    qc.rzx(params[0], qr[0], qr[1])
     
 
-    params = np.array([])   
-    # Prepare shadow data
-    reward_data_list = shadow_reward.get_reward_data(qc, params, target, env_config)
-
-    # Estimate shadow expectation, get reward
-    reward = shadow_reward.get_reward_with_primitive(reward_data_list, primitive)
-
     
-    
-    # params_for_gate = machine_learning(rewards)
-    # correction_gate = some_func(params_for_gate)
-    # qc = qc.append(correction_gate)
+tgt_state = (Statevector.from_label('00') + Statevector.from_label('11'))/np.sqrt(2)
+print(tgt_state)
+backend_config = QiskitConfig(apply_parametrized_gate)
+state_target = StateTarget(tgt_state)
+execution_config = ExecutionConfig(batch_size=5,
+                                   sampling_paulis=100, # Shadow size
+                                   n_shots=1,
+                                   seed=42
+                                   )
+reward = ShadowReward()
+env_config = QEnvConfig(state_target, 
+                        backend_config=backend_config,
+                        execution_config=execution_config,
+                        action_space=Box(low=np.array([0]), high=np.array([2*np.pi]), shape=(1,)),
+                        reward=reward)
+
+env = QuantumEnvironment(env_config)
+params = np.array([[0.]])
+reward_data = reward.get_reward_data(env.circuit, params, state_target, env_config)
+print(env.circuit)
+print(reward_data)
+
+
+
+
+
+
+
