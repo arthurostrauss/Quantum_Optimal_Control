@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import signal
-from typing import Callable, Any, Optional, List, Literal, Sequence
+from typing import Callable, Any, Optional, List, Literal, Sequence, TYPE_CHECKING
 import numpy as np
 from gymnasium import Env
 from gymnasium.core import ObsType
@@ -64,8 +64,9 @@ from ..helpers.helper_functions import (
     has_noise_model,
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
-from ..rewards import Reward, REWARD_STRINGS
-from ..rewards.reward_data import RewardDataList
+if TYPE_CHECKING:
+    from ..rewards import Reward, REWARD_STRINGS
+    from ..rewards.reward_data import RewardDataList
 
 
 class BaseQuantumEnvironment(ABC, Env):
@@ -185,6 +186,7 @@ class BaseQuantumEnvironment(ABC, Env):
             update_fit_params: Method from which to update the fit parameters (e.g., "cafe", "channel", "state")
 
         """
+        from ..rewards import Reward, REWARD_STRINGS
         fig, ax = plt.subplots()
         ax.set_title("Initial reward fit (for varying number of repetitions)")
         ax.set_xlabel("Number of repetitions")
