@@ -5,7 +5,12 @@ from .fidelity import FidelityReward, FidelityRewardData, FidelityRewardDataList
 from .orbit import ORBITReward, ORBITRewardData, ORBITRewardDataList
 from .state import StateReward, StateRewardData, StateRewardDataList
 from .xeb import XEBReward, XEBRewardData, XEBRewardDataList
+<<<<<<< HEAD
 from typing import Dict, Literal, Type
+=======
+from .shadow import ShadowReward, ShadowRewardData, ShadowRewardDataList
+from typing import Dict, Literal
+>>>>>>> f360d88 (Added Shadow method to init files)
 
 reward_dict: Dict[str, Type[Reward]] = {
     "fidelity": FidelityReward,
@@ -14,6 +19,6 @@ reward_dict: Dict[str, Type[Reward]] = {
     "xeb": XEBReward,
     "cafe": CAFEReward,
     "orbit": ORBITReward,
-    "shadow": FidelityReward,  # Placeholder for shadow tomography reward
+    "shadow": ShadowReward,  # Placeholder for shadow tomography reward
 }
 REWARD_STRINGS = Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity", "shadow"]
