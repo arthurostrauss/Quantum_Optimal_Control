@@ -24,7 +24,7 @@ from ..backend_info import BackendInfo
 from ...helpers import load_q_env_from_yaml_file, select_backend
 
 if TYPE_CHECKING:
-    from ...rewards import Reward
+    from ...rewards import Reward, REWARD_STRINGS
 
 
 def default_benchmark_config():
@@ -50,7 +50,7 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward: Reward = "state"
+    reward: Reward | REWARD_STRINGS = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
     backend_info: BackendInfo = field(init=False)
@@ -96,7 +96,7 @@ class QEnvConfig:
     def backend(self, backend: BackendV2):
         self.backend_config.backend = backend
         self.backend_config.parametrized_circuit_kwargs["backend"] = backend
-        self.backend_info._backend = backend
+        self.backend_info.backend = backend
 
     @property
     def parametrized_circuit(self):

@@ -42,7 +42,7 @@ class BackendConfig(ABC):
                 QuantumCircuit,
                 ParameterVector | List[Parameter],
                 QuantumRegister,
-                ...,
+                Any,
             ],
             None,
         ]
@@ -95,9 +95,8 @@ class DynamicsConfig(QiskitConfig):
     Qiskit Dynamics configuration elements.
 
     Args:
-        the channels and the qubit frequencies
         calibration_files: load existing gate calibrations from json file for DynamicsBackend
-        baseline gate calibrations for running algorithm
+        do_calibrations: whether to do gate calibrations for the backend
 
     """
 

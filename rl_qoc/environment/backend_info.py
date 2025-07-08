@@ -74,6 +74,10 @@ class BackendInfo(ABC):
     @property
     def backend(self):
         return self._backend
+    
+    @backend.setter
+    def backend(self, backend: QiskitBackend):
+        self._backend = backend
 
 
 class QiskitBackendInfo(BackendInfo):
