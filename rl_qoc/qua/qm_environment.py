@@ -143,6 +143,12 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self._total_data_points += step_data_points
         fetching_index, finishing_index = self._step_indices[self.step_tracker]
         fetching_size = finishing_index - fetching_index
+        if self.qm_backend_config.verbosity > 0:
+            print(f"Fetching index: {fetching_index}, finishing index: {finishing_index}")
+            print(f"Fetching size: {fetching_size}")
+            print(f"Step indices: {self._step_indices}")
+            print(f"Total data points: {self._total_data_points}")
+            
 
         reward = self.config.reward.qm_step(
             reward_data,

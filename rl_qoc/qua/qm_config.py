@@ -7,7 +7,7 @@ from qiskit_qm_provider import QMBackend
 from typing import Literal, Union, Optional
 from qiskit_qm_provider import InputType
 
-Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX"]]
+Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX"], InputType]
 
 
 @dataclass
@@ -27,8 +27,8 @@ class QMConfig(BackendConfig):
         test_mode: Whether to run in test mode (saves everything in streams)
     """
 
-    backend: QMBackend = None
-    input_type: InputType = "INPUT_STREAM"
+    backend: Optional[QMBackend] = None
+    input_type: Input_Type = InputType.INPUT_STREAM
     verbosity: int = 1
     num_updates: int = 1000
     compiler_options: Optional[CompilerOptionArguments] = None

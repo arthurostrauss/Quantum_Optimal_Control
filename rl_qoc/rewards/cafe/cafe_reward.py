@@ -407,7 +407,10 @@ class CAFEReward(Reward):
         config: QEnvConfig,
         **push_args,
     ):
-
+        from ...qua.qm_config import QMConfig
+        if not isinstance(config.backend_config, QMConfig):
+            raise ValueError("Backend config must be a QMConfig")
+        
         reward_array = np.zeros(shape=(config.batch_size,))
         num_qubits = config.target.n_qubits
         dim = 2**num_qubits
@@ -434,8 +437,8 @@ class CAFEReward(Reward):
             push_args["job"],
             fetching_index=fetching_index,
             fetching_size=fetching_size,
-            verbosity=push_args.get("verbosity", 0),
-            time_out=push_args.get("time_out", 10),
+            verbosity=config.backend_config.verbosity,
+            time_out=config.backend_config.timeout,
         )
 
         shape = (max_input_state, config.batch_size, dim)

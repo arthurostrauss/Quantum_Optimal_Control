@@ -363,7 +363,10 @@ class StateReward(Reward):
         config: QEnvConfig,
         **push_args,
     ):
-
+        from ...qua.qm_config import QMConfig
+        if not isinstance(config.backend_config, QMConfig):
+            raise ValueError("Backend config must be a QMConfig")
+        
         reward_array = np.zeros(shape=(config.batch_size,))
         num_qubits = config.target.n_qubits
         dim = 2**num_qubits
@@ -387,7 +390,7 @@ class StateReward(Reward):
             len(reward_data.observables_indices[0]), **push_args
         )
         circuit_params.n_shots.push_to_opx(reward_data.shots[0], **push_args)
-        for i, observable in enumerate(reward_data.observables_indices):
+        for i, observable in enumerate(reward_data.observables_indices[0]):
             observable_dict = {
                 observable_var: observable_val
                 for observable_var, observable_val in zip(
@@ -399,8 +402,8 @@ class StateReward(Reward):
             push_args["job"],
             fetching_index=fetching_index,
             fetching_size=fetching_size,
-            verbosity=push_args.get("verbosity", 0),
-            time_out=push_args.get("time_out", 10),
+            verbosity=config.backend_config.verbosity,
+            time_out=config.backend_config.timeout,
         )
 
         counts = []
@@ -462,17 +465,14 @@ class StateReward(Reward):
 
         if not isinstance(config.backend, QMBackend):
             raise ValueError("Backend must be a QMBackend")
-
-        if circuit_params.max_input_state is None:
-            raise ValueError("max_input_state should be set for Channel reward")
         if circuit_params.input_state_vars is None:
-            raise ValueError("input_state_vars should be set for Channel reward")
+            raise ValueError("input_state_vars should be set for State reward")
         if circuit_params.n_shots is None:
-            raise ValueError("n_shots should be set for Channel reward")
+            raise ValueError("n_shots should be set for State reward")
         if circuit_params.max_observables is None:
-            raise ValueError("max_observables should be set for Channel reward")
+            raise ValueError("max_observables should be set for State reward")
         if circuit_params.observable_vars is None:
-            raise ValueError("observable_vars should be set for Channel reward")
+            raise ValueError("observable_vars should be set for State reward")
 
         policy.reset()
         reward.reset()
