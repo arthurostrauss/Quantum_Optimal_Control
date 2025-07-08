@@ -142,3 +142,7 @@ pyrightconfig.json
 pulse_level/qua/quam_state/
 
 pulse_level/qua/quam_state_ref/
+
+.vscode/settings.json
+
+.cursor/
