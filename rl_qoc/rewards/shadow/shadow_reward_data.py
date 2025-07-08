@@ -8,9 +8,9 @@ from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
 
 
 @dataclass
-class SHADOWRewardData(RewardData):
+class ShadowRewardData(RewardData):
     """
-    Dataclass enabling the storage and tracking of all the items that will be used to compute the SHADOW reward.
+    Dataclass enabling the storage and tracking of all the items that will be used to compute the Shadow reward.
     """
     #add data for unitary list
     pub: SamplerPub | SamplerPubLike
@@ -53,12 +53,12 @@ class SHADOWRewardData(RewardData):
 
 
 @dataclass
-class SHADOWRewardDataList(RewardDataList):
+class ShadowRewardDataList(RewardDataList):
     """
-    Dataclass enabling the storage and tracking of all the items that will be used to compute the SHADOW reward.
+    Dataclass enabling the storage and tracking of all the items that will be used to compute the Shadow reward.
     """
 
-    reward_data: List[SHADOWRewardData]
+    reward_data: List[ShadowRewardData]
 
     def __post_init__(self):
         # Check if all reward data have the same number of qubits
