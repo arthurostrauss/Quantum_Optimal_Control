@@ -64,9 +64,8 @@ from ..helpers.helper_functions import (
     has_noise_model,
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
+from ..rewards import Reward, REWARD_STRINGS
 from ..rewards.reward_data import RewardDataList
-
-rewards = Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity"]
 
 
 class BaseQuantumEnvironment(ABC, Env):
@@ -168,10 +167,10 @@ class BaseQuantumEnvironment(ABC, Env):
         self,
         params: np.array,
         execution_config: Optional[ExecutionConfig] = None,
-        reward_method: Optional[Sequence[rewards]] = None,
+        reward_method: Optional[Sequence[REWARD_STRINGS | Reward]] = None,
         fit_function: Optional[Callable] = None,
         inverse_fit_function: Optional[Callable] = None,
-        update_fit_params: Optional[rewards] = None,
+        update_fit_params: Optional[REWARD_STRINGS | Reward] = None,
     ):
         """
         Method to fit the initial reward function to the first set of actions in the environment
@@ -191,11 +190,11 @@ class BaseQuantumEnvironment(ABC, Env):
         ax.set_xlabel("Number of repetitions")
         ax.set_ylabel("Reward")
         initial_execution_config = self.config.execution_config
-        initial_reward_method = self.config.reward_method
+        initial_reward = self.config.reward
         if execution_config is not None:
             self.config.execution_config = execution_config
         if reward_method is not None:
-            if isinstance(reward_method, str):
+            if isinstance(reward_method, (str, Reward)):
                 reward_method = [reward_method]
 
         else:
@@ -203,7 +202,10 @@ class BaseQuantumEnvironment(ABC, Env):
         reward_data = []
         for m, method in enumerate(reward_method):
             reward_data.append([])
-            self.config.reward_method = method
+            if isinstance(method, Reward):
+                self.config.reward = method
+            elif isinstance(method, str):
+                self.config.reward_method = method
             for i in range(len(self.config.execution_config.n_reps)):
                 self.config.execution_config.n_reps_index = i
                 print("Number of repetitions:", self.n_reps)
@@ -251,7 +253,7 @@ class BaseQuantumEnvironment(ABC, Env):
         if execution_config is not None:
             self.config.execution_config = initial_execution_config
 
-        self.config.reward_method = initial_reward_method
+        self.config.reward = initial_reward
 
     def perform_action(self, actions: np.array, update_env_history: bool = True):
         """

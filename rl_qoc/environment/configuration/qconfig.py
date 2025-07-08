@@ -222,7 +222,7 @@ class QEnvConfig:
         return self.reward.reward_method
 
     @reward_method.setter
-    def reward_method(self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]):
+    def reward_method(self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit", "shadow"]):
         try:
             from ...rewards import reward_dict
 
