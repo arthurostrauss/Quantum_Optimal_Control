@@ -288,3 +288,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             ]
             if param is not None
         ]
+    
+    def clear_history(self):
+        """
+        Clear the history of the environment
+        """
+        super().clear_history()
+        self._step_indices = {}
+        self._total_data_points = 0

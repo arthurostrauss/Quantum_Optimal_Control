@@ -459,9 +459,10 @@ class ChannelReward(Reward):
         from ...qua.qm_config import QMConfig
         if not isinstance(config.backend_config, QMConfig):
             raise ValueError("Backend config must be a QMConfig")
-        
+        if not isinstance(config.target, GateTarget):
+            raise ValueError("Channel reward is only supported for GateTarget")
         reward_array = np.zeros(shape=(config.batch_size,))
-        num_qubits = config.target.n_qubits
+        num_qubits = config.target.causal_cone_size
         dim = 2**num_qubits
         binary = lambda n, l: bin(n)[2:].zfill(l)
         input_indices = reward_data.input_indices
@@ -525,6 +526,7 @@ class ChannelReward(Reward):
                     counts[batch_idx].append(formatted_counts[i_idx][o_idx][batch_idx])
         # Compute the expectation values
         for batch_idx in range(config.batch_size):
+            exp_value = 0.
             for i_idx in range(max_input_state):
                 for o_idx in range(num_obs_per_input_state[i_idx]):
                     counts_dict = {
@@ -538,10 +540,11 @@ class ChannelReward(Reward):
                         for char in obs_.to_label():
                             diag_obs_label += char if char == "I" else "Z"
                         diag_obs += SparsePauliOp(diag_obs_label, coeff)
-                    bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
-                    exp_value = bit_array.expectation_values(diag_obs.simplify())
-                    exp_value /= reward_data.pauli_sampling
-                    reward_array[batch_idx] += exp_value
+                        bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
+                        exp_value += bit_array.expectation_values(diag_obs.simplify())
+            exp_value += reward_data.id_coeff
+            exp_value /= reward_data.pauli_sampling
+            reward_array[batch_idx] = exp_value
         return reward_array
 
     def rl_qoc_training_qua_prog(
@@ -581,12 +584,14 @@ class ChannelReward(Reward):
             raise ValueError("max_observables should be set for Channel reward")
         if circuit_params.observable_vars is None:
             raise ValueError("observable_vars should be set for Channel reward")
-
+        if not isinstance(config.target, GateTarget):
+            raise ValueError("Channel reward is only supported for GateTarget")
         policy.reset()
         reward.reset()
         circuit_params.reset()
 
-        dim = int(2**qc.num_qubits)
+        num_qubits = config.target.causal_cone_size
+        dim = int(2**num_qubits)
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
@@ -690,8 +695,8 @@ class ChannelReward(Reward):
                                     assign(counts[state_int], counts[state_int] + 1)
                                     assign(state_int, 0)  # Reset state_int for the next shot
 
-                            reward.stream_back()
-
+                                reward.stream_back()
+                                reward.assign([0.] * dim)
             with stream_processing():
                 buffer = (config.batch_size, dim)
                 reward.stream_processing(buffer=buffer)

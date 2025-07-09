@@ -6,7 +6,7 @@ from rl_qoc.environment.target import Target, StateTarget, GateTarget
 from rl_qoc.environment.configuration.qconfig import QEnvConfig
 from rl_qoc.rewards.base_reward import Reward
 from .pi_pulse_reward_data import PiPulseRewardData, PiPulseRewardDataList
-from qiskit.primitives import BaseSamplerV2
+from qiskit.primitives import BaseSamplerV2, BitArray
 
 if TYPE_CHECKING:
     from qiskit_qm_provider.parameter_table import ParameterTable, Parameter as QuaParameter
@@ -91,12 +91,15 @@ class PiPulseReward(Reward):
             fetching_size=fetching_size,
             verbosity=config.backend_config.verbosity,
             time_out=config.backend_config.timeout,
-        )
-
-        for i in range(config.batch_size):
-            for j in range(dim):
-                if collected_counts[i, j] > 0:
-                    reward_array[i] += 1 / collected_counts[i, j]
+        )[0]
+        for b in range(config.batch_size):
+            counts_dict = {
+                binary(i, num_qubits): collected_counts[b][i] for i in range(dim)
+            }
+            bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
+            reward_array[b] = bit_array.get_int_counts().get(1, 0) / config.n_shots
+        
+        
         return reward_array
 
     def rl_qoc_training_qua_prog(
@@ -130,7 +133,7 @@ class PiPulseReward(Reward):
         reward.reset()
         circuit_params.reset()
 
-        dim = int(2**qc.num_qubits)
+        dim = int(2**config.target.n_qubits)
 
         with program() as rl_qoc_training_prog:
             # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
@@ -173,27 +176,29 @@ class PiPulseReward(Reward):
                         upper_bound=upper_bound,
                     )
                     # Assign the sampled actions to the action batch
-                    for i, parameter in enumerate(
-                        circuit_params.real_time_circuit_parameters.parameters
-                    ):
+                    with for_(j, 0, j < 2, j + 1):
+                        for i, parameter in enumerate(
+                            circuit_params.real_time_circuit_parameters.parameters
+                        ):
+                            if test:
+                                parameter.assign(mu[i])
+                            else:
+                                parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
                         if test:
-                            parameter.assign(mu[i])
-                        else:
-                            parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
-                    if test:
-                        circuit_params.real_time_circuit_parameters.save_to_stream()
+                            circuit_params.real_time_circuit_parameters.save_to_stream()
 
-                    with for_(shots, 0, shots < circuit_params.n_shots.var, shots + 1):
-                        result = config.backend.quantum_circuit_to_qua(
-                            qc, circuit_params.circuit_variables
-                        )
-                        state_int = get_state_int(qc, result, state_int)
-                        if test:
-                            save(state_int, "state_int")
-                        assign(counts[state_int], counts[state_int] + 1)
-                        assign(state_int, 0)  # Reset state_int for the next shot
+                        with for_(shots, 0, shots < circuit_params.n_shots.var, shots + 1):
+                            result = config.backend.quantum_circuit_to_qua(
+                                qc, circuit_params.circuit_variables
+                            )
+                            state_int = get_state_int(qc, result, state_int)
+                            if test:
+                                save(state_int, "state_int")
+                            assign(counts[state_int], counts[state_int] + 1)
+                            assign(state_int, 0)  # Reset state_int for the next shot
 
-                    reward.stream_back()
+                        reward.stream_back()
+                        reward.assign([0.] * dim)
 
             with stream_processing():
                 buffer = (config.batch_size, dim)

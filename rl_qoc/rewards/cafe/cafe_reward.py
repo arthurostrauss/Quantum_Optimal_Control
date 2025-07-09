@@ -410,9 +410,10 @@ class CAFEReward(Reward):
         from ...qua.qm_config import QMConfig
         if not isinstance(config.backend_config, QMConfig):
             raise ValueError("Backend config must be a QMConfig")
-        
+        if not isinstance(config.target, GateTarget):
+            raise ValueError("CAFE reward is only supported for GateTarget")
         reward_array = np.zeros(shape=(config.batch_size,))
-        num_qubits = config.target.n_qubits
+        num_qubits = config.target.causal_cone_size
         dim = 2**num_qubits
         binary = lambda n, l: bin(n)[2:].zfill(l)
         input_indices = reward_data.input_indices
@@ -489,11 +490,13 @@ class CAFEReward(Reward):
             raise ValueError("input_state_vars should be set for CAFE reward")
         if circuit_params.n_shots is None:
             raise ValueError("n_shots should be set for CAFE reward")
-
+        if not isinstance(config.target, GateTarget):
+            raise ValueError("CAFE reward is only supported for GateTarget")
         policy.reset()
         reward.reset()
         circuit_params.reset()
-        dim = int(2**qc.num_qubits)
+        num_qubits = config.target.causal_cone_size
+        dim = int(2**num_qubits)
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
@@ -583,6 +586,7 @@ class CAFEReward(Reward):
                                 assign(state_int, 0)  # Reset state_int for the next shot
 
                             reward.stream_back()
+                            reward.assign([0.] * dim)
 
             with stream_processing():
                 buffer = (config.batch_size, dim)

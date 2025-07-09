@@ -62,20 +62,19 @@ class StateReward(Reward):
     def reward_args(self):
         return {"input_states_choice": self.input_states_choice}
 
-    def set_reward_seed(self, seed: int = None):
+    def set_reward_seed(self, seed: int):
         """
         Set seed for input states and observables sampling
         """
-        if seed is not None:
-            self.input_state_seed = seed + 30
-            self.observables_seed = seed + 50
-            self.input_states_rng = np.random.default_rng(self.input_state_seed)
-            self.observables_rng = np.random.default_rng(self.observables_seed)
+        self.input_state_seed = seed + 30
+        self.observables_seed = seed + 50
+        self.input_states_rng = np.random.default_rng(self.input_state_seed)
+        self.observables_rng = np.random.default_rng(self.observables_seed)
 
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: StateTarget | GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
@@ -246,7 +245,7 @@ class StateReward(Reward):
         self,
         reward_data: StateRewardDataList,
         estimator: BaseEstimatorV2,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Retrieve the reward from the PUBs and the primitive
         """
@@ -368,7 +367,7 @@ class StateReward(Reward):
             raise ValueError("Backend config must be a QMConfig")
         
         reward_array = np.zeros(shape=(config.batch_size,))
-        num_qubits = config.target.n_qubits
+        num_qubits = config.target.causal_cone_size if isinstance(config.target, GateTarget) else config.target.n_qubits
         dim = 2**num_qubits
         binary = lambda n, l: bin(n)[2:].zfill(l)
         if circuit_params.circuit_choice_var is not None and isinstance(config.target, GateTarget):
@@ -424,7 +423,7 @@ class StateReward(Reward):
             exp_value = reward_data.id_coeff
             for o_idx in range(num_obs):
                 counts_dict = {
-                    binary(i, num_qubits): counts[batch_idx][o_idx][i] for i in range(dim)
+                    binary(i, num_qubits): int(counts[batch_idx][o_idx][i]) for i in range(dim)
                 }
                 obs = reward_data[0].observables.group_commuting(True)[o_idx]
                 diag_obs = SparsePauliOp("I" * num_qubits, 0.0)
@@ -435,7 +434,8 @@ class StateReward(Reward):
                     diag_obs += SparsePauliOp(diag_obs_label, coeff)
                 bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
                 exp_value += bit_array.expectation_values(diag_obs.simplify())
-                exp_value /= reward_data.pauli_sampling
+            
+            exp_value /= reward_data.pauli_sampling
             reward_array[batch_idx] = exp_value
         return reward_array
 
@@ -477,8 +477,8 @@ class StateReward(Reward):
         policy.reset()
         reward.reset()
         circuit_params.reset()
-
-        dim = int(2**qc.num_qubits)
+        num_qubits = config.target.causal_cone_size if isinstance(config.target, GateTarget) else config.target.n_qubits
+        dim = int(2**num_qubits)
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
@@ -578,7 +578,8 @@ class StateReward(Reward):
                                 assign(counts[state_int], counts[state_int] + 1)
                                 assign(state_int, 0)  # Reset state_int for the next shot
 
-                        reward.stream_back()
+                            reward.stream_back()
+                            reward.assign([0.] * dim)
 
             with stream_processing():
                 buffer = (config.batch_size, dim)
