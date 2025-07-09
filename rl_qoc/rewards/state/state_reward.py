@@ -140,8 +140,8 @@ class StateReward(Reward):
         Chi = target_state.Chi
         probabilities = Chi**2
         dim = target_state.dm.dim
-        cutoff = 1e-8
-        non_zero_indices = np.nonzero(probabilities > cutoff)[0]
+        cutoff = 1e-5
+        non_zero_indices = np.nonzero(probabilities > cutoff)[0][1:]
         non_zero_probabilities = probabilities[non_zero_indices]
         non_zero_probabilities /= np.sum(non_zero_probabilities)
 
@@ -157,18 +157,9 @@ class StateReward(Reward):
             self.observables_rng.choice(non_zero_indices, pauli_sampling, p=non_zero_probabilities),
             return_counts=True,
         )
-        identity_term = np.where(pauli_indices == 0)[0]
         c_factor = execution_config.c_factor
-        if len(identity_term) > 0:
-            id_coeff = c_factor * np.sum(
-                counts[identity_term] / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
-            )
-        else:
-            id_coeff = 0.0
-
-        pauli_indices = np.delete(pauli_indices, identity_term)
-        counts = np.delete(counts, identity_term)
-        reward_factor = execution_config.c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
+        id_coeff = c_factor * Chi[0] * np.sqrt(dim)
+        reward_factor = c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
 
         if dfe_precision is not None:
             eps, delta = dfe_precision
@@ -249,11 +240,14 @@ class StateReward(Reward):
         """
         Retrieve the reward from the PUBs and the primitive
         """
+        num_qubits = reward_data[0].observables.num_qubits
+        dim = 2**num_qubits
         job = estimator.run(reward_data.pubs)
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward += reward_data.id_coeff
+        reward *= (dim - 1)/dim
         reward /= reward_data.pauli_sampling
+        reward += reward_data.id_coeff
 
         return reward
 
@@ -421,18 +415,19 @@ class StateReward(Reward):
 
         for batch_idx in range(config.batch_size):
             exp_value = reward_data.id_coeff
-            for o_idx in range(num_obs):
+            obs_group = reward_data[0].observables.group_commuting(True)
+            for o_idx, obs in enumerate(obs_group):
                 counts_dict = {
                     binary(i, num_qubits): int(counts[batch_idx][o_idx][i]) for i in range(dim)
                 }
-                obs = reward_data[0].observables.group_commuting(True)[o_idx]
+                bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
                 diag_obs = SparsePauliOp("I" * num_qubits, 0.0)
                 for obs_, coeff in zip(obs.paulis, obs.coeffs):
                     diag_obs_label = ""
                     for char in obs_.to_label():
                         diag_obs_label += char if char == "I" else "Z"
                     diag_obs += SparsePauliOp(diag_obs_label, coeff)
-                bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
+                
                 exp_value += bit_array.expectation_values(diag_obs.simplify())
             
             exp_value /= reward_data.pauli_sampling

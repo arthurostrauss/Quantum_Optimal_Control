@@ -528,12 +528,12 @@ class ChannelReward(Reward):
         for batch_idx in range(config.batch_size):
             exp_value = 0.
             for i_idx in range(max_input_state):
-                for o_idx in range(num_obs_per_input_state[i_idx]):
+                obs_group = reward_data[i_idx].observables.group_commuting(True)
+                for o_idx, obs in enumerate(obs_group):
                     counts_dict = {
                         binary(i, num_qubits): counts[batch_idx][i_idx][o_idx][i]
                         for i in range(dim)
                     }
-                    obs = reward_data[i_idx].observables.group_commuting(True)[o_idx]
                     diag_obs = SparsePauliOp("I" * num_qubits, 0.0)
                     for obs_, coeff in zip(obs.paulis, obs.coeffs):
                         diag_obs_label = ""
