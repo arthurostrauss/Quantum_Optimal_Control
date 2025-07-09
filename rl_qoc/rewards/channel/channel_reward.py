@@ -124,7 +124,8 @@ class ChannelReward(Reward):
         basis = pauli_basis(num_qubits=n_qubits)
         basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
-        id_coeff = c_factor * (Chi[0] / (dim**2))  # Coefficient for the identity Pauli
+        # id_coeff = c_factor * (Chi[0] / (dim**2))  # Coefficient for the identity Pauli
+        id_coeff = 0
         non_zero_indices = non_zero_indices[sorted_indices]
         pair_indices = [
             np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices
@@ -139,7 +140,13 @@ class ChannelReward(Reward):
             }
             for i, pair in enumerate(pauli_pairs)
         }
-        grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
+        Chi_dict[(Pauli("I"*n_qubits), Pauli("I"*n_qubits))] = {
+            "chi": Chi[0],
+            "indices": (0, 0),
+            "index": 0,
+        }
+        grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs[1:])
+        grouped_pauli_pairs.append((PauliList(Pauli("I"*n_qubits)), PauliList(Pauli("I"*n_qubits))))
 
         grouped_chi = [
             np.array(
@@ -293,7 +300,7 @@ class ChannelReward(Reward):
         dim = 2**reward_data.num_qubits
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward *= (dim**2 - 1) / dim**2
+        # reward *= (dim**2 - 1) / dim**2
         reward /= reward_data.pauli_sampling
         reward += reward_data.id_coeff
 
