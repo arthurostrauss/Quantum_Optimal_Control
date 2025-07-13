@@ -95,11 +95,11 @@ class TrainFunctionSettings:
     """
 
     plot_real_time: bool = False
-    print_debug: Optional[bool] = False
-    num_prints: Optional[int] = 10
-    hpo_mode: Optional[bool] = False
-    clear_history: Optional[bool] = False
-    save_data: Optional[bool] = False
+    print_debug: bool = False
+    num_prints: int = 10
+    hpo_mode: bool = False
+    clear_history: bool = False
+    save_data: bool = False
 
     def __post_init__(self):
         assert (

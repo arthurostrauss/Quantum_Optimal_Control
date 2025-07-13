@@ -27,12 +27,12 @@ class PiPulseReward(Reward):
         *args,
         **kwargs,
     ) -> PiPulseRewardDataList:
-        pass
+        return PiPulseRewardDataList([PiPulseRewardData((qc, params, env_config.n_shots))])
 
     def get_reward_with_primitive(
         self, reward_data: PiPulseRewardDataList, primitive: BaseSamplerV2, *args, **kwargs
     ) -> np.ndarray:
-        pass
+        raise NotImplementedError("This reward method does not support primitive sampling")
 
     def get_real_time_circuit(
         self,
@@ -180,12 +180,8 @@ class PiPulseReward(Reward):
                         for i, parameter in enumerate(
                             circuit_params.real_time_circuit_parameters.parameters
                         ):
-                            if test:
-                                parameter.assign(mu[i])
-                            else:
-                                parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
-                        if test:
-                            circuit_params.real_time_circuit_parameters.save_to_stream()
+
+                            parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
 
                         with for_(shots, 0, shots < circuit_params.n_shots.var, shots + 1):
                             result = config.backend.quantum_circuit_to_qua(

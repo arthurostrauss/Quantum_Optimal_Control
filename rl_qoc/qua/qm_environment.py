@@ -159,14 +159,15 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.config,
             **push_args,
         )
-
+        
         if np.mean(reward) > self._max_return:
             self._max_return = np.mean(reward)
             self._optimal_actions[self.circuit_choice] = self.mean_action
 
-        reward = np.clip(reward, 0.0, 1.0 - 1e-6)
+        # reward = np.clip(reward, 0.0, 1.0 - 1e-6)
         self.reward_history.append(reward)
-        reward = -np.log10(1.0 - reward)  # Convert to negative log10 scale
+        self.update_env_history(self.real_time_circuit, reward_data.total_shots)
+        # reward = -np.log10(1.0 - reward)  # Convert to negative log10 scale
 
         return self._get_obs(), reward, True, False, self._get_info()
 

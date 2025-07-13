@@ -6,4 +6,4 @@ try:
     from .pulse_utils import *
 except ImportError:
     # If pulse_utils is not available, we can still use the other utilities
-    pass
+    warnings.warn("pulse_utils is not available")

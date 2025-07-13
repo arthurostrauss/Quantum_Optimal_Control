@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Literal, Optional, List, Tuple
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
@@ -118,12 +118,12 @@ class CircuitParams:
             elif isinstance(param, ParameterTable):
                 param.declare_streams()
 
-    def stream_processing(self):
+    def stream_processing(self, mode: Literal["save", "save_all"] = "save_all", buffer: int | Tuple[int, ...] | None | Literal["default"] = "default"):
         for param in self.all_parameters:
             if isinstance(param, QuaParameter) and param.stream is not None:
-                param.stream_processing()
+                param.stream_processing(mode=mode, buffer=buffer)
             elif isinstance(param, ParameterTable):
-                param.stream_processing()
+                param.stream_processing(mode=mode, buffering=buffer)
 
     @property
     def all_parameters(self) -> List[QuaParameter | ParameterTable]:
@@ -161,3 +161,28 @@ class CircuitParams:
             ]
             if param is not None
         ]
+    
+    @property
+    def fiducials_variables(self) -> List[QuaParameter]:
+        """
+        Return all the parameters that are not directly used in the circuit but which structure the QUA program
+        execution.
+        """
+        return [
+            param
+            for param in [
+                self.n_shots,
+                self.max_input_state,
+                self.max_observables,
+            ]
+            if param is not None
+        ]
+    
+    def get_by_name(self, name: str) -> QuaParameter | ParameterTable:
+        """
+        Return the parameter with the given name
+        """
+        for param in self.all_parameters:
+            if param.name == name:
+                return param
+        raise ValueError(f"Parameter with name {name} not found")

@@ -158,8 +158,8 @@ class StateReward(Reward):
             return_counts=True,
         )
         c_factor = execution_config.c_factor
-        id_coeff = c_factor * Chi[0] * np.sqrt(dim)
-        reward_factor = c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
+        id_coeff = c_factor / dim
+        reward_factor = c_factor * counts * (dim - 1) / (dim * np.sqrt(dim) * Chi[pauli_indices])
 
         if dfe_precision is not None:
             eps, delta = dfe_precision
@@ -245,7 +245,6 @@ class StateReward(Reward):
         job = estimator.run(reward_data.pubs)
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward *= (dim - 1)/dim
         reward /= reward_data.pauli_sampling
         reward += reward_data.id_coeff
 
@@ -398,7 +397,14 @@ class StateReward(Reward):
             verbosity=config.backend_config.verbosity,
             time_out=config.backend_config.timeout,
         )
-
+        # sampled_actions = circuit_params.real_time_circuit_parameters.fetch_from_opx(
+        #     push_args["job"],
+        #     fetching_index=fetching_index,
+        #     fetching_size=fetching_size,
+        #     verbosity=config.backend_config.verbosity,
+        #     time_out=config.backend_config.timeout,
+        # )
+        # print("sampled_actions", sampled_actions)
         counts = []
         formatted_counts = []
         count_idx = 0
@@ -414,7 +420,7 @@ class StateReward(Reward):
                 counts[batch_idx].append(formatted_counts[o_idx][batch_idx])
 
         for batch_idx in range(config.batch_size):
-            exp_value = reward_data.id_coeff
+            exp_value = 0.0
             obs_group = reward_data[0].observables.group_commuting(True)
             for o_idx, obs in enumerate(obs_group):
                 counts_dict = {
@@ -427,10 +433,9 @@ class StateReward(Reward):
                     for char in obs_.to_label():
                         diag_obs_label += char if char == "I" else "Z"
                     diag_obs += SparsePauliOp(diag_obs_label, coeff)
-                
                 exp_value += bit_array.expectation_values(diag_obs.simplify())
-            
             exp_value /= reward_data.pauli_sampling
+            exp_value += reward_data.id_coeff
             reward_array[batch_idx] = exp_value
         return reward_array
 
@@ -533,33 +538,20 @@ class StateReward(Reward):
                     batch_r.set_seed(config.seed + n_u)
                     with for_(b, 0, b < config.batch_size, b + 2):
                         # Sample from a multivariate Gaussian distribution (Muller-Box method)
-                        if test:
-                            for i, parameter in enumerate(
-                                circuit_params.real_time_circuit_parameters.parameters
-                            ):
-                                parameter.assign(mu[i])
-                        else:
-                            tmp1, tmp2 = rand_gauss_moller_box(
-                                mu,
-                                sigma,
-                                batch_r,
-                                tmp1,
-                                tmp2,
-                                lower_bound=lower_bound,
-                                upper_bound=upper_bound,
-                            )
+                        tmp1, tmp2 = rand_gauss_moller_box(
+                            mu,
+                            sigma,
+                            batch_r,
+                            tmp1,
+                            tmp2,
+                            lower_bound=lower_bound,
+                            upper_bound=upper_bound,
+                        )
                         # Assign 1 or 2 depending on batch_size being even or odd (only relevant at last iteration)
                         with for_(j, 0, j < 2, j + 1):
                             # Assign the sampled actions to the action batch
-                            for i, parameter in enumerate(
-                                circuit_params.real_time_circuit_parameters.parameters
-                            ):
-                                if test:
-                                    parameter.assign(mu[i])
-                                else:
-                                    parameter.assign(
-                                        tmp1[i], condition=(j == 0), value_cond=tmp2[i]
-                                    )
+                            for i, parameter in enumerate(circuit_params.real_time_circuit_parameters.parameters):
+                                parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
                             if test:
                                 circuit_params.real_time_circuit_parameters.save_to_stream()
 
@@ -580,7 +572,7 @@ class StateReward(Reward):
                 buffer = (config.batch_size, dim)
                 reward.stream_processing(buffer=buffer)
                 if test:
-                    circuit_params.stream_processing()
+                    circuit_params.real_time_circuit_parameters.stream_processing(buffering={parameter: config.batch_size for parameter in circuit_params.real_time_circuit_parameters.parameters})
                     policy.stream_processing()
 
         return rl_qoc_training_prog

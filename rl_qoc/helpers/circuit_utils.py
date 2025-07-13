@@ -590,7 +590,7 @@ def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]):
 
 def extend_input_state_prep(
     input_circuit: QuantumCircuit, qc: QuantumCircuit, gate_target, indices
-) -> Tuple[QuantumCircuit, Tuple[int]]:
+) -> Tuple[QuantumCircuit, Tuple[int, ...]]:
     """
     Extend the input state preparation to all qubits in the quantum circuit if necessary
 
@@ -616,7 +616,7 @@ def extend_input_state_prep(
             else:
                 new_indices.append(initial_indices.pop(0))
 
-        new_circuit: QuantumCircuit = input_circuit.compose(
+        new_circuit = input_circuit.compose(
             random_input_context, other_qubits, front=True
         )
         return new_circuit, tuple(new_indices)
