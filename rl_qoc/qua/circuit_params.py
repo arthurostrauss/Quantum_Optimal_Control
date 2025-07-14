@@ -118,7 +118,11 @@ class CircuitParams:
             elif isinstance(param, ParameterTable):
                 param.declare_streams()
 
-    def stream_processing(self, mode: Literal["save", "save_all"] = "save_all", buffer: int | Tuple[int, ...] | None | Literal["default"] = "default"):
+    def stream_processing(
+        self,
+        mode: Literal["save", "save_all"] = "save_all",
+        buffer: int | Tuple[int, ...] | None | Literal["default"] = "default",
+    ):
         for param in self.all_parameters:
             if isinstance(param, QuaParameter) and param.stream is not None:
                 param.stream_processing(mode=mode, buffer=buffer)
@@ -161,7 +165,7 @@ class CircuitParams:
             ]
             if param is not None
         ]
-    
+
     @property
     def fiducials_variables(self) -> List[QuaParameter]:
         """
@@ -177,7 +181,7 @@ class CircuitParams:
             ]
             if param is not None
         ]
-    
+
     def get_by_name(self, name: str) -> QuaParameter | ParameterTable:
         """
         Return the parameter with the given name

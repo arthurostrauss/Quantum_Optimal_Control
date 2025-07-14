@@ -112,22 +112,25 @@ def custom_schedule(
 
     return custom_sched
 
-def x_amp_schedule(backend:BackendV2, qubits: List[int], params: ParameterVector) -> pulse.ScheduleBlock:
+
+def x_amp_schedule(
+    backend: BackendV2, qubits: List[int], params: ParameterVector
+) -> pulse.ScheduleBlock:
     """
     Define parametrization of the pulse schedule characterizing the target gate.
     This function can be customized at will, however one shall recall to make sure that number of actions match the
     number of pulse parameters used within the function (through the params argument).
     """
-    x_params: Dict[str, float] = backend.target.get_calibration("x", (0,)).instructions[0][1].pulse.parameters.copy()
+    x_params: Dict[str, float] = (
+        backend.target.get_calibration("x", (0,)).instructions[0][1].pulse.parameters.copy()
+    )
     x_amp = x_params.pop("amp")
     print(x_params)
 
     with pulse.build(backend, name="x_amp_sched") as x_amp_sched:
-        pulse.play(pulse.Drag(**x_params, amp = x_amp * params[0]), backend.drive_channel(qubits[0]))
-        
-    
-    return x_amp_sched
+        pulse.play(pulse.Drag(**x_params, amp=x_amp * params[0]), backend.drive_channel(qubits[0]))
 
+    return x_amp_sched
 
 
 def validate_pulse_kwargs(

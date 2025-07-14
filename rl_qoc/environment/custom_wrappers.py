@@ -34,9 +34,10 @@ class RescaleAndClipAction(
         assert isinstance(env.action_space, Box)
         RecordConstructorArgs.__init__(self, min_action=min_action, max_action=max_action)
 
+        new_box, _, rescale_func = rescale_box(env.action_space, min_action, max_action)
+
         def rescale_and_clip(action: np.ndarray) -> np.ndarray:
             # Rescale the action to the desired range
-            _, _, rescale_func = rescale_box(env.action_space, min_action, max_action)
             action = rescale_func(action)
             # Clip the action to the bounds of the original action space
             return np.clip(action, env.action_space.low, env.action_space.high)
@@ -44,3 +45,5 @@ class RescaleAndClipAction(
         TransformAction.__init__(
             self, env=env, func=rescale_and_clip, action_space=env.action_space
         )
+        if env.unwrapped.config.backend_config.config_type == "qm":
+            env.unwrapped.config.backend_config.wrapper_data["rescale_and_clip"] = new_box

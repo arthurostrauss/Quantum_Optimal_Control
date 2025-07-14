@@ -616,9 +616,7 @@ def extend_input_state_prep(
             else:
                 new_indices.append(initial_indices.pop(0))
 
-        new_circuit = input_circuit.compose(
-            random_input_context, other_qubits, front=True
-        )
+        new_circuit = input_circuit.compose(random_input_context, other_qubits, front=True)
         return new_circuit, tuple(new_indices)
     return input_circuit, tuple(indices)
 

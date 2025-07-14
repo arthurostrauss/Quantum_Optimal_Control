@@ -1,10 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from qm import CompilerOptionArguments
 
 from ..environment.configuration.backend_config import BackendConfig
 from qiskit_qm_provider import QMBackend
-from typing import Literal, Union, Optional
+from typing import Literal, Union, Optional, Dict, Any
 from qiskit_qm_provider import InputType
 
 Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX"], InputType]
@@ -31,6 +31,7 @@ class QMConfig(BackendConfig):
     input_type: Input_Type = InputType.INPUT_STREAM
     verbosity: int = 1
     num_updates: int = 1000
+    wrapper_data: Dict[str, Any] = field(default_factory=dict)
     compiler_options: Optional[CompilerOptionArguments] = None
     opnic_dev_path: str = "/home/dpoulos/opnic-dev"
     timeout: int = 60

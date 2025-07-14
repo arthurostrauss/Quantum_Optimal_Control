@@ -33,6 +33,7 @@ from ..rewards import CAFERewardDataList, ChannelRewardDataList, StateRewardData
 #         text += f"{args[-1]} | "
 #     print(text)
 
+
 class QMEnvironment(ContextAwareQuantumEnvironment):
 
     def __init__(
@@ -120,7 +121,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         # Push policy parameters to trigger real-time action sampling
         self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
-        print("Just pushed policy parameters to OPX:", mean_val, std_val)
+        if self.qm_backend_config.verbosity > 1:
+            print("Just pushed policy parameters to OPX:", mean_val, std_val)
 
         # Push the data to compute reward to the OPX
         if hasattr(reward_data, "input_indices"):
@@ -148,7 +150,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             print(f"Fetching size: {fetching_size}")
             print(f"Step indices: {self._step_indices}")
             print(f"Total data points: {self._total_data_points}")
-            
 
         reward = self.config.reward.qm_step(
             reward_data,
@@ -159,7 +160,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.config,
             **push_args,
         )
-        
+
         if np.mean(reward) > self._max_return:
             self._max_return = np.mean(reward)
             self._optimal_actions[self.circuit_choice] = self.mean_action
@@ -182,7 +183,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.circuit_params,
             self.config,
             num_updates,
-            self.qm_backend_config.test_mode
+            self.qm_backend_config.test_mode,
         )
 
         return rl_qoc_training_prog
@@ -289,7 +290,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             ]
             if param is not None
         ]
-    
+
     def clear_history(self):
         """
         Clear the history of the environment

@@ -2,6 +2,8 @@ from rl_qoc.rewards.reward_data import RewardData, RewardDataList
 from dataclasses import dataclass
 from typing import List
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
+
+
 @dataclass
 class PiPulseRewardData(RewardData):
     pub: SamplerPub | SamplerPubLike

@@ -2,9 +2,9 @@ from __future__ import annotations
 from typing import List, TYPE_CHECKING
 import numpy as np
 from qiskit import QuantumCircuit
-from rl_qoc.environment.target import Target, StateTarget, GateTarget
-from rl_qoc.environment.configuration.qconfig import QEnvConfig
-from rl_qoc.rewards.base_reward import Reward
+from ...environment.target import Target, StateTarget, GateTarget
+from ...environment.configuration.qconfig import QEnvConfig
+from ...rewards.base_reward import Reward
 from .pi_pulse_reward_data import PiPulseRewardData, PiPulseRewardDataList
 from qiskit.primitives import BaseSamplerV2, BitArray
 
@@ -77,9 +77,10 @@ class PiPulseReward(Reward):
         It is used in the QMEnvironment.step() function.
         """
         from ...qua.qm_config import QMConfig
+
         if not isinstance(config.backend_config, QMConfig):
             raise ValueError("Backend config must be a QMConfig")
-        
+
         reward_array = np.zeros(shape=(config.batch_size,))
         num_qubits = config.target.n_qubits
         dim = 2**num_qubits
@@ -93,13 +94,10 @@ class PiPulseReward(Reward):
             time_out=config.backend_config.timeout,
         )[0]
         for b in range(config.batch_size):
-            counts_dict = {
-                binary(i, num_qubits): collected_counts[b][i] for i in range(dim)
-            }
+            counts_dict = {binary(i, num_qubits): collected_counts[b][i] for i in range(dim)}
             bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
             reward_array[b] = bit_array.get_int_counts().get(1, 0) / config.n_shots
-        
-        
+
         return reward_array
 
     def rl_qoc_training_qua_prog(
@@ -117,23 +115,27 @@ class PiPulseReward(Reward):
             declare,
             Random,
             for_,
-            Util,
             stream_processing,
             assign,
             save,
             fixed,
         )
         from qiskit_qm_provider import QMBackend
-        from ...qua.qua_utils import rand_gauss_moller_box, get_state_int
+        from ..qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
+        from ..qm_config import QMConfig
 
         if not isinstance(config.backend, QMBackend):
             raise ValueError("Backend must be a QMBackend")
+        if not isinstance(config.backend_config, QMConfig):
+            raise ValueError("Backend config must be a QMConfig")
 
         policy.reset()
         reward.reset()
         circuit_params.reset()
 
         dim = int(2**config.target.n_qubits)
+        if config.backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
+            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
 
         with program() as rl_qoc_training_prog:
             # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
@@ -150,8 +152,7 @@ class PiPulseReward(Reward):
             b = declare(int)
             tmp1 = declare(fixed, size=config.n_actions)
             tmp2 = declare(fixed, size=config.n_actions)
-            lower_bound = declare(fixed, value=config.action_space.low.tolist())
-            upper_bound = declare(fixed, value=config.action_space.high.tolist())
+
             mu = policy.get_variable("mu")
             sigma = policy.get_variable("sigma")
             counts = reward.var
@@ -172,9 +173,18 @@ class PiPulseReward(Reward):
                         batch_r,
                         tmp1,
                         tmp2,
-                        lower_bound=lower_bound,
-                        upper_bound=upper_bound,
                     )
+                    if config.backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
+                        tmp1 = rescale_and_clip_wrapper(
+                            tmp1,
+                            config.action_space,
+                            new_box,
+                        )
+                        tmp2 = rescale_and_clip_wrapper(
+                            tmp2,
+                            config.action_space,
+                            new_box,
+                        )
                     # Assign the sampled actions to the action batch
                     with for_(j, 0, j < 2, j + 1):
                         for i, parameter in enumerate(
@@ -194,7 +204,7 @@ class PiPulseReward(Reward):
                             assign(state_int, 0)  # Reset state_int for the next shot
 
                         reward.stream_back()
-                        reward.assign([0.] * dim)
+                        reward.assign([0.0] * dim)
 
             with stream_processing():
                 buffer = (config.batch_size, dim)

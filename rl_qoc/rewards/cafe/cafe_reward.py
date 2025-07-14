@@ -408,6 +408,7 @@ class CAFEReward(Reward):
         **push_args,
     ):
         from ...qua.qm_config import QMConfig
+
         if not isinstance(config.backend_config, QMConfig):
             raise ValueError("Backend config must be a QMConfig")
         if not isinstance(config.target, GateTarget):
@@ -480,10 +481,13 @@ class CAFEReward(Reward):
             fixed,
         )
         from qiskit_qm_provider import QMBackend
-        from ...qua.qua_utils import rand_gauss_moller_box, get_state_int
+        from ...qua.qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
+        from ...qua.qm_config import QMConfig
 
         if not isinstance(config.backend, QMBackend):
             raise ValueError("Backend must be a QMBackend")
+        if not isinstance(config.backend_config, QMConfig):
+            raise ValueError("Backend config must be a QMConfig")
         if circuit_params.max_input_state is None:
             raise ValueError("max_input_state should be set for CAFE reward")
         if circuit_params.input_state_vars is None:
@@ -497,6 +501,8 @@ class CAFEReward(Reward):
         circuit_params.reset()
         num_qubits = config.target.causal_cone_size
         dim = int(2**num_qubits)
+        if config.backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
+            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
@@ -518,36 +524,23 @@ class CAFEReward(Reward):
             j = declare(int)
             tmp1 = declare(fixed, size=config.n_actions)
             tmp2 = declare(fixed, size=config.n_actions)
-            lower_bound = declare(fixed, value=config.action_space.low.tolist())
-            upper_bound = declare(fixed, value=config.action_space.high.tolist())
             mu = policy.get_variable("mu")
             sigma = policy.get_variable("sigma")
-
-            if test:
-                circuit_params.declare_streams()
-                policy.declare_streams()
 
             if config.backend.init_macro is not None:
                 config.backend.init_macro()
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
-                if test:
-                    policy.save_to_stream()
-
                 for var in [circuit_params.circuit_choice_var, circuit_params.n_reps_var]:
                     if var is not None and var.input_type is not None:
                         var.load_input_value()
-                        if test:
-                            var.save_to_stream()
+
                 circuit_params.max_input_state.load_input_value()
-                if test:
-                    circuit_params.max_input_state.save_to_stream()
 
                 with for_(i_idx, 0, i_idx < circuit_params.max_input_state.var, i_idx + 1):
                     circuit_params.input_state_vars.load_input_values()
-                    if test:
-                        circuit_params.input_state_vars.save_to_stream()
+
                     batch_r.set_seed(config.seed + n_u)
                     with for_(b, 0, b < config.batch_size, b + 2):
                         # Sample from a multivariate Gaussian distribution (Muller-Box method)
@@ -557,41 +550,42 @@ class CAFEReward(Reward):
                             batch_r,
                             tmp1,
                             tmp2,
-                            lower_bound=lower_bound,
-                            upper_bound=upper_bound,
                         )
+                        if (
+                            config.backend_config.wrapper_data.get("rescale_and_clip", None)
+                            is not None
+                        ):
+                            tmp1 = rescale_and_clip_wrapper(
+                                tmp1,
+                                config.action_space,
+                                new_box,
+                            )
+                            tmp2 = rescale_and_clip_wrapper(
+                                tmp2,
+                                config.action_space,
+                                new_box,
+                            )
+
                         # Assign 1 or 2 depending on batch_size being even or odd (only relevant at last iteration)
                         with for_(j, 0, j < 2, j + 1):
                             # Assign the sampled actions to the action batch
                             for i, parameter in enumerate(
                                 circuit_params.real_time_circuit_parameters.parameters
                             ):
-                                if test:
-                                    parameter.assign(mu[i])
-                                else:
-                                    parameter.assign(
-                                        tmp1[i], condition=(j == 0), value_cond=tmp2[i]
-                                    )
-                            if test:
-                                circuit_params.real_time_circuit_parameters.save_to_stream()
+                                parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
 
                             with for_(shots, 0, shots < circuit_params.n_shots.var, shots + 1):
                                 result = config.backend.quantum_circuit_to_qua(
                                     qc, circuit_params.circuit_variables
                                 )
                                 state_int = get_state_int(qc, result, state_int)
-                                if test:
-                                    save(state_int, "state_int")
                                 assign(counts[state_int], counts[state_int] + 1)
                                 assign(state_int, 0)  # Reset state_int for the next shot
 
                             reward.stream_back()
-                            reward.assign([0.] * dim)
+                            reward.assign([0.0] * dim)
 
             with stream_processing():
                 buffer = (config.batch_size, dim)
                 reward.stream_processing(buffer=buffer)
-                if test:
-                    circuit_params.stream_processing()
-                    policy.stream_processing()
         return rl_qoc_training_prog

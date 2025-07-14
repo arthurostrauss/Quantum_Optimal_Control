@@ -1,4 +1,4 @@
-from typing import List, Union, Sequence, Optional
+from typing import List, Union, Sequence, Optional, Tuple
 
 from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.parametervector import (
@@ -13,6 +13,7 @@ import numpy as np
 from qm.qua._expressions import QuaArrayVariable
 from quam.components.quantum_components import Qubit, QubitPair
 from quam.utils.qua_types import QuaVariableInt, Scalar, ScalarInt
+from gymnasium.spaces import Box
 
 
 def validate_parameter_table(qc: QuantumCircuit):
@@ -81,9 +82,7 @@ def rand_gauss_moller_box(
     rand: Random,
     z1: QuaArrayVariable,
     z2: QuaArrayVariable,
-    lower_bound: Optional[QuaArrayVariable] = None,
-    upper_bound: Optional[QuaArrayVariable] = None,
-) -> (QuaArrayVariable, QuaArrayVariable):
+) -> Tuple[QuaArrayVariable, QuaArrayVariable]:
     """
     Return two random numbers using muller box
     """
@@ -101,11 +100,29 @@ def rand_gauss_moller_box(
             z2[i],
             mean[i] + std[i] * ln_array[u1] * cos_array[(u2 + n_lookup // 4) & (n_lookup - 1)],
         )
-        if lower_bound is not None and upper_bound is not None:
-            clip_qua(z1[i], lower_bound[i], upper_bound[i])
-            clip_qua(z2[i], lower_bound[i], upper_bound[i])
 
     return z1, z2
+
+
+def rescale_and_clip_wrapper(
+    action: QuaArrayVariable,
+    action_space: Box,
+    new_box: Box,
+):
+    """
+    Rescale and clip the action to the bounds of the environment's original action space.
+    """
+    i = declare(int)
+    gradient_array = (new_box.high - new_box.low) / (action_space.high - action_space.low)
+    intercept_array = new_box.low - gradient_array * action_space.low
+    gradient = declare(fixed, value=gradient_array.tolist())
+    intercept = declare(fixed, value=intercept_array.tolist())
+    lower_bound = declare(fixed, value=action_space.low.tolist())
+    upper_bound = declare(fixed, value=action_space.high.tolist())
+    with for_(i, 0, i < action.length(), i + 1):
+        assign(action[i], (action[i] - intercept[i]) / gradient[i])
+        clip_qua(action[i], lower_bound[i], upper_bound[i])
+    return action
 
 
 def get_state_int(qc: QuantumCircuit, result, state_int: QuaVariableInt):
