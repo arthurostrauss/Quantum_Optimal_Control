@@ -532,9 +532,12 @@ class CAFEReward(Reward):
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
-                for var in [circuit_params.circuit_choice_var, circuit_params.n_reps_var]:
+                for var in [circuit_params.circuit_choice_var, circuit_params.n_reps_var, circuit_params.context_parameters]:
                     if var is not None and var.input_type is not None:
-                        var.load_input_value()
+                        if isinstance(var, QuaParameter):
+                            var.load_input_value()
+                        elif isinstance(var, ParameterTable):
+                            var.load_input_values()
 
                 circuit_params.max_input_state.load_input_value()
 

@@ -527,27 +527,19 @@ class StateReward(Reward):
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
-                if test:
-                    policy.save_to_stream()
 
-                for var in [circuit_params.circuit_choice_var, circuit_params.n_reps_var]:
+                for var in [circuit_params.circuit_choice_var, circuit_params.n_reps_var, circuit_params.context_parameters]:
                     if var is not None and var.input_type is not None:
-                        var.load_input_value()
-                        if test:
-                            var.save_to_stream()
+                        if isinstance(var, QuaParameter):
+                            var.load_input_value()
+                        elif isinstance(var, ParameterTable):
+                            var.load_input_values()
 
                 circuit_params.input_state_vars.load_input_values()
-                if test:
-                    circuit_params.input_state_vars.save_to_stream()
                 circuit_params.max_observables.load_input_value()
                 circuit_params.n_shots.load_input_value()
-                if test:
-                    circuit_params.max_observables.save_to_stream()
-                    circuit_params.n_shots.save_to_stream()
                 with for_(o_idx, 0, o_idx < circuit_params.max_observables.var, o_idx + 1):
                     circuit_params.observable_vars.load_input_values()
-                    if test:
-                        circuit_params.observable_vars.save_to_stream()
                     batch_r.set_seed(config.seed + n_u)
                     with for_(b, 0, b < config.batch_size, b + 2):
                         # Sample from a multivariate Gaussian distribution (Muller-Box method)
@@ -580,16 +572,12 @@ class StateReward(Reward):
                                 circuit_params.real_time_circuit_parameters.parameters
                             ):
                                 parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
-                            if test:
-                                circuit_params.real_time_circuit_parameters.save_to_stream()
 
                             with for_(shots, 0, shots < circuit_params.n_shots.var, shots + 1):
                                 result = config.backend.quantum_circuit_to_qua(
                                     qc, circuit_params.circuit_variables
                                 )
                                 state_int = get_state_int(qc, result, state_int)
-                                if test:
-                                    save(state_int, "state_int")
                                 assign(counts[state_int], counts[state_int] + 1)
                                 assign(state_int, 0)  # Reset state_int for the next shot
 
@@ -599,13 +587,5 @@ class StateReward(Reward):
             with stream_processing():
                 buffer = (config.batch_size, dim)
                 reward.stream_processing(buffer=buffer)
-                if test:
-                    circuit_params.real_time_circuit_parameters.stream_processing(
-                        buffering={
-                            parameter: config.batch_size
-                            for parameter in circuit_params.real_time_circuit_parameters.parameters
-                        }
-                    )
-                    policy.stream_processing()
 
         return rl_qoc_training_prog
