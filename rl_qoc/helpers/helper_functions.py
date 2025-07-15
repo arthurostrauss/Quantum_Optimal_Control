@@ -45,7 +45,7 @@ from qiskit_ibm_runtime import (
     QiskitRuntimeService,
 )
 
-from typing import Optional, Tuple, List, Union, Dict, Callable, Any
+from typing import Optional, Tuple, List, Union, Dict, Callable, Any, TYPE_CHECKING
 import yaml
 
 import numpy as np
@@ -53,6 +53,9 @@ import numpy as np
 from gymnasium.spaces import Box
 import optuna
 import logging
+
+if TYPE_CHECKING:
+    from ..environment.configuration.backend_config import BackendConfig
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -74,20 +77,17 @@ Sampler_type = Union[
 
 
 def retrieve_primitives(
-    backend: BackendV2,
-    config,
-    estimator_options: Optional[
-        Dict | AerOptions | RuntimeOptions | RuntimeEstimatorOptions
-    ] = None,
+    config: BackendConfig,
 ) -> Tuple[Estimator_type, Sampler_type]:
     """
     Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
 
     Args:
-        backend: Backend instance
         config: BackendConfig object
-        estimator_options: Estimator options
     """
+
+    backend = config.backend
+    primitive_options = config.primitive_options
 
     if config.config_type == "dynamics":
         from ..environment.configuration.backend_config import DynamicsConfig
@@ -101,9 +101,9 @@ def retrieve_primitives(
         if hasattr(dummy_param, "jax_compat"):
             from ..custom_jax_sim import PulseEstimatorV2
 
-            estimator = PulseEstimatorV2(backend=backend, options=estimator_options)
+            estimator = PulseEstimatorV2(backend=backend, options=primitive_options)
         else:
-            estimator = BackendEstimatorV2(backend=backend, options=estimator_options)
+            estimator = BackendEstimatorV2(backend=backend, options=primitive_options)
         sampler = BackendSamplerV2(backend=backend)
 
         if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
@@ -135,17 +135,17 @@ def retrieve_primitives(
     elif isinstance(backend, RuntimeBackend):
         estimator = RuntimeEstimatorV2(
             mode=Session(backend=backend),
-            options=estimator_options,
+            options=primitive_options,
         )
         sampler = RuntimeSamplerV2(mode=estimator.mode)
 
     elif config.config_type == "qm":
         from qiskit_qm_provider.primitives import QMSamplerV2, QMEstimatorV2
 
-        estimator = QMEstimatorV2(backend=backend, options=estimator_options)
+        estimator = QMEstimatorV2(backend=backend, options=primitive_options)
         sampler = QMSamplerV2(backend=backend)
     else:
-        estimator = BackendEstimatorV2(backend=backend, options=estimator_options)
+        estimator = BackendEstimatorV2(backend=backend, options=primitive_options)
         sampler = BackendSamplerV2(backend=backend)
 
     return estimator, sampler
@@ -454,9 +454,9 @@ def get_q_env_config(
     elif backend is None:
         backend = select_backend(**backend_params)
 
-    from ..environment.configuration.backend_config import QiskitRuntimeConfig
-
-    backend_config = QiskitRuntimeConfig(
+    from ..environment.configuration.backend_config import QiskitConfig
+    assert isinstance(backend, BackendV2) or backend is None, "Backend must be a BackendV2 instance or None"
+    backend_config = QiskitConfig(
         parametrized_circ_func,
         backend,
         pass_manager=pass_manager,

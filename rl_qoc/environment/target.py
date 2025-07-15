@@ -438,7 +438,9 @@ class GateTarget(BaseTarget):
         self._bound_circuit_contexts = [
             circ if not circ.parameters else None for circ in circuit_context
         ]
-        self._context_parameters: List[Dict[Parameter, float | None]] = [{p: None for p in circ.parameters} for circ in circuit_context]
+        self._context_parameters: List[Dict[Parameter, float | None]] = [
+            {p: None for p in circ.parameters} for circ in circuit_context
+        ]
 
     def Chi(self, n_reps: int = 1):
         """
@@ -627,7 +629,7 @@ class GateTarget(BaseTarget):
         Get the virtual target qubits for the context-aware calibration
         """
         return self._virtual_target_qubits[self._circuit_choice]
-    
+
     @property
     def context_parameters(self) -> Dict[Parameter, float | None]:
         """
@@ -746,7 +748,9 @@ class GateTarget(BaseTarget):
         self._bound_circuit_contexts[self._circuit_choice] = self._unbound_circuit_contexts[
             self._circuit_choice
         ].assign_parameters(params)
-        self._context_parameters[self._circuit_choice] = {p: params[p] for p in self._context_parameters[self._circuit_choice]}
+        self._context_parameters[self._circuit_choice] = {
+            p: params[p] for p in self._context_parameters[self._circuit_choice]
+        }
 
     def clear_parameters(self):
         """

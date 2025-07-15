@@ -50,7 +50,7 @@ class QEnvConfig:
     backend_config: BackendConfig
     action_space: Box
     execution_config: ExecutionConfig
-    reward: Reward | REWARD_STRINGS = "state"
+    reward: Reward = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
     backend_info: BackendInfo = field(init=False)

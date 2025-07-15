@@ -24,8 +24,11 @@ class CircuitParams:
 
     @classmethod
     def from_circuit(
-        cls, qc: QuantumCircuit, input_type: InputType, config: QEnvConfig,
-          context_parameters: Sequence[Parameter] = ()
+        cls,
+        qc: QuantumCircuit,
+        input_type: InputType,
+        config: QEnvConfig,
+        context_parameters: Sequence[Parameter] = (),
     ) -> "CircuitParams":
         input_state_vars = ParameterTable.from_qiskit(
             qc,

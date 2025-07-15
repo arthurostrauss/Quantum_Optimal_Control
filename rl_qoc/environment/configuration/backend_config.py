@@ -13,7 +13,6 @@ from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 from qiskit.providers import BackendV2
 from qiskit.transpiler import PassManager, InstructionDurations
-from qiskit_ibm_runtime import OptionsV2
 
 PubLike = Union[
     EstimatorPubLike,
@@ -33,6 +32,7 @@ class BackendConfig(ABC):
         parametrized_circuit_kwargs: Additional arguments to feed the parametrized_circuit function
         pass_manager: Pass manager to transpile the circuit
         instruction_durations: Dictionary containing the durations of the instructions in the circuit
+        primitive_options: Options to feed the primitives (estimator or sampler). If None, the default options of each primitive are used.
 
     """
 
@@ -52,6 +52,7 @@ class BackendConfig(ABC):
     skip_transpilation: bool = False
     pass_manager: Optional[Any] = None
     instruction_durations: Optional[InstructionDurations] = None
+    primitive_options: Optional[dict] = None
 
     @property
     @abstractmethod
@@ -65,6 +66,7 @@ class BackendConfig(ABC):
             "parametrized_circuit_kwargs": self.parametrized_circuit_kwargs,
             "pass_manager": self.pass_manager,
             "instruction_durations": self.instruction_durations,
+            "primitive_options": self.primitive_options,
         }
 
 
@@ -111,25 +113,4 @@ class DynamicsConfig(QiskitConfig):
         return super().as_dict() | {
             "calibration_files": self.calibration_files,
             "do_calibrations": self.do_calibrations,
-        }
-
-
-@dataclass
-class QiskitRuntimeConfig(QiskitConfig):
-    """
-    Qiskit Runtime configuration elements.
-
-    Args:
-        primitive_options: Options to feed the Qiskit Runtime job
-    """
-
-    primitive_options: Optional[OptionsV2] = None
-
-    @property
-    def config_type(self):
-        return "runtime"
-
-    def as_dict(self):
-        return super().as_dict() | {
-            "primitive_options": self.primitive_options,
         }

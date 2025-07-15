@@ -117,7 +117,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.avg_fidelity_history_nreps = []
         self._fit_function: Optional[Callable] = None
         self._action_to_cycle_reward_function: Optional[Callable] = None
-        self._fit_params: Optional[np.array] = None
+        self._fit_params: Optional[np.ndarray] = None
 
         # Call reset of Env class to set seed
         self._seed = training_config.seed
@@ -153,8 +153,8 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @abstractmethod
     def compute_benchmarks(
-        self, qc: QuantumCircuit, params: np.array, update_env_history=True
-    ) -> np.array:
+        self, qc: QuantumCircuit, params: np.ndarray, update_env_history=True
+    ) -> np.ndarray:
         """
         Benchmark through tomography or through simulation the policy
         Args:
@@ -167,7 +167,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
     def initial_reward_fit(
         self,
-        params: np.array,
+        params: np.ndarray,
         execution_config: Optional[ExecutionConfig] = None,
         reward_method: Optional[Sequence[REWARD_STRINGS | Reward]] = None,
         fit_function: Optional[Callable] = None,
@@ -259,7 +259,7 @@ class BaseQuantumEnvironment(ABC, Env):
 
         self.config.reward = initial_reward
 
-    def perform_action(self, actions: np.array, update_env_history: bool = True):
+    def perform_action(self, actions: np.ndarray, update_env_history: bool = True):
         """
         Send the action batch to the quantum system and retrieve reward
         :param actions: action vectors to execute on quantum system
@@ -341,10 +341,10 @@ class BaseQuantumEnvironment(ABC, Env):
     def simulate_circuit(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         update_env_history: bool = True,
         output_fidelity: Literal["cycle", "nreps"] = "cycle",
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information)
         This method should be called only when the abstraction level is "circuit"
@@ -495,7 +495,7 @@ class BaseQuantumEnvironment(ABC, Env):
     def simulate_pulse_circuit(
         self,
         qc: QuantumCircuit,
-        params: Optional[np.array] = None,
+        params: Optional[np.ndarray] = None,
         update_env_history: bool = True,
     ) -> List[float]:
         """
@@ -725,11 +725,7 @@ class BaseQuantumEnvironment(ABC, Env):
     @backend.setter
     def backend(self, backend: BackendV2):
         self.config.backend = backend
-        self._estimator, self._sampler = retrieve_primitives(
-            self.config.backend,
-            self.config.backend_config,
-            self.config.backend_config.as_dict().get("primitive_options", None),
-        )
+        self._estimator, self._sampler = retrieve_primitives(self.config.backend_config)
 
     @property
     def estimator(self) -> BaseEstimatorV2:
