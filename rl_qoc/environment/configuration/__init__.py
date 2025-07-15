@@ -4,6 +4,5 @@ from .benchmark_config import BenchmarkConfig
 from .backend_config import (
     BackendConfig,
     QiskitConfig,
-    QiskitRuntimeConfig,
     DynamicsConfig,
 )

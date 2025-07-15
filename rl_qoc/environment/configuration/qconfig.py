@@ -12,7 +12,6 @@ from qiskit_ibm_runtime import IBMBackend
 
 from .backend_config import (
     BackendConfig,
-    QiskitRuntimeConfig,
     DynamicsConfig,
     QiskitConfig,
 )
@@ -354,15 +353,7 @@ class QEnvConfig:
                     instruction_durations=instruction_durations,
                 )
                 return cls(backend_config=backend_config, **params)
-        if isinstance(backend, IBMBackend):
-            backend_config = QiskitRuntimeConfig(
-                parametrized_circ_func,
-                backend,
-                pass_manager=pass_manager,
-                instruction_durations=instruction_durations,
-                primitive_options=runtime_options,
-            )
-        elif isinstance(backend, BackendV2):
+        if isinstance(backend, BackendV2):
             backend_config = QiskitConfig(
                 parametrized_circ_func,
                 backend,
