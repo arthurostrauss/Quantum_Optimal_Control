@@ -64,10 +64,6 @@ from ..helpers.helper_functions import (
     has_noise_model,
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
-<<<<<<< HEAD
-
-=======
->>>>>>> a45f235 (Refactors shadow reward for state targets)
 if TYPE_CHECKING:
     from ..rewards import Reward, REWARD_STRINGS
     from ..rewards.reward_data import RewardDataList
@@ -187,10 +183,6 @@ class BaseQuantumEnvironment(ABC, Env):
 
         """
         from ..rewards import Reward, REWARD_STRINGS
-<<<<<<< HEAD
-
-=======
->>>>>>> a45f235 (Refactors shadow reward for state targets)
         fig, ax = plt.subplots()
         ax.set_title("Initial reward fit (for varying number of repetitions)")
         ax.set_xlabel("Number of repetitions")

@@ -3,6 +3,7 @@ from typing import List, Optional, Literal
 import numpy as np
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives import BaseSamplerV2
+from qiskit.quantum_info import Operator, SparsePauliOp
 
 from .shadow_reward_data import ShadowRewardData, ShadowRewardDataList
 from ...environment.target import GateTarget, StateTarget
@@ -66,25 +67,31 @@ class ShadowReward(Reward):
             raise ValueError("Shadow reward can only be computed for a target state")
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
-        shadow_size = execution_config.sampling_paulis
-        n_shots = execution_config.n_shots
+        n_shots = execution_config.n_shots  # currently not used
         seed = execution_config.seed
         
+        shadow_size = env_config.sampling_paulis        #in QEnvConfig, the variable "sampling_paulis" is temporarily used to store shadow size info
         num_qubits = len(target.physical_qubits)
         reward_data = [] 
-        unique_u_rows, unique_u_count = unique_u(shadow_size, num_qubits)
-        for i in range(unique_u_count):
-            u = unique_u_rows[i]
-            for qubit, id in enumerate(u):
+        unique_u_rows, unique_u_count = unique_u_func(shadow_size, num_qubits)
+        for i in range(len(unique_u_count)):
+            qc_copy = qc.copy()    
+            unique_unitary = unique_u_rows[i]
+            unique_unitary_shots = unique_u_count[i]
+            for qubit, id in enumerate(unique_unitary):
                 gate_mapping(id, qc, qubit)
 
+            qc_copy.measure_all()            # does not work due to env_config issue?
+
+            # qc_no_meas = qc.copy()
+            # qc_no_meas.remove_final_measurements()
             
-            pub = (qc, params, unique_u_count)  
+            pub = (qc_copy, params, unique_unitary_shots)  
             
             reward_data.append(
                 ShadowRewardData(
                     pub,
-                    u                    
+                    unique_unitary                  
                 )
             )
 
@@ -94,16 +101,19 @@ class ShadowReward(Reward):
         self,
         reward_data: ShadowRewardDataList,
         primitive: BaseSamplerV2,
-        shadow_size: int,  #does it need to be here, or calculated in main instead?
-        error: float,
+        shadow_size: int,
+        partition: int,
         target: StateTarget
-    ) -> np.array:
+    ) -> np.ndarray:
         
-
+        shadow_size = reward_data.shadow_size
         job = primitive.run(reward_data.pubs)
         pub_results = job.result()
-        batch_size = reward_data.pubs[0].parameter_values.shape[0]  #is this to get shadow size?
-        n_shots = reward_data.pubs[0].shots
+        batch_size = reward_data.pubs[0].parameter_values.shape[0]  # alternatively, output env_config from GRD and replace here: batch_size = reward_data.env_config.batch_size 
+        n_shots = reward_data.shots
+
+
+        """
         assert all(
             [pub.shots == n_shots for pub in reward_data.pubs]
         ), "All pubs should have the same number of shots"
@@ -111,28 +121,93 @@ class ShadowReward(Reward):
             [pub.parameter_values.shape[0] == batch_size for pub in reward_data.pubs]
         ), "All pubs should have the same batch size"
 
-        total_data_list = []
-        for i in range(len(pub_results)):
-            results = pub_results[i].quasi_dists
-            b = list(results.keys())
-            counts = list(results.values()) * n_shots[i]   #obtains b list and repeats, as shown in CCS function
-            u = reward_data[i]
-            for j in range(len(counts)):
-                total_data_list.append(u, b[j])  # need to check where params come in, may need an extra loop
 
-        shadow_size = np.sum(reward_data.total_shots)
+
+        To be sorted out:
+        1. what does job.result() return?
+        We have job that includes the run version of all the pubs. each pub has 50 circuits, if we allow batch = 50, and length of params to = 50
+        By right I will have a dataset that has
+        1. all pubs
+        2. all 50 circuits wrt params
+        3. within one circuit, we expect samplerpub to give a dictionary of measurement outcomes and probability distributions
+        ALL OF THEM STORED IN pub_results
+        eg pub_results[1][2] may give first pub, second param, full dictionary
+
+        eg
+        param1 = [2,3]
+        param2 = [2]
+        params3 = [[1,2], [2,5], [3,2]]
+        shots1 = 1
+        shots2 = 3
+        shots3 = 20
+        pub1 = (qc1, param1, shots1)
+        pub2 = (qc1, param2, shots2)
+        pub3 = (qc1, params3, shots3)
+
+        job = sampler.run([pub1, pub2, pub3, …])
+        pub_results = job.result()
+
+        #access pub result eg pub1
+        pub1_res = pub_results[0]
+        bitstrings1 = pub1_res.data.meas.get_bitstrings()
+        counts1     = pub1_res.data.meas.get_counts()
+
+        #access pub result eg pub3, all 3 param sets
+        pub3_res = pub_results[2]
+        bitstrings3_1 = pub3_res.data.meas.get_bitstrings(experiment=0)
+        counts3_1     = pub3_res.data.meas.get_counts(experiment=0)
+        """
+
+        total_data_list = []
+        for k in range(batch_size):             #iterate through params
+            
+            for i in range(len(pub_results)):   #iterate through each pub ie each unique unitary
+                unique_unitary = reward_data.unitaries[i]
+                unique_unitary = unique_unitary[::-1]
+                unique_pub_res = pub_results[i]
+                # bitstrings = unique_pub_res.data.meas.get_bitstrings(loc=k)    #collection of all bitstrings that arose from pub of index i, and param of index k
+                bitstring_counts     = unique_pub_res.data.meas.get_counts(loc=k)
+                b = list(bitstring_counts.keys())
+
+                # 2. Convert each bitstring to a list of ints
+                bitstrings = [[int(bit) for bit in bitstring] for bitstring in b]
+
+                # 3. List of counts corresponding to each bitstring
+                counts = list(bitstring_counts.values())
+
+                for j in range(len(counts)):
+                    for count in range(int(counts[j])):
+                        total_data_list.append([unique_unitary, bitstrings[j]])   #repeat counts[j] times for every individual b (measurement outcome)
+
+        
+        observable_decomp = SparsePauliOp.from_operator(Operator(target.dm))
+        pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
+        pauli_str = observable_decomp.paulis
+        pauli_str_num = []
+        mapping = {'X': 0, 'Y': 1, 'Z': 2, 'I': 3}
+
+        for pauli in pauli_str:
+            term_str = pauli.to_label()  # e.g., 'IZ'
+            term_list = [mapping[c] for c in term_str]
+            pauli_str_num.append(term_list)
+        # Here, we let X, Y, Z, I = 0, 1, 2, 3
+
+
         reward = []
-        observable_matrix = target.dm #may need to do an extra check, convert to dm matrix if needed
-        observable = pauli_to_string(observable_matrix) # to clarify: may need to define an additional function for this
-        batch = 50  # to be put into input?
-        for i in range(batch):
-            shadow = total_data_list[i:i+batch] #extract U and b out of row i, 
-            N_k, k, M = shadow_bound(error, observable_matrix)
-            reward.append(estimate_shadow_obervable(shadow, observable, k))
+        for i in range(batch_size):
+            
+            data_list = total_data_list[i*batch_size:(i+1)*batch_size]  #structure: [[u1, b11], [u2, b12], ...]
+            U_list = [var[0] for var in data_list]
+            b_list = [var[1] for var in data_list]
+            shadow = (b_list, U_list)
+            exp_vals = estimate_shadow_obervable(shadow, pauli_str_num, partition)
+            reward_i = np.dot(pauli_coeff, exp_vals)
+
+            reward.append(reward_i)
         return reward
 
 
-def unique_u(shadow_size, num_qubits):
+def unique_u_func(shadow_size, num_qubits):
 
     """ This should be fully identical in output to pennylane, which uses big endian"""
 
