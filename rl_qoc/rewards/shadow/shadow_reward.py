@@ -50,6 +50,7 @@ class ShadowReward(Reward):
         qc: QuantumCircuit, #simulate imperfect gate
         params: np.ndarray,
         target: StateTarget,
+        shadow_size: int,
         env_config: QEnvConfig,
     ) -> ShadowRewardDataList:
         """
@@ -70,16 +71,16 @@ class ShadowReward(Reward):
         n_shots = execution_config.n_shots  # currently not used
         seed = execution_config.seed
         
-        shadow_size = env_config.sampling_paulis        #in QEnvConfig, the variable "sampling_paulis" is temporarily used to store shadow size info
         num_qubits = len(target.physical_qubits)
         reward_data = [] 
         unique_u_rows, unique_u_count = unique_u_func(shadow_size, num_qubits)
+
         for i in range(len(unique_u_count)):
             qc_copy = qc.copy()    
             unique_unitary = unique_u_rows[i]
             unique_unitary_shots = unique_u_count[i]
             for qubit, id in enumerate(unique_unitary):
-                gate_mapping(id, qc, qubit)
+                gate_mapping(id, qc_copy, qubit)
 
             qc_copy.measure_all()            # does not work due to env_config issue?
 
@@ -94,7 +95,7 @@ class ShadowReward(Reward):
                     unique_unitary                  
                 )
             )
-
+        
         return ShadowRewardDataList(reward_data)
 
     def get_reward_with_primitive(
@@ -157,7 +158,7 @@ class ShadowReward(Reward):
         bitstrings3_1 = pub3_res.data.meas.get_bitstrings(experiment=0)
         counts3_1     = pub3_res.data.meas.get_counts(experiment=0)
         """
-
+        
         total_data_list = []
         for k in range(batch_size):             #iterate through params
             
@@ -165,14 +166,13 @@ class ShadowReward(Reward):
                 unique_unitary = reward_data.unitaries[i]
                 unique_unitary = unique_unitary[::-1]
                 unique_pub_res = pub_results[i]
-                # bitstrings = unique_pub_res.data.meas.get_bitstrings(loc=k)    #collection of all bitstrings that arose from pub of index i, and param of index k
                 bitstring_counts     = unique_pub_res.data.meas.get_counts(loc=k)
                 b = list(bitstring_counts.keys())
 
-                # 2. Convert each bitstring to a list of ints
+                #Convert each bitstring to a list of ints
                 bitstrings = [[int(bit) for bit in bitstring] for bitstring in b]
 
-                # 3. List of counts corresponding to each bitstring
+                #List of counts corresponding to each bitstring
                 counts = list(bitstring_counts.values())
 
                 for j in range(len(counts)):
@@ -192,18 +192,22 @@ class ShadowReward(Reward):
             pauli_str_num.append(term_list)
         # Here, we let X, Y, Z, I = 0, 1, 2, 3
 
+        print(pauli_coeff, pauli_str)
 
         reward = []
         for i in range(batch_size):
             
-            data_list = total_data_list[i*batch_size:(i+1)*batch_size]  #structure: [[u1, b11], [u2, b12], ...]
+            data_list = total_data_list[i*shadow_size:(i+1)*shadow_size]  #structure: [[u1, b11], [u2, b12], ...]
             U_list = [var[0] for var in data_list]
             b_list = [var[1] for var in data_list]
             shadow = (b_list, U_list)
-            exp_vals = estimate_shadow_obervable(shadow, pauli_str_num, partition)
+            
+            exp_vals = [estimate_shadow_obervable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
             reward_i = np.dot(pauli_coeff, exp_vals)
-
+            reward_i = round(reward_i, 4)
+            print(exp_vals)
             reward.append(reward_i)
+            
         return reward
 
 
@@ -279,17 +283,17 @@ def estimate_shadow_obervable(shadow, observable, k):
             f = []
 
             for m in range(num_qubits):
+                
                 if P[m] == 3:
                     f.append(1/3)       #important. if P = I, there is additional Tr(I) = 2 in the sum now. We must compensate by changing to 1/3.
                 elif P[m] == U[m] and b[m] == 0:
-                    f.append(-1)
-                elif P[m] == U[m] and b[m] == 1:
                     f.append(1)
+                elif P[m] == U[m] and b[m] == 1:
+                    f.append(-1)
                 else:
                     f.append(0)
             
             exp_val.append((3**num_qubits) * np.prod(np.array(f)))
-
         means.append(sum(exp_val)/(shadow_size // k))   
 
     return np.median(means) 
