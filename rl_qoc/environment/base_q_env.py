@@ -83,11 +83,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._func_args = training_config.parametrized_circuit_kwargs
         self._physical_target_qubits = training_config.target.physical_qubits
 
-        self._estimator, self._sampler = retrieve_primitives(
-            self.backend,
-            self.config.backend_config,
-            training_config.backend_config.as_dict().get("primitive_options", None),
-        )
+        self._estimator, self._sampler = retrieve_primitives(self.config.backend_config)
 
         self.circuits = []
 
