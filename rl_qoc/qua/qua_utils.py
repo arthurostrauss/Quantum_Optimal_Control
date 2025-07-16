@@ -64,14 +64,14 @@ def get_gaussian_sampling_input():
     Get the input for the gaussian sampling function
     """
     n_lookup = 512
-
+    x = np.arange(n_lookup)
     cos_array = declare(
         fixed,
-        value=[(np.cos(2 * np.pi * x / n_lookup).tolist()) for x in range(n_lookup)],
+        value=np.cos(2 * np.pi * x / n_lookup).tolist(),
     )
     ln_array = declare(
         fixed,
-        value=[(np.sqrt(-2 * np.log(x / (n_lookup + 1))).tolist()) for x in range(1, n_lookup + 1)],
+        value=np.sqrt(-2 * np.log((x + 1) / (n_lookup + 1))).tolist(),
     )
     return n_lookup, cos_array, ln_array
 

@@ -343,6 +343,8 @@ class CustomPPO:
                 var_y = np.var(y_true)
                 explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+                mean_action_np = mean_action[0].cpu().numpy()
+                std_action_np = std_action[0].cpu().numpy()
                 # Print debug information
                 if self.print_debug:
                     print_debug_info(u_env, mean_action, std_action, b_returns, b_advantages)
@@ -355,8 +357,8 @@ class CustomPPO:
                         self.lookback_window,
                         u_env,
                         iteration,
-                        mean_action,
-                        std_action,
+                        mean_action_np,
+                        std_action_np,
                         start_time,
                     )
 
@@ -396,17 +398,17 @@ class CustomPPO:
                     training_results["fidelity_history"] = u_env.fidelity_history[-1]
 
                 for i in range(u_env.n_actions):
-                    training_results[f"clipped_mean_action_{i}"] = env.action(mean_action[0])[i]
-                    training_results[f"mean_action_{i}"] = mean_action[0][i]
-                    training_results[f"std_action_{i}"] = std_action[0][i]
+                    training_results[f"clipped_mean_action_{i}"] = env.action(mean_action_np)[i]
+                    training_results[f"mean_action_{i}"] = mean_action_np[i].tolist()
+                    training_results[f"std_action_{i}"] = std_action_np[i].tolist()
 
                 if self.agent_config.wandb_config.enabled and self.save_data:
                     write_to_wandb(summary, training_results)
                 for key, value in training_results.items():
                     self._training_results[key].append(value)
-                self._training_results["mean_action"] = mean_action[0].cpu().numpy().tolist()
-                self._training_results["std_action"] = std_action[0].cpu().numpy().tolist()
-                self._training_results["clipped_mean_action"] = env.action(mean_action[0]).tolist()
+                self._training_results["mean_action"] = mean_action_np.tolist()
+                self._training_results["std_action"] = std_action_np.tolist()
+                self._training_results["clipped_mean_action"] = env.action(mean_action_np).tolist()
                 iteration += 1
 
                 if check_convergence_std_actions(std_action, self.std_actions_eps):
