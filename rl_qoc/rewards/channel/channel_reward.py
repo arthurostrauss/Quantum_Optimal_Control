@@ -569,7 +569,7 @@ class ChannelReward(Reward):
             save,
             fixed,
         )
-        from qiskit_qm_provider import QMBackend
+        from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
         from ...qua.qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
         from ...qua.qm_config import QMConfig
 

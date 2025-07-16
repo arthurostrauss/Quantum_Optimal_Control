@@ -455,7 +455,10 @@ def get_q_env_config(
         backend = select_backend(**backend_params)
 
     from ..environment.configuration.backend_config import QiskitConfig
-    assert isinstance(backend, BackendV2) or backend is None, "Backend must be a BackendV2 instance or None"
+
+    assert (
+        isinstance(backend, BackendV2) or backend is None
+    ), "Backend must be a BackendV2 instance or None"
     backend_config = QiskitConfig(
         parametrized_circ_func,
         backend,
