@@ -74,8 +74,12 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             self.real_time_circuit, self.input_type, self.config
         )
 
-        if self.input_type == InputType.DGX:
-            ParameterPool.patch_opnic_wrapper(self.qm_backend_config.opnic_dev_path)
+        if (
+            self.input_type == InputType.DGX
+            and self.qm_backend_config.path_to_python_wrapper is not None
+        ):
+            ParameterPool.initialize_streams(self.qm_backend_config.path_to_python_wrapper)
+            ParameterPool.opx_handshake()
 
         self._qm_job: Optional[RunningQmJob] = job
         if self.backend is not None:
@@ -145,7 +149,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self._total_data_points += step_data_points
         fetching_index, finishing_index = self._step_indices[self.step_tracker]
         fetching_size = finishing_index - fetching_index
-        if self.qm_backend_config.verbosity > 0:
+        if self.qm_backend_config.verbosity > 1:
             print(f"Fetching index: {fetching_index}, finishing index: {finishing_index}")
             print(f"Fetching size: {fetching_size}")
             print(f"Step indices: {self._step_indices}")
@@ -196,7 +200,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         return self.config.backend_config
 
     @property
-    def backend(self) -> QMBackend:
+    def backend(self) -> Optional[QMBackend]:
+        """
+        Get the QM backend
+        """
         return super().backend
 
     @property
@@ -221,8 +228,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         Returns:
             RunningQmJob: The running Qmjob
         """
-        if self.input_type == InputType.DGX:
-            ParameterPool.configure_stream()
+        if (
+            self.input_type == InputType.DGX
+            and self.qm_backend_config.path_to_python_wrapper is not None
+        ):
+            ParameterPool.configure_stream(self.qm_backend_config.path_to_python_wrapper)
         if hasattr(self.real_time_circuit, "calibrations") and self.real_time_circuit.calibrations:
             self.backend.update_calibrations(qc=self.real_time_circuit, input_type=self.input_type)
         self.backend.update_compiler_from_target()
@@ -239,7 +249,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         Returns:
 
         """
-        if self.input_type == InputType.DGX:
+        if (
+            self.input_type == InputType.DGX
+            and self.qm_backend_config.path_to_python_wrapper is not None
+        ):
             ParameterPool.close_streams()
         finish = self.qm_job.halt()
         if not finish:

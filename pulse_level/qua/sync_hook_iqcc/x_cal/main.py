@@ -193,11 +193,10 @@ n_shots = {n_shots}  # Minimum number of shots per fiducial evaluation
 pauli_sampling = {pauli_sampling}  # Number of fiducials to compute for fidelity estimation (DFE only)
 n_reps = {n_reps}  # Number of repetitions of the cycle circuit
 num_updates = TotalUpdates({num_updates.total_updates})
-input_type = "{str(input_type)}"
 backend_config = QMConfig(
     num_updates=num_updates.total_updates,
-    input_type=input_type,
-    verbosity=2,
+    input_type="{str(input_type)}",
+    verbosity={backend_config.verbosity},
     timeout={backend_config.timeout}
 )
 
