@@ -126,8 +126,8 @@ def update_fidelity_info(
     lookback_window,
     env: BaseQuantumEnvironment,
     update_step,
-    mean_action,
-    std_action,
+    mean_action: np.ndarray,
+    std_action: np.ndarray,
     start_time,
 ):
     """
@@ -142,8 +142,8 @@ def update_fidelity_info(
                     {
                         "achieved": True,
                         "update_at": update_step,
-                        "mean_action": mean_action[0].numpy(),
-                        "std_action": std_action.numpy()[0],
+                        "mean_action": mean_action.tolist(),
+                        "std_action": std_action.tolist(),
                         "hardware_runtime": np.sum(env.hardware_runtime),
                         "simulation_train_time": time.time() - start_time,
                         "shots_used": (

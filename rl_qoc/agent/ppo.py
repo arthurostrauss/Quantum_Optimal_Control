@@ -398,7 +398,11 @@ class CustomPPO:
                     training_results["fidelity_history"] = u_env.fidelity_history[-1]
 
                 for i in range(u_env.n_actions):
-                    training_results[f"clipped_mean_action_{i}"] = env.action(mean_action_np)[i]
+                    training_results[f"clipped_mean_action_{i}"] = (
+                        env.action(mean_action_np)[i].tolist()
+                        if isinstance(env, ActionWrapper)
+                        else mean_action_np[i].tolist()
+                    )
                     training_results[f"mean_action_{i}"] = mean_action_np[i].tolist()
                     training_results[f"std_action_{i}"] = std_action_np[i].tolist()
 
