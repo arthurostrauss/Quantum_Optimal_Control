@@ -160,7 +160,7 @@ class CustomPPO:
             wandb.init(
                 project=self.agent_config.wandb_config.project,
                 config=self.agent_config.as_dict()
-                | self.unwrapped_env.config.as_dict(to_json=True),
+                | self.unwrapped_env.config.as_dict(),
                 name=self.agent_config.run_name,
                 sync_tensorboard=True,
             )
@@ -406,7 +406,7 @@ class CustomPPO:
                     training_results[f"mean_action_{i}"] = mean_action_np[i].tolist()
                     training_results[f"std_action_{i}"] = std_action_np[i].tolist()
 
-                if self.agent_config.wandb_config.enabled and self.save_data:
+                if self.agent_config.wandb_config.enabled:
                     write_to_wandb(summary, training_results)
                 for key, value in training_results.items():
                     self._training_results[key].append(value)
@@ -430,7 +430,7 @@ class CustomPPO:
                 logging.error(f"An error occurred during training: {e}")
                 return {
                     "avg_reward": -1.0,
-                    "fidelity_history": [0] * self.training_constraint.constraint_value,
+                    "fidelity_history": [0] * int(self.training_constraint.constraint_value),
                 }
             else:  # Raise the error for debugging in the normal mode
                 raise

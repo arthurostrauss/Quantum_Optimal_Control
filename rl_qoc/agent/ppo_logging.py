@@ -93,12 +93,13 @@ def write_to_wandb(summary, training_results):
     """
     Writes the training results to Weights and Biases.
     """
-    for key, value in summary.items():
-        wandb.run.summary[key] = value
+    if wandb.run is not None:
+        for key, value in summary.items():
+            wandb.run.summary[key] = value
 
-    wandb.define_metric("fidelity_history", summary="max")
-    wandb.define_metric("avg_reward", summary="max")
-    wandb.log(training_results)
+        wandb.define_metric("fidelity_history", summary="max")
+        wandb.define_metric("avg_reward", summary="max")
+        wandb.log(training_results)
 
 
 def check_convergence_std_actions(std_action, std_actions_eps):
