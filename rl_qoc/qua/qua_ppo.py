@@ -27,7 +27,9 @@ def lcg(seed, a, c, m):
     seed = np.int32(seed)
     a = np.int32(a)
     c = np.int32(c)
-    return (a * seed + c) % m
+    with np.errstate(over="ignore"):
+        res = (a * seed + c) % m
+    return res
 
 
 def lcg_int(seed, a, c, m, upper_bound):
