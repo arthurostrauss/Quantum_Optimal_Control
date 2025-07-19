@@ -2,16 +2,36 @@
 from rl_qoc import QuantumEnvironment, QiskitConfig, QEnvConfig, ExecutionConfig, StateTarget, ShadowReward
 from qiskit.circuit import QuantumCircuit, ParameterVector, QuantumRegister
 from qiskit.circuit.library import RXGate, UGate, RZXGate
-from qiskit.quantum_info import Statevector, state_fidelity, DensityMatrix
+from qiskit.quantum_info import Statevector, state_fidelity, DensityMatrix, random_statevector
 
 from gymnasium.spaces import Box
 import numpy as np
 
+
+"""
+# example circuit of one parameter
 def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
     qc.ry(2*params[0], 0)
     qc.cx(0,1)
+"""
 
-    
+#generic 2 qubit circuit of 6 parameters
+def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
+    qc.u(params[0], params[1],params[2], 0)
+    qc.u(params[3], params[4],params[5], 1)
+    qc.cx(0,1)
+
+
+"""
+#generic n qubit circuit of 2**n - 2 parameters, in progress
+def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
+    qc.u(params[0], params[1],params[2], 0)
+    qc.u(params[3], params[4],params[5], 1)
+    qc.cx(0,1)
+"""
+
+
+
 def shadow_bound(error, observables, failure_rate=0.01):
    
     M = len(observables)
@@ -25,26 +45,33 @@ def shadow_bound(error, observables, failure_rate=0.01):
     N = 34 * max(shadow_norm(o) for o in observables) / error ** 2
     return max(int(np.ceil(N * K)), 10000), int(K), M           #sometimes N = 0. A limit of 10000 is set to prevent this
 
+
+"""  
+#2 qubit parametrized bell state of one parameter
 theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
-tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Statevector.from_label('11')) #bell state
-#vec = np.array([0.5+0.j, 0.5+0.j, 0.5+0.j, 0.5+0.j])   #XX state
+tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Statevector.from_label('11'))  
+"""
 
-#tgt_state = Statevector(vec)
+#2 qubit random state
+no_qubits = 2
+tgt_state = psi = random_statevector(2**no_qubits)  
 
-print(tgt_state)
+
+
+print("State Vector of target state: ",tgt_state)
 backend_config = QiskitConfig(apply_parametrized_gate)
 state_target = StateTarget(tgt_state)
 
-error = 0.1 # change
+error = 0.1 # can change
 observables = [state_target.dm.data]
-print(observables)
+print("Density Matrix of target state: ", observables)
 shadow_size, partition, no_observables = shadow_bound(error, observables)
-print(shadow_size, partition, no_observables)
+print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition, no_observables)
 
+#params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
 
-#params = np.array([[0,1], [1,1]])
-#params = np.array([[np.random.rand()*np.pi] for i in range(10)])
-params = np.array([[np.pi/8]])
+params = np.array([[np.random.rand()*2* np.pi for n in range(6)] for i in range(5)])  # for a generic circuit, 6 params are required to define it.
+
 batch_size = len(params)
 
 execution_config = ExecutionConfig(batch_size=batch_size,
@@ -56,7 +83,7 @@ reward = ShadowReward()
 env_config = QEnvConfig(state_target, 
                         backend_config=backend_config,
                         execution_config=execution_config,
-                        action_space=Box(low=np.array([0,0]), high=np.array([2*np.pi,2*np.pi]), shape=(2,)),
+                        action_space=Box(low=np.array([0 for i in range(len(params[0]))]), high=np.array([2*np.pi for i in range(len(params[0]))]), shape=(len(params[0]),)),
                         reward=reward)
 
 env = QuantumEnvironment(env_config)

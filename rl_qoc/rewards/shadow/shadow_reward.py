@@ -192,7 +192,7 @@ class ShadowReward(Reward):
             pauli_str_num.append(term_list)
         # Here, we let X, Y, Z, I = 0, 1, 2, 3
 
-        print(pauli_coeff, pauli_str)
+        #print(pauli_coeff, pauli_str)
 
         reward = []
         for i in range(batch_size):
@@ -205,7 +205,7 @@ class ShadowReward(Reward):
             exp_vals = [estimate_shadow_obervable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
             reward_i = np.dot(pauli_coeff, exp_vals)
             reward_i = round(reward_i, 4)
-            print(exp_vals)
+            #print(exp_vals)
             reward.append(reward_i)
             
         return reward
