@@ -52,5 +52,5 @@ class QMConfig(BackendConfig):
             "input_type": str(self.input_type),
             "verbosity": self.verbosity,
             "num_updates": self.num_updates,
-            "opnic_dev_path": self.opnic_dev_path,
+            "path_to_python_wrapper": self.path_to_python_wrapper,
         }

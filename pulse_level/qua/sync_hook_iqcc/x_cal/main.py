@@ -251,8 +251,6 @@ sync_hook_path = generate_sync_hook()
 print(f"Sync hook file generated at: {sync_hook_path}")
 
 prog = q_env.rl_qoc_training_qua_prog(num_updates=num_updates.total_updates)
-if input_type == InputType.DGX:
-    ParameterPool.configure_stream()
 if hasattr(q_env.real_time_circuit, "calibrations") and q_env.real_time_circuit.calibrations:
     backend.update_calibrations(qc=q_env.real_time_circuit, input_type=input_type)
 backend.update_compiler_from_target()

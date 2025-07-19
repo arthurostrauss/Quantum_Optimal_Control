@@ -156,11 +156,10 @@ class CustomPPO:
         if train_function_settings is not None:
             self._train_function_settings = train_function_settings
 
-        if self.save_data and self.agent_config.wandb_config.enabled:
+        if self.agent_config.wandb_config.enabled:
             wandb.init(
                 project=self.agent_config.wandb_config.project,
-                config=self.agent_config.as_dict()
-                | self.unwrapped_env.config.as_dict(),
+                config=self.agent_config.as_dict() | self.unwrapped_env.config.as_dict(),
                 name=self.agent_config.run_name,
                 sync_tensorboard=True,
             )
