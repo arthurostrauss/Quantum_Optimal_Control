@@ -22,6 +22,7 @@ class QMConfig(BackendConfig):
         input_type: Type of input for the QUA program
         verbosity: Verbosity level for the QUA program
         num_updates: Number of updates for the QUA program
+        wrapper_data: Fields to be passed to compute custom Action wrapper within QUA program
         compiler_options: Compiler options for the QUA program
         path_to_python_wrapper: Path to the python wrapper for the Opnic (DGX Quantum only)
         timeout: Timeout for the QUA program execution

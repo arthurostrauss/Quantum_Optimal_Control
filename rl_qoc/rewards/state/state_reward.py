@@ -491,8 +491,6 @@ class StateReward(Reward):
             else config.target.n_qubits
         )
         dim = int(2**num_qubits)
-        if config.backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
-            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
@@ -557,6 +555,7 @@ class StateReward(Reward):
                             config.backend_config.wrapper_data.get("rescale_and_clip", None)
                             is not None
                         ):
+                            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
                             tmp1 = rescale_and_clip_wrapper(
                                 tmp1,
                                 config.action_space,
