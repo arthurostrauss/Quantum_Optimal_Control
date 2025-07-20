@@ -501,7 +501,7 @@ class CAFEReward(Reward):
         circuit_params.reset()
         num_qubits = config.target.causal_cone_size
         dim = int(2**num_qubits)
-            
+
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")

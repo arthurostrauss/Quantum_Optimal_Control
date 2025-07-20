@@ -169,7 +169,7 @@ class BaseQuantumEnvironment(ABC, Env):
         fit_function: Optional[Callable] = None,
         inverse_fit_function: Optional[Callable] = None,
         update_fit_params: Optional[REWARD_STRINGS | Reward] = None,
-    ):
+    ) -> List[np.ndarray]:
         """
         Method to fit the initial reward function to the first set of actions in the environment
         with respect to the number of repetitions of the cycle circuit. Plots the fit and the data points.
@@ -182,6 +182,7 @@ class BaseQuantumEnvironment(ABC, Env):
             inverse_fit_function: Function to compute the inverse of the fit function
             update_fit_params: Method from which to update the fit parameters (e.g., "cafe", "channel", "state")
 
+        Returns: List of reward data for each method
         """
         from ..rewards import Reward, REWARD_STRINGS
 
@@ -254,6 +255,7 @@ class BaseQuantumEnvironment(ABC, Env):
             self.config.execution_config = initial_execution_config
 
         self.config.reward = initial_reward
+        return reward_data
 
     def perform_action(self, actions: np.ndarray, update_env_history: bool = True):
         """

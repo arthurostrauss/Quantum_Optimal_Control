@@ -64,7 +64,7 @@ class XEBReward(Reward):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
@@ -130,7 +130,7 @@ class XEBReward(Reward):
         self,
         reward_data: XEBRewardDataList,
         primitive: BaseSamplerV2,
-    ) -> np.array:
+    ) -> np.ndarray:
         pubs = reward_data.pubs
         job = primitive.run(pubs)
 
@@ -140,6 +140,7 @@ class XEBReward(Reward):
         causal_cone_qubits_indices = reward_data.causal_cone_qubits_indices
         causal_cone_size = len(causal_cone_qubits_indices)
         num_bits = results[0].data.meas[0].num_bits
+        binary = lambda n: bin(n)[2:].zfill(num_bits)
         if num_bits == causal_cone_size:
             # No post-selection based on causal cone
             pub_data = [
@@ -155,17 +156,14 @@ class XEBReward(Reward):
             # Complete the potential missing keys of the counts dictionaries (in case a bitstring was not sampled)
             for i in range(len(pub_data)):
                 for j in range(len(pub_data[i])):
-                    for key in [bin(k)[2:].zfill(num_bits) for k in range(2**num_bits)]:
+                    for key in [binary(k) for k in range(2**num_bits)]:
                         if key not in experimental_probabilities[i][j]:
                             experimental_probabilities[i][j][key] = 0
 
             experimental_probabilities = [
                 [
                     np.array(
-                        [
-                            experimental_probabilities[i][j][bin(k)[2:].zfill(num_bits)]
-                            for k in range(2**num_bits)
-                        ]
+                        [experimental_probabilities[i][j][binary(k)] for k in range(2**num_bits)]
                     )
                     for j in range(len(pub_data[i]))
                 ]
@@ -196,6 +194,8 @@ class XEBReward(Reward):
             m_u = np.sum(expected_probs * experimental_probs)
             x = e_u - u_u
             y = m_u - u_u
+            if x == 0:
+                return 0.0
             return x * y / x**2
 
 
