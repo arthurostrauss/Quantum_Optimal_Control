@@ -156,9 +156,11 @@ class CAFEReward(Reward):
                 run_qc, initial_layout=layout, scheduling=False
             )
             transpiled_circuit.barrier()
-            # Add the inverse unitary + measurement to the circuit
+            # Add the inverse unitary and measurement to the circuit
             transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-            transpiled_circuit.measure_all()
+            creg = ClassicalRegister("meas", target.causal_cone_size)
+            transpiled_circuit.add_register(creg)
+            transpiled_circuit.measure(target.causal_cone_qubits, creg)
 
             pub = (transpiled_circuit, params, execution_config.n_shots)
             reward_data.append(
