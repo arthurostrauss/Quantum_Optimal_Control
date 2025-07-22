@@ -49,7 +49,7 @@ class ShadowReward(Reward):
         self,
         qc: QuantumCircuit, #simulate imperfect gate
         params: np.ndarray,
-        target: StateTarget,
+        target: StateTarget | GateTarget,
         shadow_size: int,
         env_config: QEnvConfig,
     ) -> ShadowRewardDataList:
@@ -63,38 +63,43 @@ class ShadowReward(Reward):
             env_config: QEnvConfig containing the backend information and execution configuration
             baseline_circuit: Ideal circuit that qc should implement
         """
-
-        if not isinstance(target, StateTarget):
-            raise ValueError("Shadow reward can only be computed for a target state")
+   
         execution_config = env_config.execution_config
         backend_info = env_config.backend_info
         n_shots = execution_config.n_shots  # currently not used
         seed = execution_config.seed
         
-        num_qubits = len(target.physical_qubits)
+        num_qubits = len(target.physical_qubits) if isinstance(target, StateTarget) else target.causal_cone_size
         reward_data = [] 
-        unique_u_rows, unique_u_count = unique_u_func(shadow_size, num_qubits)
 
-        for i in range(len(unique_u_count)):
-            qc_copy = qc.copy()    
-            unique_unitary = unique_u_rows[i]
-            unique_unitary_shots = unique_u_count[i]
-            for qubit, id in enumerate(unique_unitary):
-                gate_mapping(id, qc_copy, qubit)
+        if isinstance(target, StateTarget):
+            unique_u_rows, unique_u_count = unique_u_func(shadow_size, num_qubits)
 
-            qc_copy.measure_all()            # does not work due to env_config issue?
+            for i in range(len(unique_u_count)):
+                qc_copy = qc.copy()    
+                unique_unitary = unique_u_rows[i]
+                unique_unitary_shots = unique_u_count[i]
+                for qubit, id in enumerate(unique_unitary):
+                    gate_mapping(id, qc_copy, qubit)
 
-            # qc_no_meas = qc.copy()
-            # qc_no_meas.remove_final_measurements()
-            
-            pub = (qc_copy, params, unique_unitary_shots)  
-            
-            reward_data.append(
-                ShadowRewardData(
-                    pub,
-                    unique_unitary                  
+                qc_copy.measure_all()            # does not work due to env_config issue?
+
+                # qc_no_meas = qc.copy()
+                # qc_no_meas.remove_final_measurements()
+                
+                pub = (qc_copy, params, unique_unitary_shots)  
+                
+                reward_data.append(
+                    ShadowRewardData(
+                        pub,
+                        unitary=unique_unitary,
+                        u_in=None,
+                        b_in=None
+                    )
                 )
-            )
+        else:
+            # TODO: implement Shadow tomography for channel
+            raise NotImplementedError("Shadow tomography for channel is not implemented yet")
         
         return ShadowRewardDataList(reward_data)
 

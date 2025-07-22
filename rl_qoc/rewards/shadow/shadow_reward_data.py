@@ -11,10 +11,18 @@ import numpy as np
 class ShadowRewardData(RewardData):
     """
     Dataclass enabling the storage and tracking of all the items that will be used to compute the Shadow reward.
+
+    Args:
+        pub: SamplerPub
+        u_out: unitary output of the circuit
+        u_in: unitary input of the circuit
+
     """
     #add data for unitary list
     pub: SamplerPub | SamplerPubLike
-    unitary: List[int]                             #one reward = one shadow generation = one list of list of random variables
+    unitary: List[int]                            
+    u_in: Optional[List[int]]=None
+    b_in: Optional[List[int]]=None
     
 
     def __post_init__(self):
