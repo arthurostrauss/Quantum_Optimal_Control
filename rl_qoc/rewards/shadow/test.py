@@ -88,9 +88,9 @@ env_config = QEnvConfig(state_target,
 
 env = QuantumEnvironment(env_config)
 
-reward_data = reward.get_reward_data(env.circuit, params, state_target, shadow_size, env_config)
+reward_data = reward.get_reward_data(env.circuit, params, state_target, env_config)
 #print(reward_data[1].pub.parameter_values)
-reward_array = reward.get_reward_with_primitive(reward_data, env.sampler, shadow_size, partition = partition, target = state_target)
+reward_array = reward.get_reward_with_primitive(reward_data, env.sampler, state_target)
 print("Rewards:", reward_array)
 
 binded_circuits = [env.circuit.assign_parameters(p) for p in params]

@@ -50,7 +50,6 @@ class ShadowReward(Reward):
         qc: QuantumCircuit, #simulate imperfect gate
         params: np.ndarray,
         target: StateTarget | GateTarget,
-        shadow_size: int,
         env_config: QEnvConfig,
     ) -> ShadowRewardDataList:
         """
@@ -64,35 +63,39 @@ class ShadowReward(Reward):
             baseline_circuit: Ideal circuit that qc should implement
         """
    
-        execution_config = env_config.execution_config
+        
         backend_info = env_config.backend_info
-        n_shots = execution_config.n_shots  # currently not used
-        seed = execution_config.seed
+        shadow_size = env_config.execution_config.sampling_paulis
         
         num_qubits = len(target.physical_qubits) if isinstance(target, StateTarget) else target.causal_cone_size
         reward_data = [] 
 
         if isinstance(target, StateTarget):
-            unique_u_rows, unique_u_count = unique_u_func(shadow_size, num_qubits)
+            unitary_ids = self.unitary_rng.choice(3, size=(shadow_size, num_qubits))
+            unique_unitaries, counts = np.unique(unitary_ids, axis=0, return_counts=True)
 
-            for i in range(len(unique_u_count)):
+            for unitary, shots in zip(unique_unitaries, counts):
                 qc_copy = qc.copy()    
-                unique_unitary = unique_u_rows[i]
-                unique_unitary_shots = unique_u_count[i]
-                for qubit, id in enumerate(unique_unitary):
-                    gate_mapping(id, qc_copy, qubit)
-
-                qc_copy.measure_all()            # does not work due to env_config issue?
-
-                # qc_no_meas = qc.copy()
-                # qc_no_meas.remove_final_measurements()
-                
-                pub = (qc_copy, params, unique_unitary_shots)  
+                for qubit, id in enumerate(unitary):
+                    if id == 0: # X basis 
+                        qc_copy.h(qubit)
+                    elif id == 1 : # Y basis 
+                        qc_copy.sdg(qubit)
+                        qc_copy.h(qubit)
+                    
+                qc_copy.measure_all()
+                circuit = backend_info.custom_transpile(qc_copy,
+                                                        remove_final_measurements=False,
+                                                        initial_layout=target.layout,
+                                                        scheduling=False, 
+                                                        optimization_level=0)
+            
+                pub = (circuit, params, shots)  
                 
                 reward_data.append(
                     ShadowRewardData(
                         pub,
-                        unitary=unique_unitary,
+                        unitary=unitary,
                         u_in=None,
                         b_in=None
                     )
@@ -107,74 +110,24 @@ class ShadowReward(Reward):
         self,
         reward_data: ShadowRewardDataList,
         primitive: BaseSamplerV2,
-        shadow_size: int,
-        partition: int,
         target: StateTarget
     ) -> np.ndarray:
         
         shadow_size = reward_data.shadow_size
         job = primitive.run(reward_data.pubs)
         pub_results = job.result()
-        batch_size = reward_data.pubs[0].parameter_values.shape[0]  # alternatively, output env_config from GRD and replace here: batch_size = reward_data.env_config.batch_size 
-        n_shots = reward_data.shots
-
-
-        """
-        assert all(
-            [pub.shots == n_shots for pub in reward_data.pubs]
-        ), "All pubs should have the same number of shots"
-        assert all(
-            [pub.parameter_values.shape[0] == batch_size for pub in reward_data.pubs]
-        ), "All pubs should have the same batch size"
-
-
-
-        To be sorted out:
-        1. what does job.result() return?
-        We have job that includes the run version of all the pubs. each pub has 50 circuits, if we allow batch = 50, and length of params to = 50
-        By right I will have a dataset that has
-        1. all pubs
-        2. all 50 circuits wrt params
-        3. within one circuit, we expect samplerpub to give a dictionary of measurement outcomes and probability distributions
-        ALL OF THEM STORED IN pub_results
-        eg pub_results[1][2] may give first pub, second param, full dictionary
-
-        eg
-        param1 = [2,3]
-        param2 = [2]
-        params3 = [[1,2], [2,5], [3,2]]
-        shots1 = 1
-        shots2 = 3
-        shots3 = 20
-        pub1 = (qc1, param1, shots1)
-        pub2 = (qc1, param2, shots2)
-        pub3 = (qc1, params3, shots3)
-
-        job = sampler.run([pub1, pub2, pub3, …])
-        pub_results = job.result()
-
-        #access pub result eg pub1
-        pub1_res = pub_results[0]
-        bitstrings1 = pub1_res.data.meas.get_bitstrings()
-        counts1     = pub1_res.data.meas.get_counts()
-
-        #access pub result eg pub3, all 3 param sets
-        pub3_res = pub_results[2]
-        bitstrings3_1 = pub3_res.data.meas.get_bitstrings(experiment=0)
-        counts3_1     = pub3_res.data.meas.get_counts(experiment=0)
-        """
+        batch_size = reward_data.pubs[0].parameter_values.shape[0]
         
         total_data_list = []
-        for k in range(batch_size):             #iterate through params
-            
-            for i in range(len(pub_results)):   #iterate through each pub ie each unique unitary
-                unique_unitary = reward_data.unitaries[i]
+        for k in range(batch_size):
+            for i in range(len(pub_results)):
+                unique_unitary = reward_data[i].unitary
                 unique_unitary = unique_unitary[::-1]
                 unique_pub_res = pub_results[i]
-                bitstring_counts     = unique_pub_res.data.meas.get_counts(loc=k)
+                bitstring_counts = unique_pub_res.data.meas.get_counts(loc=k)
                 b = list(bitstring_counts.keys())
 
-                #Convert each bitstring to a list of ints
+                # Convert each bitstring to a list of ints
                 bitstrings = [[int(bit) for bit in bitstring] for bitstring in b]
 
                 #List of counts corresponding to each bitstring
@@ -184,8 +137,8 @@ class ShadowReward(Reward):
                     for count in range(int(counts[j])):
                         total_data_list.append([unique_unitary, bitstrings[j]])   #repeat counts[j] times for every individual b (measurement outcome)
 
-        
         observable_decomp = SparsePauliOp.from_operator(Operator(target.dm))
+        partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
         pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
         pauli_str = observable_decomp.paulis
         pauli_str_num = []
@@ -199,9 +152,8 @@ class ShadowReward(Reward):
 
         #print(pauli_coeff, pauli_str)
 
-        reward = []
+        reward = np.zeros(batch_size)
         for i in range(batch_size):
-            
             data_list = total_data_list[i*shadow_size:(i+1)*shadow_size]  #structure: [[u1, b11], [u2, b12], ...]
             U_list = [var[0] for var in data_list]
             b_list = [var[1] for var in data_list]
@@ -209,29 +161,10 @@ class ShadowReward(Reward):
             
             exp_vals = [estimate_shadow_obervable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
             reward_i = np.dot(pauli_coeff, exp_vals)
-            reward_i = round(reward_i, 4)
-            #print(exp_vals)
-            reward.append(reward_i)
+            assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
+            reward[i] = reward_i.real
             
         return reward
-
-
-def unique_u_func(shadow_size, num_qubits):
-
-    """ This should be fully identical in output to pennylane, which uses big endian"""
-
-    unitary_ids = np.random.randint(0, 3, size=(shadow_size, num_qubits))
-    unique_rows, counts = np.unique(unitary_ids, axis=0, return_counts=True)
-    return unique_rows, counts
-
-def gate_mapping(id, qc, qubit):
-    if id == 0 : 
-        qc.h(qubit)
-    elif id == 1 : 
-        qc.sdg(qubit)
-        qc.h(qubit)
-    elif id == 2: 
-        pass
 
 def shadow_bound(error, observables, failure_rate=0.01):
 
@@ -278,7 +211,7 @@ def estimate_shadow_obervable(shadow, observable, k):
             obs_shuffled[start: end],
         )
 
-        exp_val = []
+        exp_val = np.zeros(shadow_size // k)
         
         for n in range(shadow_size // k):
             
@@ -298,8 +231,8 @@ def estimate_shadow_obervable(shadow, observable, k):
                 else:
                     f.append(0)
             
-            exp_val.append((3**num_qubits) * np.prod(np.array(f)))
-        means.append(sum(exp_val)/(shadow_size // k))   
+            exp_val[n] = (3**num_qubits) * np.prod(np.array(f))
+        means.append(np.sum(exp_val)/(shadow_size // k))   
 
     return np.median(means) 
 
