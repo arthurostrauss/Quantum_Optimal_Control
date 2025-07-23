@@ -569,7 +569,7 @@ class ChannelReward(Reward):
             save,
             fixed,
         )
-        from qiskit_qm_provider import QMBackend
+        from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
         from ...qua.qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
         from ...qua.qm_config import QMConfig
 
@@ -599,8 +599,6 @@ class ChannelReward(Reward):
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
-        if config.backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
-            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
         with program() as rl_qoc_training_prog:
             # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
             circuit_params.declare_variables()
@@ -661,6 +659,7 @@ class ChannelReward(Reward):
                                 config.backend_config.wrapper_data.get("rescale_and_clip", None)
                                 is not None
                             ):
+                                new_box = config.backend_config.wrapper_data["rescale_and_clip"]
                                 tmp1 = rescale_and_clip_wrapper(
                                     tmp1,
                                     config.action_space,

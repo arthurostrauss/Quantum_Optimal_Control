@@ -93,12 +93,13 @@ def write_to_wandb(summary, training_results):
     """
     Writes the training results to Weights and Biases.
     """
-    for key, value in summary.items():
-        wandb.run.summary[key] = value
+    if wandb.run is not None:
+        for key, value in summary.items():
+            wandb.run.summary[key] = value
 
-    wandb.define_metric("fidelity_history", summary="max")
-    wandb.define_metric("avg_reward", summary="max")
-    wandb.log(training_results)
+        wandb.define_metric("fidelity_history", summary="max")
+        wandb.define_metric("avg_reward", summary="max")
+        wandb.log(training_results)
 
 
 def check_convergence_std_actions(std_action, std_actions_eps):
@@ -126,8 +127,8 @@ def update_fidelity_info(
     lookback_window,
     env: BaseQuantumEnvironment,
     update_step,
-    mean_action,
-    std_action,
+    mean_action: np.ndarray,
+    std_action: np.ndarray,
     start_time,
 ):
     """
@@ -142,8 +143,8 @@ def update_fidelity_info(
                     {
                         "achieved": True,
                         "update_at": update_step,
-                        "mean_action": mean_action[0].numpy(),
-                        "std_action": std_action.numpy()[0],
+                        "mean_action": mean_action.tolist(),
+                        "std_action": std_action.tolist(),
                         "hardware_runtime": np.sum(env.hardware_runtime),
                         "simulation_train_time": time.time() - start_time,
                         "shots_used": (

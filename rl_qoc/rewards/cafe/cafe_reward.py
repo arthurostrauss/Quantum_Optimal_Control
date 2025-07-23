@@ -156,9 +156,11 @@ class CAFEReward(Reward):
                 run_qc, initial_layout=layout, scheduling=False
             )
             transpiled_circuit.barrier()
-            # Add the inverse unitary + measurement to the circuit
+            # Add the inverse unitary and measurement to the circuit
             transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-            transpiled_circuit.measure_all()
+            creg = ClassicalRegister("meas", target.causal_cone_size)
+            transpiled_circuit.add_register(creg)
+            transpiled_circuit.measure(target.causal_cone_qubits, creg)
 
             pub = (transpiled_circuit, params, execution_config.n_shots)
             reward_data.append(
@@ -480,7 +482,7 @@ class CAFEReward(Reward):
             save,
             fixed,
         )
-        from qiskit_qm_provider import QMBackend
+        from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
         from ...qua.qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
         from ...qua.qm_config import QMConfig
 
@@ -501,8 +503,7 @@ class CAFEReward(Reward):
         circuit_params.reset()
         num_qubits = config.target.causal_cone_size
         dim = int(2**num_qubits)
-        if config.backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
-            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
+
         for clbit in qc.clbits:
             if len(qc.find_bit(clbit).registers) >= 2:
                 raise ValueError("Overlapping classical registers are not supported")
@@ -562,6 +563,7 @@ class CAFEReward(Reward):
                             config.backend_config.wrapper_data.get("rescale_and_clip", None)
                             is not None
                         ):
+                            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
                             tmp1 = rescale_and_clip_wrapper(
                                 tmp1,
                                 config.action_space,

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from qm import CompilerOptionArguments
 
@@ -21,8 +22,9 @@ class QMConfig(BackendConfig):
         input_type: Type of input for the QUA program
         verbosity: Verbosity level for the QUA program
         num_updates: Number of updates for the QUA program
+        wrapper_data: Fields to be passed to compute custom Action wrapper within QUA program
         compiler_options: Compiler options for the QUA program
-        opnic_dev_path: Path to the Opnic development directory
+        path_to_python_wrapper: Path to the python wrapper for the Opnic (DGX Quantum only)
         timeout: Timeout for the QUA program execution
         test_mode: Whether to run in test mode (saves everything in streams)
     """
@@ -33,7 +35,7 @@ class QMConfig(BackendConfig):
     num_updates: int = 1000
     wrapper_data: Dict[str, Any] = field(default_factory=dict)
     compiler_options: Optional[CompilerOptionArguments] = None
-    opnic_dev_path: str = "/home/dpoulos/opnic-dev"
+    path_to_python_wrapper: Optional[str | Path] = None
     timeout: int = 60
     test_mode: bool = False
 
@@ -51,5 +53,5 @@ class QMConfig(BackendConfig):
             "input_type": str(self.input_type),
             "verbosity": self.verbosity,
             "num_updates": self.num_updates,
-            "opnic_dev_path": self.opnic_dev_path,
+            "path_to_python_wrapper": self.path_to_python_wrapper,
         }
