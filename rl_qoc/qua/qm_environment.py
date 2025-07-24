@@ -3,14 +3,13 @@ from __future__ import annotations
 import numpy as np
 from qiskit.circuit import QuantumCircuit
 from qm import QuantumMachine, Program
-from quam.utils.qua_types import QuaVariableInt
 
 from .circuit_params import CircuitParams
 from ..environment import (
     ContextAwareQuantumEnvironment,
     QEnvConfig,
+    RescaleAndClipAction
 )
-
 from .qm_config import QMConfig
 from qm.jobs.running_qm_job import RunningQmJob
 from typing import List, Optional, Union
@@ -127,6 +126,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
         if self.qm_backend_config.verbosity > 1:
             print("Just pushed policy parameters to OPX:", mean_val, std_val)
+            if self.qm_backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
+                new_box = self.qm_backend_config.wrapper_data["rescale_and_clip"]
+                rescale_and_clip = RescaleAndClipAction(self, new_box.low, new_box.high)
+                rescaled_mean = rescale_and_clip.action(np.array(mean_val))
+                print(f"Rescaled mean: {rescaled_mean}")
 
         # Push the data to compute reward to the OPX
         if hasattr(reward_data, "input_indices"):
