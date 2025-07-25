@@ -249,7 +249,9 @@ class BaseQuantumEnvironment(ABC, Env):
         ax.legend()
         ax.set_title("Initial reward fit (for varying number of repetitions)")
         # Print found parameters
-        print(f"Found parameters: {popt}, in radians: {np.round(np.array(popt) / np.pi, 5)}")
+        print(
+            f"Found parameters: {popt}, in radians: {np.round(np.array(popt) / np.pi, 5)}"
+        )
 
         if execution_config is not None:
             self.config.execution_config = initial_execution_config
@@ -260,7 +262,7 @@ class BaseQuantumEnvironment(ABC, Env):
                 reward, n, *popt
             )
             self._fit_params = popt
-        return fig
+        return fig, reward_data
 
     def perform_action(self, actions: np.array, update_env_history: bool = True):
         """
