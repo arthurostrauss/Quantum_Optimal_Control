@@ -325,7 +325,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._episode_tracker += 1
         self._episode_ended = False
         options = options or {}
-        self.modify_environment_params(**options)
+        self.set_env_params(**options)
         if len(self.config.execution_config.n_reps) > 1:
             self.config.execution_config.n_reps_index = self._n_reps_rng.integers(
                 0, len(self.config.execution_config.n_reps)
@@ -700,7 +700,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         raise NotImplementedError("Gate calibration not implemented for this environment")
 
-    def modify_environment_params(self, **kwargs):
+    def set_env_params(self, **kwargs):
         """
         Modify environment parameters (can be overridden by subclasses to modify specific parameters)
         """
@@ -876,6 +876,13 @@ class BaseQuantumEnvironment(ABC, Env):
                     "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "arg max circuit fidelity": np.argmax(self.fidelity_history),
                     "optimal action": self.optimal_action,
+                    "n_reps": self.n_reps,
+                    "n_shots": self.n_shots,
+                    "sampling_paulis": self.sampling_paulis,
+                    "batch_size": self.batch_size,
+                    "c_factor": self.c_factor,
+                    "reward_method": self.config.reward_method,
+                    "circuit_choice": self.circuit_choice,
                 }
             else:
                 info = {
@@ -884,6 +891,13 @@ class BaseQuantumEnvironment(ABC, Env):
                     "max return": np.max(np.mean(self.reward_history, axis=1)),
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "optimal action": self.optimal_action,
+                    "circuit_choice": self.circuit_choice,
+                    "n_reps": self.n_reps,
+                    "n_shots": self.n_shots,
+                    "sampling_paulis": self.sampling_paulis,
+                    "batch_size": self.batch_size,
+                    "c_factor": self.c_factor,
+                    "reward_method": self.config.reward_method,
                 }
         else:
             info = {
@@ -950,6 +964,18 @@ class BaseQuantumEnvironment(ABC, Env):
         :return: Number of repetitions
         """
         return self.config.execution_config.current_n_reps
+    
+    @n_reps.setter
+    def n_reps(self, n_reps: int):
+        if n_reps < 1:
+            raise ValueError("n_reps must be at least 1")
+        n_reps_list = list(self.config.execution_config.n_reps)
+        if n_reps in n_reps_list:
+            self.config.execution_config.n_reps_index = n_reps_list.index(n_reps)
+        else:
+            n_reps_list.append(n_reps)
+            self.config.execution_config.n_reps = n_reps_list
+            self.config.execution_config.n_reps_index = len(n_reps_list) - 1
 
     @property
     def n_shots(self) -> int:

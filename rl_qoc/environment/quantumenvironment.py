@@ -103,8 +103,6 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         else:
             return np.array([0, 0])
 
-    def modify_environment_params(self, **kwargs):
-        print(f"\n Number of repetitions: {self.n_reps}")
 
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         if self._episode_ended:
