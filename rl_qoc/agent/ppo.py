@@ -31,7 +31,6 @@ class CustomPPO:
         env: BaseQuantumEnvironment | ActionWrapper,
         chkpt_dir: Optional[str] = "tmp/ppo",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
-        save_data: Optional[bool] = False,
     ):
         """
         Custom Agent implementing Proximal Policy Optimization (PPO) using PyTorch.
@@ -68,15 +67,14 @@ class CustomPPO:
             self._training_results[f"std_action_{i}"] = []
 
         self._train_function_settings = self.agent_config.train_function_settings
-        if save_data:
+        if self._train_function_settings.save_data:
             run_name = self.agent_config.run_name
             writer = SummaryWriter(f"runs/{run_name}")
-
-            if self.agent_config.wandb_config.enabled:
-                wandb.login(key=self.agent_config.wandb_config.api_key, verify=True)
-
         else:
             writer = None
+
+        if self.agent_config.wandb_config.enabled:
+            wandb.login(key=self.agent_config.wandb_config.api_key, verify=True)
 
         self.writer = writer
         torch.manual_seed(self.seed)
@@ -618,7 +616,7 @@ class CustomPPO:
 
     @property
     def save_data(self):
-        return self.writer is not None
+        return self.train_function_settings.save_data
 
     @property
     def n_epochs(self):

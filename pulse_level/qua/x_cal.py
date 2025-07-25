@@ -253,6 +253,11 @@ if not running_jobs:
 
 pr.disable()
 
+profile_data_filename = "profile_results.dat"
+pr.dump_stats(profile_data_filename)
+
+print(f"Profiling data saved to: {profile_data_filename}")
+
 s = io.StringIO()
 sortby = "cumulative"  # Sort by cumulative time
 ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
@@ -261,6 +266,6 @@ ps.print_stats()
 # Print the profiling results to the console
 print(s.getvalue())
 
-# Optional: Save the profiling results to a file for later analysis
-with open("profile_results_with_startup.txt", "w") as f:
-    f.write(s.getvalue())
+# # Optional: Save the profiling results to a file for later analysis
+# with open("profile_results_with_startup.txt", "w") as f:
+#     f.write(s.getvalue())
