@@ -348,11 +348,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         if "circuit_choice" in kwargs:
             self.circuit_choice = kwargs["circuit_choice"]
-        elif "parameters" in kwargs:
+        if "parameters" in kwargs:
             assert isinstance(self.config.target, GateTarget), "Target must be a gate target"
             self.config.target.bind_parameters(kwargs["parameters"])
-        else:
-            return
+        if "backend" in kwargs:
+            self.backend = kwargs["backend"]
+        self.modify_environment_params(**kwargs)
 
     @property
     def circuit_context(self) -> QuantumCircuit:
