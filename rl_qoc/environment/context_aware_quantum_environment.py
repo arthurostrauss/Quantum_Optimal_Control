@@ -342,6 +342,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """Reset all counters related to training"""
         super().clear_history()
 
+    def set_context(self, **kwargs):
+        """
+        Set the circuit context for the environment.
+        """
+        if "circuit_choice" in kwargs:
+            self.circuit_choice = kwargs["circuit_choice"]
+        elif "parameters" in kwargs:
+            assert isinstance(self.config.target, GateTarget), "Target must be a gate target"
+            self.config.target.bind_parameters(kwargs["parameters"])
+        else:
+            return
+
     @property
     def circuit_context(self) -> QuantumCircuit:
         """
