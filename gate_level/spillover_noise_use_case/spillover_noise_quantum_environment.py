@@ -48,7 +48,7 @@ class SpilloverNoiseQuantumEnvironment(ContextAwareQuantumEnvironment):
         )
         self.phi_gamma_tuple = phi_gamma_tuple
 
-    def modify_environment_params(self, **kwargs):
+    def set_env_params(self, **kwargs):
         """
         Set environment parameters according to the provided kwargs
         """
