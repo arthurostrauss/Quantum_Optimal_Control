@@ -46,3 +46,22 @@ class ShadowRewardDataList(RewardDataList):
     @property
     def shadow_size(self) -> int:
         return sum(int(pub.shots) for pub in self.pubs)
+    
+
+    @property
+    def unitaries_in(self) -> List[Optional[List[int]]]:
+        """
+        Return the list of unitaries.
+        """        
+        return [data.u_in for data in self.reward_data if data.u_in is not None]
+    
+    @property
+    def bitstrings(self) -> List[Optional[List[int]]]:
+        """
+        Return the list of bitstrings.
+        """        
+        return [data.b_in for data in self.reward_data if data.b_in is not None]
+        """
+        Return the list of unitaries.
+        """        
+        return [data.unitary for data in self.reward_data]

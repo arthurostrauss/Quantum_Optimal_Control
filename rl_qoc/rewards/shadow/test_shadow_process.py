@@ -1,8 +1,8 @@
 
-from rl_qoc import QuantumEnvironment, QiskitConfig, QEnvConfig, ExecutionConfig, StateTarget, ShadowReward
+from rl_qoc import QuantumEnvironment, QiskitConfig, QEnvConfig, ExecutionConfig, StateTarget, ShadowReward, GateTarget
 from qiskit.circuit import QuantumCircuit, ParameterVector, QuantumRegister
 from qiskit.circuit.library import RXGate, UGate, RZXGate
-from qiskit.quantum_info import Statevector, state_fidelity, DensityMatrix, random_statevector
+from qiskit.quantum_info import Statevector, state_fidelity, DensityMatrix, random_statevector, Choi, Operator
 
 from gymnasium.spaces import Box
 import numpy as np
@@ -20,17 +20,6 @@ def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: Qua
     qc.u(params[0], params[1],params[2], 0)
     qc.u(params[3], params[4],params[5], 1)
     qc.cx(0,1)
-
-
-"""
-#generic n qubit circuit of 2**n - 2 parameters, in progress
-def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
-    qc.u(params[0], params[1],params[2], 0)
-    qc.u(params[3], params[4],params[5], 1)
-    qc.cx(0,1)
-"""
-
-
 
 def shadow_bound_state(error, observables, failure_rate=0.01):
    
@@ -56,18 +45,26 @@ tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Stat
 no_qubits = 2
 tgt_state = psi = random_statevector(2**no_qubits)  
 
-
-
 print("State Vector of target state: ",tgt_state)
 backend_config = QiskitConfig(apply_parametrized_gate)
-state_target = StateTarget(tgt_state)
 
+
+#create gate?
+params = ParameterVector("theta", 6)
+qc = QuantumCircuit(no_qubits)
+qc.u(params[0], params[1],params[2], 0)
+qc.u(params[3], params[4],params[5], 1)
+qc.cx(0,1)
+param_gate = qc.to_gate(label="U_entangle")
+gate_target = GateTarget(param_gate)
+
+"""
 error = 0.1 # can change
 observables = [state_target.dm.data]
 print("Density Matrix of target state: ", observables)
 shadow_size, partition, no_observables = shadow_bound_state(error, observables)
 print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition, no_observables)
-
+"""
 #params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
 
 params = np.array([[np.random.rand()*2* np.pi for n in range(6)] for i in range(5)])  # for a generic circuit, 6 params are required to define it.
@@ -80,7 +77,7 @@ execution_config = ExecutionConfig(batch_size=batch_size,
                                    seed=42
                                    )
 reward = ShadowReward()
-env_config = QEnvConfig(state_target, 
+env_config = QEnvConfig(gate_target, 
                         backend_config=backend_config,
                         execution_config=execution_config,
                         action_space=Box(low=np.array([0 for i in range(len(params[0]))]), high=np.array([2*np.pi for i in range(len(params[0]))]), shape=(len(params[0]),)),
@@ -88,14 +85,19 @@ env_config = QEnvConfig(state_target,
 
 env = QuantumEnvironment(env_config)
 
-reward_data = reward.get_reward_data(env.circuit, params, state_target, env_config)
-#print(reward_data[1].pub.parameter_values)
-reward_array = reward.get_reward_with_primitive(reward_data, env.sampler, state_target)
+#from gate_target, i need to calculate the ideal gate choi matrix, which will serve as the target observable
+ideal_gate_choi = gate_target.get_choi_matrix()
+
+reward_data = reward.get_reward_data(env.circuit, params, gate_target, env_config)
+print(reward_data[1].pub.parameter_values)
+
+"""
+reward_array = reward.get_reward_with_primitive_process(reward_data, env.sampler, state_target)
 print("Rewards:", reward_array)
 
 binded_circuits = [env.circuit.assign_parameters(p) for p in params]
 print("expected rewards:" , [round(state_fidelity(state_target.dm, Statevector(circ)), 4) for circ in binded_circuits])
-
+"""
 
 
 
