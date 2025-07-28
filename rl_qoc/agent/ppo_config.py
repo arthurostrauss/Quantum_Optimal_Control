@@ -55,7 +55,7 @@ class TotalUpdates(TrainingConstraint):
     @property
     def constraint_value(self):
         return self.total_updates
-    
+
     @classmethod
     def from_value(cls, value):
         """
@@ -86,7 +86,7 @@ class HardwareRuntime(TrainingConstraint):
     @property
     def constraint_value(self):
         return self.hardware_runtime
-    
+
     @classmethod
     def from_value(cls, value):
         """
@@ -177,10 +177,14 @@ class TrainingConfig:
         Create a TrainingConfig object from a dictionary
         """
         config_dict = {k.lower(): v for k, v in config_dict.items()}
-        if 'total_updates' in config_dict:
-            config_dict['training_constraint'] = TotalUpdates.from_value(config_dict['total_updates'])
+        if "total_updates" in config_dict:
+            config_dict["training_constraint"] = TotalUpdates.from_value(
+                config_dict.pop("total_updates")
+            )
         else:
-            config_dict['training_constraint'] = HardwareRuntime.from_value(config_dict['hardware_runtime'])
+            config_dict["training_constraint"] = HardwareRuntime.from_value(
+                config_dict.pop("hardware_runtime")
+            )
         return cls(**config_dict)
 
 
@@ -323,9 +327,13 @@ class PPOConfig:
         if "wandb_config" in config_dict:
             config_dict["wandb_config"] = WandBConfig.from_dict(config_dict["wandb_config"])
         if "training_config" in config_dict:
-            config_dict["training_config"] = TrainingConfig.from_dict(config_dict["training_config"])
+            config_dict["training_config"] = TrainingConfig.from_dict(
+                config_dict["training_config"]
+            )
         if "train_function_settings" in config_dict:
-            config_dict["train_function_settings"] = TrainFunctionSettings.from_dict(config_dict["train_function_settings"])
+            config_dict["train_function_settings"] = TrainFunctionSettings.from_dict(
+                config_dict["train_function_settings"]
+            )
         return cls(**config_dict)
 
     @classmethod

@@ -352,9 +352,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             assert isinstance(self.config.target, GateTarget), "Target must be a gate target"
             assert isinstance(kwargs["parameters"], dict), "Parameters must be a dictionary"
             self.config.target.clear_parameters()
-            assert all(p in self.config.target.circuit.parameters or p in [p_.name for p_ in self.config.target.circuit.parameters] for p in kwargs["parameters"]), "Parameters must be in the circuit parameters"
+            assert all(
+                p in self.config.target.circuit.parameters
+                or p in [p_.name for p_ in self.config.target.circuit.parameters]
+                for p in kwargs["parameters"]
+            ), "Parameters must be in the circuit parameters"
             self.config.target.bind_parameters(kwargs["parameters"])
-        
+
         super().set_env_params(**kwargs)
 
     @property

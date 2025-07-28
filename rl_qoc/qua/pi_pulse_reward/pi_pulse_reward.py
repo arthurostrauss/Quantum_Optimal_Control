@@ -175,13 +175,8 @@ class PiPulseReward(Reward):
                         tmp2,
                     )
                     if config.backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
-                        tmp1 = rescale_and_clip_wrapper(
-                            tmp1,
-                            config.action_space,
-                            new_box,
-                        )
-                        tmp2 = rescale_and_clip_wrapper(
-                            tmp2,
+                        tmp1, tmp2 = rescale_and_clip_wrapper(
+                            [tmp1, tmp2],
                             config.action_space,
                             new_box,
                         )

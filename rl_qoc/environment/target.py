@@ -261,7 +261,7 @@ class StateTarget(BaseTarget):
         Convert the target state to a dictionary representation
         """
         return {
-            "state": self.dm.data.tolist(),
+            "state": np.array2string(self.dm.data, separator=","),
             "physical_qubits": self.physical_qubits,
         }
 

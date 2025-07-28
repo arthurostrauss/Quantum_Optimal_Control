@@ -964,7 +964,7 @@ class BaseQuantumEnvironment(ABC, Env):
         :return: Number of repetitions
         """
         return self.config.execution_config.current_n_reps
-    
+
     @n_reps.setter
     def n_reps(self, n_reps: int):
         if n_reps < 1:

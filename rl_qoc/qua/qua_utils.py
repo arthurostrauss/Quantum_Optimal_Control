@@ -105,7 +105,7 @@ def rand_gauss_moller_box(
 
 
 def rescale_and_clip_wrapper(
-    action: QuaArrayVariable,
+    action: QuaArrayVariable | List[QuaArrayVariable],
     action_space: Box,
     new_box: Box,
 ):
@@ -119,10 +119,16 @@ def rescale_and_clip_wrapper(
     intercept = declare(fixed, value=intercept_array.tolist())
     lower_bound = declare(fixed, value=action_space.low.tolist())
     upper_bound = declare(fixed, value=action_space.high.tolist())
-    with for_(i, 0, i < action.length(), i + 1):
-        assign(action[i], (action[i] - intercept[i]) / gradient[i])
-        clip_qua(action[i], lower_bound[i], upper_bound[i])
-    return action
+
+    if isinstance(action, QuaArrayVariable):
+        action_list = [action]
+    else:
+        action_list = action
+    with for_(i, 0, i < action_list[0].length(), i + 1):
+        for action_ in action_list:
+            assign(action_[i], (action_[i] - intercept[i]) / gradient[i])
+            clip_qua(action_[i], lower_bound[i], upper_bound[i])
+    return action_list
 
 
 def get_state_int(qc: QuantumCircuit, result, state_int: QuaVariableInt):

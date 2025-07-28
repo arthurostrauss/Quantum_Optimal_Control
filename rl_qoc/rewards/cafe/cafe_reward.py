@@ -564,13 +564,8 @@ class CAFEReward(Reward):
                             is not None
                         ):
                             new_box = config.backend_config.wrapper_data["rescale_and_clip"]
-                            tmp1 = rescale_and_clip_wrapper(
-                                tmp1,
-                                config.action_space,
-                                new_box,
-                            )
-                            tmp2 = rescale_and_clip_wrapper(
-                                tmp2,
+                            tmp1, tmp2 = rescale_and_clip_wrapper(
+                                [tmp1, tmp2],
                                 config.action_space,
                                 new_box,
                             )

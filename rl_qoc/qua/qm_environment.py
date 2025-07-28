@@ -5,11 +5,7 @@ from qiskit.circuit import QuantumCircuit
 from qm import QuantumMachine, Program
 
 from .circuit_params import CircuitParams
-from ..environment import (
-    ContextAwareQuantumEnvironment,
-    QEnvConfig,
-    RescaleAndClipAction
-)
+from ..environment import ContextAwareQuantumEnvironment, QEnvConfig, RescaleAndClipAction
 from .qm_config import QMConfig
 from qm.jobs.running_qm_job import RunningQmJob
 from typing import List, Optional, Union
