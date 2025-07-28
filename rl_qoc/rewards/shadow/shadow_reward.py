@@ -2,9 +2,9 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Literal
 import numpy as np
 from qiskit.circuit import QuantumCircuit
+from qiskit.circuit.library import StatePreparation
 from qiskit.primitives import BaseSamplerV2
-from qiskit.quantum_info import Operator, SparsePauliOp
-
+from qiskit.quantum_info import Operator, SparsePauliOp, DensityMatrix, Statevector, Choi, SuperOp
 from .shadow_reward_data import ShadowRewardData, ShadowRewardDataList
 from ...environment.target import GateTarget, StateTarget
 from ...environment.configuration.qconfig import QEnvConfig
@@ -47,7 +47,7 @@ class ShadowReward(Reward):
     
     def get_reward_data(
         self,
-        qc: QuantumCircuit, #simulate imperfect gate
+        qc: QuantumCircuit, #simulate imperfect gate/ channel
         params: np.ndarray,
         target: StateTarget | GateTarget,
         env_config: QEnvConfig,
@@ -95,14 +95,67 @@ class ShadowReward(Reward):
                 reward_data.append(
                     ShadowRewardData(
                         pub,
-                        unitary=unitary,
+                        unitary=unitary[::-1],  # u is taken to be little endian, so we flip it to become big endian. after running circuit, b will also be big endian.
                         u_in=None,
                         b_in=None
                     )
                 )
+        
+        
         else:
             # TODO: implement Shadow tomography for channel
-            raise NotImplementedError("Shadow tomography for channel is not implemented yet")
+            """Step 1/2/4: Sample U_in, U_out and b_in"""
+
+            
+            index_process = self.unitary_rng.choice(18, size=(shadow_size, num_qubits))
+            unique_indexes, counts = np.unique(index_process, axis=0, return_counts=True)
+
+
+            """Step 3: Construct input state rho_in = U_in_hermitian * |b_in><b_in| * U_in"""
+            qubits = target.causal_cone_qubits
+
+            for unique_index, shots in zip(unique_indexes, counts):
+
+                bitstrings_in, unitary_in, unitary_out = np.unravel_index(unique_index, (2,3,3))
+                qc_copy = qc.copy_empty_like()
+                
+                for i, bit in enumerate(bitstrings_in):  
+                    if bit == 1:
+                        qc_copy.x(i)
+    
+                for q, id in enumerate(unitary_in):
+                    if id == 0: # X basis
+                        qc_copy.h(qubits[q])
+                    elif id == 1 : # Y basis
+                        qc_copy.sdg(qubits[q])
+                        qc_copy.h(qubits[q])
+
+                qc_copy.compose(qc, inplace=True)
+                     
+                for q, id in enumerate(unitary_out):
+                    if id == 0: # X basis 
+                        qc_copy.h(qubits[q])
+                    elif id == 1 : # Y basis
+                        qc_copy.sdg(qubits[q])
+                        qc_copy.h(qubits[q])
+
+                qc_copy.measure_all()
+                circuit = backend_info.custom_transpile(qc_copy,
+                                                        remove_final_measurements=False,
+                                                        initial_layout=target.layout,
+                                                        scheduling=False, 
+                                                        optimization_level=0)
+            
+                pub = (circuit, params, shots)  
+                
+                reward_data.append(
+                    ShadowRewardData(
+                        pub,
+                        unitary=unitary_out[::-1],  # u in and u out is taken to be little endian, so the output reverses it to become big endian
+                        u_in=unitary_in[::-1],
+                        b_in=bitstrings_in[::-1]       #inverted because little endian as well.
+                    )
+                )
         
         return ShadowRewardDataList(reward_data)
 
@@ -121,13 +174,13 @@ class ShadowReward(Reward):
         total_data_list = []
         for k in range(batch_size):
             for i in range(len(pub_results)):
+                # Extract unique unitary and bitstring for each reward data
                 unique_unitary = reward_data[i].unitary
-                unique_unitary = unique_unitary[::-1]
                 unique_pub_res = pub_results[i]
                 bitstring_counts = unique_pub_res.data.meas.get_counts(loc=k)
                 b = list(bitstring_counts.keys())
 
-                # Convert each bitstring to a list of ints
+                # Convert each bitstring to a list of ints 
                 bitstrings = [[int(bit) for bit in bitstring] for bitstring in b]
 
                 #List of counts corresponding to each bitstring
@@ -136,7 +189,7 @@ class ShadowReward(Reward):
                 for j in range(len(counts)):
                     for count in range(int(counts[j])):
                         total_data_list.append([unique_unitary, bitstrings[j]])   #repeat counts[j] times for every individual b (measurement outcome)
-
+       
         observable_decomp = SparsePauliOp.from_operator(Operator(target.dm))
         partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
         pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
@@ -158,26 +211,89 @@ class ShadowReward(Reward):
             U_list = [var[0] for var in data_list]
             b_list = [var[1] for var in data_list]
             shadow = (b_list, U_list)
-            
+            #print(U_list)
             exp_vals = [estimate_shadow_obervable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
             reward_i = np.dot(pauli_coeff, exp_vals)
             assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
             reward[i] = reward_i.real
+            print("Reward batch ", i, " is ", reward_i.real)
+        return reward
+    
+
+    def get_reward_with_primitive_process(
+        self,
+        reward_data: ShadowRewardDataList,
+        primitive: BaseSamplerV2,
+        target:  GateTarget
+    ) -> np.ndarray:
+        
+        shadow_size = reward_data.shadow_size
+        job = primitive.run(reward_data.pubs)
+        pub_results = job.result()
+        batch_size = reward_data.pubs[0].parameter_values.shape[0]
+        
+        total_data_list = []
+        z_list = []
+
+        for k in range(batch_size):
+            for i in range(len(pub_results)):
+                unique_unitary_out = reward_data[i].unitary
+                unique_unitary_in = reward_data[i].u_in
+                unique_bitstring_in = reward_data[i].b_in
+                unique_pub_res = pub_results[i]
+                bitstring_counts = unique_pub_res.data.meas.get_counts(loc=k)
+                b = list(bitstring_counts.keys())
+
+                # Convert each bitstring to a list of ints 
+                bitstrings = [[int(bit) for bit in bitstring] for bitstring in b]
+
+                #List of counts corresponding to each bitstring
+                counts = list(bitstring_counts.values())
+
+                for j in range(len(counts)):
+                    for count in range(int(counts[j])):
+                        total_data_list.append([unique_unitary_in, unique_bitstring_in, unique_unitary_out, bitstrings[j]])   
+                        #repeat counts[j] times for every individual b (measurement outcome)
+
+                        #Calculate z: U_in.T |bin> tensor U_out.hermitian |bout>
+                        #for pauli string, .T only adds a - sign for Y terms and does not change I, X and Z terms. Y terms are mapped as digit '1'
+                        sign = (-1) ** np.sum(unique_unitary_in == 1)
+                        #however, if we use |z><z| later, this -ve cancels out. So it is not modelled into z now.
+                        unique_unitary_combined = np.concatenate((unique_unitary_in, unique_unitary_out))
+                        unique_bitstring_combined = np.concatenate((unique_bitstring_in, np.array(bitstrings[j])))
+                        z_list.append([unique_unitary_combined, unique_bitstring_combined])  #store the sign to be used later
+
+        target_choi = Choi(target.target_operator)
+        target_choi_dm = DensityMatrix(target_choi.data)
+
+        observable_decomp = SparsePauliOp.from_operator(Operator(target_choi_dm))   #to check what is the target gate fidelity like, is it a density matrix?
+        partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
+        pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
+        pauli_str = observable_decomp.paulis
+        pauli_str_num = []
+        mapping = {'X': 0, 'Y': 1, 'Z': 2, 'I': 3}
+
+        for pauli in pauli_str:
+            term_str = pauli.to_label()  # e.g., 'IZ'
+            term_list = [mapping[c] for c in term_str]
+            pauli_str_num.append(term_list)
+        # Here, we let X, Y, Z, I = 0, 1, 2, 3
+
+        #print(pauli_coeff, pauli_str)
+
+        reward = np.zeros(batch_size)
+        for i in range(batch_size):
+            data_list = z_list[i*shadow_size:(i+1)*shadow_size]  #structure: [[u1, b11], [u2, b12], ...]
+            U_list = [var[0] for var in data_list]
+            b_list = [var[1] for var in data_list]
+            shadow = (b_list, U_list)
+            exp_vals = [estimate_shadow_obervable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
+            reward_i = np.dot(pauli_coeff, exp_vals)
+            assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
+            reward[i] = reward_i.real
+            print("Reward batch ", i, " is ", reward_i.real)
             
         return reward
-
-def shadow_bound(error, observables, failure_rate=0.01):
-
-    M = len(observables)
-    K = 2 * np.log(2 * M / failure_rate)
-    shadow_norm = (
-        lambda op: np.linalg.norm(
-            op - np.trace(op) / 2 ** int(np.log2(op.shape[0])), ord=np.inf
-        )
-        ** 2
-    )
-    N = 34 * max(shadow_norm(o) for o in observables) / error ** 2
-    return int(np.ceil(N * K)), int(K), M
 
 
 def estimate_shadow_obervable(shadow, observable, k):
@@ -232,6 +348,7 @@ def estimate_shadow_obervable(shadow, observable, k):
                     f.append(0)
             
             exp_val[n] = (3**num_qubits) * np.prod(np.array(f))
+            
         means.append(np.sum(exp_val)/(shadow_size // k))   
 
     return np.median(means) 

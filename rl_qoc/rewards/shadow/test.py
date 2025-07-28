@@ -32,7 +32,7 @@ def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: Qua
 
 
 
-def shadow_bound(error, observables, failure_rate=0.01):
+def shadow_bound_state(error, observables, failure_rate=0.01):
    
     M = len(observables)
     K = 2 * np.log(2 * M / failure_rate)
@@ -65,7 +65,7 @@ state_target = StateTarget(tgt_state)
 error = 0.1 # can change
 observables = [state_target.dm.data]
 print("Density Matrix of target state: ", observables)
-shadow_size, partition, no_observables = shadow_bound(error, observables)
+shadow_size, partition, no_observables = shadow_bound_state(error, observables)
 print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition, no_observables)
 
 #params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
@@ -97,15 +97,6 @@ binded_circuits = [env.circuit.assign_parameters(p) for p in params]
 print("expected rewards:" , [round(state_fidelity(state_target.dm, Statevector(circ)), 4) for circ in binded_circuits])
 
 
-"""
-for troubleshooting
-def qc_testing(params):
 
-    qc = QuantumCircuit(2)
-    qc.ry(2*params[0,0], 0)
-    qc.cx(0,1)
-    return qc, Statevector.from_instruction(qc), DensityMatrix.from_instruction(qc)
 
-print("expected rewards 2:", [state_fidelity(state_target.dm, qc_testing(params)[1])])
-"""
 
