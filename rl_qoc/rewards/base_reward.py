@@ -77,6 +77,8 @@ class Reward(ABC):
         self,
         reward_data: RewardDataList,
         primitive: Primitive,
+        *args,
+        **kwargs
     ) -> np.ndarray:
         pass
 
