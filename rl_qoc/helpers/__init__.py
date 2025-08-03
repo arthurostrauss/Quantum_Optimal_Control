@@ -1,4 +1,4 @@
-from .transpiler_passes import CustomGateReplacementPass, MomentAnalysisPass
+from .transpiler_passes import CustomGateReplacementPass, MomentAnalysisPass, InstructionReplacement
 from .circuit_utils import *
 from .helper_functions import *
 

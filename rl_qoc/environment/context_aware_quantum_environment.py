@@ -49,6 +49,7 @@ from qiskit_experiments.library import ProcessTomography
 from ..helpers import (
     MomentAnalysisPass,
     CustomGateReplacementPass,
+    InstructionReplacement,
 )
 from ..helpers.circuit_utils import get_instruction_timings
 from .configuration.qconfig import QEnvConfig
@@ -155,13 +156,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         circuits = []
         for i, circ in enumerate(self.target.circuits):
+            instruction_replacement = InstructionReplacement(
+                self.target.target_instructions[i],
+                self.parametrized_circuit_func,
+                self.parameters[i],
+                self._func_args,
+            )
 
             pm = PassManager(
                 CustomGateReplacementPass(
-                    [self.target.target_instructions[i]],
-                    [self.parametrized_circuit_func],
-                    [self.parameters[i]],
-                    [self._func_args],
+                    instruction_replacement,
                 )
             )
             custom_circ = pm.run(circ)

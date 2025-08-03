@@ -749,7 +749,7 @@ class GateTarget(BaseTarget):
             self._circuit_choice
         ].assign_parameters(params)
         self._context_parameters[self._circuit_choice] = {
-            p: params[p] for p in self._context_parameters[self._circuit_choice]
+            p: params[p.name] for p in self._context_parameters[self._circuit_choice]
         }
 
     def clear_parameters(self):
