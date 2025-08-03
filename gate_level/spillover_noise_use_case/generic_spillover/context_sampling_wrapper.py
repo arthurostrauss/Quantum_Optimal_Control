@@ -295,9 +295,11 @@ class ContextSamplingWrapper(gym.Wrapper):
         plt.style.use("seaborn-v0_8-whitegrid")
         plt.figure(figsize=(10, 7), dpi=100)
 
+        plot_action_num = 0 if target_qubit == 2 else 3
+
         # Plot each dimension of the agent's action
         for i in range(agent_actions.shape[1]):
-            if i == 3:
+            if i == plot_action_num:
                 plt.scatter(
                     optimal_action,
                     agent_actions[:, i],

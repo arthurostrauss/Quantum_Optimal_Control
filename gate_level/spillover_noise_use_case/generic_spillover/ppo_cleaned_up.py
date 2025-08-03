@@ -245,7 +245,7 @@ class PPO:
         self.wandb_entity = agent_config["wandb_entity"]
         self.save_model = agent_config["save_model"]
         self.plot_real_time = agent_config["plot_real_time"]
-        self.num_prints = agent_config["num_prints"]
+        self.print_freq = agent_config["print_freq"]
 
         self.num_updates = agent_config["total_updates"]
         self.learning_rate = agent_config["learning_rate"]
@@ -553,7 +553,7 @@ class PPO:
 
             # Plotting calls are now directed to the wrapped environment
             if self.plot_real_time and (
-                update % (self.num_updates // self.num_prints) == 0
+                update % (self.print_freq) == 0
                 or update == self.num_updates
             ):
                 print("Plotting")
@@ -563,21 +563,30 @@ class PPO:
 
                 # This plot uses the unwrapped env's history
                 if hasattr(self.env.unwrapped, "reward_history"):
+                    print("Plotting Curves")
                     plot_curves(self.env.unwrapped)
 
                 # These plots use the wrapper's buffer
-                plot_args = {
+                plot_args_2 = {
+                    "gamma_matrix": self.env.unwrapped.gamma_matrix,
+                    "spillover_qubits": self.env.unwrapped.applied_qubits,  # [0, 1, 2, 3, 4, 5],
+                    "target_qubit": 2,
+                    "action_scale": np.mean(self.env.unwrapped.action_space.high),
+                }
+                plot_args_3 = {
                     "gamma_matrix": self.env.unwrapped.gamma_matrix,
                     "spillover_qubits": self.env.unwrapped.applied_qubits,  # [0, 1, 2, 3, 4, 5],
                     "target_qubit": 3,
-                    "action_scale": 0.3,
+                    "action_scale": np.mean(self.env.unwrapped.action_space.high),
                 }
                 if hasattr(self.env, "plot_buffer_reward_distribution"):
                     self.env.plot_buffer_reward_distribution()
                 if hasattr(self.env, "plot_policy_behaviour"):
-                    self.env.plot_policy_behaviour(**plot_args)
+                    self.env.plot_policy_behaviour(**plot_args_2)
+                    self.env.plot_policy_behaviour(**plot_args_3)
                 if hasattr(self.env, "plot_action_comparison"):
-                    self.env.plot_action_comparison(**plot_args)
+                    self.env.plot_action_comparison(**plot_args_2)
+                    self.env.plot_action_comparison(**plot_args_3)
 
         if self.save_model:
             model_path = f"runs/{self.run_name}/{self.exp_name}.cleanrl_model"
