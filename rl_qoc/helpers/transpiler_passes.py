@@ -206,15 +206,13 @@ class CustomGateReplacementPass(TransformationPass):
         qargs: Tuple[Qubit, ...],
         cargs: Tuple[Clbit, ...],
     ) -> DAGCircuit:
-        # This method is unchanged from your version
-        # ... (implementation from previous step)
         qc = QuantumCircuit()
         qc.add_bits(qargs + cargs)
         local_qargs = tuple(qc.qubits[qargs.index(q)] for q in qargs)
         local_cargs = tuple(qc.clbits[cargs.index(c)] for c in cargs)
         if isinstance(func, QuantumCircuit):
             bound_circ = func.assign_parameters(params) if params is not None else func
-            qc.compose(bound_circ, qubits=local_qargs, clbits=local_cargs, inplace=True)
+            qc.append(bound_circ, qargs=local_qargs, cargs=local_cargs)
         elif isinstance(func, Gate):
             new_gate = func.copy()
             if params is not None:
