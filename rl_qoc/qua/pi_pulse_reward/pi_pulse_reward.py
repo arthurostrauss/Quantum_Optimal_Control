@@ -122,7 +122,7 @@ class PiPulseReward(Reward):
         )
         from qiskit_qm_provider import QMBackend
         from ..qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
-        from qiskit_qm_provider.backend import get_integers_from_cregs
+        from qiskit_qm_provider.backend import get_measurement_outcomes
         from ..qm_config import QMConfig
 
         if not isinstance(config.backend, QMBackend):
@@ -192,7 +192,7 @@ class PiPulseReward(Reward):
                             result = config.backend.quantum_circuit_to_qua(
                                 qc, circuit_params.circuit_variables
                             )
-                            state_int = get_integers_from_cregs(qc, result)[qc.cregs[0].name]["state_int"]
+                            state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
                             if test:
                                 save(state_int, "state_int")
                             assign(counts[state_int], counts[state_int] + 1)

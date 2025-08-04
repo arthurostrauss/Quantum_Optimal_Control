@@ -570,8 +570,8 @@ class ChannelReward(Reward):
             fixed,
         )
         from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
-        from qiskit_qm_provider.backend import get_integers_from_cregs
-        from ...qua.qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
+        from qiskit_qm_provider.backend import get_measurement_outcomes
+        from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
         from ...qua.qm_config import QMConfig
 
         if not isinstance(config.backend, QMBackend):
@@ -679,7 +679,7 @@ class ChannelReward(Reward):
                                     result = config.backend.quantum_circuit_to_qua(
                                         qc, circuit_params.circuit_variables
                                     )
-                                    state_int = get_integers_from_cregs(qc, result)[qc.cregs[0].name]["state_int"]
+                                    state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
                                     assign(counts[state_int], counts[state_int] + 1)
 
                                 reward.stream_back(reset=True)

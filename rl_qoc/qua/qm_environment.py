@@ -55,7 +55,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         self.reward = QuaParameter(
             "reward",
             [0] * 2**self.n_qubits,
-            input_type=self.input_type if self.input_type == InputType.DGX else None,
+            input_type=self.input_type if self.input_type == InputType.DGX_Q else None,
             direction=Direction.INCOMING,
         )
 
@@ -70,7 +70,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         )
 
         if (
-            self.input_type == InputType.DGX
+            self.input_type == InputType.DGX_Q
             and self.qm_backend_config.path_to_python_wrapper is not None
         ):
             ParameterPool.initialize_streams(self.qm_backend_config.path_to_python_wrapper)
@@ -229,7 +229,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             RunningQmJob: The running Qmjob
         """
         if (
-            self.input_type == InputType.DGX
+            self.input_type == InputType.DGX_Q
             and self.qm_backend_config.path_to_python_wrapper is not None
         ):
             ParameterPool.configure_stream(self.qm_backend_config.path_to_python_wrapper)
@@ -250,7 +250,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         """
         if (
-            self.input_type == InputType.DGX
+            self.input_type == InputType.DGX_Q
             and self.qm_backend_config.path_to_python_wrapper is not None
         ):
             ParameterPool.close_streams()
