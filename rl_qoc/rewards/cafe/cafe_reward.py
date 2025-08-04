@@ -483,7 +483,8 @@ class CAFEReward(Reward):
             fixed,
         )
         from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
-        from ...qua.qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
+        from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
+        from qiskit_qm_provider.backend import get_integers_from_cregs
         from ...qua.qm_config import QMConfig
 
         if not isinstance(config.backend, QMBackend):
@@ -519,7 +520,6 @@ class CAFEReward(Reward):
             n_u = declare(int)
             shots = declare(int)
             i_idx = declare(int)
-            state_int = declare(int, value=0)
             batch_r = Random(config.seed)
             b = declare(int)
             j = declare(int)
@@ -582,12 +582,10 @@ class CAFEReward(Reward):
                                 result = config.backend.quantum_circuit_to_qua(
                                     qc, circuit_params.circuit_variables
                                 )
-                                state_int = get_state_int(qc, result, state_int)
+                                state_int = get_integers_from_cregs(qc, result)[qc.cregs[0].name]["state_int"]
                                 assign(counts[state_int], counts[state_int] + 1)
-                                assign(state_int, 0)  # Reset state_int for the next shot
 
-                            reward.stream_back()
-                            reward.assign([0.0] * dim)
+                            reward.stream_back(reset=True)
 
             with stream_processing():
                 buffer = (config.batch_size, dim)

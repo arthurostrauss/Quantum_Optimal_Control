@@ -570,6 +570,7 @@ class ChannelReward(Reward):
             fixed,
         )
         from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
+        from qiskit_qm_provider.backend import get_integers_from_cregs
         from ...qua.qua_utils import rand_gauss_moller_box, get_state_int, rescale_and_clip_wrapper
         from ...qua.qm_config import QMConfig
 
@@ -610,7 +611,6 @@ class ChannelReward(Reward):
             shots = declare(int)
             i_idx = declare(int)
             o_idx = declare(int)
-            state_int = declare(int, value=0)
             b = declare(int)
             j = declare(int)
             tmp1 = declare(fixed, size=config.n_actions)
@@ -679,12 +679,11 @@ class ChannelReward(Reward):
                                     result = config.backend.quantum_circuit_to_qua(
                                         qc, circuit_params.circuit_variables
                                     )
-                                    state_int = get_state_int(qc, result, state_int)
+                                    state_int = get_integers_from_cregs(qc, result)[qc.cregs[0].name]["state_int"]
                                     assign(counts[state_int], counts[state_int] + 1)
-                                    assign(state_int, 0)  # Reset state_int for the next shot
 
-                                reward.stream_back()
-                                reward.assign([0.0] * dim)
+                                reward.stream_back(reset=True)
+
             with stream_processing():
                 buffer = (config.batch_size, dim)
                 reward.stream_processing(buffer=buffer)
