@@ -13,9 +13,6 @@ import numpy as np
 def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
     qc.ry(2*params[0], 0)
 
-
-
-
 def shadow_bound_state(error, observables, coeffs, failure_rate=0.01):
    
     M = len(observables)
@@ -64,7 +61,9 @@ print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition,
 #params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
 #params = np.array([[np.random.rand()*2* np.pi for n in range(6)] for i in range(5)])  # for a generic circuit, 6 params are required to define it.
 
-params = np.array([params, params - 0.2, params + 0.2, params - 1, params + 1])
+params = np.array([params, params + 0.5, params - 0.5])
+params_add = np.array([[np.random.rand()*2* np.pi] for n in range(2)])
+params = np.concatenate((params, params_add))  # add one more batch with different parameters
 
 batch_size = len(params)
 
@@ -86,6 +85,7 @@ reward_data = reward.get_reward_data(env.circuit, params, gate_target, env_confi
 # print(reward_data[1].pub.parameter_values)
 
 reward_array = reward.get_reward_with_primitive_process(reward_data, env.sampler, gate_target)
+print("Params:", params)
 print("Rewards:", reward_array)
 """
 binded_circuits = [env.circuit.assign_parameters(p) for p in params]

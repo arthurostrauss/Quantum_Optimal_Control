@@ -153,7 +153,7 @@ class ShadowReward(Reward):
                         pub,
                         unitary=unitary_out[::-1],  # u in and u out is taken to be little endian, so the output reverses it to become big endian
                         u_in=unitary_in[::-1],
-                        b_in=bitstrings_in[::-1]       #inverted because little endian as well.
+                        b_in=bitstrings_in[::-1]       #inverted because little endian as well.``
                     )
                 )
         
@@ -261,7 +261,7 @@ class ShadowReward(Reward):
                         #however, if we use |z><z| later, this -ve cancels out. So it is not modelled into z now.
                         unique_unitary_combined = np.concatenate((unique_unitary_in, unique_unitary_out))
                         unique_bitstring_combined = np.concatenate((unique_bitstring_in, np.array(bitstrings[j])))
-                        z_list.append([unique_unitary_combined, unique_bitstring_combined])  #store the sign to be used later
+                        z_list.append([unique_unitary_combined, unique_bitstring_combined, sign])  #store the sign to be used later
 
         target_choi = Choi(target.target_operator)
         target_choi_dm = DensityMatrix(target_choi.data)
@@ -286,8 +286,9 @@ class ShadowReward(Reward):
             data_list = z_list[i*shadow_size:(i+1)*shadow_size]  #structure: [[u1, b11], [u2, b12], ...]
             U_list = [var[0] for var in data_list]
             b_list = [var[1] for var in data_list]
+            sign_list = [var[2] for var in data_list]
             shadow = (b_list, U_list)
-            exp_vals = [estimate_shadow_obervable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
+            exp_vals = [estimate_shadow_obervable_process(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
             reward_i = np.dot(pauli_coeff, exp_vals)
             assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
             reward[i] = reward_i.real
@@ -353,3 +354,84 @@ def estimate_shadow_obervable(shadow, observable, k):
 
     return np.median(means) 
 
+
+
+
+def estimate_shadow_obervable_process(shadow, observable, k):
+    
+    """
+    Goal: From measurement_list and unitary_ids, split into N/k groups, find mean for each, then find median of means
+    
+    By the formulation in Pennylane notes, if the observable is not matching the unitary, the entire expectation value goes to 0 for that shadow.
+    For example; 5 qubits, observable is [3, 0, 0, 3, 3] which correspond to IXXII
+    And my unitary id (shadow) is [2, 0, 0, 3, 1].
+    Then Tr(Orho) will give non zero value. Else, we will get 0 for the entire shadow.
+    """
+    shadow = np.array(shadow)
+    shadow_size, num_qubits = shadow[0].shape
+    b_lists, obs_lists = shadow
+    shuffle_indices = np.random.permutation(b_lists.shape[0])
+    b_shuffled = b_lists[shuffle_indices]
+    obs_shuffled = obs_lists[shuffle_indices]
+
+    means = []
+    P = observable
+
+    # loop over the splits of the shadow:
+    for i in range(k):       # shadow_size // k = no of elements in each set; k = no of sets
+
+        # assign the splits 
+        start = i * (shadow_size //k)
+        end = (i+1) * (shadow_size //k)
+        b_lists_k, obs_lists_k = (
+            b_shuffled[start: end],
+            obs_shuffled[start: end],
+        )
+
+        exp_val = np.zeros(shadow_size // k)
+        
+        for n in range(shadow_size // k):
+            
+            b = b_lists_k[n]
+            U = obs_lists_k[n]
+            
+            f = []
+
+            for m in range(num_qubits//2):
+                
+                if P[m] == 3:
+                    f.append(1/3)       #important. if P = I, there is additional Tr(I) = 2 in the sum now. We must compensate by changing to 1/3.
+                elif P[m] == U[m] and b[m] == 0:
+                    if U[m] ==1:
+                        f.append(-1)
+                    else:
+                        f.append(1)
+                elif P[m] == U[m] and b[m] == 1:
+                    if U[m] ==1:
+                        f.append(1)
+                    else:
+                        f.append(-1)
+                else:
+                    f.append(0)
+
+            for m in range(num_qubits//2, num_qubits):
+                
+                if P[m] == 3:
+                    f.append(1/3)       #important. if P = I, there is additional Tr(I) = 2 in the sum now. We must compensate by changing to 1/3.
+                elif P[m] == U[m] and b[m] == 0:
+                    f.append(1)
+                elif P[m] == U[m] and b[m] == 1:
+                    f.append(-1)
+                else:
+                    f.append(0)
+            
+            # add a correction for transpose part - to integrate into code if necessary
+            # b_in  = b[:num_qubits//2]
+            # count_negative_y = np.sum(b_in == 1)
+
+            exp_val[n] = (3**num_qubits) * np.prod(np.array(f)) #* (-1)**count_negative_y
+            
+        means.append(np.sum(exp_val)/(shadow_size // k))   
+    #print(means)
+
+    return np.median(means) 
