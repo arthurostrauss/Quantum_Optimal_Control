@@ -19,7 +19,14 @@ def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: Qua
 def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
     qc.u(params[0], params[1],params[2], 0)
     qc.u(params[3], params[4],params[5], 1)
+    qc.u(params[6], params[7],params[8], 2)
+    #qc.u(params[9], params[10],params[11], 3)
     qc.cx(0,1)
+    qc.cx(0,2)
+    #qc.cx(0,3)
+    qc.cx(1,2)
+    #qc.cx(1,3)
+    #qc.cx(2,3)
 
 
 """
@@ -53,7 +60,7 @@ tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Stat
 """
 
 #2 qubit random state
-no_qubits = 2
+no_qubits = 3
 tgt_state = psi = random_statevector(2**no_qubits)  
 
 
@@ -70,7 +77,7 @@ print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition,
 
 #params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
 
-params = np.array([[np.random.rand()*2* np.pi for n in range(6)] for i in range(5)])  # for a generic circuit, 6 params are required to define it.
+params = np.array([[np.random.rand()*2* np.pi for n in range(9)] for i in range(4)])  # for a generic circuit, 9 params are required to define it.
 
 batch_size = len(params)
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List, Optional, Literal
 import numpy as np
 from qiskit.circuit import QuantumCircuit
@@ -15,7 +16,7 @@ from ...helpers.circuit_utils import (
     get_input_states_cardinality_per_qubit,
 )
 from qiskit_aer import AerSimulator
-
+import sys
 
 @dataclass
 class ShadowReward(Reward):
@@ -190,6 +191,9 @@ class ShadowReward(Reward):
                     for count in range(int(counts[j])):
                         total_data_list.append([unique_unitary, bitstrings[j]])   #repeat counts[j] times for every individual b (measurement outcome)
        
+
+        """
+        # FOR estimate_shadow_observable AND estimate_shadow_observable_v2
         observable_decomp = SparsePauliOp.from_operator(Operator(target.dm))
         partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
         pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
@@ -202,8 +206,25 @@ class ShadowReward(Reward):
             term_list = [mapping[c] for c in term_str]
             pauli_str_num.append(term_list)
         # Here, we let X, Y, Z, I = 0, 1, 2, 3
+        
+        reward = np.zeros(batch_size)
+        for i in range(batch_size):
+            data_list = total_data_list[i*shadow_size:(i+1)*shadow_size]  #structure: [[u1, b11], [u2, b12], ...]
+            U_list = [var[0] for var in data_list]
+            b_list = [var[1] for var in data_list]
+            shadow = (b_list, U_list)
+        
+            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            exp_vals = [estimate_shadow_observable_v2(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
+            reward_i = np.dot(pauli_coeff, exp_vals)
+            assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
+            reward[i] = reward_i.real
+            print("Reward batch ", i, " is ", reward_i.real)
+            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-        #print(pauli_coeff, pauli_str)
+        """
+        M = 1
+        partition = int(2 * np.log(2 * M / 0.01))
 
         reward = np.zeros(batch_size)
         for i in range(batch_size):
@@ -211,12 +232,14 @@ class ShadowReward(Reward):
             U_list = [var[0] for var in data_list]
             b_list = [var[1] for var in data_list]
             shadow = (b_list, U_list)
-            #print(U_list)
-            exp_vals = [estimate_shadow_obervable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
-            reward_i = np.dot(pauli_coeff, exp_vals)
+        
+            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            reward_i = estimate_shadow_observable_v3(shadow, target.dm, partition)
+            
             assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
             reward[i] = reward_i.real
             print("Reward batch ", i, " is ", reward_i.real)
+            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         return reward
     
 
@@ -296,9 +319,117 @@ class ShadowReward(Reward):
             
         return reward
 
-
-def estimate_shadow_obervable(shadow, observable, k):
+""""""
+def estimate_shadow_observable_v3(shadow, observable, k):
+    #not even working yet
+    """
+    Goal: From measurement_list and unitary_ids, split into N/k groups, find mean for each, then find median of means
     
+    By the formulation in Pennylane notes, if the observable is not matching the unitary, the entire expectation value goes to 0 for that shadow.
+    For example; 5 qubits, observable is [3, 0, 0, 3, 3] which correspond to IXXII
+    And my unitary id (shadow) is [2, 0, 0, 3, 1].
+    Then Tr(Orho) will give non zero value. Else, we will get 0 for the entire shadow.
+
+
+    OBSERVABLE IS NOW JUST A DENSITY MATRIX, NOT A PAULI STRING.
+    """
+    shadow = np.array(shadow)
+    shadow_size, num_qubits = shadow[0].shape
+    b_lists, obs_lists = shadow
+    shuffle_indices = np.random.permutation(b_lists.shape[0])
+    b_shuffled = b_lists[shuffle_indices]
+    obs_shuffled = obs_lists[shuffle_indices]
+    
+
+    means = []
+    mapping = {0: 'X', 1: 'Y', 2: 'Z', 3: 'I'}
+    
+    P_op = observable
+    # loop over the splits of the shadow:
+    for i in range(k):       # shadow_size // k = no of elements in each set; k = no of sets
+
+        # assign the splits 
+        start = i * (shadow_size //k)
+        end = (i+1) * (shadow_size //k)
+        b_lists_k, obs_lists_k = (
+            b_shuffled[start: end],
+            obs_shuffled[start: end],
+        )
+
+        exp_val = np.zeros(shadow_size // k)
+        
+        for n in range(shadow_size // k):
+            
+            b = b_lists_k[n]
+            b_str = ''.join(map(str, b))
+            U = obs_lists_k[n]
+            U_str = ''.join(mapping[i] for i in U)
+
+            exp_val = np.array([])  # Compute the expectation value for this shadow and observable
+            b_string = Statevector.from_label(b_str)
+            U_op = SparsePauliOp.from_list([(U_str, 1.0)])
+            b_evolved = b_string.evolve(U_op)
+            exp_val = b_evolved.expectation_value(P_op)
+
+        means.append(np.sum(exp_val)/ (shadow_size // k))   
+    print("Means: ", means)
+    return np.mean(means) 
+    #significantly slower
+
+
+
+def estimate_shadow_observable_v2(shadow, observable, k):
+    # slightly less accurate as original and slightly slower
+    """
+    Goal: From measurement_list and unitary_ids, split into N/k groups, find mean for each, then find median of means
+    
+    By the formulation in Pennylane notes, if the observable is not matching the unitary, the entire expectation value goes to 0 for that shadow.
+    For example; 5 qubits, observable is [3, 0, 0, 3, 3] which correspond to IXXII
+    And my unitary id (shadow) is [2, 0, 0, 3, 1].
+    Then Tr(Orho) will give non zero value. Else, we will get 0 for the entire shadow.
+    """
+    shadow = np.array(shadow)
+    shadow_size, num_qubits = shadow[0].shape
+    b_lists, U_lists = shadow
+    shuffle_indices = np.random.permutation(b_lists.shape[0])
+    b_shuffled = b_lists[shuffle_indices]
+    U_shuffled = U_lists[shuffle_indices]
+    
+
+    exp_val_means = []
+    P = np.array(observable)
+    mask = P != 3
+    P_remove_I = P[mask]
+
+    exp_vals = []
+    for b_list, U_list in zip(b_shuffled, U_shuffled):
+        U_list = U_list[mask]
+        b_list = b_list[mask]
+        P_U_matching = (U_list == P_remove_I).astype(int)
+        b_list = -b_list
+        b_list_modified = np.where(b_list == 0, 1, b_list)
+        vals = P_U_matching * b_list_modified
+        if vals.size == 0:
+            exp_val = 1
+        else:
+            exp_val = (3**len(P_remove_I)) * np.prod(vals)
+
+        exp_vals.append(exp_val)
+    #print(P, U_shuffled[-1], b_shuffled[-1], exp_vals[-1])
+    
+    for i in range(k):       # shadow_size // k = no of elements in each set; k = no of sets
+
+        # assign the splits
+        start = i * (shadow_size // k)
+        end = (i + 1) * (shadow_size // k)
+        exp_vals_k = exp_vals[start:end]   
+        exp_val_means.append(np.mean(exp_vals_k))
+
+    return np.median(exp_val_means)
+        
+
+def estimate_shadow_observable(shadow, observable, k):
+
     """
     Goal: From measurement_list and unitary_ids, split into N/k groups, find mean for each, then find median of means
     
@@ -313,9 +444,9 @@ def estimate_shadow_obervable(shadow, observable, k):
     shuffle_indices = np.random.permutation(b_lists.shape[0])
     b_shuffled = b_lists[shuffle_indices]
     obs_shuffled = obs_lists[shuffle_indices]
-
     means = []
     P = observable
+
 
     # loop over the splits of the shadow:
     for i in range(k):       # shadow_size // k = no of elements in each set; k = no of sets
@@ -337,6 +468,7 @@ def estimate_shadow_obervable(shadow, observable, k):
             
             f = []
 
+            
             for m in range(num_qubits):
                 
                 if P[m] == 3:
@@ -347,6 +479,7 @@ def estimate_shadow_obervable(shadow, observable, k):
                     f.append(-1)
                 else:
                     f.append(0)
+            
             
             exp_val[n] = (3**num_qubits) * np.prod(np.array(f))
             
