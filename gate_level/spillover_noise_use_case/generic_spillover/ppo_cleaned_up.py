@@ -30,10 +30,7 @@ def process_action(self, probs: Normal):
     mean_action = probs.mean
     std_action = probs.stddev
 
-    if isinstance(self.env, ActionWrapper):
-        self.unwrapped_env.mean_action = self.env.action(mean_action[0].cpu().numpy())
-    else:
-        self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
+    self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
 
     self.unwrapped_env.std_action = std_action[0].cpu().numpy()
     return action, logprob
