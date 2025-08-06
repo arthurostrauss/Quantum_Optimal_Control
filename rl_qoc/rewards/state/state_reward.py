@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple, Literal, Optional, Union
+from typing import List, Tuple, Literal, Optional, Union, TYPE_CHECKING
 
 from qiskit import ClassicalRegister
 from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.classical.types import Uint
-from qiskit.primitives import BaseEstimatorV2
+from qiskit.primitives import BaseEstimatorV2, BitArray
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.quantum_info import SparsePauliOp, pauli_basis
 import numpy as np
@@ -28,6 +28,11 @@ from ...helpers.circuit_utils import (
     handle_n_reps,
     get_single_qubit_input_states,
 )
+
+if TYPE_CHECKING:
+    from qiskit_qm_provider.parameter_table import ParameterTable, Parameter as QuaParameter
+    from ...qua.circuit_params import CircuitParams
+    from qm import Program
 
 Indices = Tuple[int]
 Target = Union[StateTarget, GateTarget]
@@ -57,20 +62,19 @@ class StateReward(Reward):
     def reward_args(self):
         return {"input_states_choice": self.input_states_choice}
 
-    def set_reward_seed(self, seed: int = None):
+    def set_reward_seed(self, seed: int):
         """
         Set seed for input states and observables sampling
         """
-        if seed is not None:
-            self.input_state_seed = seed + 30
-            self.observables_seed = seed + 50
-            self.input_states_rng = np.random.default_rng(self.input_state_seed)
-            self.observables_rng = np.random.default_rng(self.observables_seed)
+        self.input_state_seed = seed + 30
+        self.observables_seed = seed + 50
+        self.input_states_rng = np.random.default_rng(self.input_state_seed)
+        self.observables_rng = np.random.default_rng(self.observables_seed)
 
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: StateTarget | GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
@@ -136,8 +140,8 @@ class StateReward(Reward):
         Chi = target_state.Chi
         probabilities = Chi**2
         dim = target_state.dm.dim
-        cutoff = 1e-8
-        non_zero_indices = np.nonzero(probabilities > cutoff)[0]
+        cutoff = 1e-5
+        non_zero_indices = np.nonzero(probabilities > cutoff)[0][1:]
         non_zero_probabilities = probabilities[non_zero_indices]
         non_zero_probabilities /= np.sum(non_zero_probabilities)
 
@@ -153,18 +157,9 @@ class StateReward(Reward):
             self.observables_rng.choice(non_zero_indices, pauli_sampling, p=non_zero_probabilities),
             return_counts=True,
         )
-        identity_term = np.where(pauli_indices == 0)[0]
         c_factor = execution_config.c_factor
-        if len(identity_term) > 0:
-            id_coeff = c_factor * np.sum(
-                counts[identity_term] / (np.sqrt(dim) * Chi[pauli_indices[identity_term]])
-            )
-        else:
-            id_coeff = 0.0
-
-        pauli_indices = np.delete(pauli_indices, identity_term)
-        counts = np.delete(counts, identity_term)
-        reward_factor = execution_config.c_factor * counts / (np.sqrt(dim) * Chi[pauli_indices])
+        id_coeff = c_factor / dim
+        reward_factor = c_factor * counts * (dim - 1) / (dim * np.sqrt(dim) * Chi[pauli_indices])
 
         if dfe_precision is not None:
             eps, delta = dfe_precision
@@ -241,15 +236,17 @@ class StateReward(Reward):
         self,
         reward_data: StateRewardDataList,
         estimator: BaseEstimatorV2,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Retrieve the reward from the PUBs and the primitive
         """
+        num_qubits = reward_data[0].observables.num_qubits
+        dim = 2**num_qubits
         job = estimator.run(reward_data.pubs)
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward += reward_data.id_coeff
         reward /= reward_data.pauli_sampling
+        reward += reward_data.id_coeff
 
         return reward
 
@@ -347,3 +344,243 @@ class StateReward(Reward):
             scheduling=False,
             remove_final_measurements=False,
         )
+
+    def qm_step(
+        self,
+        reward_data: StateRewardDataList,
+        fetching_index: int,
+        fetching_size: int,
+        circuit_params: CircuitParams,
+        reward: QuaParameter,
+        config: QEnvConfig,
+        **push_args,
+    ):
+        from ...qua.qm_config import QMConfig
+
+        if not isinstance(config.backend_config, QMConfig):
+            raise ValueError("Backend config must be a QMConfig")
+
+        reward_array = np.zeros(shape=(config.batch_size,))
+        num_qubits = (
+            config.target.causal_cone_size
+            if isinstance(config.target, GateTarget)
+            else config.target.n_qubits
+        )
+        dim = 2**num_qubits
+        binary = lambda n, l: bin(n)[2:].zfill(l)
+        if circuit_params.circuit_choice_var is not None and isinstance(config.target, GateTarget):
+            circuit_params.circuit_choice_var.push_to_opx(config.target.circuit_choice, **push_args)
+
+        if circuit_params.n_reps_var is not None:
+            circuit_params.n_reps_var.push_to_opx(config.current_n_reps, **push_args)
+        if len(reward_data.input_indices) > 1:
+            raise ValueError("StateRewardDataList with multiple input indices is not supported")
+
+        input_state_dict = {
+            input_var: input_state_val
+            for input_var, input_state_val in zip(
+                circuit_params.input_state_vars.parameters, reward_data.input_indices[0]
+            )
+        }
+        circuit_params.input_state_vars.push_to_opx(input_state_dict, **push_args)
+        circuit_params.max_observables.push_to_opx(
+            len(reward_data.observables_indices[0]), **push_args
+        )
+        circuit_params.n_shots.push_to_opx(reward_data.shots[0], **push_args)
+        for i, observable in enumerate(reward_data.observables_indices[0]):
+            observable_dict = {
+                observable_var: observable_val
+                for observable_var, observable_val in zip(
+                    circuit_params.observable_vars.parameters, observable
+                )
+            }
+            circuit_params.observable_vars.push_to_opx(observable_dict, **push_args)
+        collected_counts = reward.fetch_from_opx(
+            push_args["job"],
+            fetching_index=fetching_index,
+            fetching_size=fetching_size,
+            verbosity=config.backend_config.verbosity,
+            time_out=config.backend_config.timeout,
+        )
+        # sampled_actions = circuit_params.real_time_circuit_parameters.fetch_from_opx(
+        #     push_args["job"],
+        #     fetching_index=fetching_index,
+        #     fetching_size=fetching_size,
+        #     verbosity=config.backend_config.verbosity,
+        #     time_out=config.backend_config.timeout,
+        # )
+        # print("sampled_actions", sampled_actions)
+        counts = []
+        formatted_counts = []
+        count_idx = 0
+        num_obs = len(reward_data.observables_indices[0])
+        for o_idx in range(num_obs):
+            formatted_counts.append([])
+            counts_array = np.array(collected_counts[count_idx], dtype=int)
+            formatted_counts[o_idx] = counts_array
+            count_idx += 1
+        for batch_idx in range(config.batch_size):
+            counts.append([])
+            for o_idx in range(num_obs):
+                counts[batch_idx].append(formatted_counts[o_idx][batch_idx])
+
+        for batch_idx in range(config.batch_size):
+            exp_value = 0.0
+            obs_group = reward_data[0].observables.group_commuting(True)
+            for o_idx, obs in enumerate(obs_group):
+                counts_dict = {
+                    binary(i, num_qubits): int(counts[batch_idx][o_idx][i]) for i in range(dim)
+                }
+                bit_array = BitArray.from_counts(counts_dict, num_bits=num_qubits)
+                diag_obs = SparsePauliOp("I" * num_qubits, 0.0)
+                for obs_, coeff in zip(obs.paulis, obs.coeffs):
+                    diag_obs_label = ""
+                    for char in obs_.to_label():
+                        diag_obs_label += char if char == "I" else "Z"
+                    diag_obs += SparsePauliOp(diag_obs_label, coeff)
+                exp_value += bit_array.expectation_values(diag_obs.simplify())
+            exp_value /= reward_data.pauli_sampling
+            exp_value += reward_data.id_coeff
+            reward_array[batch_idx] = exp_value
+        return reward_array
+
+    def rl_qoc_training_qua_prog(
+        self,
+        qc: QuantumCircuit,
+        policy: ParameterTable,
+        reward: QuaParameter,
+        circuit_params: CircuitParams,
+        config: QEnvConfig,
+        num_updates: int = 1000,
+        test: bool = False,
+    ) -> Program:
+        from qm.qua import (
+            program,
+            declare,
+            Random,
+            for_,
+            Util,
+            stream_processing,
+            assign,
+            save,
+            fixed,
+        )
+        from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
+        from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
+        from qiskit_qm_provider.backend import get_measurement_outcomes
+        from ...qua.qm_config import QMConfig
+
+        if not isinstance(config.backend, QMBackend):
+            raise ValueError("Backend must be a QMBackend")
+        if not isinstance(config.backend_config, QMConfig):
+            raise ValueError("Backend config must be a QMConfig")
+        if circuit_params.input_state_vars is None:
+            raise ValueError("input_state_vars should be set for State reward")
+        if circuit_params.n_shots is None:
+            raise ValueError("n_shots should be set for State reward")
+        if circuit_params.max_observables is None:
+            raise ValueError("max_observables should be set for State reward")
+        if circuit_params.observable_vars is None:
+            raise ValueError("observable_vars should be set for State reward")
+
+        policy.reset()
+        reward.reset()
+        circuit_params.reset()
+        num_qubits = (
+            config.target.causal_cone_size
+            if isinstance(config.target, GateTarget)
+            else config.target.n_qubits
+        )
+        dim = int(2**num_qubits)
+        for clbit in qc.clbits:
+            if len(qc.find_bit(clbit).registers) >= 2:
+                raise ValueError("Overlapping classical registers are not supported")
+
+        with program() as rl_qoc_training_prog:
+            # Declare the necessary variables (all are counters variables to loop over the corresponding hyperparameters)
+            circuit_params.declare_variables()
+            policy.declare_variables()
+            reward.declare_variable()
+            reward.declare_stream()
+
+            n_u = declare(int)
+            shots = declare(int)
+            o_idx = declare(int)
+            b = declare(int)
+            j = declare(int)
+            tmp1 = declare(fixed, size=config.n_actions)
+            tmp2 = declare(fixed, size=config.n_actions)
+
+            mu = policy.get_variable("mu")
+            sigma = policy.get_variable("sigma")
+            counts = reward.var
+            batch_r = Random(config.seed)
+
+            if test:
+                circuit_params.declare_streams()
+                policy.declare_streams()
+
+            if config.backend.init_macro is not None:
+                config.backend.init_macro()
+
+            with for_(n_u, 0, n_u < num_updates, n_u + 1):
+                policy.load_input_values()
+                for var in [
+                    circuit_params.circuit_choice_var,
+                    circuit_params.n_reps_var,
+                    circuit_params.context_parameters,
+                ]:
+                    if var is not None and var.input_type is not None:
+                        if isinstance(var, QuaParameter):
+                            var.load_input_value()
+                        elif isinstance(var, ParameterTable):
+                            var.load_input_values()
+
+                circuit_params.input_state_vars.load_input_values()
+                circuit_params.max_observables.load_input_value()
+                circuit_params.n_shots.load_input_value()
+                with for_(o_idx, 0, o_idx < circuit_params.max_observables.var, o_idx + 1):
+                    circuit_params.observable_vars.load_input_values()
+                    batch_r.set_seed(config.seed + n_u)
+                    with for_(b, 0, b < config.batch_size, b + 2):
+                        # Sample from a multivariate Gaussian distribution (Muller-Box method)
+                        tmp1, tmp2 = rand_gauss_moller_box(
+                            mu,
+                            sigma,
+                            batch_r,
+                            tmp1,
+                            tmp2,
+                        )
+                        if (
+                            config.backend_config.wrapper_data.get("rescale_and_clip", None)
+                            is not None
+                        ):
+                            new_box = config.backend_config.wrapper_data["rescale_and_clip"]
+                            tmp1, tmp2 = rescale_and_clip_wrapper(
+                                [tmp1, tmp2],
+                                config.action_space,
+                                new_box,
+                            )
+
+                        # Assign 1 or 2 depending on batch_size being even or odd (only relevant at last iteration)
+                        with for_(j, 0, j < 2, j + 1):
+                            # Assign the sampled actions to the action batch
+                            for i, parameter in enumerate(
+                                circuit_params.real_time_circuit_parameters.parameters
+                            ):
+                                parameter.assign(tmp1[i], condition=(j == 0), value_cond=tmp2[i])
+
+                            with for_(shots, 0, shots < circuit_params.n_shots.var, shots + 1):
+                                result = config.backend.quantum_circuit_to_qua(
+                                    qc, circuit_params.circuit_variables
+                                )
+                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
+                                assign(counts[state_int], counts[state_int] + 1)
+
+                            reward.stream_back(reset=True)
+                            
+            with stream_processing():
+                buffer = (config.batch_size, dim)
+                reward.stream_processing(buffer=buffer)
+
+        return rl_qoc_training_prog

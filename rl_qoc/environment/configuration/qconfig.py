@@ -12,7 +12,6 @@ from qiskit_ibm_runtime import IBMBackend
 
 from .backend_config import (
     BackendConfig,
-    QiskitRuntimeConfig,
     DynamicsConfig,
     QiskitConfig,
 )
@@ -24,7 +23,7 @@ from ..backend_info import BackendInfo
 from ...helpers import load_q_env_from_yaml_file, select_backend
 
 if TYPE_CHECKING:
-    from ...rewards import Reward
+    from ...rewards import Reward, REWARD_STRINGS
 
 
 def default_benchmark_config():
@@ -96,7 +95,7 @@ class QEnvConfig:
     def backend(self, backend: BackendV2):
         self.backend_config.backend = backend
         self.backend_config.parametrized_circuit_kwargs["backend"] = backend
-        self.backend_info._backend = backend
+        self.backend_info.backend = backend
 
     @property
     def parametrized_circuit(self):
@@ -222,7 +221,9 @@ class QEnvConfig:
         return self.reward.reward_method
 
     @reward_method.setter
-    def reward_method(self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit"]):
+    def reward_method(
+        self, value: Literal["fidelity", "channel", "state", "xeb", "cafe", "orbit", "shadow"]
+    ):
         try:
             from ...rewards import reward_dict
 
@@ -352,15 +353,7 @@ class QEnvConfig:
                     instruction_durations=instruction_durations,
                 )
                 return cls(backend_config=backend_config, **params)
-        if isinstance(backend, IBMBackend):
-            backend_config = QiskitRuntimeConfig(
-                parametrized_circ_func,
-                backend,
-                pass_manager=pass_manager,
-                instruction_durations=instruction_durations,
-                primitive_options=runtime_options,
-            )
-        elif isinstance(backend, BackendV2):
+        if isinstance(backend, BackendV2):
             backend_config = QiskitConfig(
                 parametrized_circ_func,
                 backend,

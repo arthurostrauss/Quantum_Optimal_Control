@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from qiskit.transpiler import Target, InstructionProperties
 from qiskit_experiments.calibration_management import (
@@ -9,7 +9,7 @@ from qiskit_experiments.calibration_management import (
     EchoedCrossResonance,
 )
 
-from rl_qoc.environment.target import BaseTarget
+from rl_qoc.environment.target import BaseTarget, GateTarget
 from rl_qoc.helpers import (
     new_params_ecr,
     new_params_sq_gate,
@@ -113,6 +113,26 @@ def custom_schedule(
     return custom_sched
 
 
+def x_amp_schedule(
+    backend: BackendV2, qubits: List[int], params: ParameterVector
+) -> pulse.ScheduleBlock:
+    """
+    Define parametrization of the pulse schedule characterizing the target gate.
+    This function can be customized at will, however one shall recall to make sure that number of actions match the
+    number of pulse parameters used within the function (through the params argument).
+    """
+    x_params: Dict[str, float] = (
+        backend.target.get_calibration("x", (0,)).instructions[0][1].pulse.parameters.copy()
+    )
+    x_amp = x_params.pop("amp")
+    print(x_params)
+
+    with pulse.build(backend, name="x_amp_sched") as x_amp_sched:
+        pulse.play(pulse.Drag(**x_params, amp=x_amp * params[0]), backend.drive_channel(qubits[0]))
+
+    return x_amp_sched
+
+
 def validate_pulse_kwargs(
     **kwargs,
 ) -> tuple[Optional[Gate], list[int], BackendV1 | BackendV2]:
@@ -125,13 +145,14 @@ def validate_pulse_kwargs(
 
     target, backend = kwargs["target"], kwargs["backend"]
     if isinstance(target, BaseTarget):
-        target = asdict(target)
+        target = {"physical_qubits": target.physical_qubits}
+        if isinstance(target, GateTarget):
+            target["gate"] = target.gate
+        else:
+            target["gate"] = None
     assert isinstance(
         backend, (BackendV1, BackendV2)
     ), "Backend should be a valid Qiskit Backend instance"
-    assert isinstance(
-        asdict(target), dict
-    ), "Target should be a dictionary with 'physical_qubits' keys."
 
     gate, physical_qubits = target.get("gate", None), target["physical_qubits"]
     if gate is not None:
@@ -177,11 +198,12 @@ def apply_parametrized_circuit(
     )
 
     # Create custom schedule with original parameters
-    parametrized_schedule = custom_schedule(
-        backend=backend,
-        physical_qubits=physical_qubits,
-        params=params,
-    )
+    # parametrized_schedule = custom_schedule(
+    #     backend=backend,
+    #     physical_qubits=physical_qubits,
+    #     params=params,
+    # )
+    parametrized_schedule = x_amp_schedule(backend, physical_qubits, params)
 
     # Add the custom calibration to the circuit with current parameters
     qc.append(parametrized_gate, tgt_register)

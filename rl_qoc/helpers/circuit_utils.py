@@ -200,21 +200,6 @@ def causal_cone_circuit(
     return dag_to_circuit(filtered_dag, False), involved_qubits
 
 
-def to_python_identifier(s):
-    # Prepend underscore if the string starts with a digit
-    if s[0].isdigit():
-        s = "_" + s
-
-    # Replace non-alphanumeric characters with underscore
-    s = re.sub("\W|^(?=\d)", "_", s)
-
-    # Append underscore if the string is a Python keyword
-    if keyword.iskeyword(s):
-        s += "_"
-
-    return s
-
-
 def count_gates(qc: QuantumCircuit):
     """
     Count number of gates in a Quantum Circuit
@@ -680,9 +665,7 @@ def extend_input_state_prep(
             else:
                 new_indices.append(initial_indices.pop(0))
 
-        new_circuit: QuantumCircuit = input_circuit.compose(
-            random_input_context, other_qubits, front=True
-        )
+        new_circuit = input_circuit.compose(random_input_context, other_qubits, front=True)
         return new_circuit, tuple(new_indices)
     return input_circuit, tuple(indices)
 

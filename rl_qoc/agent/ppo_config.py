@@ -41,7 +41,7 @@ class TotalUpdates(TrainingConstraint):
     :param total_updates: Total number of updates
     """
 
-    total_updates: int = None
+    total_updates: int = 50
 
     def __post_init__(self):
         assert (
@@ -56,6 +56,13 @@ class TotalUpdates(TrainingConstraint):
     def constraint_value(self):
         return self.total_updates
 
+    @classmethod
+    def from_value(cls, value):
+        """
+        Create a TotalUpdates object from a dictionary
+        """
+        return cls(total_updates=value)
+
 
 @dataclass
 class HardwareRuntime(TrainingConstraint):
@@ -67,7 +74,7 @@ class HardwareRuntime(TrainingConstraint):
     :param hardware_runtime: Hardware runtime constraint for training (in seconds)
     """
 
-    hardware_runtime: Union[int, float] = None
+    hardware_runtime: Union[int, float]
 
     def __post_init__(self):
         assert self.hardware_runtime > 0, "hardware_runtime must be greater than 0"
@@ -79,6 +86,13 @@ class HardwareRuntime(TrainingConstraint):
     @property
     def constraint_value(self):
         return self.hardware_runtime
+
+    @classmethod
+    def from_value(cls, value):
+        """
+        Create a HardwareRuntime object from a dictionary
+        """
+        return cls(hardware_runtime=value)
 
 
 @dataclass
@@ -95,11 +109,11 @@ class TrainFunctionSettings:
     """
 
     plot_real_time: bool = False
-    print_debug: Optional[bool] = False
-    num_prints: Optional[int] = 10
-    hpo_mode: Optional[bool] = False
-    clear_history: Optional[bool] = False
-    save_data: Optional[bool] = False
+    print_debug: bool = False
+    num_prints: int = 10
+    hpo_mode: bool = False
+    clear_history: bool = False
+    save_data: bool = False
 
     def __post_init__(self):
         assert (
@@ -156,6 +170,22 @@ class TrainingConfig:
             "anneal_learning_rate": self.anneal_learning_rate,
             "std_actions_eps": self.std_actions_eps,
         }
+
+    @classmethod
+    def from_dict(cls, config_dict):
+        """
+        Create a TrainingConfig object from a dictionary
+        """
+        config_dict = {k.lower(): v for k, v in config_dict.items()}
+        if "total_updates" in config_dict:
+            config_dict["training_constraint"] = TotalUpdates.from_value(
+                config_dict.pop("total_updates")
+            )
+        else:
+            config_dict["training_constraint"] = HardwareRuntime.from_value(
+                config_dict.pop("hardware_runtime")
+            )
+        return cls(**config_dict)
 
 
 @dataclass
@@ -230,7 +260,7 @@ class PPOConfig:
     train_function_settings: Optional[TrainFunctionSettings] = field(
         default_factory=TrainFunctionSettings
     )
-    wandb_config: Optional[WandBConfig] = None
+    wandb_config: Optional[WandBConfig] = field(default_factory=WandBConfig)
 
     def __post_init__(self):
         """
@@ -242,8 +272,6 @@ class PPOConfig:
             self.optimizer = get_optimizer(self.optimizer)
         if self.wandb_config is not None and not isinstance(self.wandb_config, WandBConfig):
             self.wandb_config = WandBConfig.from_dict(self.wandb_config)
-        else:
-            self.wandb_config = WandBConfig()
         self.hidden_activation_functions = [
             get_module(activation) for activation in self.hidden_activation_functions
         ]
@@ -296,6 +324,16 @@ class PPOConfig:
         """
         # Ensure all keys are written in lowercase
         config_dict = {k.lower(): v for k, v in config_dict.items()}
+        if "wandb_config" in config_dict:
+            config_dict["wandb_config"] = WandBConfig.from_dict(config_dict["wandb_config"])
+        if "training_config" in config_dict:
+            config_dict["training_config"] = TrainingConfig.from_dict(
+                config_dict["training_config"]
+            )
+        if "train_function_settings" in config_dict:
+            config_dict["train_function_settings"] = TrainFunctionSettings.from_dict(
+                config_dict["train_function_settings"]
+            )
         return cls(**config_dict)
 
     @classmethod

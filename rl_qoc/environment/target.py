@@ -30,7 +30,7 @@ from qiskit.circuit import (
     Parameter,
 )
 from itertools import product
-from typing import Any, List, Optional, Literal, Sequence, Union
+from typing import Any, Dict, List, Optional, Literal, Sequence, Union
 from qiskit_experiments.library.tomography.basis import (
     PauliPreparationBasis,
     Pauli6PreparationBasis,
@@ -141,7 +141,7 @@ class StateTarget(BaseTarget):
 
     def __init__(
         self,
-        state: DensityMatrix | Statevector | QuantumCircuit | str,
+        state: DensityMatrix | Statevector | QuantumCircuit | str | np.ndarray,
         physical_qubits: Optional[Sequence[int]] = None,
     ):
         """
@@ -162,25 +162,26 @@ class StateTarget(BaseTarget):
                 tgt_register = QuantumRegister(state.num_qubits, "tgt")
                 self.circuit = QuantumCircuit(tgt_register)
                 self.circuit.prepare_state(state)
-        else:
-            try:  # Try to convert to DensityMatrix
-                state = DensityMatrix(state)
-            except Exception as e:
-                raise ValueError("Input could not be converted to DensityMatrix") from e
-            if not isinstance(state, DensityMatrix):
-                raise ValueError(
-                    "State should be a DensityMatrix, Statevector or QuantumCircuit object"
-                )
-            if state.num_qubits != len(physical_qubits):
-                raise ValueError(
-                    "Number of qubits in the state should match the number of physical qubits"
-                )
-            if state.purity() - 1 > 1e-6:
-                raise ValueError("Density matrix should be pure")
+        elif isinstance(state, DensityMatrix):
             self.dm = state
             tgt_register = QuantumRegister(self.dm.num_qubits, "tgt")
             self.circuit = QuantumCircuit(tgt_register)
             self.circuit.prepare_state(density_matrix_to_statevector(state))
+        else:
+            try:  # Try to convert to DensityMatrix
+                state = DensityMatrix(state)
+                if physical_qubits is not None and state.num_qubits != len(physical_qubits):
+                    raise ValueError(
+                        "Number of qubits in the state should match the number of physical qubits"
+                    )
+                if state.purity() - 1 > 1e-6:
+                    raise ValueError("Density matrix should be pure")
+                self.dm = state
+                tgt_register = QuantumRegister(self.dm.num_qubits, "tgt")
+                self.circuit = QuantumCircuit(tgt_register)
+                self.circuit.prepare_state(density_matrix_to_statevector(state))
+            except Exception as e:
+                raise ValueError("Input could not be converted to DensityMatrix") from e
         if physical_qubits is None:
             physical_qubits = list(range(self.dm.num_qubits))
 
@@ -260,7 +261,7 @@ class StateTarget(BaseTarget):
         Convert the target state to a dictionary representation
         """
         return {
-            "state": self.dm.data.tolist(),
+            "state": np.array2string(self.dm.data, separator=","),
             "physical_qubits": self.physical_qubits,
         }
 
@@ -273,6 +274,8 @@ class StateTarget(BaseTarget):
         :raises ValueError: If the data does not contain a valid density matrix or physical qubits
         """
         dm = DensityMatrix(np.array(data["dm"]))
+        if dm.num_qubits is None:
+            raise ValueError("DensityMatrix num_qubits is None")
         physical_qubits = data.get("physical_qubits", list(range(dm.num_qubits)))
         return cls(state=dm, physical_qubits=physical_qubits)
 
@@ -434,6 +437,9 @@ class GateTarget(BaseTarget):
         self._unbound_circuit_contexts = circuit_context
         self._bound_circuit_contexts = [
             circ if not circ.parameters else None for circ in circuit_context
+        ]
+        self._context_parameters: List[Dict[Parameter, float | None]] = [
+            {p: None for p in circ.parameters} for circ in circuit_context
         ]
 
     def Chi(self, n_reps: int = 1):
@@ -625,6 +631,13 @@ class GateTarget(BaseTarget):
         return self._virtual_target_qubits[self._circuit_choice]
 
     @property
+    def context_parameters(self) -> Dict[Parameter, float | None]:
+        """
+        Get the context parameters for the target
+        """
+        return self._context_parameters[self._circuit_choice]
+
+    @property
     def causal_cone_qubits(self) -> List[Qubit]:
         """
         Get the qubits forming the causal cone of the target gate
@@ -735,6 +748,9 @@ class GateTarget(BaseTarget):
         self._bound_circuit_contexts[self._circuit_choice] = self._unbound_circuit_contexts[
             self._circuit_choice
         ].assign_parameters(params)
+        self._context_parameters[self._circuit_choice] = {
+            p: params[p.name] for p in self._context_parameters[self._circuit_choice]
+        }
 
     def clear_parameters(self):
         """

@@ -31,7 +31,6 @@ class CustomPPO:
         env: BaseQuantumEnvironment | ActionWrapper,
         chkpt_dir: Optional[str] = "tmp/ppo",
         chkpt_dir_critic: Optional[str] = "tmp/critic_ppo",
-        save_data: Optional[bool] = False,
     ):
         """
         Custom Agent implementing Proximal Policy Optimization (PPO) using PyTorch.
@@ -68,15 +67,14 @@ class CustomPPO:
             self._training_results[f"std_action_{i}"] = []
 
         self._train_function_settings = self.agent_config.train_function_settings
-        if save_data:
+        if self._train_function_settings.save_data:
             run_name = self.agent_config.run_name
             writer = SummaryWriter(f"runs/{run_name}")
-
-            if self.agent_config.wandb_config.enabled:
-                wandb.login(key=self.agent_config.wandb_config.api_key, verify=True)
-
         else:
             writer = None
+
+        if self.agent_config.wandb_config.enabled:
+            wandb.login(key=self.agent_config.wandb_config.api_key, verify=True)
 
         self.writer = writer
         torch.manual_seed(self.seed)
@@ -156,11 +154,10 @@ class CustomPPO:
         if train_function_settings is not None:
             self._train_function_settings = train_function_settings
 
-        if self.save_data and self.agent_config.wandb_config.enabled:
+        if self.agent_config.wandb_config.enabled:
             wandb.init(
                 project=self.agent_config.wandb_config.project,
-                config=self.agent_config.as_dict()
-                | self.unwrapped_env.config.as_dict(to_json=True),
+                config=self.agent_config.as_dict() | self.unwrapped_env.config.as_dict(),
                 name=self.agent_config.run_name,
                 sync_tensorboard=True,
             )
@@ -343,6 +340,8 @@ class CustomPPO:
                 var_y = np.var(y_true)
                 explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+                mean_action_np = mean_action[0].cpu().numpy()
+                std_action_np = std_action[0].cpu().numpy()
                 # Print debug information
                 if self.print_debug:
                     print_debug_info(u_env, mean_action, std_action, b_returns, b_advantages)
@@ -355,8 +354,8 @@ class CustomPPO:
                         self.lookback_window,
                         u_env,
                         iteration,
-                        mean_action,
-                        std_action,
+                        mean_action_np,
+                        std_action_np,
                         start_time,
                     )
 
@@ -396,17 +395,21 @@ class CustomPPO:
                     training_results["fidelity_history"] = u_env.fidelity_history[-1]
 
                 for i in range(u_env.n_actions):
-                    training_results[f"clipped_mean_action_{i}"] = env.action(mean_action[0])[i]
-                    training_results[f"mean_action_{i}"] = mean_action[0][i]
-                    training_results[f"std_action_{i}"] = std_action[0][i]
+                    training_results[f"clipped_mean_action_{i}"] = (
+                        env.action(mean_action_np)[i].tolist()
+                        if isinstance(env, ActionWrapper)
+                        else mean_action_np[i].tolist()
+                    )
+                    training_results[f"mean_action_{i}"] = mean_action_np[i].tolist()
+                    training_results[f"std_action_{i}"] = std_action_np[i].tolist()
 
-                if self.agent_config.wandb_config.enabled and self.save_data:
+                if self.agent_config.wandb_config.enabled:
                     write_to_wandb(summary, training_results)
                 for key, value in training_results.items():
                     self._training_results[key].append(value)
-                self._training_results["mean_action"] = mean_action[0].cpu().numpy().tolist()
-                self._training_results["std_action"] = std_action[0].cpu().numpy().tolist()
-                self._training_results["clipped_mean_action"] = env.action(mean_action[0]).tolist()
+                self._training_results["mean_action"] = mean_action_np.tolist()
+                self._training_results["std_action"] = std_action_np.tolist()
+                self._training_results["clipped_mean_action"] = env.action(mean_action_np).tolist()
                 iteration += 1
 
                 if check_convergence_std_actions(std_action, self.std_actions_eps):
@@ -424,7 +427,7 @@ class CustomPPO:
                 logging.error(f"An error occurred during training: {e}")
                 return {
                     "avg_reward": -1.0,
-                    "fidelity_history": [0] * self.training_constraint.constraint_value,
+                    "fidelity_history": [0] * int(self.training_constraint.constraint_value),
                 }
             else:  # Raise the error for debugging in the normal mode
                 raise
@@ -613,7 +616,7 @@ class CustomPPO:
 
     @property
     def save_data(self):
-        return self.writer is not None
+        return self.train_function_settings.save_data
 
     @property
     def n_epochs(self):

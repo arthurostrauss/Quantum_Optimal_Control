@@ -27,7 +27,9 @@ def lcg(seed, a, c, m):
     seed = np.int32(seed)
     a = np.int32(a)
     c = np.int32(c)
-    return (a * seed + c) % m
+    with np.errstate(over="ignore"):
+        res = (a * seed + c) % m
+    return res
 
 
 def lcg_int(seed, a, c, m, upper_bound):
@@ -99,13 +101,10 @@ class CustomQMPPO(CustomPPO):
         mean_action = probs.mean
         std_action = probs.stddev
         batch_size = mean_action.size(0)
-        if isinstance(self.env, ActionWrapper):
-            self.unwrapped_env.mean_action = self.env.action(mean_action[0].cpu().numpy())
-        else:
-            self.unwrapped_env.mean_action = mean_action[0].cpu().numpy()
-        self.unwrapped_env.std_action = std_action[0].cpu().numpy()
-        μ = self.unwrapped_env.mean_action
         σ = std_action[0].cpu().numpy()
+        μ = mean_action[0].cpu().numpy()
+        self.unwrapped_env.mean_action = μ
+        self.unwrapped_env.std_action = σ
         μ_f = [FixedPoint(μ[i]) for i in range(self.n_actions)]
         σ_f = [FixedPoint(σ[i]) for i in range(self.n_actions)]
         action = np.zeros((batch_size, self.n_actions))
@@ -129,7 +128,6 @@ class CustomQMPPO(CustomPPO):
                 action[b][j] = temp_action1.to_float()
                 action[b + 1][j] = temp_action2.to_float()
 
-        action = np.clip(action, self.min_action, self.max_action)
         torch_action = torch.tensor(action, device=self.device)
         logprob = probs.log_prob(torch_action).sum(1)
         return torch_action, logprob

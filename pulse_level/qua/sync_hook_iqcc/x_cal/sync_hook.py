@@ -20,9 +20,10 @@ import numpy as np
 from gymnasium.spaces import Box
 
 job = get_qm_job()
+
 physical_qubits = (0,)
-target_name = "x"
-target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
+target_state = np.array([[0.0 + 0.0j, 0.0 + 0.0j], [0.0 + 0.0j, 1.0 + 0.0j]], dtype=complex)
+target = StateTarget(state=target_state, physical_qubits=physical_qubits)
 
 reward = StateReward()
 
@@ -32,8 +33,8 @@ param_bounds = [(-1.98, 2.0)]  # Can be any number of bounds
 # Environment execution parameters
 seed = 1203  # Master seed to make training reproducible
 batch_size = 32  # Number of actions to evaluate per policy evaluation
-n_shots = 100  # Minimum number of shots per fiducial evaluation
-pauli_sampling = 100  # Number of fiducials to compute for fidelity estimation (DFE only)
+n_shots = 10  # Minimum number of shots per fiducial evaluation
+pauli_sampling = 10  # Number of fiducials to compute for fidelity estimation (DFE only)
 n_reps = 1  # Number of repetitions of the cycle circuit
 num_updates = TotalUpdates(5)
 input_type = "INPUT_STREAM"

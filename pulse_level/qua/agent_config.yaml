@@ -5,10 +5,10 @@ WANDB_CONFIG:
     API_KEY: null # Weights & Biases API key
 RUN_NAME: "test" # Name of the run
 OPTIMIZER: "adam" # Optimizer for the policy network
-NUM_UPDATES: 1 # Number of policy updates
+NUM_UPDATES: 100 # Number of policy updates
 N_EPOCHS: 8 # Number of epochs for each policy update
 MINIBATCH_SIZE: 16 # Number of samples per mini-batch
-LEARNING_RATE: 0.0005 # Learning rate
+LEARNING_RATE: 0.01 # Learning rate
 GAMMA: 0.99 # Discount factor
 GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
 ENTROPY_COEF: 0.05 # Entropy coefficient

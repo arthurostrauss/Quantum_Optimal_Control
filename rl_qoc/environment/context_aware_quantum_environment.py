@@ -31,6 +31,7 @@ from qiskit.circuit import (
     Gate,
     Instruction,
     Parameter,
+    Qubit,
 )
 from qiskit.circuit.parametervector import ParameterVectorElement
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -48,6 +49,7 @@ from qiskit_experiments.library import ProcessTomography
 from ..helpers import (
     MomentAnalysisPass,
     CustomGateReplacementPass,
+    InstructionReplacement,
 )
 from ..helpers.circuit_utils import get_instruction_timings
 from .configuration.qconfig import QEnvConfig
@@ -55,7 +57,6 @@ from .base_q_env import (
     GateTarget,
     StateTarget,
     BaseQuantumEnvironment,
-    QiskitBackendInfo,
 )
 
 import logging
@@ -155,13 +156,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         circuits = []
         for i, circ in enumerate(self.target.circuits):
+            instruction_replacement = InstructionReplacement(
+                self.target.target_instructions[i],
+                self.parametrized_circuit_func,
+                self.parameters[i],
+                self._func_args,
+            )
 
             pm = PassManager(
                 CustomGateReplacementPass(
-                    self.target.target_instructions[i],
-                    [self.parametrized_circuit_func],
-                    [self.parameters[i]],
-                    [self._func_args],
+                    instruction_replacement,
                 )
             )
             custom_circ = pm.run(circ)
@@ -328,7 +332,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         Return the virtual target qubits used in the circuit context
         """
         if isinstance(self.config.target, GateTarget):
-            return self.config.target.virtual_target_qubits[self.circuit_choice]
+            return self.config.target.virtual_target_qubits
         else:
             return self.config.target.tgt_register
 
@@ -353,11 +357,30 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             return self._optimal_actions
 
     def episode_length(self, global_step: int) -> int:
-        return 1 + self.circuit_choice
+        return 1
 
     def clear_history(self) -> None:
         """Reset all counters related to training"""
         super().clear_history()
+
+    def set_env_params(self, **kwargs):
+        """
+        Set the circuit context for the environment.
+        """
+        if "circuit_choice" in kwargs:
+            self.circuit_choice = kwargs["circuit_choice"]
+        if "parameters" in kwargs:
+            assert isinstance(self.config.target, GateTarget), "Target must be a gate target"
+            assert isinstance(kwargs["parameters"], dict), "Parameters must be a dictionary"
+            self.config.target.clear_parameters()
+            assert all(
+                p in self.config.target.circuit.parameters
+                or p in [p_.name for p_ in self.config.target.circuit.parameters]
+                for p in kwargs["parameters"]
+            ), "Parameters must be in the circuit parameters"
+            self.config.target.bind_parameters(kwargs["parameters"])
+
+        super().set_env_params(**kwargs)
 
     @property
     def circuit_context(self) -> QuantumCircuit:
@@ -387,33 +410,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         :return: Boolean indicating if the environment has a circuit context
         """
         return self.target.has_context
-
-    def set_circuit_context(
-        self,
-        new_context: Optional[QuantumCircuit] = None,
-        backend: Optional[BackendV2] = None,
-        **kwargs,
-    ):
-        """
-        Update the circuit context and all relevant attributes
-        """
-        if new_context is not None:  # Update circuit context from scratch
-            self._circuit_context = new_context
-            self.custom_circuit_context = self.circuit_context.copy_empty_like("custom_context")
-
-        else:
-            self._circuit_context = self._unbound_circuit_context.assign_parameters(kwargs)
-
-        if backend is not None:  # Update backend and backend info if provided
-            self.backend = backend
-            self.backend_info = QiskitBackendInfo(
-                backend,
-                self.config.backend_config.instruction_durations,
-                self.pass_manager,
-                self.config.backend_config.skip_transpilation,
-            )
-
-        self._target, self.circuits, self.baseline_circuits = self.define_target_and_circuits()
 
     def update_gate_calibration(self, gate_names: Optional[List[str]] = None):
         """

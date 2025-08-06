@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import signal
-from typing import Callable, Any, Optional, List, Literal, Sequence
+from typing import Callable, Any, Optional, List, Literal, Sequence, TYPE_CHECKING
 import numpy as np
 from gymnasium import Env
 from gymnasium.core import ObsType
@@ -54,7 +54,7 @@ from qiskit_ibm_runtime import (
 )
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-from .backend_info import QiskitBackendInfo, BackendInfo
+from .backend_info import BackendInfo
 from .configuration.qconfig import QEnvConfig, ExecutionConfig
 from .target import GateTarget, StateTarget
 
@@ -64,10 +64,10 @@ from ..helpers.helper_functions import (
     has_noise_model,
 )
 from ..helpers.circuit_utils import retrieve_neighbor_qubits
-from ..rewards.reward_data import RewardDataList
-from ..rewards.base_reward import Reward
 
-rewards = Literal["cafe", "channel", "orbit", "state", "xeb", "fidelity"]
+if TYPE_CHECKING:
+    from ..rewards import Reward, REWARD_STRINGS
+    from ..rewards.reward_data import RewardDataList
 
 
 class BaseQuantumEnvironment(ABC, Env):
@@ -83,11 +83,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._func_args = training_config.parametrized_circuit_kwargs
         self._physical_target_qubits = training_config.target.physical_qubits
 
-        self._estimator, self._sampler = retrieve_primitives(
-            self.backend,
-            self.config.backend_config,
-            training_config.backend_config.as_dict().get("primitive_options", None),
-        )
+        self._estimator, self._sampler = retrieve_primitives(self.config.backend_config)
 
         self.circuits = []
 
@@ -117,7 +113,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self.avg_fidelity_history_nreps = []
         self._fit_function: Optional[Callable] = None
         self._action_to_cycle_reward_function: Optional[Callable] = None
-        self._fit_params: Optional[np.array] = None
+        self._fit_params: Optional[np.ndarray] = None
 
         # Call reset of Env class to set seed
         self._seed = training_config.seed
@@ -153,8 +149,8 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @abstractmethod
     def compute_benchmarks(
-        self, qc: QuantumCircuit, params: np.array, update_env_history=True
-    ) -> np.array:
+        self, qc: QuantumCircuit, params: np.ndarray, update_env_history=True
+    ) -> np.ndarray:
         """
         Benchmark through tomography or through simulation the policy
         Args:
@@ -167,13 +163,13 @@ class BaseQuantumEnvironment(ABC, Env):
 
     def initial_reward_fit(
         self,
-        params: np.array,
+        params: np.ndarray,
         execution_config: Optional[ExecutionConfig] = None,
-        reward_method: Optional[Sequence[rewards]] = None,
+        reward_method: Optional[Sequence[REWARD_STRINGS | Reward]] = None,
         fit_function: Optional[Callable] = None,
         inverse_fit_function: Optional[Callable] = None,
-        update_fit_params: Optional[rewards] = None,
-    ):
+        update_fit_params: Optional[REWARD_STRINGS | Reward] = None,
+    ) -> List[np.ndarray]:
         """
         Method to fit the initial reward function to the first set of actions in the environment
         with respect to the number of repetitions of the cycle circuit. Plots the fit and the data points.
@@ -186,17 +182,20 @@ class BaseQuantumEnvironment(ABC, Env):
             inverse_fit_function: Function to compute the inverse of the fit function
             update_fit_params: Method from which to update the fit parameters (e.g., "cafe", "channel", "state")
 
+        Returns: List of reward data for each method
         """
+        from ..rewards import Reward, REWARD_STRINGS
+
         fig, ax = plt.subplots()
         ax.set_title("Initial reward fit (for varying number of repetitions)")
         ax.set_xlabel("Number of repetitions")
         ax.set_ylabel("Reward")
         initial_execution_config = self.config.execution_config
-        initial_reward_method = self.config.reward_method
+        initial_reward = self.config.reward
         if execution_config is not None:
             self.config.execution_config = execution_config
         if reward_method is not None:
-            if isinstance(reward_method, str):
+            if isinstance(reward_method, (str, Reward)):
                 reward_method = [reward_method]
 
         else:
@@ -204,7 +203,10 @@ class BaseQuantumEnvironment(ABC, Env):
         reward_data = []
         for m, method in enumerate(reward_method):
             reward_data.append([])
-            self.config.reward_method = method
+            if isinstance(method, Reward):
+                self.config.reward = method
+            elif isinstance(method, str):
+                self.config.reward_method = method
             for i in range(len(self.config.execution_config.n_reps)):
                 self.config.execution_config.n_reps_index = i
                 print("Number of repetitions:", self.n_reps)
@@ -252,9 +254,10 @@ class BaseQuantumEnvironment(ABC, Env):
         if execution_config is not None:
             self.config.execution_config = initial_execution_config
 
-        self.config.reward_method = initial_reward_method
+        self.config.reward = initial_reward
+        return reward_data
 
-    def perform_action(self, actions: np.array, update_env_history: bool = True):
+    def perform_action(self, actions: np.ndarray, update_env_history: bool = True):
         """
         Send the action batch to the quantum system and retrieve reward
         :param actions: action vectors to execute on quantum system
@@ -322,7 +325,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._episode_tracker += 1
         self._episode_ended = False
         options = options or {}
-        self.modify_environment_params(**options)
+        self.set_env_params(**options)
         if len(self.config.execution_config.n_reps) > 1:
             self.config.execution_config.n_reps_index = self._n_reps_rng.integers(
                 0, len(self.config.execution_config.n_reps)
@@ -336,10 +339,10 @@ class BaseQuantumEnvironment(ABC, Env):
     def simulate_circuit(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         update_env_history: bool = True,
         output_fidelity: Literal["cycle", "nreps", "all"] = "cycle",
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Method to store in lists all relevant data to assess performance of training (fidelity information).
         This method should be called only when the abstraction level is "circuit".
@@ -495,7 +498,7 @@ class BaseQuantumEnvironment(ABC, Env):
     def simulate_pulse_circuit(
         self,
         qc: QuantumCircuit,
-        params: Optional[np.array] = None,
+        params: Optional[np.ndarray] = None,
         update_env_history: bool = True,
     ) -> List[float]:
         """
@@ -702,7 +705,7 @@ class BaseQuantumEnvironment(ABC, Env):
         """
         raise NotImplementedError("Gate calibration not implemented for this environment")
 
-    def modify_environment_params(self, **kwargs):
+    def set_env_params(self, **kwargs):
         """
         Modify environment parameters (can be overridden by subclasses to modify specific parameters)
         """
@@ -725,11 +728,7 @@ class BaseQuantumEnvironment(ABC, Env):
     @backend.setter
     def backend(self, backend: BackendV2):
         self.config.backend = backend
-        self._estimator, self._sampler = retrieve_primitives(
-            self.config.backend,
-            self.config.backend_config,
-            self.config.backend_config.as_dict().get("primitive_options", None),
-        )
+        self._estimator, self._sampler = retrieve_primitives(self.config.backend_config)
 
     @property
     def estimator(self) -> BaseEstimatorV2:
@@ -882,6 +881,13 @@ class BaseQuantumEnvironment(ABC, Env):
                     "arg max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "arg max circuit fidelity": np.argmax(self.fidelity_history),
                     "optimal action": self.optimal_action,
+                    "n_reps": self.n_reps,
+                    "n_shots": self.n_shots,
+                    "sampling_paulis": self.sampling_paulis,
+                    "batch_size": self.batch_size,
+                    "c_factor": self.c_factor,
+                    "reward_method": self.config.reward_method,
+                    "circuit_choice": self.circuit_choice,
                 }
             else:
                 info = {
@@ -890,6 +896,13 @@ class BaseQuantumEnvironment(ABC, Env):
                     "max return": np.max(np.mean(self.reward_history, axis=1)),
                     "arg_max return": np.argmax(np.mean(self.reward_history, axis=1)),
                     "optimal action": self.optimal_action,
+                    "circuit_choice": self.circuit_choice,
+                    "n_reps": self.n_reps,
+                    "n_shots": self.n_shots,
+                    "sampling_paulis": self.sampling_paulis,
+                    "batch_size": self.batch_size,
+                    "c_factor": self.c_factor,
+                    "reward_method": self.config.reward_method,
                 }
         else:
             info = {
@@ -956,6 +969,18 @@ class BaseQuantumEnvironment(ABC, Env):
         :return: Number of repetitions
         """
         return self.config.execution_config.current_n_reps
+
+    @n_reps.setter
+    def n_reps(self, n_reps: int):
+        if n_reps < 1:
+            raise ValueError("n_reps must be at least 1")
+        n_reps_list = list(self.config.execution_config.n_reps)
+        if n_reps in n_reps_list:
+            self.config.execution_config.n_reps_index = n_reps_list.index(n_reps)
+        else:
+            n_reps_list.append(n_reps)
+            self.config.execution_config.n_reps = n_reps_list
+            self.config.execution_config.n_reps_index = len(n_reps_list) - 1
 
     @property
     def n_shots(self) -> int:

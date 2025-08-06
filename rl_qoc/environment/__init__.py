@@ -1,7 +1,6 @@
 from .configuration import (
     QiskitConfig,
     DynamicsConfig,
-    QiskitRuntimeConfig,
     BackendConfig,
     ExecutionConfig,
     QEnvConfig,
