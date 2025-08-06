@@ -17,8 +17,8 @@ def apply_qc(qc:QuantumCircuit, params, qreg):
 
 action_space = Box(-np.pi, np.pi, shape=(1,))
 backend_config = QiskitConfig(apply_qc)
-exec = ExecutionConfig(sampling_paulis=5000, n_shots=1000, batch_size=1, n_reps=list(range(1, 30)),
-                       dfe_precision=None, seed=seed,
+exec = ExecutionConfig(sampling_paulis=10000, n_shots=1000, batch_size=1, n_reps=list(range(1, 30)),
+                       dfe_precision=(0.01, 0.01), seed=seed,
                        c_factor=1)
 reward = ChannelReward()
 q_env_config = QEnvConfig(target, backend_config, action_space, reward=reward,

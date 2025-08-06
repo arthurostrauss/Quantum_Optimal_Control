@@ -113,6 +113,8 @@ class ChannelReward(Reward):
         c_factor = execution_config.c_factor
 
         Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
+        if Chi is None:
+            raise ValueError("Chi is not computed for more than 3 qubits")
         cutoff = 1e-4  # Cutoff for negligible probabilities
         non_zero_indices = np.nonzero(np.abs(Chi) > cutoff)[0]
         # Remove index 0 from non_zero_indices as it corresponds to the identity Pauli
@@ -124,8 +126,8 @@ class ChannelReward(Reward):
         basis = pauli_basis(num_qubits=n_qubits)
         basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
-        # id_coeff = c_factor * (Chi[0] / (dim**2))  # Coefficient for the identity Pauli
-        id_coeff = 0
+        id_coeff = c_factor * (Chi[0]/dim**2)  # Coefficient for the identity Pauli
+        # id_coeff = 0
         non_zero_indices = non_zero_indices[sorted_indices]
         pair_indices = [
             np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices
@@ -140,13 +142,7 @@ class ChannelReward(Reward):
             }
             for i, pair in enumerate(pauli_pairs)
         }
-        Chi_dict[(Pauli("I"*n_qubits), Pauli("I"*n_qubits))] = {
-            "chi": Chi[0],
-            "indices": (0, 0),
-            "index": 0,
-        }
-        grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs[1:])
-        grouped_pauli_pairs.append((PauliList(Pauli("I"*n_qubits)), PauliList(Pauli("I"*n_qubits))))
+        grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
 
         grouped_chi = [
             np.array(
@@ -163,6 +159,7 @@ class ChannelReward(Reward):
 
         if dfe_precision is not None:
             # DFE precision guarantee, ϵ additive error, δ failure probability
+            print("DFE precision guarantee")
             eps, delta = dfe_precision
             pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
         else:
@@ -201,14 +198,15 @@ class ChannelReward(Reward):
             pauli_rep = Pauli(
                 (np.logical_or.reduce(prep_group.z), np.logical_or.reduce(prep_group.x))
             )
-            prep_label = [pauli.to_label() for pauli in prep_group]
+            prep_labels = [pauli.to_label() for pauli in prep_group]
             if dfe_precision is None:
                 # Number of shots per Pauli eigenstate (divided equally)
                 dedicated_shots = counts_input_states * n_shots
-            else:
+            else: # DFE precision guarantee
                 dedicated_shots = 2 * np.log(2 / delta) / (pauli_sampling * eps**2)
                 dedicated_shots *= np.sum(grouped_chi[sampled_group_indices[g]]) ** 2
-                dedicated_shots /= np.sum(grouped_chi[sampled_group_indices[g]] ** 2) ** 2
+                dedicated_shots /= np.sum(grouped_chi[sampled_group_indices[g]] ** 2) ** 2 
+                dedicated_shots *= counts_input_states # Convert into an array for each sampled input state
 
             for pure_eig_state, shots in zip(selected_input_states, dedicated_shots):
                 # Convert input state to Pauli6 basis:
@@ -225,7 +223,7 @@ class ChannelReward(Reward):
                             if term != "I"
                         ]
                     )
-                    for label in prep_label
+                    for label in prep_labels
                 ]
 
                 prep_indices = pauli_input_to_indices(pauli_rep, inputs)
@@ -300,7 +298,7 @@ class ChannelReward(Reward):
         dim = 2**reward_data.num_qubits
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        # reward *= (dim**2 - 1) / dim**2
+        reward *= (dim**2 - 1) / dim**2
         reward /= reward_data.pauli_sampling
         reward += reward_data.id_coeff
 
