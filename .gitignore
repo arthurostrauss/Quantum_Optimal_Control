@@ -146,3 +146,17 @@ pulse_level/qua/quam_state_ref/
 .vscode/settings.json
 
 .cursor/
+
+profile_results_with_startup.txt
+
+profile_results.dat
+
+profile.dat
+
+pulse_level/qua/wandb/
+
+pulse_level/qua/sync_hook_iqcc/x_cal/agent_config.yaml
+
+pulse_level/qua/sync_hook_iqcc/x_cal/sync_hook.py
+
+pulse_level/qua/agent_config.yaml
