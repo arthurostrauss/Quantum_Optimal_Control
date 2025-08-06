@@ -125,9 +125,8 @@ class ChannelReward(Reward):
         non_zero_indices = np.nonzero(np.abs(Chi) > cutoff)[0]
         # Remove index 0 from non_zero_indices as it corresponds to the identity Pauli
         non_zero_indices = non_zero_indices[non_zero_indices != 0]
-        sorted_indices = np.argsort(np.abs(Chi[non_zero_indices]))[
-            ::-1
-        ]  # Sort indices by Chi value
+        # Sort indices by Chi value (descending order)
+        sorted_indices = np.argsort(np.abs(Chi[non_zero_indices]))[::-1]
 
         basis = pauli_basis(num_qubits=n_qubits)
         basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
@@ -149,7 +148,6 @@ class ChannelReward(Reward):
             for i, pair in enumerate(pauli_pairs)
         }
         grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
-
         grouped_chi = [
             np.array(
                 [Chi_dict[(pauli_in, pauli_obs)]["chi"] for pauli_in, pauli_obs in zip(*group)]
@@ -165,7 +163,7 @@ class ChannelReward(Reward):
 
         if dfe_precision is not None:
             # DFE precision guarantee, ϵ additive error, δ failure probability
-            print("DFE precision guarantee")
+            print("DFE precision guarantee", dfe_precision)
             eps, delta = dfe_precision
             pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
         else:

@@ -44,7 +44,7 @@ from ..helpers.circuit_utils import (
 import warnings
 
 
-def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Gate):
+def _calculate_chi_target(target: DensityMatrix | Operator | QuantumCircuit | Gate) -> np.ndarray:
     """
     Calculate characteristic function for the given target. Based on DFE scheme
     :param target: Density matrix of the target state or Operator of the target gate
