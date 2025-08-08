@@ -865,3 +865,18 @@ class GateTarget(BaseTarget):
 
 
 Target = Union[StateTarget, GateTarget]
+
+
+class BosonicTarget(BaseTarget):
+    """
+    Class to represent a target state for a bosonic system
+    """
+
+    def __init__(
+        self,
+        state: DensityMatrix | Statevector | np.ndarray,
+        physical_qubits: Optional[Sequence[int]] = None,
+    ):
+        super().__init__(physical_qubits=physical_qubits)
+
+
