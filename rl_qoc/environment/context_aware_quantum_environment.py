@@ -222,6 +222,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return obs, reward, terminated, False, self._get_info()
 
     def _get_obs(self) -> ObsType:
+        """
+        Return the observation of the environment.
+        This method should be overridden by the subclass.
+        """
         return np.zeros(self.observation_space.shape, dtype=np.float32)
 
     def compute_benchmarks(
@@ -351,7 +355,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         Set the circuit context for the environment.
         """
         if "circuit_choice" in kwargs:
-            self.circuit_choice = kwargs["circuit_choice"]
+            self.circuit_choice = kwargs.pop("circuit_choice")
         if "parameters" in kwargs:
             assert isinstance(self.config.target, GateTarget), "Target must be a gate target"
             assert isinstance(kwargs["parameters"], dict), "Parameters must be a dictionary"
@@ -361,7 +365,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 or p in [p_.name for p_ in self.config.target.circuit.parameters]
                 for p in kwargs["parameters"]
             ), "Parameters must be in the circuit parameters"
-            self.config.target.bind_parameters(kwargs["parameters"])
+            self.config.target.bind_parameters(kwargs.pop("parameters"))
 
         super().set_env_params(**kwargs)
 

@@ -145,6 +145,10 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @abstractmethod
     def _get_obs(self):
+        """
+        Return the observation of the environment.
+        This method should be overridden by the subclass.
+        """
         pass
 
     @abstractmethod
