@@ -13,7 +13,7 @@ from .environment.quantumenvironment import QuantumEnvironment
 from .environment.context_aware_quantum_environment import (
     ContextAwareQuantumEnvironment,
 )
-from .environment.custom_wrappers import RescaleAndClipAction
+from .environment.wrappers.custom_wrappers import RescaleAndClipAction
 from .agent import Agent, ActorNetwork, CriticNetwork, CustomPPO, PPOConfig
 from .hpo.hpo_config import HPOConfig
 from .hpo.hyperparameter_optimization import HyperparameterOptimizer

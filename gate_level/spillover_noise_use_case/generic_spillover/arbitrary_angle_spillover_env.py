@@ -1,6 +1,6 @@
 from typing import Optional, Dict, Any, List, Sequence, Literal
 
-from gymnasium.spaces import Box
+from gymnasium.spaces import Box, Dict
 from qiskit import QuantumCircuit
 from qiskit.transpiler import Layout
 
@@ -27,22 +27,22 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
     def __init__(
         self,
         q_env_config: QEnvConfig,
-        unbound_circuit_context: QuantumCircuit,
         gamma_matrix: np.ndarray,
     ):
         """
         Initialize the environment
         """
         self.gamma_matrix = gamma_matrix
-        self.circuit_parameters = unbound_circuit_context.parameters
 
         super().__init__(q_env_config)
+        if not isinstance(self.target, GateTarget):
+            raise ValueError("Target must be a GateTarget")
+        if len(self.target.circuits) > 1:
+            raise ValueError("Target must have only one circuit")
+        self.circuit_parameters = self.target.circuit.parameters
         self._rotation_angles_rng = np.random.default_rng(self.np_random.integers(2**32))
-        self.observation_space = Box(
-            low=np.array([0.0] * len(self.circuit_parameters)),
-            high=np.array([2 * np.pi] * len(self.circuit_parameters)),
-            dtype=np.float32,
-        )
+        self.observation_space = Dict({p.name: Box(low=-np.pi, high=np.pi, shape=(1,)) for p in self.circuit_parameters})
+
 
     # def define_target_and_circuits(self):
     #     """
@@ -113,12 +113,7 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         Get the observation
         :return: Observation
         """
-        phi = self._rotation_angles_rng.uniform(
-            0,
-            2 * np.pi,
-            self.target.circuit.num_qubits,
-        )
-        return phi
+        return {p.name: self._rotation_angles_rng.uniform(0, 2 * np.pi) for p in self.circuit_parameters}
 
     def _get_info(self) -> Any:
         return {}
