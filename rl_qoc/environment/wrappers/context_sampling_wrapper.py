@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from ..context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from gymnasium.wrappers import RescaleObservation
 from gymnasium.spaces import Box, Dict as DictSpace
+from abc import ABC, abstractmethod
 
 @dataclass
 class ContextSamplingWrapperConfig:
@@ -21,8 +22,22 @@ class ContextSamplingWrapperConfig:
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "ContextSamplingWrapperConfig":
         return cls(**config_dict)
+    
+@dataclass
+class SpilloverConfig:
+    spillover_qubits: list
+    target_subsystem: list
+    discrete_history_length: int
+    
 
-class ContextSamplingWrapper(gym.Wrapper):
+
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "SpilloverConfig":
+        return cls(**config_dict)
+
+
+class ContextSamplingWrapper(gym.Wrapper, ABC):
     """
     A Gymnasium wrapper that implements reward-guided context sampling.
 
@@ -48,7 +63,6 @@ class ContextSamplingWrapper(gym.Wrapper):
 
         # State tracking
         self.current_context = None
-        self.current_mean_action = None
         self.total_updates_for_annealing = None  # Set by the PPO agent
 
         if not isinstance(self.observation_space, DictSpace):
@@ -59,14 +73,13 @@ class ContextSamplingWrapper(gym.Wrapper):
 
     @property
     def observation_space(self) -> DictSpace:
+        """
+        Return the observation space of the environment.
+        """
         return super().observation_space
 
-    def set_mean_action(self, mean_action: np.ndarray):
-        """Set the mean action for the current step, used for buffer storage."""
-        self.current_mean_action = mean_action
-
     def _add_to_buffer(
-        self, context: np.ndarray, reward: float, mean_action: np.ndarray
+        self, context:Dict[str, Any], reward: float, mean_action: np.ndarray
     ):
         """Adds context, reward, and action to buffers with eviction logic."""
         if context is None or mean_action is None:
@@ -89,7 +102,38 @@ class ContextSamplingWrapper(gym.Wrapper):
             self.context_rewards.pop(idx_to_remove)
             self.mean_action_buffer.pop(idx_to_remove)
 
-    def _sample_context(self) -> Dict[str, Dict[str, np.ndarray | Any]]:
+    @abstractmethod
+    def _sample_context(self) -> Dict[str, Any]:
+        """Samples a context for the environment to reset to."""
+        pass
+
+    def reset(self, **kwargs):
+        """Resets the environment with a sampled context."""
+        # Sample a new context and store it for the upcoming episode
+        self.current_context = self._sample_context()
+
+        # Reset the underlying environment, passing the specific angles
+        return self.env.reset(options=self.current_context)
+
+    def step(self, action):
+        """Takes a step and logs the result to the context buffer."""
+        next_obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # The reward is of shape (batch_size, 1), we take the mean
+        mean_reward = np.mean(reward)
+
+        # Add the experience from this step to the buffer
+        self._add_to_buffer(self.current_context), mean_reward, self.env.mean_action)
+
+        # If the episode ends, clear the context. A new one will be sampled on reset.
+        if terminated or truncated:
+            self.current_context = None
+
+        return next_obs, reward, terminated, truncated, info
+
+class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
+
+    def _sample_context(self) -> Dict[str, Any]:
         """Samples a context for the environment to reset to."""
         is_warmup = self.env.unwrapped.step_tracker <= self.config.num_warmup_updates
 
@@ -128,44 +172,19 @@ class ContextSamplingWrapper(gym.Wrapper):
             noisy_context = context + noise
 
             return {
-                "parameters": np.clip(
-                    noisy_context, self.observation_space.low, self.observation_space.high
-                )
+                "parameters": {key: np.clip(
+                    noisy_context[i], obs_space.low, obs_space.high
+                ) for i, (key, obs_space) in enumerate(self.observation_space.items())}
             }
         else:
             # Random exploration
             return {
-                "parameters": self.np_random.uniform(
-                self.observation_space.low,
-                self.observation_space.high,
-                self.observation_space.shape,
-            )}
-
-    def reset(self, **kwargs):
-        """Resets the environment with a sampled context."""
-        # Sample a new context and store it for the upcoming episode
-        self.current_context = self._sample_context()
-
-
-        # Reset the underlying environment, passing the specific angles
-        return self.env.reset(options=self.current_context)
-
-    def step(self, action):
-        """Takes a step and logs the result to the context buffer."""
-        next_obs, reward, terminated, truncated, info = self.env.step(action)
-
-        # The reward may be a vector for parallel envs; we take the mean
-        mean_reward = np.mean(reward)
-
-        # Add the experience from this step to the buffer
-        self._add_to_buffer(self.current_context, mean_reward, self.current_mean_action)
-
-        # If the episode ends, clear the context. A new one will be sampled on reset.
-        if terminated or truncated:
-            self.current_context = None
-
-        return next_obs, reward, terminated, truncated, info
-
+                "parameters": {key: self.np_random.uniform(
+                obs_space.low,
+                obs_space.high,
+                obs_space.shape,
+            ) for key, obs_space in self.observation_space.items()}}
+        
     # --- Plotting functions that depend on the buffer ---
     def plot_buffer_reward_distribution(self, **kwargs):
         if not self.context_rewards:
