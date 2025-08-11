@@ -144,6 +144,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self._optimal_actions = [
             np.zeros(self.config.n_actions) for _ in range(len(self.target.circuits))
         ]
+        
+        self._pm = [PassManager(
+            CustomGateReplacementPass(
+                InstructionReplacement(self.target.target_instructions[i],
+                    self.parametrized_circuit_func,
+                    self.parameters[i],
+                    self._func_args,
+                )
+            )
+        )
+            for i in range(len(self.target.circuits))
+        ]
         self.circuits = self.define_circuits()
 
     def define_circuits(self) -> list[QuantumCircuit]:
@@ -156,19 +168,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         circuits = []
         for i, circ in enumerate(self.target.circuits):
-            instruction_replacement = InstructionReplacement(
-                self.target.target_instructions[i],
-                self.parametrized_circuit_func,
-                self.parameters[i],
-                self._func_args,
-            )
-
-            pm = PassManager(
-                CustomGateReplacementPass(
-                    instruction_replacement,
-                )
-            )
-            custom_circ = pm.run(circ)
+            custom_circ = self._pm[i].run(circ)
             custom_circ.metadata["baseline_circuit"] = circ.copy(f"baseline_circ_{circ.name}")
             circuits.append(custom_circ)
 
@@ -366,6 +366,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 for p in kwargs["parameters"]
             ), "Parameters must be in the circuit parameters"
             self.config.target.bind_parameters(kwargs.pop("parameters"))
+            self.circuits = self.define_circuits()
 
         super().set_env_params(**kwargs)
 
