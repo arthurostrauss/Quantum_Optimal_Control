@@ -115,7 +115,7 @@ def rescale_and_clip_wrapper(
     i = declare(int)
     gradient_array = (new_box.high - new_box.low) / (action_space.high - action_space.low)
     intercept_array = new_box.low - gradient_array * action_space.low
-    gradient = declare(fixed, value=gradient_array.tolist())
+    gradient_inv = declare(fixed, value=(1./gradient_array).tolist())
     intercept = declare(fixed, value=intercept_array.tolist())
     lower_bound = declare(fixed, value=action_space.low.tolist())
     upper_bound = declare(fixed, value=action_space.high.tolist())
@@ -126,7 +126,7 @@ def rescale_and_clip_wrapper(
         action_list = action
     with for_(i, 0, i < action_list[0].length(), i + 1):
         for action_ in action_list:
-            assign(action_[i], (action_[i] - intercept[i]) / gradient[i])
+            assign(action_[i], (action_[i] - intercept[i]) * gradient_inv[i])
             clip_qua(action_[i], lower_bound[i], upper_bound[i])
     return action_list
 
