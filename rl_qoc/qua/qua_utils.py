@@ -1,11 +1,7 @@
 from typing import List, Union, Sequence, Optional, Tuple
 
-from qiskit.circuit import QuantumCircuit
-from qiskit.circuit.parametervector import (
-    ParameterVectorElement,
-    Parameter,
-    ParameterVector,
-)
+from qiskit.circuit import QuantumCircuit, Parameter
+from qiskit.circuit.parametervector import ParameterVectorElement
 
 from qm.qua import declare, assign, while_, if_, fixed, Cast, Util, for_, Random
 
