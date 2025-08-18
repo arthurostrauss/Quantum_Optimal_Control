@@ -75,7 +75,7 @@ pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
 pauli_str = observable_decomp.paulis
 observables = [Pauli(str).to_matrix() for str in pauli_str]
 
-error = 0.5  # Set the error tolerance for the shadow bound state
+error = 0.25  # Set the error tolerance for the shadow bound state
 print("Density Matrix of target state: ", target_choi_dm)
 shadow_size, partition, no_observables = shadow_bound_state(error, observables, pauli_coeff)
 print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition, no_observables)

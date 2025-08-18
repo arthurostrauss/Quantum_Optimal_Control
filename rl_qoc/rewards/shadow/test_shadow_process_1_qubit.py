@@ -85,7 +85,7 @@ reward_data = reward.get_reward_data(env.circuit, params, gate_target, env_confi
 # print(reward_data[1].pub.parameter_values)
 
 reward_array = reward.get_reward_with_primitive_process(reward_data, env.sampler, gate_target)
-print("Params:", params)
+#print("Params:", params)
 print("Rewards:", reward_array)
 """
 binded_circuits = [env.circuit.assign_parameters(p) for p in params]

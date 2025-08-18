@@ -192,7 +192,7 @@ class ShadowReward(Reward):
                         total_data_list.append([unique_unitary, bitstrings[j]])   #repeat counts[j] times for every individual b (measurement outcome)
        
 
-        """
+        
         # FOR estimate_shadow_observable AND estimate_shadow_observable_v2
         observable_decomp = SparsePauliOp.from_operator(Operator(target.dm))
         partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
@@ -215,12 +215,12 @@ class ShadowReward(Reward):
             shadow = (b_list, U_list)
         
             print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            exp_vals = [estimate_shadow_observable_v2(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
+            exp_vals = [estimate_shadow_observable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
             reward_i = np.dot(pauli_coeff, exp_vals)
             assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
             reward[i] = reward_i.real
             print("Reward batch ", i, " is ", reward_i.real)
-            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            
 
         """
         M = 1
@@ -239,9 +239,15 @@ class ShadowReward(Reward):
             assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
             reward[i] = reward_i.real
             print("Reward batch ", i, " is ", reward_i.real)
-            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            """
         return reward
     
+
+
+
+
+
+
 
     def get_reward_with_primitive_process(
         self,
@@ -311,6 +317,7 @@ class ShadowReward(Reward):
             b_list = [var[1] for var in data_list]
             sign_list = [var[2] for var in data_list]
             shadow = (b_list, U_list)
+            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             exp_vals = [estimate_shadow_obervable_process(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
             reward_i = np.dot(pauli_coeff, exp_vals)
             assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
@@ -320,6 +327,12 @@ class ShadowReward(Reward):
         return reward
 
 """"""
+
+
+
+
+
+
 def estimate_shadow_observable_v3(shadow, observable, k):
     #not even working yet
     """
@@ -460,32 +473,36 @@ def estimate_shadow_observable(shadow, observable, k):
         )
 
         exp_val = np.zeros(shadow_size // k)
-        
+            
         for n in range(shadow_size // k):
             
-            b = b_lists_k[n]
-            U = obs_lists_k[n]
-            
-            f = []
-
-            
-            for m in range(num_qubits):
-                
-                if P[m] == 3:
-                    f.append(1/3)       #important. if P = I, there is additional Tr(I) = 2 in the sum now. We must compensate by changing to 1/3.
-                elif P[m] == U[m] and b[m] == 0:
-                    f.append(1)
-                elif P[m] == U[m] and b[m] == 1:
-                    f.append(-1)
-                else:
-                    f.append(0)
-            
-            
-            exp_val[n] = (3**num_qubits) * np.prod(np.array(f))
+            exp_val[n] = exp_single(b_lists_k[n], obs_lists_k[n], P)
             
         means.append(np.sum(exp_val)/(shadow_size // k))   
 
     return np.median(means) 
+
+def exp_single(b, U, P):
+    num_qubits = len(P)
+    prod = 1.0
+
+    for m in range(num_qubits):
+        if P[m] == 3:                # I
+            prod *= 1/3
+        elif P[m] != U[m]:           # mismatch → whole term is 0
+            return 0.0
+        else:                        # match and P != I
+            prod *= 1.0 if b[m] == 0 else -1.0
+
+    return (3.0 ** num_qubits) * prod
+
+
+
+
+
+
+
+
 
 
 
@@ -524,7 +541,11 @@ def estimate_shadow_obervable_process(shadow, observable, k):
         exp_val = np.zeros(shadow_size // k)
         
         for n in range(shadow_size // k):
-            
+
+            exp_val[n] = exp_single_process(b_lists_k[n], obs_lists_k[n], P)
+
+            """
+            #outdated
             b = b_lists_k[n]
             U = obs_lists_k[n]
             
@@ -557,14 +578,43 @@ def estimate_shadow_obervable_process(shadow, observable, k):
                     f.append(-1)
                 else:
                     f.append(0)
+
+            exp_val[n] = (3**num_qubits) * np.prod(np.array(f)) #* (-1)**count_negative_y
+
+            """
+
             
             # add a correction for transpose part - to integrate into code if necessary
             # b_in  = b[:num_qubits//2]
             # count_negative_y = np.sum(b_in == 1)
 
-            exp_val[n] = (3**num_qubits) * np.prod(np.array(f)) #* (-1)**count_negative_y
             
         means.append(np.sum(exp_val)/(shadow_size // k))   
     #print(means)
 
     return np.median(means) 
+
+
+def exp_single_process(b, U, P):
+    num_qubits = len(P)
+    prod = 1.0
+
+    for m in range(num_qubits//2):
+        if P[m] == 3:                # I
+            prod *= 1/3
+        elif P[m] != U[m]:           # mismatch → whole term is 0
+            return 0.0
+        elif U[m] ==1:               # account for 
+            prod *= -.0 if b[m] == 0 else 1.0
+        else:                        # match and P != I
+            prod *= 1.0 if b[m] == 0 else -1.0
+
+    for m in range(num_qubits//2, num_qubits):
+        if P[m] == 3:                # I
+            prod *= 1/3
+        elif P[m] != U[m]:           # mismatch → whole term is 0
+            return 0.0
+        else:                        # match and P != I
+            prod *= 1.0 if b[m] == 0 else -1.0
+
+    return (3.0 ** num_qubits) * prod
