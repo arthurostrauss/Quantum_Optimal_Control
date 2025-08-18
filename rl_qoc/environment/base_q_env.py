@@ -1182,9 +1182,11 @@ class BaseQuantumEnvironment(ABC, Env):
             }
         )
 
-    def update_env_history(self, qc, total_shots):
+    def update_env_history(self, qc, total_shots, hardware_runtime=None):
         self._total_shots.append(total_shots)
-        if self.backend_info.instruction_durations is not None:
+        if hardware_runtime is not None:
+            self._hardware_runtime.append(hardware_runtime)
+        elif self.backend_info.instruction_durations is not None:
             self._hardware_runtime.append(
                 get_hardware_runtime_single_circuit(
                     qc,

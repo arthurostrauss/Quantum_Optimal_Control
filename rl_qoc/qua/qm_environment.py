@@ -18,6 +18,7 @@ from qiskit_qm_provider import (
     QMBackend,
 )
 from ..rewards import CAFERewardDataList, ChannelRewardDataList, StateRewardDataList
+import time
 
 # @callable_from_qua
 # def qua_print(*args):
@@ -97,6 +98,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             raise RuntimeError(
                 "The QUA program has not been started yet. Call start_program() first."
             )
+        # Time the step
+        start_time = time.time()
 
         push_args = {
             "job": self.qm_job,
@@ -171,7 +174,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         # reward = np.clip(reward, 0.0, 1.0 - 1e-6)
         self.reward_history.append(reward)
-        self.update_env_history(self.real_time_circuit, reward_data.total_shots)
+        self.update_env_history(self.real_time_circuit, reward_data.total_shots, hardware_runtime=time.time() - start_time)
         # reward = -np.log10(1.0 - reward)  # Convert to negative log10 scale
 
         return self._get_obs(), reward, True, False, self._get_info()
