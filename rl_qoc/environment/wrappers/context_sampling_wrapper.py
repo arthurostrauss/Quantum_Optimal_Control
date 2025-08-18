@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from matplotlib import pyplot as plt
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 from ..context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from gymnasium.wrappers import RescaleObservation
@@ -25,12 +25,10 @@ class ContextSamplingWrapperConfig:
     
 @dataclass
 class SpilloverConfig:
-    spillover_qubits: list
-    target_subsystem: list
-    discrete_history_length: int
-    
-
-
+    gamma_matrix: np.ndarray
+    spillover_qubits: List[int]
+    target_subsystem: Tuple[int, int]
+    discrete_history_length: int = 1
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "SpilloverConfig":
@@ -49,7 +47,7 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
 
     def __init__(
         self,
-        env: ContextAwareQuantumEnvironment | gym.Wrapper,
+        env: ContextAwareQuantumEnvironment,
         config: ContextSamplingWrapperConfig | Dict[str, Any],
     ):
         super().__init__(env)
@@ -103,14 +101,20 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
             self.mean_action_buffer.pop(idx_to_remove)
 
     @abstractmethod
-    def _sample_context(self) -> Dict[str, Any]:
-        """Samples a context for the environment to reset to."""
+    def sample_context(self) -> Dict[str, Any]:
+        """Samples a context for the environment to reset to.
+        This method should be overridden by the subclass.
+        The output should be a dictionary with keys corresponding to environment parameters
+        that can be updated at each reset. The keys should be environment attributes, or it can also be "circuit_choice"
+        if there are multiple circuit choices in the Target of the environment. There can also be a "parameters" key,
+        which is a dictionary of Qiskit Parameters that can be bound to the parametrized circuit context.
+        """
         pass
 
     def reset(self, **kwargs):
         """Resets the environment with a sampled context."""
         # Sample a new context and store it for the upcoming episode
-        self.current_context = self._sample_context()
+        self.current_context = self.sample_context()
 
         # Reset the underlying environment, passing the specific angles
         return self.env.reset(options=self.current_context)
@@ -123,7 +127,7 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
         mean_reward = np.mean(reward)
 
         # Add the experience from this step to the buffer
-        self._add_to_buffer(self.current_context), mean_reward, self.env.mean_action)
+        self._add_to_buffer(self.current_context, mean_reward, self.env.mean_action)
 
         # If the episode ends, clear the context. A new one will be sampled on reset.
         if terminated or truncated:
@@ -131,11 +135,25 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
 
         return next_obs, reward, terminated, truncated, info
 
-class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
+def obs_dict_to_array(obs_dict: Dict[str, Any]) -> np.ndarray:
+    """
+    Convert a dictionary of observations to a numpy array.
+    """
+    return np.array([obs_dict[key] for key in obs_dict.keys()])
 
-    def _sample_context(self) -> Dict[str, Any]:
+class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
+    """
+    A wrapper for environments that sample contexts based on spillover noise
+    """
+    def __init__(self, env: ContextAwareQuantumEnvironment,
+                 spillover_config: SpilloverConfig,
+                 context_config: ContextSamplingWrapperConfig | Dict[str, Any] = None):
+        super().__init__(env, context_config)
+        self.spillover_config = SpilloverConfig.from_dict(spillover_config) if isinstance(spillover_config, dict) else spillover_config
+
+    def sample_context(self) -> Dict[str, Any]:
         """Samples a context for the environment to reset to."""
-        is_warmup = self.env.unwrapped.step_tracker <= self.config.num_warmup_updates
+        is_warmup = self.env.step_tracker <= self.config.num_warmup_updates
 
         if is_warmup or len(self.context_buffer) == 0:
             return {
@@ -153,7 +171,7 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
             prob_weights /= np.sum(prob_weights)
 
             idx = self.np_random.choice(len(self.context_buffer), p=prob_weights)
-            context = self.context_buffer[idx]
+            context = obs_dict_to_array(self.context_buffer[idx]["parameters"])
 
             # Anneal noise added to the sampled context
             if self.config.anneal_noise and self.total_updates_for_annealing is not None:
