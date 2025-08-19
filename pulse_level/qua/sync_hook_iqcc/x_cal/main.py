@@ -1,9 +1,10 @@
+import base64
 import numpy as np
 from qiskit.circuit import QuantumCircuit, QuantumRegister, Parameter, Gate
 from typing import List
 from gymnasium.spaces import Box
 from rl_qoc.qua import QMEnvironment, QMConfig
-from quam_libs.components import QuAM, Transmon
+from iqcc_calibration_tools.quam_config.components import Quam, Transmon
 from qiskit_qm_provider import (
     FluxTunableTransmonBackend,
     QMInstructionProperties,
@@ -13,6 +14,7 @@ from qiskit_qm_provider import (
 from qiskit_qm_provider.backend.backend_utils import add_basic_macros_to_machine
 from rl_qoc.agent.ppo_config import (
     TotalUpdates,
+    TrainingConfig,
 )
 from rl_qoc import (
     RescaleAndClipAction,
@@ -33,12 +35,14 @@ import json
 import os
 from pathlib import Path
 
+from rl_qoc.qua.qua_ppo import CustomQMPPO
+
 # Set your quantum computer backend
 path = Path.home() / "iqcc_token.json"
 with open(path, "r") as f:
     iqcc_config = json.load(f)
 
-backend_name = "arbel"
+backend_name = "gilboa"
 iqcc = IQCC_Cloud(quantum_computer_backend=backend_name, api_token=iqcc_config[backend_name])
 
 # Get the latest state and wiring files
@@ -55,7 +59,7 @@ with open(os.path.join(quam_state_folder_path, "wiring.json"), "w") as f:
 with open(os.path.join(quam_state_folder_path, "state.json"), "w") as f:
     json.dump(latest_state.data, f, indent=4)
 
-machine = QuAM.load()
+machine = Quam.load()
 
 add_basic_macros_to_machine(machine)
 backend = FluxTunableTransmonBackend(machine)
@@ -83,11 +87,11 @@ def apply_parametrized_circuit(
 
 
 physical_qubits = (0,)
-target_name = "1"
+target_name = "x"
 
-# target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
-target = StateTarget(state=target_name, physical_qubits=physical_qubits)
-reward = StateReward()
+target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
+# target = StateTarget(state=target_name, physical_qubits=physical_qubits)
+reward =  ChannelReward()
 
 # Action space specification
 param_bounds = [(-1.98, 2.0)]  # Can be any number of bounds
@@ -95,10 +99,10 @@ param_bounds = [(-1.98, 2.0)]  # Can be any number of bounds
 # Environment execution parameters
 seed = 1203  # Master seed to make training reproducible
 batch_size = 32  # Number of actions to evaluate per policy evaluation
-n_shots = 10  # Minimum number of shots per fiducial evaluation
+n_shots = 100  # Minimum number of shots per fiducial evaluation
 pauli_sampling = 10  # Number of fiducials to compute for fidelity estimation (DFE only)
 n_reps = 1  # Number of repetitions of the cycle circuit
-num_updates = TotalUpdates(5)
+num_updates = TotalUpdates(100)
 input_type = InputType.INPUT_STREAM
 
 
@@ -258,8 +262,12 @@ run_data = iqcc.execute(
     prog,
     backend.qm_config,
     terminal_output=True,
-    options={"sync_hook": sync_hook_path, "timeout": 120},
+    options={"sync_hook": sync_hook_path, "timeout": 600, "profiling": False},
 )
+# base64_str = run_data["result"]["__sync_hook"]["cprofile"]
+# binary_data = base64.b64decode(base64_str.encode("utf-8"))
 
+# with open("profile.dat", "wb") as output_file:
+#     output_file.write(binary_data)
 print("Job submitted successfully.")
 print(f"Run data: {run_data}")
