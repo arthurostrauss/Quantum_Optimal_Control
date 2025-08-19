@@ -389,7 +389,7 @@ class CustomPPO:
                     "avg_reward": np.mean(u_env.reward_history, axis=1)[-1].tolist(),
                     "total_shots": int(u_env.reward_data.total_shots),
                 }
-                if u_env.backend_info.instruction_durations is not None:
+                if u_env.hardware_runtime:
                     training_results["hardware_runtime"] = u_env.hardware_runtime[-1]
                 if u_env.do_benchmark():
                     training_results["fidelity_history"] = u_env.fidelity_history[-1]
