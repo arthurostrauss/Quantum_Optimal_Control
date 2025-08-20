@@ -27,12 +27,10 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
     def __init__(
         self,
         q_env_config: QEnvConfig,
-        gamma_matrix: np.ndarray,
     ):
         """
         Initialize the environment
         """
-        self.gamma_matrix = gamma_matrix
 
         super().__init__(q_env_config)
         if not isinstance(self.target, GateTarget):
@@ -41,31 +39,7 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
             raise ValueError("Target must have only one circuit")
         self.circuit_parameters = self.target.circuit.parameters
         self._rotation_angles_rng = np.random.default_rng(self.np_random.integers(2**32))
-        self.observation_space = DictSpace({p.name: Box(low=-np.pi, high=np.pi, shape=(1,)) for p in self.circuit_parameters})
-        
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> tuple[ObsType, dict[str, Any]]:
-        """
-        Reset the environment
-        :param seed: Seed for the environment
-        :param options: Options for the environment
-        :return: Initial observation and info
-        """
-        # Reset the environment
-        obs, info = super().reset(seed=seed, options=options)
-
-        self.backend = noisy_backend(
-            self.target.circuit, self.gamma_matrix, self.config.env_metadata["target_subsystem"]
-        )
-        # Generate the initial observation
-
-        # Return the initial observation and info
-        return obs, {}
+        self.observation_space = DictSpace({p.name: Box(low=0., high=np.pi, shape=(1,)) for p in self.circuit_parameters})
 
     def _get_obs(self):
         """

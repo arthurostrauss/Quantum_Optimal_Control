@@ -1,3 +1,4 @@
+from curses import raw
 import gymnasium as gym
 import numpy as np
 from matplotlib import pyplot as plt
@@ -22,17 +23,6 @@ class ContextSamplingWrapperConfig:
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "ContextSamplingWrapperConfig":
         return cls(**config_dict)
-    
-@dataclass
-class SpilloverConfig:
-    gamma_matrix: np.ndarray
-    spillover_qubits: List[int]
-    target_subsystem: Tuple[int, int]
-    discrete_history_length: int = 1
-
-    @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "SpilloverConfig":
-        return cls(**config_dict)
 
 
 class ContextSamplingWrapper(gym.Wrapper, ABC):
@@ -52,7 +42,7 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
     ):
         super().__init__(env)
         # Store hyperparameters
-        self.config = ContextSamplingWrapperConfig.from_dict(config) if isinstance(config, dict) else  config
+        self.context_config = config if isinstance(config, ContextSamplingWrapperConfig) else ContextSamplingWrapperConfig.from_dict(config)
 
         # Buffers for context sampling logic
         self.context_buffer = []
@@ -61,7 +51,6 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
 
         # State tracking
         self.current_context = None
-        self.total_updates_for_annealing = None  # Set by the PPO agent
 
         if not isinstance(self.observation_space, DictSpace):
             raise ValueError("Observation space must be a Dict space")
@@ -87,10 +76,10 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
         self.context_rewards.append(reward)
         self.mean_action_buffer.append(mean_action)
 
-        if len(self.context_buffer) > self.config.context_buffer_size:
+        if len(self.context_buffer) > self.context_config.context_buffer_size:
             if (
-                self.config.eviction_strategy == "hybrid"
-                and self.np_random.random() < self.config.evict_best_prob
+                self.context_config.eviction_strategy == "hybrid"
+                and self.np_random.random() < self.context_config.evict_best_prob
             ):
                 idx_to_remove = np.argmax(self.context_rewards)  # Evict highest reward
             else:
@@ -111,13 +100,13 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
         """
         pass
 
-    def reset(self, **kwargs):
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         """Resets the environment with a sampled context."""
         # Sample a new context and store it for the upcoming episode
         self.current_context = self.sample_context()
 
         # Reset the underlying environment, passing the specific angles
-        return self.env.reset(options=self.current_context)
+        return self.env.reset(options=self.current_context, seed=seed)
 
     def step(self, action):
         """Takes a step and logs the result to the context buffer."""
@@ -134,235 +123,3 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
             self.current_context = None
 
         return next_obs, reward, terminated, truncated, info
-
-def obs_dict_to_array(obs_dict: Dict[str, Any]) -> np.ndarray:
-    """
-    Convert a dictionary of observations to a numpy array.
-    """
-    return np.array([obs_dict[key] for key in obs_dict.keys()])
-
-class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
-    """
-    A wrapper for environments that sample contexts based on spillover noise
-    """
-    def __init__(self, env: ContextAwareQuantumEnvironment,
-                 spillover_config: SpilloverConfig,
-                 context_config: ContextSamplingWrapperConfig | Dict[str, Any] = None):
-        super().__init__(env, context_config)
-        self.spillover_config = SpilloverConfig.from_dict(spillover_config) if isinstance(spillover_config, dict) else spillover_config
-
-    def sample_context(self) -> Dict[str, Any]:
-        """Samples a context for the environment to reset to."""
-        is_warmup = self.env.step_tracker <= self.config.num_warmup_updates
-
-        if is_warmup or len(self.context_buffer) == 0:
-            return {
-                "parameters": {key: self.np_random.uniform(
-                obs_space.low,
-                obs_space.high,
-                obs_space.shape,
-            ) for key, obs_space in self.observation_space.items()}}
-
-        if self.np_random.random() < self.config.sampling_prob:
-            # Rank-based prioritized replay
-            rewards = np.array(self.context_rewards)
-            ranks = np.argsort(np.argsort(rewards)) + 1  # Ranks from 1 (lowest reward)
-            prob_weights = 1.0 / ranks
-            prob_weights /= np.sum(prob_weights)
-
-            idx = self.np_random.choice(len(self.context_buffer), p=prob_weights)
-            context = obs_dict_to_array(self.context_buffer[idx]["parameters"])
-
-            # Anneal noise added to the sampled context
-            if self.config.anneal_noise and self.total_updates_for_annealing is not None:
-                progress = (self.env.unwrapped.step_tracker - self.config.num_warmup_updates) / (
-                    self.total_updates_for_annealing - self.config.num_warmup_updates
-                )
-                progress = np.clip(progress, 0.0, 1.0)
-                current_noise_scale = (
-                    self.config.initial_noise_scale * (1 - progress)
-                    + self.config.final_noise_scale * progress
-                )
-            else:
-                current_noise_scale = self.config.initial_noise_scale
-
-            noise = self.np_random.normal(0, current_noise_scale, context.shape)
-            noisy_context = context + noise
-
-            return {
-                "parameters": {key: np.clip(
-                    noisy_context[i], obs_space.low, obs_space.high
-                ) for i, (key, obs_space) in enumerate(self.observation_space.items())}
-            }
-        else:
-            # Random exploration
-            return {
-                "parameters": {key: self.np_random.uniform(
-                obs_space.low,
-                obs_space.high,
-                obs_space.shape,
-            ) for key, obs_space in self.observation_space.items()}}
-        
-    # --- Plotting functions that depend on the buffer ---
-    def plot_buffer_reward_distribution(self, **kwargs):
-        if not self.context_rewards:
-            print("No rewards in buffer to plot.")
-            return
-        plt.figure(figsize=(10, 6))
-        plt.hist(
-            self.context_rewards,
-            bins=30,
-            density=True,
-            alpha=0.7,
-            label="Buffer Rewards",
-        )
-        plt.xlabel("Reward")
-        plt.ylabel("Density")
-        plt.title("Distribution of Rewards in Context Buffer")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-
-    def plot_policy_behaviour(
-        self,
-        gamma_matrix: np.ndarray,
-        spillover_qubits: list,
-        target_qubit: int,
-        action_scale: float,
-        filename="policy_behaviour.png",
-    ):
-        """
-        Plots the agent's reward against the optimal action required to
-        counteract spillover noise.
-
-        A robust agent should show a flat reward profile, while a naive
-        agent's reward will decrease as the optimal action magnitude increases.
-        """
-        # if len(self.context_buffer) < 100:
-        #     print("Not enough data in buffer to plot policy behaviour.")
-        #     return
-
-        # 1. Convert buffers to numpy arrays for calculation
-        obs_arr = np.array(self.context_buffer)
-        rewards_arr = np.array(self.context_rewards)
-
-        # 2. Calculate the optimal action based on the provided formula
-        # Assumes the dimensions of obs_arr correspond to the spillover_qubits
-        source_angles = 0.5 * (obs_arr + 1) * np.pi
-        spillover_factors = gamma_matrix[spillover_qubits, target_qubit]
-
-        # Calculate the total spillover angle for each context in the buffer
-        total_spillover_angle = np.sum(
-            source_angles * spillover_factors.reshape(1, -1), axis=-1
-        )
-
-        # The optimal action is the one that perfectly cancels this spillover
-        optimal_action = -total_spillover_angle / action_scale
-
-        # 3. Create the plot
-        plt.style.use("seaborn-v0_8-whitegrid")
-        plt.figure(figsize=(10, 7), dpi=100)
-
-        # Scatter plot of raw data points
-        plt.scatter(
-            optimal_action,
-            rewards_arr,
-            alpha=0.1,
-            label="Raw Data Points",
-            color="royalblue",
-        )
-
-        # Calculate and plot a binned average to show the trend clearly
-        try:
-            bins = np.linspace(optimal_action.min(), optimal_action.max(), 15)
-            bin_indices = np.digitize(optimal_action, bins)
-            binned_rewards_mean = [
-                rewards_arr[bin_indices == i].mean() for i in range(1, len(bins))
-            ]
-            binned_rewards_std = [
-                rewards_arr[bin_indices == i].std() for i in range(1, len(bins))
-            ]
-            bin_centers = (bins[:-1] + bins[1:]) / 2
-
-            plt.errorbar(
-                bin_centers,
-                binned_rewards_mean,
-                yerr=binned_rewards_std,
-                fmt="-o",
-                color="red",
-                markersize=8,
-                capsize=5,
-                linewidth=2.5,
-                label="Binned Average Reward",
-            )
-        except Exception as e:
-            print(f"Could not compute binned average for policy behaviour plot: {e}")
-
-        plt.title("Agent Reward vs. Optimal Corrective Action")
-        plt.xlabel("Optimal Action Magnitude (to counteract spillover)")
-        plt.ylabel("Achieved Reward")
-        plt.legend()
-        plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-        # plt.savefig(f"runs/{self.run_name}/{filename}")
-        plt.show()
-
-    def plot_action_comparison(
-        self,
-        gamma_matrix: np.ndarray,
-        spillover_qubits: list,
-        target_qubit: int,
-        action_scale: float,
-        filename="action_comparison.png",
-    ):
-        """
-        Plots the agent's actual output action against the analytically
-        calculated optimal action.
-        """
-        # if len(self.context_buffer) < 100:
-        #     print("Not enough data in buffer to plot action comparison.")
-        #     return
-
-        # 1. Get data from buffers
-        obs_arr = np.array(self.context_buffer)
-        agent_actions = np.array(self.mean_action_buffer)
-
-        # 2. Calculate the optimal action for each observation
-        source_angles = 0.5 * (obs_arr + 1) * np.pi
-        spillover_factors = gamma_matrix[spillover_qubits, target_qubit]
-        total_spillover_angle = np.sum(
-            source_angles * spillover_factors.reshape(1, -1), axis=-1
-        )
-        optimal_action = -total_spillover_angle / action_scale
-
-        # 3. Create the plot
-        plt.style.use("seaborn-v0_8-whitegrid")
-        plt.figure(figsize=(10, 7), dpi=100)
-
-        plot_action_num = 0 if target_qubit == 2 else 3
-
-        # Plot each dimension of the agent's action
-        for i in range(agent_actions.shape[1]):
-            if i == plot_action_num:
-                plt.scatter(
-                    optimal_action,
-                    agent_actions[:, i],
-                    alpha=0.2,
-                    label=f"Agent Action Dim {i}",
-                )
-
-        # Plot the "perfect" policy line for reference
-        plt.plot(
-            optimal_action,
-            optimal_action,
-            "r--",
-            linewidth=2.5,
-            label="Analytical Optimal (y=x)",
-        )
-
-        plt.title("Agent's Learned Action vs. Optimal Action")
-        plt.xlabel("Optimal Corrective Action (Calculated)")
-        plt.ylabel("Actual Action (From Agent Policy)")
-        plt.legend()
-        plt.grid(True, which="both", linestyle="--")
-        # plt.axis('equal') # Ensures the y=x line is at a 45-degree angle
-        plt.show()

@@ -50,6 +50,7 @@ class CustomPPO:
 
         self.agent_config = agent_config
         self.env = env
+        self.unwrapped_env.total_updates = self.agent_config.num_updates
         self.chkpt_dir = chkpt_dir
         self.chkpt_dir_critic = chkpt_dir_critic
 
@@ -62,7 +63,7 @@ class CustomPPO:
             "total_updates": [],
         }
         for i in range(self.unwrapped_env.n_actions):
-            self._training_results[f"clipped_mean_action_{i}"] = []
+            self._training_results[f"rescaled_mean_action_{i}"] = []
             self._training_results[f"mean_action_{i}"] = []
             self._training_results[f"std_action_{i}"] = []
 
@@ -151,6 +152,9 @@ class CustomPPO:
         """
         if training_config is not None:
             self._training_config = training_config
+            if isinstance(self.training_constraint, TotalUpdates):
+                self.unwrapped_env.total_updates = self.training_constraint.total_updates
+            
         if train_function_settings is not None:
             self._train_function_settings = train_function_settings
 

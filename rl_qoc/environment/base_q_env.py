@@ -114,6 +114,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._fit_function: Optional[Callable] = None
         self._action_to_cycle_reward_function: Optional[Callable] = None
         self._fit_params: Optional[np.ndarray] = None
+        self._total_updates = None
 
         # Call reset of Env class to set seed
         self._seed = training_config.seed
@@ -866,6 +867,20 @@ class BaseQuantumEnvironment(ABC, Env):
             return False
         else:
             return self._episode_tracker % self.benchmark_cycle == 0
+        
+    @property
+    def total_updates(self):
+        """
+        Return the total number of steps planned by the agent
+        """
+        return self._total_updates
+    
+    @total_updates.setter
+    def total_updates(self, total_updates: int):
+        """
+        Set the total number of steps planned by the agent
+        """
+        self._total_updates = total_updates
 
     def _get_info(self) -> Any:
         step = self._episode_tracker
