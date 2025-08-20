@@ -6,6 +6,7 @@ from qm import QuantumMachine, Program
 
 from .circuit_params import CircuitParams
 from ..environment import ContextAwareQuantumEnvironment, QEnvConfig, RescaleAndClipAction
+from ..environment.target import GateTarget
 from .qm_config import QMConfig
 from qm.jobs.running_qm_job import RunningQmJob
 from typing import List, Optional, Union
@@ -67,7 +68,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             skip_transpilation=True,
         )
         self.circuit_params = CircuitParams.from_circuit(
-            self.real_time_circuit, self.input_type, self.config
+            self.real_time_circuit, self.input_type, self.config,
+            list(self.target.context_parameters.keys()) if isinstance(self.target, GateTarget) else ()
         )
 
         if (
