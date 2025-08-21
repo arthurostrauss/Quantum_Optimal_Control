@@ -46,7 +46,7 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
         Get the observation
         :return: Observation
         """
-        return {p.name: self._rotation_angles_rng.uniform(0, 2 * np.pi) for p in self.circuit_parameters}
+        return {p.name: val for p, val in self.target.context_parameters.items()}
 
     def _get_info(self) -> Any:
         return {}

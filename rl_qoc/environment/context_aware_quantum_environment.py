@@ -366,6 +366,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 for p in kwargs["parameters"]
             ), "Parameters must be in the circuit parameters"
             self.config.target.bind_parameters(kwargs.pop("parameters"))
+            self.circuits = self.define_circuits()
 
         super().set_env_params(**kwargs)
 
