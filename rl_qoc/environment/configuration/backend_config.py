@@ -48,10 +48,6 @@ class BackendConfig(ABC):
     custom_instruction_durations: Optional[InstructionDurations] = None
     primitive_options: Optional[dict] = None
 
-    def __post_init__(self):
-        if isinstance(self.backend, BackendV2):
-            self.instruction_durations = self.backend.instruction_durations
-
     @property
     @abstractmethod
     def config_type(self):
@@ -72,6 +68,8 @@ class BackendConfig(ABC):
 
     @property
     def instruction_durations(self):
+        if isinstance(self.backend, QiskitBackend) and self.backend.instruction_durations.duration_by_name_qubits:
+            return self.backend.instruction_durations
         return self.custom_instruction_durations
 
 @dataclass
