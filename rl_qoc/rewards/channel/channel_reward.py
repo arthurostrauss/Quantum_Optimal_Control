@@ -107,7 +107,7 @@ class ChannelReward(Reward):
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         n_qubits = target.causal_cone_size
         dim = 2**n_qubits
         nb_states = self.num_eigenstates_per_pauli
@@ -438,7 +438,7 @@ class ChannelReward(Reward):
         if skip_transpilation:
             return qc
 
-        return env_config.backend_info.custom_transpile(
+        return env_config.backend_config.custom_transpile(
             qc,
             optimization_level=1,
             initial_layout=target.layout,
@@ -720,7 +720,7 @@ class ChannelReward(Reward):
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         n_qubits = target.causal_cone_size
         n_reps = execution_config.current_n_reps
         control_flow = execution_config.control_flow_enabled

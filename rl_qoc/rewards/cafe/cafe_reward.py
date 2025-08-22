@@ -76,7 +76,7 @@ class CAFEReward(Reward):
         if not isinstance(target, GateTarget):
             raise ValueError("CAFE reward can only be computed for a target gate")
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
 
         if baseline_circuit is not None:
             circuit_ref = baseline_circuit.copy()
@@ -152,13 +152,13 @@ class CAFEReward(Reward):
             )
 
             # Bind inverse unitary + measurement to run circuit
-            transpiled_circuit = backend_info.custom_transpile(
+            transpiled_circuit: QuantumCircuit = backend_info.custom_transpile(
                 run_qc, initial_layout=layout, scheduling=False
             )
             transpiled_circuit.barrier()
             # Add the inverse unitary and measurement to the circuit
             transpiled_circuit.compose(reverse_unitary_qc, inplace=True)
-            creg = ClassicalRegister("meas", target.causal_cone_size)
+            creg = ClassicalRegister(target.causal_cone_size, "meas")
             transpiled_circuit.add_register(creg)
             transpiled_circuit.measure(target.causal_cone_qubits, creg)
 
@@ -193,7 +193,7 @@ class CAFEReward(Reward):
         self,
         reward_data: CAFERewardDataList,
         primitive: BaseSamplerV2,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Compute the reward based on the input pubs
         """
@@ -247,7 +247,7 @@ class CAFEReward(Reward):
         *args,
     ) -> QuantumCircuit:
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         prep_circuits = [circuits] if isinstance(circuits, QuantumCircuit) else circuits
 
         qubits = [qc.qubits for qc in prep_circuits]

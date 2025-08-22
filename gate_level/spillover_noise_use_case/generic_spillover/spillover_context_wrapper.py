@@ -1,11 +1,14 @@
 from dataclasses import dataclass
 from typing import Tuple, Optional, Dict, Any, List
 import numpy as np
+from qiskit import generate_preset_pass_manager
+from qiskit.transpiler import PassManager
 from rl_qoc.environment.wrappers import ContextSamplingWrapper, ContextSamplingWrapperConfig
 from gymnasium.spaces import Dict as DictSpace, Box
 from rl_qoc.environment.context_aware_quantum_environment import ContextAwareQuantumEnvironment
 import matplotlib.pyplot as plt
-from gate_level.spillover_noise_use_case.generic_spillover.spillover_effect_on_subsystem import noisy_backend
+from gate_level.spillover_noise_use_case.generic_spillover.spillover_effect_on_subsystem import noisy_backend, LocalSpilloverNoiseAerPass, numpy_to_hashable
+from rl_qoc.helpers.transpiler_passes import CausalConePass
 
 def obs_dict_to_array(obs_dict: Dict[str, Any]) -> np.ndarray:
     """
@@ -40,6 +43,9 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
         keys = list(self.observation_space.keys())
         spillover_keys = [keys[i] for i in self.spillover_config.spillover_qubits]
         self.spillover_space = DictSpace({key: self.observation_space[key] for key in spillover_keys})
+        self.custom_passes = [LocalSpilloverNoiseAerPass(numpy_to_hashable(self.spillover_config.gamma_matrix),
+                                                         self.spillover_config.target_subsystem),
+                                                         CausalConePass(self.spillover_config.target_subsystem)]
 
     def sample_context(self) -> Dict[str, Any]:
         """Samples a context for the environment to reset to."""
@@ -100,9 +106,16 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
     
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         obs, info = super().reset(seed=seed, options=options)
-        self.env.set_env_params(backend=noisy_backend(
+        backend = noisy_backend(
             self.env.target.circuit, self.spillover_config.gamma_matrix, self.spillover_config.target_subsystem
-        ))
+        )
+        pm = generate_preset_pass_manager(optimization_level=0, backend=backend)
+        custom_translation_pass = PassManager(self.custom_passes)
+        custom_translation_pass.append(pm.translation.to_flow_controller().passes)
+        pm.translation = custom_translation_pass
+        self.env.set_env_params(backend=backend, 
+                                pass_manager=pm)
+        
         return obs, info
         
     # --- Plotting functions that depend on the buffer ---

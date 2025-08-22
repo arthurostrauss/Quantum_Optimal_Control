@@ -37,7 +37,7 @@ class ORBITReward(Reward):
     def get_reward_data(
         self,
         qc: QuantumCircuit,
-        params: np.array,
+        params: np.ndarray,
         target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
@@ -58,7 +58,7 @@ class ORBITReward(Reward):
         if not isinstance(target, GateTarget):
             raise ValueError("ORBIT reward can only be computed for a target gate")
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         layout = target.layout
         if baseline_circuit is not None:
             circuit_ref = baseline_circuit
@@ -165,7 +165,7 @@ class ORBITReward(Reward):
         self,
         reward_data: ORBITRewardDataList,
         primitive: BaseSamplerV2,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Compute the reward based on the input pubs
         """

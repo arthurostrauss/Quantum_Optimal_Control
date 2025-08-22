@@ -94,7 +94,7 @@ class StateReward(Reward):
             List of pubs related to the reward method
         """
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         input_circuit = qc.copy_empty_like()
 
         prep_circuit = qc
@@ -337,7 +337,7 @@ class StateReward(Reward):
         if skip_transpilation:
             return qc
 
-        return env_config.backend_info.custom_transpile(
+        return env_config.backend_config.custom_transpile(
             qc,
             optimization_level=1,
             initial_layout=target.layout,

@@ -211,7 +211,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         """
         Get the real-time circuit transpiled for QUA execution
         """
-        return self.backend_info.custom_transpile(
+        return self.qm_backend_config.custom_transpile(
             self.real_time_circuit,
             optimization_level=1,
             initial_layout=self.layout,
