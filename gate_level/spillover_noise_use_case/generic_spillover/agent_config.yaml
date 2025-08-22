@@ -1,5 +1,5 @@
 WANDB_CONFIG: 
-    ENABLED: True # Whether to enable Weights & Biases logging
+    ENABLED: False # Whether to enable Weights & Biases logging
     PROJECT: 'GateCalibration' # Weights & Biases project name
     ENTITY: null # Weights & Biases entity name
     API_KEY: null # Weights & Biases API key

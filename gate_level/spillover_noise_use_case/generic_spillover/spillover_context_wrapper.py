@@ -68,7 +68,7 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
             prob_weights /= np.sum(prob_weights)
 
             idx = self.np_random.choice(len(self.context_buffer), p=prob_weights)
-            context = obs_dict_to_array(self.context_buffer[idx]["parameters"])
+            context = self.context_buffer[idx]["parameters"]
 
             # Anneal noise added to the sampled context
             if self.context_config.anneal_noise and self.env.total_updates is not None:
