@@ -103,7 +103,7 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         """Resets the environment with a sampled context."""
         # Sample a new context and store it for the upcoming episode
-        self.current_context = self.sample_context()
+        self.current_context = self.sample_context() if options is None else options
 
         # Reset the underlying environment, passing the specific angles
         return self.env.reset(options=self.current_context, seed=seed)
