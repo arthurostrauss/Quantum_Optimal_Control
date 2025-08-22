@@ -409,6 +409,22 @@ class CAFEReward(Reward):
         config: QEnvConfig,
         **push_args,
     ):
+        """
+        This function is used to compute the reward for the CAFE reward.
+        It is used in the QMEnvironment.step() function.
+
+        Args:
+            reward_data: Reward data to be used to compute the reward (can be used to send inputs to the QUA program and also to post-process measurement outcomes/counts coming out of the QUA program)
+            fetching_index: Index of the first measurement outcome to be fetched in stream processing / DGX Quantum stream
+            fetching_size: Number of measurement outcomes to be fetched
+            circuit_params: Parameters defining the quantum program to be executed, those are entrypoints towards streaming values to control-flow that define the program adaptively (e.g. input state, number of repetitions, observable, etc.)
+            reward: Reward parameter to be used to fetch measurement outcomes from the QUA program and compute the reward
+            config: Environment configuration
+            **push_args: Additional arguments to pass necessary entrypoints to communicate with the OPX (e.g. job, qm, verbosity, etc.)
+
+        Returns:
+            Reward array of shape (batch_size,)
+        """
         from ...qua.qm_config import QMConfig
 
         if not isinstance(config.backend_config, QMConfig):

@@ -48,6 +48,10 @@ class BackendConfig(ABC):
     custom_instruction_durations: Optional[InstructionDurations] = None
     primitive_options: Optional[dict] = None
 
+    def __post_init__(self):
+        if isinstance(self.backend, BackendV2):
+            self.instruction_durations = self.backend.instruction_durations
+
     @property
     @abstractmethod
     def config_type(self):
