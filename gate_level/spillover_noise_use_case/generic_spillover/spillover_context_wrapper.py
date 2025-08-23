@@ -107,7 +107,9 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         obs, info = super().reset(seed=seed, options=options)
         backend = noisy_backend(
-            self.env.target.circuit, self.spillover_config.gamma_matrix, self.spillover_config.target_subsystem
+            self.env.target.circuit,
+            self.spillover_config.gamma_matrix,
+            self.spillover_config.target_subsystem
         )
         pm = generate_preset_pass_manager(optimization_level=0, backend=backend)
         custom_translation_pass = PassManager(self.custom_passes)

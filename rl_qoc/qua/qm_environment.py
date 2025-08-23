@@ -69,7 +69,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         )
         self.circuit_params = CircuitParams.from_circuit(
             self.real_time_circuit, self.input_type, self.config,
-            list(self.target.context_parameters.keys()) if isinstance(self.target, GateTarget) else ()
+            self.target.all_context_parameters if isinstance(self.target, GateTarget) else ()
         )
 
         if (

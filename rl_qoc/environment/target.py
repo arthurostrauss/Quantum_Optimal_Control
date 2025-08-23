@@ -801,6 +801,13 @@ class GateTarget(BaseTarget):
         return self._tgt_register
 
     @property
+    def all_context_parameters(self) -> Sequence[Dict[Parameter, float|None]]:
+        """
+        Get all symbolic parameters associated to each circuit context
+        """
+        return self._context_parameters
+
+    @property
     def causal_cone_circuits(self) -> List[QuantumCircuit]:
         """
         Get all causal cone circuits for each circuit context
