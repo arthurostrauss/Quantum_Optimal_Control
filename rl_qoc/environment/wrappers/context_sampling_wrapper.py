@@ -1,11 +1,9 @@
-from curses import raw
 import gymnasium as gym
 import numpy as np
-from matplotlib import pyplot as plt
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from ..context_aware_quantum_environment import ContextAwareQuantumEnvironment
-from gymnasium.wrappers import RescaleObservation
+from ..target import GateTarget
 from gymnasium.spaces import Box, Dict as DictSpace
 from abc import ABC, abstractmethod
 
@@ -51,7 +49,8 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
 
         # State tracking
         self.current_context = None
-
+        if not isinstance(env.target, GateTarget):
+            raise ValueError("Environment target must be a GateTarget")
         if not isinstance(self.observation_space, DictSpace):
             raise ValueError("Observation space must be a Dict space")
         for key, obs_space in self.observation_space.items():

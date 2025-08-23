@@ -90,9 +90,6 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
                 else:
                     raise ValueError(f"Spillover space for key {key} must be a Box space")
 
-            return {
-                "parameters": context
-            }
         else:
             # Random exploration
             for key, space in self.spillover_space.items():
@@ -100,9 +97,9 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
                     context[key] = self.np_random.uniform(space.low, space.high, space.shape)
                 else:
                     raise ValueError(f"Spillover space for key {key} must be a Box space")
-            return {
-                "parameters": context
-            }
+        return {
+            "parameters": context
+        }
     
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         obs, info = super().reset(seed=seed, options=options)
