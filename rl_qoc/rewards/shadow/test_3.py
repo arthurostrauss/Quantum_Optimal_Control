@@ -8,37 +8,7 @@ from gymnasium.spaces import Box
 import numpy as np
 
 
-"""
-# example circuit of one parameter
-def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
-    qc.ry(2*params[0], 0)
-    qc.cx(0,1)
-"""
-
-#generic 2 qubit circuit of 6 parameters
-def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
-    qc.u(params[0], params[1],params[2], 0)
-    qc.u(params[3], params[4],params[5], 1)
-    qc.u(params[6], params[7],params[8], 2)
-    #qc.u(params[9], params[10],params[11], 3)
-    qc.cx(0,1)
-    qc.cx(0,2)
-    #qc.cx(0,3)
-    qc.cx(1,2)
-    #qc.cx(1,3)
-    #qc.cx(2,3)
-
-
-"""
-#generic n qubit circuit of 2**n - 2 parameters, in progress
-def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
-    qc.u(params[0], params[1],params[2], 0)
-    qc.u(params[3], params[4],params[5], 1)
-    qc.cx(0,1)
-"""
-
-
-
+""" Shadow Bound Calculation; Taken from Pennylane: Classical Shadows."""
 def shadow_bound_state(error, observables, failure_rate=0.01):
    
     M = len(observables)
@@ -54,16 +24,37 @@ def shadow_bound_state(error, observables, failure_rate=0.01):
 
 
 
-"""  
-#2 qubit parametrized bell state of one parameter
+# TEST 1: 2 qubits, 1 parameter only
+
+# simplified 2 qubit circuit of one parameter
+def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
+    qc.ry(2*params[0], 0)
+    qc.cx(0,1)
+
+# 2 qubit parametrized bell state of one parameter
 theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
 tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Statevector.from_label('11'))  
-"""
 
-#2 qubit random state
-no_qubits = 3
+params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
+
+
+
+
+
+"""
+# TEST 2: 2 qubits, 6 parameters
+#generic 2 qubit circuit of 6 parameters
+def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
+    qc.u(params[0], params[1],params[2], 0)
+    qc.u(params[3], params[4],params[5], 1)
+    qc.cx(0,1)
+
+# 2 qubit random state
+no_qubits = 2
 tgt_state = psi = random_statevector(2**no_qubits)  
 
+params = np.array([[np.random.rand()*2* np.pi for n in range(6)] for i in range(2)])  # for a generic 2 qubit circuit, 6 params are required to define it.
+"""
 
 
 print("State Vector of target state: ",tgt_state)
@@ -75,10 +66,6 @@ observables = [state_target.dm.data]
 print("Density Matrix of target state: ", observables)
 shadow_size, partition, no_observables = shadow_bound_state(error, observables)
 print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition, no_observables)
-
-#params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
-
-params = np.array([[np.random.rand()*2* np.pi for n in range(9)] for i in range(2)])  # for a generic circuit, 9 params are required to define it.
 
 batch_size = len(params)
 
@@ -97,7 +84,6 @@ env_config = QEnvConfig(state_target,
 env = QuantumEnvironment(env_config)
 
 reward_data = reward.get_reward_data(env.circuit, params, state_target, env_config)
-#print(reward_data[1].pub.parameter_values)
 reward_array = reward.get_reward_with_primitive(reward_data, env.sampler, state_target)
 print("Rewards:", reward_array)
 

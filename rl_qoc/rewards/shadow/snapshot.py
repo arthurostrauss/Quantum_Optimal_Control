@@ -6,11 +6,22 @@ from qiskit.quantum_info import Operator, Pauli
 
 @dataclass
 class Snapshot:
-    b: List[int]
-    pauli_int: List[int]
+    b: List[int]    # takes input data made of one snapshot - one bitstring and one pauli string
+    pauli_int: List[int]    # note that we are already assuming the pauli_int is reversed, i.e. in little endian form
+
+    """
+    for convenience, listed below all the properties in this class
+    num_qubits: number of qubits in bitstring/shadow
+    pauli_string: converts list of Paulis into a string of letters eg [1,2,3,0] -> "XYZI"
+    pauli: returns Pauli object of pauli_string which can be used directly into qiskit simulation - this may not be needed
+    circuit: returns circuit that has undergone evolution as per pauli_int
+    unitary: returns actual unitary that acts on the bitstring b in operator form
+
+    
+    """
 
     def __post_init__(self):
-        if len(self.b) != len(self.pauli):
+        if len(self.b) != len(self.pauli_int):
             raise ValueError("b and pauli must have the same length")
 
     @property
@@ -29,7 +40,9 @@ class Snapshot:
         """
         Returns Pauli operator as a string for the sampled basis
         """
-        return "".join(map(str, self.pauli_int))[::-1]
+        mapping = {0: 'X', 1: 'Y', 2: 'Z', 3: 'I'}
+        return ''.join(mapping[i] for i in self.pauli_int)
+   
     
     @property
     def pauli(self):
@@ -48,7 +61,11 @@ class Snapshot:
         return qc
     
     @property
-    def U(self):
+    def unitary(self):
         return Operator(self.circuit)
                 
 
+@dataclass
+class SnapshotList:
+    pass
+            
