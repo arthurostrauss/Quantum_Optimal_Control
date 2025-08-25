@@ -135,7 +135,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.custom_instructions: List[Instruction] = []
         self.new_gates: List[Gate] = []
 
-        if self.target.context_parameters:
+        if isinstance(self.target, GateTarget) and self.target.context_parameters:
             self.observation_space = DictSpace({p.name: Box(0., np.pi, shape=(1,), dtype=np.float32)
                                                 for p in self.target.context_parameters})
         else:
