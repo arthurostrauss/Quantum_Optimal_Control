@@ -35,7 +35,8 @@ def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: Qua
 theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
 tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Statevector.from_label('11'))  
 
-params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
+params = np.array([[theta]])
+#params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
 
 
 

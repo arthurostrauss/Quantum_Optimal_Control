@@ -67,5 +67,28 @@ class Snapshot:
 
 @dataclass
 class SnapshotList:
-    pass
-            
+    snapshots: List[Snapshot]
+    """
+    Builds a list of snapshots from many unitary operators and their corresponding bitstrings.
+    Creates object that shows the nth qubit bit and pauli.
+    """
+
+    def __post_init__(self):
+        self.snapshots = []
+        self.bitstring_no = bitstring_no
+        self.unitary_no = unitary_no
+
+    def add_snapshot(self, snapshot: Snapshot):
+        self.snapshots.append(snapshot)
+
+    def get_snapshot(self, index: int) -> Snapshot:
+        return self.snapshots[index]
+    @property
+    def num_snapshots(self) -> int:
+        return len(self.snapshots)
+
+    def bit_n(self, bitstring_no):
+        return [snapshot.b[bitstring_no] for snapshot in self.snapshots]
+
+    def unitary_n(self, unitary_no):
+        return [snapshot.unitary for snapshot in self.snapshots]
