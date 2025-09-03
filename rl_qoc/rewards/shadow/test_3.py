@@ -22,7 +22,23 @@ def shadow_bound_state(error, observables, failure_rate=0.01):
     N = 34 * max(shadow_norm(o) for o in observables) / error ** 2
     return max(int(np.ceil(N * K)), 10000), int(K), M           #sometimes N = 0. A limit of 10000 is set to prevent this
 
+# ______________________________________________________________________________________________________________________________________________
+"""
+# TEST 0: 1 qubits, 1 parameter only
 
+# simplified 1 qubit circuit of one parameter
+def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
+    qc.ry(np.pi/8, 0)
+
+# 1 qubit parametrized state of one parameter
+theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
+tgt_state = np.cos(theta/2) * Statevector.from_label('0') + np.sin(theta/2) * Statevector.from_label('1')
+
+params = np.array([[theta]])
+#params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
+"""
+#np.random.seed(42)
+# ______________________________________________________________________________________________________________________________________________
 
 # TEST 1: 2 qubits, 1 parameter only
 
@@ -35,13 +51,12 @@ def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: Qua
 theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
 tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Statevector.from_label('11'))  
 
-params = np.array([[theta]])
-#params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
+#params = np.array([[theta]])
+params = np.array([[np.random.rand()*np.pi] for i in range(3)]) # for only one parameter in the circuit, over a few batches
 
 
 
-
-
+# ______________________________________________________________________________________________________________________________________________
 """
 # TEST 2: 2 qubits, 6 parameters
 #generic 2 qubit circuit of 6 parameters
@@ -57,7 +72,7 @@ tgt_state = psi = random_statevector(2**no_qubits)
 params = np.array([[np.random.rand()*2* np.pi for n in range(6)] for i in range(2)])  # for a generic 2 qubit circuit, 6 params are required to define it.
 """
 
-
+# ______________________________________________________________________________________________________________________________________________
 print("State Vector of target state: ",tgt_state)
 backend_config = QiskitConfig(apply_parametrized_gate)
 state_target = StateTarget(tgt_state)

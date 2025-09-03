@@ -63,7 +63,21 @@ class Snapshot:
     @property
     def unitary(self):
         return Operator(self.circuit)
-                
+
+    def circuit_single(self, pauli):
+        qc = QuantumCircuit(1)
+
+        if pauli == 0:  # X Pauli: Hadamard basis
+            qc.h(0)
+        elif pauli == 1:  # Y Pauli: Sdg-H basis
+            qc.sdg(0)
+            qc.h(0)
+        return qc
+    
+    @property
+    def unitary_single(self):
+        return [Operator(self.circuit_single(pauli)) for pauli in self.pauli_int]
+
 
 @dataclass
 class SnapshotList:

@@ -202,58 +202,66 @@ class ShadowReward(Reward):
 
        # total_data_list gives a list of all (unitary, bitstring) pairs 
 
-        """
-        # Uncomment code block to run estimate_shadow_observable AND estimate_shadow_observable_v2
+        function_observable = 3 # for testing the 3 functions only
 
-        observable_decomp = SparsePauliOp.from_operator(Operator(target.dm))
-        partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
-        pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
-        pauli_str = observable_decomp.paulis
-        pauli_str_num = []
-        mapping = {'X': 0, 'Y': 1, 'Z': 2, 'I': 3}
 
-        for pauli in pauli_str:
-            term_str = pauli.to_label()  # e.g., 'IZ'
-            term_list = [mapping[c] for c in term_str]
-            pauli_str_num.append(term_list)
-        # Here, we let X, Y, Z, I = 0, 1, 2, 3
+        dict_function_observable = {
+            1: estimate_shadow_observable, 
+            2: estimate_shadow_observable_v2, 
+            3: estimate_shadow_observable_v3
+            }
         
-        reward = np.zeros(batch_size)
-        for i in range(batch_size):
-            data_list = total_data_list[i*shadow_size:(i+1)*shadow_size]  # structure: [[u1, b11], [u2, b12], ...]
-            U_list = [var[0] for var in data_list]
-            b_list = [var[1] for var in data_list]
-            shadow = (b_list, U_list)
-        
-            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            exp_vals = [estimate_shadow_observable(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
-            reward_i = np.dot(pauli_coeff, exp_vals)
-            assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
-            reward[i] = reward_i.real
-            print("Reward batch ", i, " is ", reward_i.real)
+        function_observable_name = dict_function_observable[function_observable]
+
+        if function_observable_name == estimate_shadow_observable or function_observable_name == estimate_shadow_observable_v2:
+            observable_decomp = SparsePauliOp.from_operator(Operator(target.dm))
+            partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
+            pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
+            pauli_str = observable_decomp.paulis
+            pauli_str_num = []
+            mapping = {'X': 0, 'Y': 1, 'Z': 2, 'I': 3}
+
+            for pauli in pauli_str:
+                term_str = pauli.to_label()  # e.g., 'IZ'
+                term_list = [mapping[c] for c in term_str]
+                pauli_str_num.append(term_list)
+            # Here, we let X, Y, Z, I = 0, 1, 2, 3
+            
+            reward = np.zeros(batch_size)
+            for i in range(batch_size):
+                data_list = total_data_list[i*shadow_size:(i+1)*shadow_size]  # structure: [[u1, b11], [u2, b12], ...]
+                U_list = [var[0] for var in data_list]
+                b_list = [var[1] for var in data_list]
+                shadow = (b_list, U_list)
+            
+                print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                exp_vals = [function_observable_name(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
+                reward_i = np.dot(pauli_coeff, exp_vals)
+                assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
+                reward[i] = reward_i.real
+                print("Reward batch ", i, " is ", reward_i.real)
             
 
         
-        """
-        # Uncomment code block to run estimate_shadow_observable_v3.
+        elif function_observable_name == estimate_shadow_observable_v3:
         # V3 directly evolves the shadow U|b><b|U with respect to the target observable.
         # As such, the number of observables is just 1, and partition formula is taken directly and calculated here.
-        M = 1
-        partition = int(2 * np.log(2 * M / 0.01))
+            M = 1
+            partition = int(2 * np.log(2 * M / 0.01))
 
-        reward = np.zeros(batch_size)
-        for i in range(batch_size):
-            data_list = total_data_list[i*shadow_size:(i+1)*shadow_size]  #structure: [[u1, b11], [u2, b12], ...]
-            U_list = [var[0] for var in data_list]
-            b_list = [var[1] for var in data_list]
-            shadow = (b_list, U_list)
-        
-            print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            reward_i = estimate_shadow_observable_v3(shadow, target.dm, partition)
+            reward = np.zeros(batch_size)
+            for i in range(batch_size):
+                data_list = total_data_list[i*shadow_size:(i+1)*shadow_size]  #structure: [[u1, b11], [u2, b12], ...]
+                U_list = [var[0] for var in data_list]
+                b_list = [var[1] for var in data_list]
+                shadow = (b_list, U_list)
             
-            assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
-            reward[i] = reward_i.real
-            print("Reward batch ", i, " is ", reward_i.real)
+                print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                reward_i = function_observable_name(shadow, target.dm, partition)
+                
+                assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
+                reward[i] = reward_i.real
+                print("Reward batch ", i, " is ", reward_i.real)
         
         return reward
     
@@ -307,7 +315,7 @@ class ShadowReward(Reward):
 
         observable_decomp = SparsePauliOp.from_operator(Operator(target_choi_dm))   #to check what is the target gate fidelity like, is it a density matrix?
         partition = int(2 * np.log(2*len(observable_decomp.paulis)/0.01))
-        pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
+        pauli_coeff = observable_decomp.coeffs   # to also be used in shadow bound
         pauli_str = observable_decomp.paulis
         pauli_str_num = []
         mapping = {'X': 0, 'Y': 1, 'Z': 2, 'I': 3}
@@ -360,6 +368,7 @@ def estimate_shadow_observable_v3(
     b_shuffled = b_lists[shuffle_indices]
     u_shuffled = u_lists[shuffle_indices]
     
+    
 
     means = []
     # loop over the splits of the shadow:
@@ -373,41 +382,57 @@ def estimate_shadow_observable_v3(
             u_shuffled[start: end],
         )
 
-        exp_val = np.zeros(shadow_size // k)
+        exp_val = np.array([])
         
         for n in range(shadow_size // k):
             
             b = b_lists_k[n]
             U = u_lists_k[n]
-            snapshot = Snapshot(b[::-1], U[::-1])       # supposed to ensure b, u and observable are all of the same endianness
-            b_string = Statevector.from_label(snapshot.bitstring)  # convert bitstring list into statevector
-            b_evolved = b_string.evolve(snapshot.unitary)   # calculate U|b>
-            exp_val = np.append(exp_val, state_fidelity(b_evolved, observable))
-            #exp_val = np.append(exp_val, b_evolved.expectation_value(observable)) # alternative to calculate expectation value
+            snapshot = Snapshot(b, U)       
+            # print("Snapshot bitstring: ", b)
+            # print("Snapshot unitary: ", U)
+            # print("bitstring in snapshot: ", snapshot.bitstring)
             
+            rho_shadow = None
+            for i in range(snapshot.num_qubits):
+                b_single = Statevector.from_label(snapshot.bitstring[i])
+                U_single = snapshot.unitary_single[i]
+                b_evolved_single = b_single.evolve(U_single)
+                rho_local = 3 * DensityMatrix(b_evolved_single) - DensityMatrix(np.eye(2)) # creating the shadow per qubit as per Pennylane, "State Reconstruction from a Classical Shadow"
+                
+                # print("bitstring: ", snapshot.bitstring[i])
+                # print("b_single: ", b_single)
+                # print("unitary_string: ", snapshot.unitary_single[i])    
+                # print("U_single: ", U_single)
+                # print("Evolved local shadow state statevector: ", b_evolved_single)
+                # print("Evolved local shadow state density matrix: ", rho_local)
+                
+                if rho_shadow is None:
+                    rho_shadow = rho_local
+                else:
+                    rho_shadow = rho_shadow.tensor(rho_local)   # tensor product of per qubit shadow to get one copy of shadow
+
+            exp_val = np.append(exp_val, np.trace(observable.data @ rho_shadow.data).real)  #Tr(Orho)
+
+            # print("Evolved shadow state density matrix: ", rho_shadow)
+            # print("Observable: ", observable)
+            # print(exp_val)
+            # sys.exit()
+ 
         means.append(np.sum(exp_val)/ (shadow_size // k))  
             
-    return np.median(means) 
-
-def reverse_density_matrix(dm: DensityMatrix) -> DensityMatrix:
-    n = dm.num_qubits
-    # Permutation gate that reverses qubits: [n-1, n-2, ..., 0]
-    perm = Permutation(n, list(range(n-1, -1, -1)))
-    swap_op = Operator(perm)
-    return dm.evolve(swap_op)
-
-def reverse_operator(op: Operator) -> Operator:
-    n = op.num_qubits
-    perm = Permutation(n, list(range(n-1, -1, -1)))
-    swap_op = Operator(perm)
-    return swap_op @ op @ swap_op
+    return np.median(means)
 
 
 
 
 
 
-def estimate_shadow_observable_v2(shadow, observable, k):
+def estimate_shadow_observable_v2(
+        shadow: Tuple[List[List[int]], List[List[int]]],
+        observable: DensityMatrix,
+        k: int,
+    ) -> float:
     # slightly less accurate as original and slightly slower
     """
     Goal: From measurement_list and unitary_ids, split into N/k groups, find mean for each, then find median of means
@@ -417,12 +442,12 @@ def estimate_shadow_observable_v2(shadow, observable, k):
     And my unitary id (shadow) is [2, 0, 0, 3, 1].
     Then Tr(Orho) will give non zero value. Else, we will get 0 for the entire shadow.
     """
-    shadow = np.array(shadow)
-    shadow_size, num_qubits = shadow[0].shape
-    b_lists, U_lists = shadow
+    b_lists  = np.array(shadow[0])
+    obs_lists = np.array(shadow[1])
+    shadow_size, num_qubits = b_lists.shape
     shuffle_indices = np.random.permutation(b_lists.shape[0])
     b_shuffled = b_lists[shuffle_indices]
-    U_shuffled = U_lists[shuffle_indices]
+    obs_shuffled = obs_lists[shuffle_indices]
     
 
     exp_val_means = []
@@ -431,7 +456,7 @@ def estimate_shadow_observable_v2(shadow, observable, k):
     P_remove_I = P[mask]
 
     exp_vals = []
-    for b_list, U_list in zip(b_shuffled, U_shuffled):
+    for b_list, U_list in zip(b_shuffled, obs_shuffled):
         U_list = U_list[mask]
         b_list = b_list[mask]
         P_U_matching = (U_list == P_remove_I).astype(int)
