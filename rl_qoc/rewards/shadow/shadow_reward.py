@@ -27,9 +27,11 @@ class ShadowReward(Reward):
     """
     unitary_seed: int = 2000
     unitary_rng: np.random.Generator = field(init=False)
+    shuffling_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
         self.unitary_rng = np.random.default_rng(self.unitary_seed)
+        self.shuffling_rng = np.random.default_rng(self.unitary_seed + 1)
 
     @property
     def reward_args(self):
@@ -257,7 +259,7 @@ class ShadowReward(Reward):
                 shadow = (b_list, U_list)
             
                 print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                reward_i = function_observable_name(shadow, target.dm, partition)
+                reward_i = function_observable_name(shadow, target.dm, partition, self.shuffling_rng)
                 
                 assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
                 reward[i] = reward_i.real
@@ -355,6 +357,7 @@ def estimate_shadow_observable_v3(
         shadow: Tuple[List[List[int]], List[List[int]]],
         observable: DensityMatrix,
         k: int,
+        shuffling_rng: np.random.Generator,
     ) -> float:
     
     """
@@ -364,9 +367,11 @@ def estimate_shadow_observable_v3(
     b_lists  = np.array(shadow[0])      # split shadow and convert bitstring and unitaries into arrays
     u_lists = np.array(shadow[1])
     shadow_size, num_qubits = b_lists.shape
-    shuffle_indices = np.random.permutation(b_lists.shape[0])   # Shuffle the indices so that median of means work. The indices were previously ordered for ease of execution.
+    shuffle_indices = shuffling_rng.permutation(b_lists.shape[0])   # Shuffle the indices so that median of means work. The indices were previously ordered for ease of execution.
     b_shuffled = b_lists[shuffle_indices]
     u_shuffled = u_lists[shuffle_indices]
+    obs = SparsePauliOp.from_operator(observable.data)
+            
     
     
 
@@ -382,42 +387,47 @@ def estimate_shadow_observable_v3(
             u_shuffled[start: end],
         )
 
-        exp_val = np.array([])
-        
+        #exp_val = np.array([])
+        exp_val = []
         for n in range(shadow_size // k):
             
             b = b_lists_k[n]
             U = u_lists_k[n]
             snapshot = Snapshot(b, U)       
-            # print("Snapshot bitstring: ", b)
-            # print("Snapshot unitary: ", U)
-            # print("bitstring in snapshot: ", snapshot.bitstring)
-            
+            """
+            print("Snapshot bitstring: ", b)
+            print("Snapshot unitary: ", U)
+            print("bitstring in snapshot: ", snapshot.bitstring)
+            """
             rho_shadow = None
             for i in range(snapshot.num_qubits):
                 b_single = Statevector.from_label(snapshot.bitstring[i])
                 U_single = snapshot.unitary_single[i]
                 b_evolved_single = b_single.evolve(U_single)
                 rho_local = 3 * DensityMatrix(b_evolved_single) - DensityMatrix(np.eye(2)) # creating the shadow per qubit as per Pennylane, "State Reconstruction from a Classical Shadow"
-                
-                # print("bitstring: ", snapshot.bitstring[i])
-                # print("b_single: ", b_single)
-                # print("unitary_string: ", snapshot.unitary_single[i])    
-                # print("U_single: ", U_single)
-                # print("Evolved local shadow state statevector: ", b_evolved_single)
-                # print("Evolved local shadow state density matrix: ", rho_local)
-                
+                """
+                print("bitstring: ", snapshot.bitstring[i])
+                print("b_single: ", b_single)
+                print("unitary_string: ", snapshot.unitary_single[i])    
+                print("U_single: ", U_single)
+                print("Evolved local shadow state statevector: ", b_evolved_single)
+                print("Evolved local shadow state density matrix: ", rho_local)
+                """
                 if rho_shadow is None:
                     rho_shadow = rho_local
                 else:
-                    rho_shadow = rho_shadow.tensor(rho_local)   # tensor product of per qubit shadow to get one copy of shadow
+                    rho_shadow = rho_shadow.expand(rho_local)   # tensor product of per qubit shadow to get one copy of shadow
 
-            exp_val = np.append(exp_val, np.trace(observable.data @ rho_shadow.data).real)  #Tr(Orho)
+            
 
-            # print("Evolved shadow state density matrix: ", rho_shadow)
-            # print("Observable: ", observable)
-            # print(exp_val)
-            # sys.exit()
+            exp_val.append(rho_shadow.expectation_value(obs).real)
+                #exp_val, np.trace(observable.data @ rho_shadow.data).real)  #Tr(Orho)
+            """
+            print("Evolved shadow state density matrix: ", rho_shadow)
+            print("Observable: ", observable)
+            print(exp_val)
+            sys.exit()
+            """
  
         means.append(np.sum(exp_val)/ (shadow_size // k))  
             

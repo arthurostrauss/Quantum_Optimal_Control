@@ -28,31 +28,33 @@ def shadow_bound_state(error, observables, failure_rate=0.01):
 
 # simplified 1 qubit circuit of one parameter
 def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
-    qc.ry(np.pi/8, 0)
+    qc.ry(params[0], 0)
 
 # 1 qubit parametrized state of one parameter
 theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
 tgt_state = np.cos(theta/2) * Statevector.from_label('0') + np.sin(theta/2) * Statevector.from_label('1')
 
-params = np.array([[theta]])
-#params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
-"""
+#params = np.array([[theta]])
+params = np.array([[np.random.rand()*np.pi] for i in range(2)]) # for only one parameter in the circuit, over a few batches
+
 #np.random.seed(42)
 # ______________________________________________________________________________________________________________________________________________
-
+"""
 # TEST 1: 2 qubits, 1 parameter only
 
 # simplified 2 qubit circuit of one parameter
 def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
-    qc.ry(2*params[0], 0)
+    #qc.ry(2*params[0], 0)
+    qc.h(0)
     qc.cx(0,1)
+    qc.rz(0*params[0], 1)
 
 # 2 qubit parametrized bell state of one parameter
-theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
+theta = np.pi/4 #generate a random target state; this is the goal we want to obtain
 tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Statevector.from_label('11'))  
 
-#params = np.array([[theta]])
-params = np.array([[np.random.rand()*np.pi] for i in range(3)]) # for only one parameter in the circuit, over a few batches
+params =  np.array([[theta]])
+#params = np.array([[np.random.rand()*np.pi] for i in range(10)]) # for only one parameter in the circuit, over a few batches
 
 
 
