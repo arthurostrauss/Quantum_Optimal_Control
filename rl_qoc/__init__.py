@@ -4,6 +4,7 @@ from .rewards import (
     ChannelReward,
     CAFEReward,
     FidelityReward,
+    ShadowReward
 )
 from .environment.configuration.qconfig import *
 from .environment.configuration.backend_config import *
