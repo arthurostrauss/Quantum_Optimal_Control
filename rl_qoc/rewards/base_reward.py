@@ -71,14 +71,14 @@ class Reward(ABC):
         Returns:
             List of pubs related to the reward method
         """
-        pass
+        raise NotImplementedError("This reward method does not support getting reward data")
 
     def get_reward_with_primitive(
         self,
         reward_data: RewardDataList,
         primitive: Primitive,
     ) -> np.ndarray:
-        pass
+        raise NotImplementedError("This reward method does not support getting reward with primitive")
 
     def get_shot_budget(self, pubs: List[Pub]) -> int:
         """
@@ -117,8 +117,6 @@ class Reward(ABC):
 
         """
         raise NotImplementedError("This reward method does not support real-time circuit")
-            "get_real_time_circuit is not implemented for this reward method."
-        )
 
     def qm_step(
         self,
