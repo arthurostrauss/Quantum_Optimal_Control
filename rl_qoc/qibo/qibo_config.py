@@ -48,6 +48,22 @@ class QiboConfig(BackendConfig):
             else:
                 raise ValueError(f"Pub type {type(pub)} not recognized")
         return new_pubs
+    
+    def custom_transpile(
+        self, qc_input: Union[QuantumCircuit, List[QuantumCircuit]], *args, **kwargs
+    ):
+        return (
+            qc_input.decompose()
+            if isinstance(qc_input, QuantumCircuit)
+            else [circ.decompose() for circ in qc_input]
+        )
+    
+    def asdict(self):
+        return {
+            "n_qubits": self.n_qubits,
+            "coupling_map": self.coupling_map,
+            "pass_manager": self.pass_manager,
+        }
 
 
 class QiboBackendInfo(BackendInfo):

@@ -1,9 +1,9 @@
 WANDB_CONFIG: 
     ENABLED: False # Whether to enable Weights & Biases logging
-    PROJECT: 'GateCalibration' # Weights & Biases project name
+    PROJECT: null # Weights & Biases project name
     ENTITY: null # Weights & Biases entity name
     API_KEY: null # Weights & Biases API key
-RUN_NAME: "spillover_subsystem" # Name of the run
+RUN_NAME: "test" # Name of the run
 OPTIMIZER: "adam" # Optimizer for the policy network
 NUM_UPDATES: 1 # Number of policy updates
 N_EPOCHS: 8 # Number of epochs for each policy update
@@ -11,7 +11,7 @@ MINIBATCH_SIZE: 16 # Number of samples per mini-batch
 LEARNING_RATE: 0.0005 # Learning rate
 GAMMA: 0.99 # Discount factor
 GAE_LAMBDA: 0.95 # Lambda coefficient for Generalized Advantage Estimation
-ENTROPY_COEF: 0.01 # Entropy coefficient
+ENTROPY_COEF: 0.05 # Entropy coefficient
 VALUE_LOSS_COEF: 0.5 # Value (critic) function coefficient
 GRADIENT_CLIP: 0.5 # Gradient clipping
 CLIP_VALUE_LOSS: True # Whether to clip value loss
@@ -24,3 +24,18 @@ OUTPUT_ACTIVATION_MEAN: "tanh" # Output activation function (for continuous acti
 OUTPUT_ACTIVATION_STD: "sigmoid" # Output activation function (for continuous action space)
 INCLUDE_CRITIC: True # Whether to include critic network within ActorCritic model
 NORMALIZE_ADVANTAGE: True # Whether to normalize advantage
+TRAINING_CONFIG: # Specify either TOTAL_UPDATES or HARDWARE_RUNTIME
+    TOTAL_UPDATES: 50
+    # HARDWARE_RUNTIME: 100
+    TARGET_FIDELITIES: [0.999, 0.9999, 0.99999]
+    LOOKBACK_WINDOW: 10
+    ANNEAL_LEARNING_RATE: False
+    STD_ACTIONS_EPS: 1e-2
+TRAIN_FUNCTION_SETTINGS: # Logging settings
+    PLOT_REAL_TIME: False
+    PRINT_DEBUG: False
+    NUM_PRINTS: 10
+    HPO_MODE: False
+    CLEAR_HISTORY: False
+    SAVE_DATA: False
+

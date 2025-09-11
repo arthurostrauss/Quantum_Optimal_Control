@@ -1,18 +1,19 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from qiskit import QuantumCircuit
 
 from qm import CompilerOptionArguments
 
-from ..environment.configuration.backend_config import BackendConfig
+from ..environment.configuration.backend_config import QiskitConfig
 from qiskit_qm_provider import QMBackend
-from typing import Literal, Union, Optional, Dict, Any
+from typing import Literal, Union, Optional, Dict, Any, List
 from qiskit_qm_provider import InputType
 
 Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX"], InputType]
 
 
 @dataclass
-class QMConfig(BackendConfig):
+class QMConfig(QiskitConfig):
     """
     QUA Configuration
 

@@ -50,6 +50,7 @@ class CustomPPO:
 
         self.agent_config = agent_config
         self.env = env
+        self.unwrapped_env.total_updates = self.agent_config.num_updates
         self.chkpt_dir = chkpt_dir
         self.chkpt_dir_critic = chkpt_dir_critic
 
@@ -62,7 +63,7 @@ class CustomPPO:
             "total_updates": [],
         }
         for i in range(self.unwrapped_env.n_actions):
-            self._training_results[f"clipped_mean_action_{i}"] = []
+            self._training_results[f"rescaled_mean_action_{i}"] = []
             self._training_results[f"mean_action_{i}"] = []
             self._training_results[f"std_action_{i}"] = []
 
@@ -81,7 +82,7 @@ class CustomPPO:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Initialize networks
         self.agent = initialize_networks(
-            self.unwrapped_env.observation_space,
+            self.env.observation_space,
             agent_config.hidden_layers,
             self.unwrapped_env.n_actions,
             agent_config.hidden_activation_functions,
@@ -151,6 +152,9 @@ class CustomPPO:
         """
         if training_config is not None:
             self._training_config = training_config
+            if isinstance(self.training_constraint, TotalUpdates):
+                self.unwrapped_env.total_updates = self.training_constraint.total_updates
+            
         if train_function_settings is not None:
             self._train_function_settings = train_function_settings
 
@@ -395,7 +399,7 @@ class CustomPPO:
                     training_results["fidelity_history"] = u_env.fidelity_history[-1]
 
                 for i in range(u_env.n_actions):
-                    training_results[f"clipped_mean_action_{i}"] = (
+                    training_results[f"rescaled_mean_action_{i}"] = (
                         env.action(mean_action_np)[i].tolist()
                         if isinstance(env, ActionWrapper)
                         else mean_action_np[i].tolist()
@@ -409,7 +413,7 @@ class CustomPPO:
                     self._training_results[key].append(value)
                 self._training_results["mean_action"] = mean_action_np.tolist()
                 self._training_results["std_action"] = std_action_np.tolist()
-                self._training_results["clipped_mean_action"] = env.action(mean_action_np).tolist()
+                self._training_results["rescaled_mean_action"] = env.action(mean_action_np).tolist()
                 iteration += 1
 
                 if check_convergence_std_actions(std_action, self.std_actions_eps):

@@ -20,7 +20,7 @@ from typing import (
 )
 
 import numpy as np
-from gymnasium.spaces import Box, Discrete
+from gymnasium.spaces import Box, Discrete, Dict as DictSpace
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -135,7 +135,11 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.custom_instructions: List[Instruction] = []
         self.new_gates: List[Gate] = []
 
-        self.observation_space = Box(0.0, 1.0, shape=(1,), dtype=np.float32, seed=self.seed + 98)
+        if isinstance(self.target, GateTarget) and self.target.context_parameters:
+            self.observation_space = DictSpace({p.name: Box(0., np.pi, shape=(1,), dtype=np.float32)
+                                                for p in self.target.context_parameters})
+        else:
+            self.observation_space = Box(0.0, 1.0, shape=(1,), dtype=np.float32, seed=self.seed + 98)
         self._parameters = [
             [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
             for j in range(len(self.target.circuits))
@@ -226,6 +230,9 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         Return the observation of the environment.
         This method should be overridden by the subclass.
         """
+
+        if isinstance(self.observation_space, DictSpace):
+            return {p.name: val for p, val in self.target.context_parameters.items()}
         return np.zeros(self.observation_space.shape, dtype=np.float32)
 
     def compute_benchmarks(

@@ -288,3 +288,34 @@ def handle_real_time_n_reps(
                 for n in n_reps:
                     with case_reps(n):
                         apply_real_time_n_reps(n, qc, prep_circuit)
+
+def push_circuit_context(circuit_params, target: GateTarget, **push_args):
+    """
+    Code to load to the OPX all context parameters, which can be either
+    a choice of circuit ansatz to feed a switch statement or a list of symbolic parameters to be assigned in real-time
+    """
+    if circuit_params.circuit_choice_var is not None:
+        # Switch over different circuit ansatze
+        circuit_params.circuit_choice_var.push_to_opx(target.circuit_choice, **push_args)
+    if circuit_params.context_parameters[target.circuit_choice] is not None:
+        # Different symbolic parameters to load for context
+        circuit_params.context_parameters[target.circuit_choice].push_to_opx(
+            {p.name: val for p, val in target.context_parameters.items()}, **push_args)
+
+def load_circuit_context(circuit_params):
+    """
+    QUA macro to load all relevant circuit context parameters
+    """
+    from qm.qua import switch_, case_
+    c_var = circuit_params.circuit_choice_var
+    c_params = circuit_params.context_parameters
+    if c_var is not None:
+        c_var.load_input_value()
+        if any(p is not None for p in c_params):
+            with switch_(c_var.var):
+                for i, params in enumerate(c_params):
+                    if params is not None:
+                        with case_(i):
+                            params.load_input_values()
+    elif len(c_params) == 1 and c_params[0] is not None:
+        c_params[0].load_input_values()

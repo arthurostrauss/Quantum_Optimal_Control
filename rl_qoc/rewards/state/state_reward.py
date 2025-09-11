@@ -94,7 +94,7 @@ class StateReward(Reward):
             List of pubs related to the reward method
         """
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         input_circuit = qc.copy_empty_like()
 
         prep_circuit = qc
@@ -337,7 +337,7 @@ class StateReward(Reward):
         if skip_transpilation:
             return qc
 
-        return env_config.backend_info.custom_transpile(
+        return env_config.backend_config.custom_transpile(
             qc,
             optimization_level=1,
             initial_layout=target.layout,
@@ -383,8 +383,9 @@ class StateReward(Reward):
         )
         dim = 2**num_qubits
         binary = lambda n, l: bin(n)[2:].zfill(l)
-        if circuit_params.circuit_choice_var is not None and isinstance(config.target, GateTarget):
-            circuit_params.circuit_choice_var.push_to_opx(config.target.circuit_choice, **push_args)
+        if isinstance(config.target, GateTarget):
+            from ..real_time_utils import push_circuit_context
+            push_circuit_context(circuit_params, config.target, **push_args)
 
         if circuit_params.n_reps_var is not None:
             circuit_params.n_reps_var.push_to_opx(config.current_n_reps, **push_args)
@@ -474,16 +475,15 @@ class StateReward(Reward):
             declare,
             Random,
             for_,
-            Util,
             stream_processing,
             assign,
-            save,
-            fixed,
+            fixed
         )
         from qiskit_qm_provider import QMBackend
         from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
         from qiskit_qm_provider.backend import get_measurement_outcomes
         from ...qua.qm_config import QMConfig
+        from ..real_time_utils import load_circuit_context
 
         if not isinstance(config.backend, QMBackend):
             raise ValueError("Backend must be a QMBackend")
@@ -540,16 +540,12 @@ class StateReward(Reward):
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
-                for var in [
-                    circuit_params.circuit_choice_var,
-                    circuit_params.n_reps_var,
-                    circuit_params.context_parameters,
-                ]:
-                    if var is not None and var.input_type is not None:
-                        if isinstance(var, QuaParameter):
-                            var.load_input_value()
-                        elif isinstance(var, ParameterTable):
-                            var.load_input_values()
+                # Load context
+                load_circuit_context(circuit_params)
+
+                n_reps_var = circuit_params.n_reps_var
+                if n_reps_var is not None and n_reps_var.input_type is not None:
+                    n_reps_var.load_input_value()
 
                 circuit_params.input_state_vars.load_input_values()
                 circuit_params.max_observables.load_input_value()
