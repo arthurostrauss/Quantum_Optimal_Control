@@ -20,7 +20,8 @@ class CircuitParams:
     max_input_state: Optional[QuaParameter] = None
     max_observables: Optional[QuaParameter] = None
     real_time_circuit_parameters: Optional[ParameterTable] = None
-    context_parameters: List[Optional[ParameterTable]] = None
+    context_parameters: Optional[List[Optional[ParameterTable]]] = None
+    benchmark_cycle_var: Optional[QuaParameter] = None
 
     @classmethod
     def from_circuit(
@@ -41,6 +42,16 @@ class CircuitParams:
             input_type=input_type,
             filter_function=lambda x: "observable" in x.name,
             name="observable_vars",
+        )
+        benchmark_cycle_var = (
+            QuaParameter(
+                "benchmark_cycle",
+                False,
+                input_type=input_type,
+                direction=Direction.OUTGOING,
+            )
+            if config.benchmark_cycle > 0
+            else None
         )
         n_reps_var = (
             QuaParameter(
@@ -112,6 +123,7 @@ class CircuitParams:
             max_observables=max_observables,
             real_time_circuit_parameters=real_time_circuit_parameters,
             context_parameters=context_parameters_table,
+            benchmark_cycle_var=benchmark_cycle_var,
         )
 
     def reset(self):

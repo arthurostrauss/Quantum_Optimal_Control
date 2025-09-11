@@ -588,7 +588,7 @@ class ChannelReward(Reward):
         from qiskit_qm_provider.backend import get_measurement_outcomes
         from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
         from ...qua.qm_config import QMConfig
-        from ..real_time_utils import load_circuit_context
+        from ..real_time_utils import load_circuit_context, benchmark_cycle_macro
 
         if not isinstance(config.backend, QMBackend):
             raise ValueError("Backend must be a QMBackend")
@@ -642,7 +642,8 @@ class ChannelReward(Reward):
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
-
+                # Benchmark cycle 
+                benchmark_cycle_macro(circuit_params.benchmark_cycle_var, config.benchmark_cycle)
                 # Load context
                 load_circuit_context(circuit_params)
 

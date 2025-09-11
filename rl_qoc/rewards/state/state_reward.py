@@ -540,6 +540,8 @@ class StateReward(Reward):
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
+                # Benchmark cycle 
+                benchmark_cycle_macro(circuit_params.benchmark_cycle_var, config.benchmark_cycle)
                 # Load context
                 load_circuit_context(circuit_params)
 

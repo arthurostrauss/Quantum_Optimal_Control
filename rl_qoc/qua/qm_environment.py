@@ -125,6 +125,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         # Push policy parameters to trigger real-time action sampling
         self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
+        if self.config.benchmark_cycle > 0: # Push benchmark boolean to OPX if benchmarking is enabled
+            self.circuit_params.benchmark_cycle_var.push_to_opx(self.do_benchmark(), **push_args)
         if self.qm_backend_config.verbosity > 1:
             print("Just pushed policy parameters to OPX:", mean_val, std_val)
             if self.qm_backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
