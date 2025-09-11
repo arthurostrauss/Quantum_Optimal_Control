@@ -79,7 +79,7 @@ def get_real_time_reward_circuit(
     n_reps = execution_config.current_n_reps
 
     if len(execution_config.n_reps) > 1:  # Switch over possible number of repetitions
-        n_reps_var = qc.add_input("n_reps", Uint(8))
+        n_reps_var = qc.add_input("n_reps", Uint(32))
     else:
         n_reps_var = n_reps
 
@@ -103,13 +103,13 @@ def get_real_time_reward_circuit(
         ), f"ClassicalRegister not matching causal cone size of circuit"
 
     if is_gate_target:  # Declare input states variables
-        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(4)) for i in range(num_qubits)]
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(num_qubits)]
     else:
         input_state_vars = None
 
     if reward_method in ["state", "channel"]:
         observables_vars = [
-            qc.add_input(f"observable_{i}", Uint(4)) for i in range(causal_cone_size)
+            qc.add_input(f"observable_{i}", Uint(32)) for i in range(causal_cone_size)
         ]
 
     if is_gate_target:
@@ -130,7 +130,7 @@ def get_real_time_reward_circuit(
                         qc.compose(input_circuit, [qubit], inplace=True)
 
     if len(prep_circuits) > 1:  # Switch over possible circuit contexts
-        circuit_choice = qc.add_input("circuit_choice", Uint(8))
+        circuit_choice = qc.add_input("circuit_choice", Uint(32))
         with qc.switch(circuit_choice) as circuit_case:
             for i, prep_circuit in enumerate(prep_circuits):
                 with circuit_case(i):
@@ -278,7 +278,7 @@ def handle_real_time_n_reps(
         try:
             from qiskit.circuit.classical import expr, types
 
-            n_reps_var_range = expr.Range(1, n_reps_var)
+            n_reps_var_range = expr.Range(expr.lift(1, Uint(32)), n_reps_var)
             with qc.for_loop(n_reps_var_range):
                 qc &= prep_circuit
         except AttributeError:

@@ -382,7 +382,7 @@ class ChannelReward(Reward):
         qc.reset(qc.qubits)
         num_qubits = qc.num_qubits
 
-        n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
+        n_reps_var = qc.add_input("n_reps", Uint(32)) if len(all_n_reps) > 1 else n_reps
 
         if not qc.clbits:
             meas = ClassicalRegister(target.causal_cone_size, name="meas")
@@ -392,9 +392,9 @@ class ChannelReward(Reward):
             if meas.size != target.causal_cone_size:
                 raise ValueError("Classical register size must match the target causal cone size")
 
-        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(num_qubits)]
         observables_vars = [
-            qc.add_input(f"observable_{i}", Uint(4)) for i in range(target.causal_cone_size)
+            qc.add_input(f"observable_{i}", Uint(32)) for i in range(target.causal_cone_size)
         ]
         input_circuits = [circ.decompose() for circ in get_single_qubit_input_states("pauli6")]
 
@@ -409,7 +409,7 @@ class ChannelReward(Reward):
                             qc.delay(16, qubit)
 
         if len(prep_circuits) > 1:  # Switch over possible contexts
-            circuit_choice = qc.add_input("circuit_choice", Uint(8))
+            circuit_choice = qc.add_input("circuit_choice", Uint(32))
             with qc.switch(circuit_choice) as case_circuit:
                 for i, prep_circuit in enumerate(prep_circuits):
                     with case_circuit(i):

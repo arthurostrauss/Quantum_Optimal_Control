@@ -267,8 +267,6 @@ class QEnvConfig:
             "reward_config": self.reward_method,
             "benchmark_config": {
                 "benchmark_cycle": self.benchmark_cycle,
-                "benchmark_batch_size": self.benchmark_batch_size,
-                "tomography_analysis": self.tomography_analysis,
                 "check_on_exp": self.check_on_exp,
             },
             "metadata": self.env_metadata,

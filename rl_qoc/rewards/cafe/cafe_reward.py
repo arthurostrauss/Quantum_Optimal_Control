@@ -260,7 +260,7 @@ class CAFEReward(Reward):
         all_n_reps = execution_config.n_reps
         n_reps = execution_config.current_n_reps
 
-        n_reps_var = qc.add_input("n_reps", Uint(8)) if len(all_n_reps) > 1 else n_reps
+        n_reps_var = qc.add_input("n_reps", Uint(32)) if len(all_n_reps) > 1 else n_reps
         if not qc.clbits:
             meas = ClassicalRegister(target.causal_cone_size, name="meas")
             qc.add_register(meas)
@@ -269,7 +269,7 @@ class CAFEReward(Reward):
             if meas.size != target.causal_cone_size:
                 raise ValueError("Classical register size must match the target causal cone size")
 
-        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(8)) for i in range(num_qubits)]
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(num_qubits)]
 
         input_choice = self.input_states_choice
         input_circuits = [
@@ -288,7 +288,7 @@ class CAFEReward(Reward):
                             qc.delay(16, qubit)
 
         if len(prep_circuits) > 1:  # Switch over possible contexts
-            circuit_choice = qc.add_input("circuit_choice", Uint(8))
+            circuit_choice = qc.add_input("circuit_choice", Uint(32))
             with qc.switch(circuit_choice) as case_circuit:
                 for i, prep_circuit in enumerate(prep_circuits):
                     with case_circuit(i):
