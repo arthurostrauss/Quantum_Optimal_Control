@@ -174,26 +174,22 @@ class QEnvConfig:
 
     @property
     def benchmark_cycle(self):
+        """
+        Number of steps between two fidelity benchmarks
+        """
         return self.benchmark_config.benchmark_cycle
 
     @benchmark_cycle.setter
     def benchmark_cycle(self, value: int):
         self.benchmark_config.benchmark_cycle = value
 
-    @property
-    def benchmark_batch_size(self):
-        return self.benchmark_config.benchmark_batch_size
-
-    @benchmark_batch_size.setter
-    def benchmark_batch_size(self, value: int):
-        self.benchmark_config.benchmark_batch_size = value
-
-    @property
-    def tomography_analysis(self):
-        return self.benchmark_config.tomography_analysis
 
     @property
     def check_on_exp(self):
+        """
+        Check if benchmarking should be performed through experiment instead of simulation.
+        By default, benchmarking is performed through simulation.
+        """
         return self.benchmark_config.check_on_exp
 
     @property

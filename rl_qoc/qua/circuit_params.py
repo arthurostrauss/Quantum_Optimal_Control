@@ -50,7 +50,7 @@ class CircuitParams:
                 input_type=input_type,
                 direction=Direction.OUTGOING,
             )
-            if config.benchmark_cycle > 0
+            if config.benchmark_cycle > 0 and config.check_on_exp
             else None
         )
         n_reps_var = (
