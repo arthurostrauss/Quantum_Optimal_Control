@@ -498,7 +498,7 @@ class CAFEReward(Reward):
             save,
             fixed,
         )
-        from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
+        from qiskit_qm_provider import QMBackend
         from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
         from qiskit_qm_provider.backend import get_measurement_outcomes
         from ...qua.qm_config import QMConfig
