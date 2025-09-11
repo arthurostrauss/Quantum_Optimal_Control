@@ -326,7 +326,7 @@ class ChannelReward(Reward):
         self,
         reward_data: ChannelRewardDataList,
         estimator: BaseEstimatorV2,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Retrieve the reward from the PUBs and the primitive
         """

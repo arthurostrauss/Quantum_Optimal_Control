@@ -80,14 +80,14 @@ class Reward(ABC):
     ) -> np.ndarray:
         pass
 
-    def get_shot_budget(self, pubs: List[Pub]):
+    def get_shot_budget(self, pubs: List[Pub]) -> int:
         """
         Compute the total number of shots to be used for the reward computation
         """
-        pass
+        raise NotImplementedError("This reward method does not support shot budget")
 
     def set_reward_seed(self, seed: int):
-        pass
+        raise NotImplementedError("This reward method does not support setting reward seed")
 
     def get_real_time_circuit(
         self,
@@ -116,7 +116,7 @@ class Reward(ABC):
             A QuantumCircuit object containing the real-time control flow and logic to compute the reward.
 
         """
-        raise NotImplementedError(
+        raise NotImplementedError("This reward method does not support real-time circuit")
             "get_real_time_circuit is not implemented for this reward method."
         )
 
