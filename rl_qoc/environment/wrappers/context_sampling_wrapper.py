@@ -7,6 +7,7 @@ from ..target import GateTarget
 from gymnasium.spaces import Box, Dict as DictSpace
 from abc import ABC, abstractmethod
 
+
 @dataclass
 class ContextSamplingWrapperConfig:
     num_warmup_updates: int = 20
@@ -40,7 +41,11 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
     ):
         super().__init__(env)
         # Store hyperparameters
-        self.context_config = config if isinstance(config, ContextSamplingWrapperConfig) else ContextSamplingWrapperConfig.from_dict(config)
+        self.context_config = (
+            config
+            if isinstance(config, ContextSamplingWrapperConfig)
+            else ContextSamplingWrapperConfig.from_dict(config)
+        )
 
         # Buffers for context sampling logic
         self.context_buffer = []
@@ -64,9 +69,7 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
         """
         return super().observation_space
 
-    def _add_to_buffer(
-        self, context:Dict[str, Any], reward: float, mean_action: np.ndarray
-    ):
+    def _add_to_buffer(self, context: Dict[str, Any], reward: float, mean_action: np.ndarray):
         """Adds context, reward, and action to buffers with eviction logic."""
         if context is None or mean_action is None:
             return  # Don't add if context/action aren't set

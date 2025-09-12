@@ -154,7 +154,7 @@ class CustomPPO:
             self._training_config = training_config
             if isinstance(self.training_constraint, TotalUpdates):
                 self.unwrapped_env.total_updates = self.training_constraint.total_updates
-            
+
         if train_function_settings is not None:
             self._train_function_settings = train_function_settings
 

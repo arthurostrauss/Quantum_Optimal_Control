@@ -7,14 +7,20 @@ from rl_qoc.environment.wrappers import ContextSamplingWrapper, ContextSamplingW
 from gymnasium.spaces import Dict as DictSpace, Box
 from rl_qoc.environment.context_aware_quantum_environment import ContextAwareQuantumEnvironment
 import matplotlib.pyplot as plt
-from gate_level.spillover_noise_use_case.generic_spillover.spillover_effect_on_subsystem import noisy_backend, LocalSpilloverNoiseAerPass, numpy_to_hashable
+from gate_level.spillover_noise_use_case.generic_spillover.spillover_effect_on_subsystem import (
+    noisy_backend,
+    LocalSpilloverNoiseAerPass,
+    numpy_to_hashable,
+)
 from rl_qoc.helpers.transpiler_passes import CausalConePass
+
 
 def obs_dict_to_array(obs_dict: Dict[str, Any]) -> np.ndarray:
     """
     Convert a dictionary of observations to a numpy array.
     """
     return np.array([obs_dict[key] for key in obs_dict.keys()])
+
 
 @dataclass
 class SpilloverConfig:
@@ -25,7 +31,7 @@ class SpilloverConfig:
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "SpilloverConfig":
         return cls(**config_dict)
-    
+
     def __post_init__(self):
         if self.spillover_qubits is None:
             self.spillover_qubits = list(range(len(self.gamma_matrix)))
@@ -35,29 +41,43 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
     """
     A wrapper for environments that sample contexts based on spillover noise
     """
-    def __init__(self, env: ContextAwareQuantumEnvironment,
-                 spillover_config: SpilloverConfig,
-                 context_config: ContextSamplingWrapperConfig | Dict[str, Any] = None):
+
+    def __init__(
+        self,
+        env: ContextAwareQuantumEnvironment,
+        spillover_config: SpilloverConfig,
+        context_config: ContextSamplingWrapperConfig | Dict[str, Any] = None,
+    ):
         super().__init__(env, context_config)
-        self.spillover_config = SpilloverConfig.from_dict(spillover_config) if isinstance(spillover_config, dict) else spillover_config
+        self.spillover_config = (
+            SpilloverConfig.from_dict(spillover_config)
+            if isinstance(spillover_config, dict)
+            else spillover_config
+        )
         keys = list(self.observation_space.keys())
         spillover_keys = [keys[i] for i in self.spillover_config.spillover_qubits]
-        self.spillover_space = DictSpace({key: self.observation_space[key] for key in spillover_keys})
-        self.custom_passes = [LocalSpilloverNoiseAerPass(numpy_to_hashable(self.spillover_config.gamma_matrix),
-                                                         self.spillover_config.target_subsystem),
-                                                         CausalConePass(self.spillover_config.target_subsystem)]
+        self.spillover_space = DictSpace(
+            {key: self.observation_space[key] for key in spillover_keys}
+        )
+        self.custom_passes = [
+            LocalSpilloverNoiseAerPass(
+                numpy_to_hashable(self.spillover_config.gamma_matrix),
+                self.spillover_config.target_subsystem,
+            ),
+            CausalConePass(self.spillover_config.target_subsystem),
+        ]
 
     def sample_context(self) -> Dict[str, Any]:
         """Samples a context for the environment to reset to."""
         is_warmup = self.env.step_tracker <= self.context_config.num_warmup_updates
-        context =  {key: np.zeros(space.shape) for key, space in self.observation_space.items()}
+        context = {key: np.zeros(space.shape) for key, space in self.observation_space.items()}
         if is_warmup or len(self.context_buffer) == 0:
             for key, space in self.spillover_space.items():
                 if isinstance(space, Box):
                     context[key] = self.np_random.uniform(space.low, space.high, space.shape)
                 else:
                     raise ValueError(f"Spillover space for key {key} must be a Box space")
-            
+
             return {"parameters": context}
 
         if self.np_random.random() < self.context_config.sampling_prob:
@@ -72,9 +92,9 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
 
             # Anneal noise added to the sampled context
             if self.context_config.anneal_noise and self.env.total_updates is not None:
-                progress = (self.env.unwrapped.step_tracker - self.context_config.num_warmup_updates) / (
-                    self.env.total_updates - self.context_config.num_warmup_updates
-                )
+                progress = (
+                    self.env.unwrapped.step_tracker - self.context_config.num_warmup_updates
+                ) / (self.env.total_updates - self.context_config.num_warmup_updates)
                 progress = np.clip(progress, 0.0, 1.0)
                 current_noise_scale = (
                     self.context_config.initial_noise_scale * (1 - progress)
@@ -83,10 +103,17 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
             else:
                 current_noise_scale = self.context_config.initial_noise_scale
 
-            noise = {key:self.np_random.normal(0, current_noise_scale, space.shape) for key, space in self.spillover_space.items()}
+            noise = {
+                key: self.np_random.normal(0, current_noise_scale, space.shape)
+                for key, space in self.spillover_space.items()
+            }
             for key, val in noise.items():
                 if isinstance(self.spillover_space[key], Box):
-                    context[key] = np.clip(context[key] + val, self.spillover_space[key].low, self.spillover_space[key].high)
+                    context[key] = np.clip(
+                        context[key] + val,
+                        self.spillover_space[key].low,
+                        self.spillover_space[key].high,
+                    )
                 else:
                     raise ValueError(f"Spillover space for key {key} must be a Box space")
 
@@ -97,26 +124,23 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
                     context[key] = self.np_random.uniform(space.low, space.high, space.shape)
                 else:
                     raise ValueError(f"Spillover space for key {key} must be a Box space")
-        return {
-            "parameters": context
-        }
-    
+        return {"parameters": context}
+
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         obs, info = super().reset(seed=seed, options=options)
         backend = noisy_backend(
             self.env.target.circuit,
             self.spillover_config.gamma_matrix,
-            self.spillover_config.target_subsystem
+            self.spillover_config.target_subsystem,
         )
         pm = generate_preset_pass_manager(optimization_level=0, backend=backend)
         custom_translation_pass = PassManager(self.custom_passes)
         custom_translation_pass.append(pm.translation.to_flow_controller().passes)
         pm.translation = custom_translation_pass
-        self.env.set_env_params(backend=backend, 
-                                pass_manager=pm)
-        
+        self.env.set_env_params(backend=backend, pass_manager=pm)
+
         return obs, info
-        
+
     # --- Plotting functions that depend on the buffer ---
     def plot_buffer_reward_distribution(self, **kwargs):
         if not self.context_rewards:
@@ -160,12 +184,12 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
         # 2. Calculate the optimal action based on the provided formula
         # Assumes the dimensions of obs_arr correspond to the spillover_qubits
         source_angles = 0.5 * (obs_arr + 1) * np.pi
-        spillover_factors = self.spillover_config.gamma_matrix[self.spillover_config.spillover_qubits, target_qubit]
+        spillover_factors = self.spillover_config.gamma_matrix[
+            self.spillover_config.spillover_qubits, target_qubit
+        ]
 
         # Calculate the total spillover angle for each context in the buffer
-        total_spillover_angle = np.sum(
-            source_angles * spillover_factors.reshape(1, -1), axis=-1
-        )
+        total_spillover_angle = np.sum(source_angles * spillover_factors.reshape(1, -1), axis=-1)
 
         # The optimal action is the one that perfectly cancels this spillover
         optimal_action = -total_spillover_angle / np.mean(self.env.action_space.high)
@@ -190,9 +214,7 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
             binned_rewards_mean = [
                 rewards_arr[bin_indices == i].mean() for i in range(1, len(bins))
             ]
-            binned_rewards_std = [
-                rewards_arr[bin_indices == i].std() for i in range(1, len(bins))
-            ]
+            binned_rewards_std = [rewards_arr[bin_indices == i].std() for i in range(1, len(bins))]
             bin_centers = (bins[:-1] + bins[1:]) / 2
 
             plt.errorbar(
@@ -236,10 +258,10 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
 
         # 2. Calculate the optimal action for each observation
         source_angles = 0.5 * (obs_arr + 1) * np.pi
-        spillover_factors = self.spillover_config.gamma_matrix[self.spillover_config.spillover_qubits, target_qubit]
-        total_spillover_angle = np.sum(
-            source_angles * spillover_factors.reshape(1, -1), axis=-1
-        )
+        spillover_factors = self.spillover_config.gamma_matrix[
+            self.spillover_config.spillover_qubits, target_qubit
+        ]
+        total_spillover_angle = np.sum(source_angles * spillover_factors.reshape(1, -1), axis=-1)
         optimal_action = -total_spillover_angle / np.mean(self.env.action_space.high)
 
         # 3. Create the plot
@@ -285,5 +307,3 @@ class SpilloverContextSamplingWrapper(ContextSamplingWrapper):
             self.plot_policy_behaviour(tgt_qubit)
         for tgt_qubit in self.spillover_config.target_subsystem:
             self.plot_action_comparison(tgt_qubit)
-
-    

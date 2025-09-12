@@ -801,7 +801,7 @@ class GateTarget(BaseTarget):
         return self._tgt_register
 
     @property
-    def all_context_parameters(self) -> Sequence[Dict[Parameter, float|None]]:
+    def all_context_parameters(self) -> Sequence[Dict[Parameter, float | None]]:
         """
         Get all symbolic parameters associated to each circuit context
         """

@@ -78,7 +78,9 @@ class Reward(ABC):
         reward_data: RewardDataList,
         primitive: Primitive,
     ) -> np.ndarray:
-        raise NotImplementedError("This reward method does not support getting reward with primitive")
+        raise NotImplementedError(
+            "This reward method does not support getting reward with primitive"
+        )
 
     def get_shot_budget(self, pubs: List[Pub]) -> int:
         """
@@ -131,7 +133,7 @@ class Reward(ABC):
         """
         This method is used to compute the classical processing that surrounds the QUA program execution in a step.
         It is used in the QMEnvironment.step() function.
-        
+
         Args:
             reward_data: Reward data to be used to compute the reward (can be used to send inputs to the QUA program and also to post-process measurement outcomes/counts coming out of the QUA program)
             fetching_index: Index of the first measurement outcome to be fetched in stream processing / DGX Quantum stream
@@ -143,7 +145,7 @@ class Reward(ABC):
 
         Returns:
             Reward array of shape (batch_size,)
-            
+
         """
         raise NotImplementedError("This reward method does not support QM step")
 

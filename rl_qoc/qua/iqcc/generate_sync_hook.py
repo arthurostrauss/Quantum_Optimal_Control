@@ -8,6 +8,7 @@ from rl_qoc import GateTarget, StateTarget
 import numpy as np
 import os
 
+
 def generate_sync_hook(
     target: Union[GateTarget, StateTarget],
     reward: Reward,

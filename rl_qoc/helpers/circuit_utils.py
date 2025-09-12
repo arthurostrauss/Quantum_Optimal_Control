@@ -97,7 +97,7 @@ def add_custom_gate(
     (if provided).
     Args:
         qc: Quantum Circuit to which the gate is to be added
-        gate: Gate to be added (can be a Gate, QuantumCircuit, or string name of the gate). 
+        gate: Gate to be added (can be a Gate, QuantumCircuit, or string name of the gate).
             If a string name is provided, a Gate object is created with the name and the provided parameters, whereas the number of qubits is inferred from the qubits argument.
         qubits: Virtual qubits on which the gate is to be applied (within qc.qubits)
         parameters: Parameters of the gate (if applicable, e.g., for parametrized gates)

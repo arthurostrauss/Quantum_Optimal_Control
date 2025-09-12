@@ -15,17 +15,15 @@ class CRGate(QubitPairMacro):
     qc_correction_phase: float = 0.0
 
     def apply(
-            self,
-            cr_type: Literal[
-                "direct", "direct+cancel", "direct+echo", "direct+cancel+echo"
-            ] = "direct",
-            wf_type: Literal["square", "cosine", "gauss", "flattop"] = "square",
-            cr_drive_amp_scaling: Optional[float | qua_T] = None,
-            cr_drive_phase: Optional[float | qua_T] = None,
-            cr_cancel_amp_scaling: Optional[float | qua_T] = None,
-            cr_cancel_phase: Optional[float | qua_T] = None,
-            cr_duration_clock_cycles: Optional[float | qua_T] = None,
-            qc_correction_phase: Optional[float | qua_T] = None,
+        self,
+        cr_type: Literal["direct", "direct+cancel", "direct+echo", "direct+cancel+echo"] = "direct",
+        wf_type: Literal["square", "cosine", "gauss", "flattop"] = "square",
+        cr_drive_amp_scaling: Optional[float | qua_T] = None,
+        cr_drive_phase: Optional[float | qua_T] = None,
+        cr_cancel_amp_scaling: Optional[float | qua_T] = None,
+        cr_cancel_phase: Optional[float | qua_T] = None,
+        cr_duration_clock_cycles: Optional[float | qua_T] = None,
+        qc_correction_phase: Optional[float | qua_T] = None,
     ) -> None:
         qc = self.qubit_pair.qubit_control
         qt = self.qubit_pair.qubit_target
@@ -33,11 +31,11 @@ class CRGate(QubitPairMacro):
         cr_elems = [qc.xy.name, qt.xy.name, cr.name]
 
         def _play_cr_pulse(
-                elem,
-                wf_type: str = wf_type,
-                amp_scale: Optional[float | qua_T] = None,
-                duration: Optional[float | qua_T] = None,
-                sgn: int = 1,
+            elem,
+            wf_type: str = wf_type,
+            amp_scale: Optional[float | qua_T] = None,
+            duration: Optional[float | qua_T] = None,
+            sgn: int = 1,
         ):
             if amp_scale is None and duration is None:
                 elem.play(wf_type)
@@ -61,8 +59,8 @@ class CRGate(QubitPairMacro):
                 qc.xy.frame_rotation_2pi(qc_correction_phase)
 
         def cr_drive_play(
-                sgn: Literal["direct", "echo"] = "direct",
-                wf_type=wf_type,
+            sgn: Literal["direct", "echo"] = "direct",
+            wf_type=wf_type,
         ):
             _play_cr_pulse(
                 elem=cr,
@@ -73,8 +71,8 @@ class CRGate(QubitPairMacro):
             )
 
         def cr_cancel_play(
-                sgn: Literal["direct", "echo"] = "direct",
-                wf_type=wf_type,
+            sgn: Literal["direct", "echo"] = "direct",
+            wf_type=wf_type,
         ):
             _play_cr_pulse(
                 elem=qt.xy,

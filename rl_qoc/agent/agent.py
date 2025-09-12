@@ -38,7 +38,9 @@ class ActorNetwork(nn.Module):
         # Define a list to hold the layer sizes including input and output sizes
         input_activation_function = get_module(input_activation_function)
         output_activation_mean = get_module(output_activation_mean)
-        input_size = observation_space.shape[0]  # TODO: Check if it's not shape[-1] that we actually need
+        input_size = observation_space.shape[
+            0
+        ]  # TODO: Check if it's not shape[-1] that we actually need
         hidden_sizes = list(hidden_layers)
 
         if isinstance(hidden_activation_functions, nn.Module) or isinstance(

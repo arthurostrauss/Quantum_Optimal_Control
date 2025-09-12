@@ -39,7 +39,9 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
             raise ValueError("Target must have only one circuit")
         self.circuit_parameters = self.target.circuit.parameters
         self._rotation_angles_rng = np.random.default_rng(self.np_random.integers(2**32))
-        self.observation_space = DictSpace({p.name: Box(low=0., high=np.pi, shape=(1,)) for p in self.circuit_parameters})
+        self.observation_space = DictSpace(
+            {p.name: Box(low=0.0, high=np.pi, shape=(1,)) for p in self.circuit_parameters}
+        )
 
     def _get_obs(self):
         """

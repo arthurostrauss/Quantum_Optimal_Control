@@ -67,7 +67,7 @@ class QEnvConfig:
 
             if not isinstance(self.reward, Reward):
                 raise ValueError("Reward configuration must be a string or a Reward instance")
-    
+
     @property
     def backend(self) -> Optional[BackendV2]:
         return self.backend_config.backend

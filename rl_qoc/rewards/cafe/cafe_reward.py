@@ -593,7 +593,9 @@ class CAFEReward(Reward):
                                 result = config.backend.quantum_circuit_to_qua(
                                     qc, circuit_params.circuit_variables
                                 )
-                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
+                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name][
+                                    "state_int"
+                                ]
                                 assign(counts[state_int], counts[state_int] + 1)
 
                             reward.stream_back(reset=True)

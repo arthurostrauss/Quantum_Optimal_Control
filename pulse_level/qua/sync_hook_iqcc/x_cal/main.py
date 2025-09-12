@@ -54,6 +54,7 @@ backend = FluxTunableTransmonBackend(machine)
 path = os.path.join(os.path.dirname(__file__), "agent_config.yaml")
 ppo_config = load_from_yaml_file(path)
 
+
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: List[Parameter], q_reg: QuantumRegister, **kwargs
 ):
@@ -77,11 +78,11 @@ physical_qubits = (0,)
 
 target_name = "x"
 target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
-reward =  ChannelReward()
+reward = ChannelReward()
 
 target_name = "1"
 target = StateTarget(state=target_name, physical_qubits=physical_qubits)
-reward =  PiPulseReward()
+reward = PiPulseReward()
 
 
 # Action space specification
