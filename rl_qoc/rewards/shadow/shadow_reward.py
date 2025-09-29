@@ -264,7 +264,7 @@ class ShadowReward(Reward):
                 assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
                 reward[i] = reward_i.real
                 print("Reward batch ", i, " is ", reward_i.real)
-        
+
         return reward
     
 
@@ -367,12 +367,14 @@ def estimate_shadow_observable_v3(
     b_lists  = np.array(shadow[0])      # split shadow and convert bitstring and unitaries into arrays
     u_lists = np.array(shadow[1])
     shadow_size, num_qubits = b_lists.shape
-    shuffle_indices = shuffling_rng.permutation(b_lists.shape[0])   # Shuffle the indices so that median of means work. The indices were previously ordered for ease of execution.
+    shuffle_indices = np.random.permutation(b_lists.shape[0])
+    
+    #shuffle_indices = shuffling_rng.permutation(b_lists.shape[0])   # Shuffle the indices so that median of means work. The indices were previously ordered for ease of execution.
     b_shuffled = b_lists[shuffle_indices]
     u_shuffled = u_lists[shuffle_indices]
     obs = SparsePauliOp.from_operator(observable.data)
+
             
-    
     
 
     means = []
@@ -400,6 +402,8 @@ def estimate_shadow_observable_v3(
             print("bitstring in snapshot: ", snapshot.bitstring)
             """
             rho_shadow = None
+            rho_shadow_list = []
+            counter = 0
             for i in range(snapshot.num_qubits):
                 b_single = Statevector.from_label(snapshot.bitstring[i])
                 U_single = snapshot.unitary_single[i]
@@ -413,12 +417,14 @@ def estimate_shadow_observable_v3(
                 print("Evolved local shadow state statevector: ", b_evolved_single)
                 print("Evolved local shadow state density matrix: ", rho_local)
                 """
-                if rho_shadow is None:
+                rho_shadow_list.append(rho_local)
+                """if rho_shadow is None:
                     rho_shadow = rho_local
                 else:
-                    rho_shadow = rho_shadow.expand(rho_local)   # tensor product of per qubit shadow to get one copy of shadow
+                    rho_shadow = rho_shadow.expand(rho_local)   # tensor product of per qubit shadow to get one copy of shadow"""
 
-            
+           
+            rho_shadow = DensityMatrix.tensor(*rho_shadow_list[::-1]) if snapshot.num_qubits < 1 else rho_local #may or may not need to reverse the order here
 
             exp_val.append(rho_shadow.expectation_value(obs).real)
                 #exp_val, np.trace(observable.data @ rho_shadow.data).real)  #Tr(Orho)
@@ -426,12 +432,14 @@ def estimate_shadow_observable_v3(
             print("Evolved shadow state density matrix: ", rho_shadow)
             print("Observable: ", observable)
             print(exp_val)
-            sys.exit()
-            """
- 
-        means.append(np.sum(exp_val)/ (shadow_size // k))  
-            
-    return np.median(means)
+            counter+=1"""
+
+
+        print(exp_val)
+        exp_val_list = np.sum(exp_val)/ (shadow_size // k)
+        means.append(exp_val_list)
+
+    return np.mean(means)
 
 
 
@@ -492,6 +500,9 @@ def estimate_shadow_observable_v2(
     return np.median(exp_val_means)
         
 
+
+
+
 def estimate_shadow_observable(
         shadow: Tuple[List[List[int]], List[List[int]]],
         observable: DensityMatrix,
@@ -534,8 +545,10 @@ def estimate_shadow_observable(
         for n in range(shadow_size // k):
             
             exp_val[n] = exp_single(b_lists_k[n], obs_lists_k[n], P)
-            
-        means.append(np.sum(exp_val)/(shadow_size // k))   
+
+        exp_val_list = np.sum(exp_val)/(shadow_size // k)
+        means.append(exp_val_list)
+
 
     return np.median(means) 
 
@@ -662,7 +675,7 @@ def exp_single_process(b, U, P):
         elif P[m] != U[m]:           # mismatch → whole term is 0
             return 0.0
         elif U[m] ==1:               # account for 
-            prod *= -.0 if b[m] == 0 else 1.0
+            prod *= -1.0 if b[m] == 0 else 1.0
         else:                        # match and P != I
             prod *= 1.0 if b[m] == 0 else -1.0
 

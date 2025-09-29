@@ -6,13 +6,10 @@ from qiskit.quantum_info import Statevector, state_fidelity, DensityMatrix, rand
 
 from gymnasium.spaces import Box
 import numpy as np
+import sys
 
 
-
-# example circuit of one parameter
-def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
-    qc.ry(2*params[0], 0)
-
+# function to define shadow bounds and partitions
 def shadow_bound_state(error, observables, coeffs, failure_rate=0.01):
    
     M = len(observables)
@@ -28,45 +25,49 @@ def shadow_bound_state(error, observables, coeffs, failure_rate=0.01):
     return max(int(np.ceil(N.real * K)), 10000), int(K), M           #sometimes N = 0. A limit of 10000 is set to prevent this
 
 
-"""  
-#2 qubit parametrized bell state of one parameter
-theta = np.pi/8 #generate a random target state; this is the goal we want to obtain
-tgt_state = (np.cos(theta) * Statevector.from_label('00') + np.sin(theta) * Statevector.from_label('11'))  
-"""
 
-backend_config = QiskitConfig(apply_parametrized_gate)
+# example circuit of one parameter
+def apply_parametrized_gate(qc: QuantumCircuit, params: ParameterVector, qr: QuantumRegister, *args, **kwargs):
+    qc.ry(2*params[0], 0)
 
-params = np.array([np.random.rand()*2* np.pi])
+#create random 1 qubit gate and obtain its choi state
+param = np.array([np.random.rand()*2* np.pi])
 qc = QuantumCircuit(1)
-qc.ry(2*params[0], 0)
+qc.ry(2*param[0], 0)
 
-specific_gate = param_gate = qc.to_gate(label="U_entangle")
-
+specific_gate = qc.to_gate(label="U_entangle")
 gate_target = GateTarget(specific_gate)
-
-
 target_choi = Choi(gate_target.target_operator)
 target_choi_dm = DensityMatrix(target_choi.data)
 
-observable_decomp = SparsePauliOp.from_operator(Operator(target_choi_dm))
+
+
+# Create observable decompositions and calculate shadow size and partitions
+num_qubits = qc.num_qubits
+observable_decomp = SparsePauliOp.from_operator(Operator(target_choi_dm/ 2**num_qubits))
 pauli_coeff = observable_decomp.coeffs   #to also be used in shadow bound
 pauli_str = observable_decomp.paulis
 observables = [Pauli(str).to_matrix() for str in pauli_str]
 
 error = 0.1  # Set the error tolerance for the shadow bound state
-print("Density Matrix of target state: ", target_choi_dm)
+#print("Density Matrix of target state: ", target_choi_dm)
 shadow_size, partition, no_observables = shadow_bound_state(error, observables, pauli_coeff)
 print("Shadow Size, Partition, Number of Observables: ", shadow_size, partition, no_observables)
 
+
+#sys.exit()
+
+
+
+# set of parameters to be tested; first value is the original; reward should therefore return 1
+params = np.array([param, param + 0.5, param - 0.5])
 #params = np.array([[np.random.rand()*np.pi] for i in range(5)]) # for only one parameter in the circuit, over a few batches
-#params = np.array([[np.random.rand()*2* np.pi for n in range(6)] for i in range(5)])  # for a generic circuit, 6 params are required to define it.
-
-params = np.array([params, params + 0.5, params - 0.5])
-params_add = np.array([[np.random.rand()*2* np.pi] for n in range(2)])
-params = np.concatenate((params, params_add))  # add one more batch with different parameters
-
 batch_size = len(params)
 
+
+
+# set up the backend, execution and environment; native to rlqoc methods
+backend_config = QiskitConfig(apply_parametrized_gate)
 execution_config = ExecutionConfig(batch_size=batch_size,
                                    sampling_paulis=shadow_size, # do not use first
                                    n_shots=1,
@@ -81,16 +82,13 @@ env_config = QEnvConfig(gate_target,
 
 env = QuantumEnvironment(env_config)
 
+
+
+# Run the classical shadow method to obtain rewards
 reward_data = reward.get_reward_data(env.circuit, params, gate_target, env_config)
 # print(reward_data[1].pub.parameter_values)
-
 reward_array = reward.get_reward_with_primitive_process(reward_data, env.sampler, gate_target)
-#print("Params:", params)
 print("Rewards:", reward_array)
-"""
-binded_circuits = [env.circuit.assign_parameters(p) for p in params]
-print("expected rewards:" , [round(state_fidelity(state_target.dm, Statevector(circ)), 4) for circ in binded_circuits])
-"""
 
 
 
