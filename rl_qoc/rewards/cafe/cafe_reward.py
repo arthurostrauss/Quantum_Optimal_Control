@@ -42,7 +42,8 @@ class CAFEReward(Reward):
 
     @property
     def reward_args(self):
-        return {"input_states_choice": self.input_states_choice}
+        return {"input_states_choice": self.input_states_choice,
+        "input_states_seed": self.input_states_seed}
 
     @property
     def reward_method(self):

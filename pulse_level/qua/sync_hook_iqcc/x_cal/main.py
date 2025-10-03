@@ -135,17 +135,7 @@ rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
 
 # Générer le fichier sync_hook.py avant l'exécution
 sync_hook_path = generate_sync_hook(
-    target=target,
-    reward=reward,
-    param_bounds=param_bounds,
-    seed=seed,
-    batch_size=batch_size,
-    n_shots=n_shots,
-    pauli_sampling=pauli_sampling,
-    n_reps=n_reps,
-    num_updates=num_updates,
-    input_type=input_type,
-    backend_config=backend_config,
+    env=rescaled_env,
     ppo_config=ppo_config,
 )
 print(f"Sync hook file generated at: {sync_hook_path}")

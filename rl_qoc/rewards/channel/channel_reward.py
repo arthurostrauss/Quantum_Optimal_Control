@@ -65,7 +65,9 @@ class ChannelReward(Reward):
 
     @property
     def reward_args(self):
-        return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli}
+        return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli,
+        "fiducials_seed": self.fiducials_seed,
+        "input_states_seed": self.input_states_seed}
 
     @property
     def reward_method(self):

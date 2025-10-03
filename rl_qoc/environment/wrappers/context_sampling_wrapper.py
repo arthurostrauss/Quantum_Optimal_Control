@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from typing import Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from ..context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from ..target import GateTarget
 from gymnasium.spaces import Box, Dict as DictSpace
@@ -24,7 +24,7 @@ class ContextSamplingWrapperConfig:
         return cls(**config_dict)
 
 
-class ContextSamplingWrapper(gym.Wrapper, ABC):
+class ContextSamplingWrapper(gym.Wrapper, gym.utils.RecordConstructorArgs, ABC):
     """
     A Gymnasium wrapper that implements reward-guided context sampling.
 
@@ -39,6 +39,7 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
         env: ContextAwareQuantumEnvironment,
         config: ContextSamplingWrapperConfig | Dict[str, Any],
     ):
+        gym.utils.RecordConstructorArgs.__init__(self, config=config if isinstance(config, dict) else asdict(config))
         super().__init__(env)
         # Store hyperparameters
         self.context_config = (

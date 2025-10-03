@@ -60,7 +60,9 @@ class StateReward(Reward):
 
     @property
     def reward_args(self):
-        return {"input_states_choice": self.input_states_choice}
+        return {"input_states_choice": self.input_states_choice,
+        "input_state_seed": self.input_state_seed,
+        "observables_seed": self.observables_seed}
 
     def set_reward_seed(self, seed: int):
         """
