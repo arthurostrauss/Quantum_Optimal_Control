@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..reward_data import RewardData, RewardDataList
+from ...environment.target import StateTarget, GateTarget
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
 from qiskit.circuit import QuantumCircuit
@@ -35,6 +36,7 @@ class ShadowRewardDataList(RewardDataList):
     """
 
     reward_data: List[ShadowRewardData]
+    target: StateTarget | GateTarget
     
     @property
     def unitaries(self) -> List[List[int]]:

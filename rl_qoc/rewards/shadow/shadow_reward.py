@@ -55,6 +55,7 @@ class ShadowReward(Reward):
         params: np.ndarray,
         target: StateTarget | GateTarget,
         env_config: QEnvConfig,
+        *args
     ) -> ShadowRewardDataList:
         """
         Compute pubs related to the reward method
@@ -169,19 +170,20 @@ class ShadowReward(Reward):
                     )
                 )
         
-        return ShadowRewardDataList(reward_data)
+        return ShadowRewardDataList(reward_data, target=target)
 
     def get_reward_with_primitive(
         self,
         reward_data: ShadowRewardDataList,
         primitive: BaseSamplerV2,
-        target: StateTarget
+
     ) -> np.ndarray:
         
         shadow_size = reward_data.shadow_size
         job = primitive.run(reward_data.pubs)   # use Sampler Primitive to run the compiled circuits
         pub_results = job.result()  # contains all the bitstrings
         batch_size = reward_data.pubs[0].parameter_values.shape[0]
+        target = reward_data.target
         
         total_data_list = []
         for k in range(batch_size):
@@ -204,7 +206,7 @@ class ShadowReward(Reward):
 
        # total_data_list gives a list of all (unitary, bitstring) pairs 
 
-        function_observable = 3 # for testing the 3 functions only
+        function_observable = 1 # for testing the 3 functions only
 
 
         dict_function_observable = {
@@ -236,12 +238,12 @@ class ShadowReward(Reward):
                 b_list = [var[1] for var in data_list]
                 shadow = (b_list, U_list)
             
-                print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                #print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 exp_vals = [function_observable_name(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
                 reward_i = np.dot(pauli_coeff, exp_vals)
                 assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
                 reward[i] = reward_i.real
-                print("Reward batch ", i, " is ", reward_i.real)
+                #print("Reward batch ", i, " is ", reward_i.real)
             
 
         
