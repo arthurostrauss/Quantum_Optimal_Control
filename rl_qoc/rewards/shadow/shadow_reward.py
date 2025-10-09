@@ -24,18 +24,27 @@ class ShadowReward(Reward):
     """
     Configuration for computing the reward based on (Shadow) 
     all data in GRD and all calculations in GRWP
+
+    Args:
+        unitary_seed: Seed for the unitary random number generator
+        input_state_seed: Seed for the input state random number generator
+        process_shadow: Whether the user wants to do shadow process tomography or state tomography (relevant only if target is a channel)
     """
     unitary_seed: int = 2000
+    input_state_seed: int = 2001
+    process_shadow: bool = False
     unitary_rng: np.random.Generator = field(init=False)
     shuffling_rng: np.random.Generator = field(init=False)
+    input_state_rng: np.random.Generator = field(init=False)
 
     def __post_init__(self):
         self.unitary_rng = np.random.default_rng(self.unitary_seed)
         self.shuffling_rng = np.random.default_rng(self.unitary_seed + 1)
+        self.input_state_rng = np.random.default_rng(self.input_state_seed)
 
     @property
     def reward_args(self):
-        return {"unitary_seed": self.unitary_seed}
+        return {"unitary_seed": self.unitary_seed, "input_state_seed": self.input_state_seed}
 
     @property
     def reward_method(self):
@@ -46,8 +55,9 @@ class ShadowReward(Reward):
         Set the seed for the random number generator
         """
         self.unitary_seed = seed + 357
+        self.input_state_seed = seed + 358
         self.unitary_rng = np.random.default_rng(self.unitary_seed)
-
+        self.input_state_rng = np.random.default_rng(self.input_state_seed)
     
     def get_reward_data(
         self,
@@ -82,13 +92,21 @@ class ShadowReward(Reward):
         
         num_qubits = len(target.physical_qubits) if isinstance(target, StateTarget) else target.causal_cone_size
         reward_data = [] 
+        new_target = target
 
-        if isinstance(target, StateTarget):
+        if isinstance(target, StateTarget) or (isinstance(target, GateTarget) and not self.process_shadow):
+            input_state = None
+            if isinstance(target, GateTarget):
+                input_state_choice = self.input_state_rng.choice(len(target.input_states("pauli6")))
+                input_state = target.input_states("pauli6")[input_state_choice]
+                new_target = target.input_states("pauli6")[input_state_choice].target_state(env_config.execution_config.current_n_reps)
             unitary_ids = self.unitary_rng.choice(3, size=(shadow_size, num_qubits))    # Draw a sample of Pauli operators encoded via mapping = {'X': 0, 'Y': 1, 'Z': 2, 'I': 3}
             unique_unitaries, counts = np.unique(unitary_ids, axis=0, return_counts=True)   # Tabulates unique Pauli Strings with their counts
 
             for unitary, shots in zip(unique_unitaries, counts):    # Apply unitary based on Pauli String = {'X': H, 'Y': H*Sdg, 'Z': 1, 'I': 1}
                 qc_copy = qc.copy()    
+                if input_state is not None:
+                    qc_copy.compose(input_state.circuit, qubits=target.causal_cone_qubits, inplace=True, front=True)
                 for qubit, id in enumerate(unitary):
                     if id == 0: # X basis 
                         qc_copy.h(qubit)
@@ -116,6 +134,8 @@ class ShadowReward(Reward):
         
         
         else:
+
+            
             # TODO: implement Shadow tomography for channel
             """Step 1/2/4: Sample U_in, U_out and b_in"""
 
@@ -144,7 +164,7 @@ class ShadowReward(Reward):
                         qc_copy.h(qubits[q])
 
                 qc_copy.compose(qc, inplace=True)
-                     
+                    
                 for q, id in enumerate(unitary_out):
                     if id == 0: # X basis 
                         qc_copy.h(qubits[q])
@@ -169,8 +189,9 @@ class ShadowReward(Reward):
                         b_in=bitstrings_in[::-1]       #inverted because little endian as well.``
                     )
                 )
+                
         
-        return ShadowRewardDataList(reward_data, target=target)
+        return ShadowRewardDataList(reward_data, target=new_target)
 
     def get_reward_with_primitive(
         self,
