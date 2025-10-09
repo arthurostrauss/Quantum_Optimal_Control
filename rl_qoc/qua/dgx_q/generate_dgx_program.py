@@ -158,7 +158,6 @@ import rl_qoc.rewards as _rewards_mod
 from rl_qoc.agent import PPOConfig, TrainingConfig, TrainFunctionSettings, TotalUpdates
 from rl_qoc.qua import QMEnvironment, QMConfig
 from rl_qoc import (
-    RescaleAndClipAction,
     GateTarget,
     StateTarget,
     ExecutionConfig,
@@ -265,8 +264,14 @@ q_env = QMEnvironment(q_env_config)
 
 # Apply wrappers (outermost to innermost order as provided)
 def _apply_wrappers(env, wrappers_spec):
-    if not wrappers_spec:
-        return RescaleAndClipAction(env, -1.0, 1.0)
+    '''Apply an ordered list of wrappers to env.
+
+    For wrappers subclassing ContextSamplingWrapper, a 'config' dict is accepted
+    and converted to ContextSamplingWrapperConfig via from_dict. For all other
+    wrappers, 'kwargs' are passed positionally after 'env' as standard keyword
+    arguments.
+    '''
+
     for spec in wrappers_spec[::-1]:
         name = spec.get("name")
         kwargs = spec.get("kwargs", {{}}) or {{}}
@@ -294,6 +299,6 @@ print(json.dumps(results))
     program_path = os.path.join(target_output_dir, "dgx_program.py")
     with open(program_path, "w") as f:
         f.write(script_code)
-    return program_path
+    return script_code
 
 
