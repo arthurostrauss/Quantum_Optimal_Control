@@ -19,7 +19,6 @@ from .backend_config import (
 from ..target import GateTarget, StateTarget
 from .execution_config import ExecutionConfig
 from .benchmark_config import BenchmarkConfig
-from ..backend_info import BackendInfo
 from ...helpers import load_q_env_from_yaml_file, select_backend
 
 if TYPE_CHECKING:
@@ -52,7 +51,6 @@ class QEnvConfig:
     reward: Reward = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
-    backend_info: BackendInfo = field(init=False)
 
     def __post_init__(self):
         if isinstance(self.target, Dict):
@@ -69,23 +67,6 @@ class QEnvConfig:
 
             if not isinstance(self.reward, Reward):
                 raise ValueError("Reward configuration must be a string or a Reward instance")
-        if self.backend_config.config_type in ["qiskit", "dynamics", "runtime", "qm"]:
-            from ..backend_info import QiskitBackendInfo
-
-            self.backend_info = QiskitBackendInfo(
-                self.backend_config.backend,
-                self.backend_config.instruction_durations,
-                self.backend_config.pass_manager,
-                self.backend_config.skip_transpilation,
-            )
-        elif self.backend_config.config_type == "qibo":
-            from ...qibo.qibo_config import QiboBackendInfo
-
-            self.backend_info = QiboBackendInfo(
-                self.backend_config.n_qubits, self.backend_config.coupling_map
-            )
-        else:
-            raise ValueError("Backend configuration type not recognized")
 
     @property
     def backend(self) -> Optional[BackendV2]:
@@ -95,7 +76,6 @@ class QEnvConfig:
     def backend(self, backend: BackendV2):
         self.backend_config.backend = backend
         self.backend_config.parametrized_circuit_kwargs["backend"] = backend
-        self.backend_info.backend = backend
 
     @property
     def parametrized_circuit(self):

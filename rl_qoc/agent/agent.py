@@ -2,7 +2,7 @@ from typing import Sequence, Optional
 
 import torch
 import torch.nn as nn
-from gymnasium import Space
+from gymnasium.spaces import Box
 from .ppo_utils import get_module
 from numpy import sqrt
 
@@ -10,7 +10,7 @@ from numpy import sqrt
 class ActorNetwork(nn.Module):
     def __init__(
         self,
-        observation_space: Space,
+        observation_space: Box,
         hidden_layers: Sequence[int],
         n_actions: int,
         input_activation_function: nn.Module | str = "identity",
@@ -131,7 +131,7 @@ class ActorNetwork(nn.Module):
 class CriticNetwork(nn.Module):
     def __init__(
         self,
-        observation_space: Space,
+        observation_space: Box,
         hidden_layers: Sequence[int],
         input_activation_function: nn.Module | str = "identity",
         hidden_activation_functions: Sequence[nn.Module | str] | nn.Module | str = "tanh",

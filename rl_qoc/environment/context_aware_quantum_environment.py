@@ -20,7 +20,7 @@ from typing import (
 )
 
 import numpy as np
-from gymnasium.spaces import Box, Discrete
+from gymnasium.spaces import Box, Discrete, Dict as DictSpace
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -135,7 +135,17 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.custom_instructions: List[Instruction] = []
         self.new_gates: List[Gate] = []
 
-        self.observation_space = Box(0.0, 1.0, shape=(1,), dtype=np.float32, seed=self.seed + 98)
+        if isinstance(self.target, GateTarget) and self.target.context_parameters:
+            self.observation_space = DictSpace(
+                {
+                    p.name: Box(0.0, np.pi, shape=(1,), dtype=np.float32)
+                    for p in self.target.context_parameters
+                }
+            )
+        else:
+            self.observation_space = Box(
+                0.0, 1.0, shape=(1,), dtype=np.float32, seed=self.seed + 98
+            )
         self._parameters = [
             [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
             for j in range(len(self.target.circuits))
@@ -143,6 +153,20 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
         self._optimal_actions = [
             np.zeros(self.config.n_actions) for _ in range(len(self.target.circuits))
+        ]
+
+        self._pm = [
+            PassManager(
+                CustomGateReplacementPass(
+                    InstructionReplacement(
+                        self.target.target_instructions[i],
+                        self.parametrized_circuit_func,
+                        self.parameters[i],
+                        self._func_args,
+                    )
+                )
+            )
+            for i in range(len(self.target.circuits))
         ]
         self.circuits = self.define_circuits()
 
@@ -156,19 +180,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         """
         circuits = []
         for i, circ in enumerate(self.target.circuits):
-            instruction_replacement = InstructionReplacement(
-                self.target.target_instructions[i],
-                self.parametrized_circuit_func,
-                self.parameters[i],
-                self._func_args,
-            )
-
-            pm = PassManager(
-                CustomGateReplacementPass(
-                    instruction_replacement,
-                )
-            )
-            custom_circ = pm.run(circ)
+            custom_circ = self._pm[i].run(circ)
             custom_circ.metadata["baseline_circuit"] = circ.copy(f"baseline_circ_{circ.name}")
             circuits.append(custom_circ)
 
@@ -222,6 +234,13 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return obs, reward, terminated, False, self._get_info()
 
     def _get_obs(self) -> ObsType:
+        """
+        Return the observation of the environment.
+        This method should be overridden by the subclass.
+        """
+
+        if isinstance(self.observation_space, DictSpace):
+            return {p.name: val for p, val in self.target.context_parameters.items()}
         return np.zeros(self.observation_space.shape, dtype=np.float32)
 
     def compute_benchmarks(
@@ -368,7 +387,7 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         Set the circuit context for the environment.
         """
         if "circuit_choice" in kwargs:
-            self.circuit_choice = kwargs["circuit_choice"]
+            self.circuit_choice = kwargs.pop("circuit_choice")
         if "parameters" in kwargs:
             assert isinstance(self.config.target, GateTarget), "Target must be a gate target"
             assert isinstance(kwargs["parameters"], dict), "Parameters must be a dictionary"
@@ -378,7 +397,8 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                 or p in [p_.name for p_ in self.config.target.circuit.parameters]
                 for p in kwargs["parameters"]
             ), "Parameters must be in the circuit parameters"
-            self.config.target.bind_parameters(kwargs["parameters"])
+            self.config.target.bind_parameters(kwargs.pop("parameters"))
+            self.circuits = self.define_circuits()
 
         super().set_env_params(**kwargs)
 

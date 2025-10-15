@@ -1,6 +1,6 @@
 from typing import Optional, Dict, Any, List, Sequence, Literal
 
-from gymnasium.spaces import Box
+from gymnasium.spaces import Box, Dict as DictSpace
 from qiskit import QuantumCircuit
 from qiskit.transpiler import Layout
 
@@ -27,98 +27,28 @@ class ArbitraryAngleSpilloverEnv(ContextAwareQuantumEnvironment):
     def __init__(
         self,
         q_env_config: QEnvConfig,
-        unbound_circuit_context: QuantumCircuit,
-        gamma_matrix: np.ndarray,
     ):
         """
         Initialize the environment
         """
-        self.gamma_matrix = gamma_matrix
-        self.circuit_parameters = unbound_circuit_context.parameters
 
         super().__init__(q_env_config)
+        if not isinstance(self.target, GateTarget):
+            raise ValueError("Target must be a GateTarget")
+        if len(self.target.circuits) > 1:
+            raise ValueError("Target must have only one circuit")
+        self.circuit_parameters = self.target.circuit.parameters
         self._rotation_angles_rng = np.random.default_rng(self.np_random.integers(2**32))
-        self.observation_space = Box(
-            low=np.array([0.0] * len(self.circuit_parameters)),
-            high=np.array([2 * np.pi] * len(self.circuit_parameters)),
-            dtype=np.float32,
+        self.observation_space = DictSpace(
+            {p.name: Box(low=0.0, high=np.pi, shape=(1,)) for p in self.circuit_parameters}
         )
-
-    # def define_target_and_circuits(self):
-    #     """
-    #     Define the target gate and the circuits to be executed
-    #     """
-    #     # original_context = self.circuit_context
-    #     # circuit_context = causal_cone_circuit(
-    #     #     self.circuit_context, list(self.config.env_metadata["target_subsystem"])
-    #     # )[0]
-    #     # self._physical_target_qubits = list(range(circuit_context.num_qubits))
-    #     # self._circuit_context = circuit_context
-    #     _, custom_circuits, baseline_circuits = (
-    #         super().define_target_and_circuits()
-    #     )
-    #     layouts = [Layout({self.circuit_context.qubits[q]: i for i, q in enumerate(self.config.env_metadata["target_subsystem"])})
-    #                for _ in range(len(baseline_circuits))]
-    #     input_states_choice = getattr(
-    #         self.config.reward.reward_args, "input_states_choice", "pauli4"
-    #     )
-    #     target = [
-    #         GateTarget(
-    #             self.config.target.gate,
-    #             [0, 1],
-    #             causal_cone_circuit(baseline_circuit, list(self.config.env_metadata["target_subsystem"]))[0],
-    #             self.circ_tgt_register,
-    #             layout,
-    #             input_states_choice=input_states_choice,
-    #         )
-    #         for baseline_circuit, layout in zip(baseline_circuits, layouts)
-    #     ]
-    #
-    #     return target, custom_circuits, baseline_circuits
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> tuple[ObsType, dict[str, Any]]:
-        """
-        Reset the environment
-        :param seed: Seed for the environment
-        :param options: Options for the environment
-        :return: Initial observation and info
-        """
-        # Reset the environment
-        phi, info = super().reset(seed=seed, options=options)
-
-        # phi = np.random.uniform(0, 2 * np.pi, self.unbound_circuit_context.num_qubits)
-
-        param_dict = {self.circuit_parameters[i].name: phi[i] for i in range(len(phi))}
-        self.config.target.clear_parameters()
-        self.config.target.bind_parameters(param_dict)
-        circuit = self.config.target.circuit
-        self.backend = noisy_backend(
-            circuit, self.gamma_matrix, self.config.env_metadata["target_subsystem"]
-        )
-        # Generate the initial observation
-
-        self.circuits = self.define_circuits()
-        obs = phi
-        print("Sampled angles: ", obs)
-        # Return the initial observation and info
-        return obs, {}
 
     def _get_obs(self):
         """
         Get the observation
         :return: Observation
         """
-        phi = self._rotation_angles_rng.uniform(
-            0,
-            2 * np.pi,
-            self.target.circuit.num_qubits,
-        )
-        return phi
+        return {p.name: val for p, val in self.target.context_parameters.items()}
 
     def _get_info(self) -> Any:
         return {}

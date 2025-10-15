@@ -60,7 +60,9 @@ class StateReward(Reward):
 
     @property
     def reward_args(self):
-        return {"input_states_choice": self.input_states_choice}
+        return {"input_states_choice": self.input_states_choice,
+        "input_state_seed": self.input_state_seed,
+        "observables_seed": self.observables_seed}
 
     def set_reward_seed(self, seed: int):
         """
@@ -94,7 +96,7 @@ class StateReward(Reward):
             List of pubs related to the reward method
         """
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         input_circuit = qc.copy_empty_like()
 
         prep_circuit = qc
@@ -337,7 +339,7 @@ class StateReward(Reward):
         if skip_transpilation:
             return qc
 
-        return env_config.backend_info.custom_transpile(
+        return env_config.backend_config.custom_transpile(
             qc,
             optimization_level=1,
             initial_layout=target.layout,
@@ -355,6 +357,21 @@ class StateReward(Reward):
         config: QEnvConfig,
         **push_args,
     ):
+        """
+        This function is used to compute the reward for the state reward.
+        It is used in the QMEnvironment.step() function.
+        Args:
+            reward_data: Reward data to be used to compute the reward (can be used to send inputs to the QUA program and also to post-process measurement outcomes/counts coming out of the QUA program)
+            fetching_index: Index of the first measurement outcome to be fetched in stream processing / DGX Quantum stream
+            fetching_size: Number of measurement outcomes to be fetched
+            circuit_params: Parameters defining the quantum program to be executed, those are entrypoints towards streaming values to control-flow that define the program adaptively (e.g. input state, number of repetitions, observable, etc.)
+            reward: Reward parameter to be used to fetch measurement outcomes from the QUA program and compute the reward
+            config: Environment configuration
+            **push_args: Additional arguments to pass necessary entrypoints to communicate with the OPX (e.g. job, qm, verbosity, etc.)
+
+        Returns:
+            Reward array of shape (batch_size,)
+        """
         from ...qua.qm_config import QMConfig
 
         if not isinstance(config.backend_config, QMConfig):
@@ -368,8 +385,10 @@ class StateReward(Reward):
         )
         dim = 2**num_qubits
         binary = lambda n, l: bin(n)[2:].zfill(l)
-        if circuit_params.circuit_choice_var is not None and isinstance(config.target, GateTarget):
-            circuit_params.circuit_choice_var.push_to_opx(config.target.circuit_choice, **push_args)
+        if isinstance(config.target, GateTarget):
+            from ..real_time_utils import push_circuit_context
+
+            push_circuit_context(circuit_params, config.target, **push_args)
 
         if circuit_params.n_reps_var is not None:
             circuit_params.n_reps_var.push_to_opx(config.current_n_reps, **push_args)
@@ -454,21 +473,12 @@ class StateReward(Reward):
         num_updates: int = 1000,
         test: bool = False,
     ) -> Program:
-        from qm.qua import (
-            program,
-            declare,
-            Random,
-            for_,
-            Util,
-            stream_processing,
-            assign,
-            save,
-            fixed,
-        )
-        from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
+        from qm.qua import program, declare, Random, for_, stream_processing, assign, fixed
+        from qiskit_qm_provider import QMBackend
         from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
         from qiskit_qm_provider.backend import get_measurement_outcomes
         from ...qua.qm_config import QMConfig
+        from ..real_time_utils import load_circuit_context
 
         if not isinstance(config.backend, QMBackend):
             raise ValueError("Backend must be a QMBackend")
@@ -525,16 +535,12 @@ class StateReward(Reward):
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
-                for var in [
-                    circuit_params.circuit_choice_var,
-                    circuit_params.n_reps_var,
-                    circuit_params.context_parameters,
-                ]:
-                    if var is not None and var.input_type is not None:
-                        if isinstance(var, QuaParameter):
-                            var.load_input_value()
-                        elif isinstance(var, ParameterTable):
-                            var.load_input_values()
+                # Load context
+                load_circuit_context(circuit_params)
+
+                n_reps_var = circuit_params.n_reps_var
+                if n_reps_var is not None and n_reps_var.input_type is not None:
+                    n_reps_var.load_input_value()
 
                 circuit_params.input_state_vars.load_input_values()
                 circuit_params.max_observables.load_input_value()
@@ -574,11 +580,13 @@ class StateReward(Reward):
                                 result = config.backend.quantum_circuit_to_qua(
                                     qc, circuit_params.circuit_variables
                                 )
-                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
+                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name][
+                                    "state_int"
+                                ]
                                 assign(counts[state_int], counts[state_int] + 1)
 
                             reward.stream_back(reset=True)
-                            
+
             with stream_processing():
                 buffer = (config.batch_size, dim)
                 reward.stream_processing(buffer=buffer)

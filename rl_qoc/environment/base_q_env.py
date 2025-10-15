@@ -22,6 +22,7 @@ from qiskit.circuit import (
     ParameterVector,
     Parameter,
 )
+from qiskit.transpiler import CouplingMap
 
 # Qiskit Estimator Primitives: for computing Pauli expectation value sampling easily
 from qiskit.primitives import (
@@ -54,7 +55,6 @@ from qiskit_ibm_runtime import (
 )
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-from .backend_info import BackendInfo
 from .configuration.qconfig import QEnvConfig, ExecutionConfig
 from .target import GateTarget, StateTarget
 
@@ -114,6 +114,7 @@ class BaseQuantumEnvironment(ABC, Env):
         self._fit_function: Optional[Callable] = None
         self._action_to_cycle_reward_function: Optional[Callable] = None
         self._fit_params: Optional[np.ndarray] = None
+        self._total_updates = None
 
         # Call reset of Env class to set seed
         self._seed = training_config.seed
@@ -145,6 +146,10 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @abstractmethod
     def _get_obs(self):
+        """
+        Return the observation of the environment.
+        This method should be overridden by the subclass.
+        """
         pass
 
     @abstractmethod
@@ -365,12 +370,14 @@ class BaseQuantumEnvironment(ABC, Env):
         qc_state_nreps = qc.repeat(self.n_reps).decompose()
         names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
 
-        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = self.backend_info.custom_transpile(
-            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
-            optimization_level=0,
-            initial_layout=self.target.layout,
-            scheduling=False,
-            remove_final_measurements=False,
+        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = (
+            self.config.backend_config.custom_transpile(
+                [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
+                optimization_level=0,
+                initial_layout=self.target.layout,
+                scheduling=False,
+                remove_final_measurements=False,
+            )
         )
         for circ, name in zip([qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names):
             circ.name = name
@@ -710,12 +717,15 @@ class BaseQuantumEnvironment(ABC, Env):
         Modify environment parameters (can be overridden by subclasses to modify specific parameters)
         """
         for key, value in kwargs.items():
-            try:
-                setattr(self.config, key, value)
-            except AttributeError:
-                raise AttributeError(f"Invalid attribute {key} for environment config")
-            except Exception as e:
-                raise ValueError(f"Error setting {key} to {value}: {e}")
+            if key == "backend":
+                self.backend = value
+            else:
+                try:
+                    setattr(self.config, key, value)
+                except AttributeError:
+                    raise AttributeError(f"Invalid attribute {key} for environment config")
+                except Exception as e:
+                    raise ValueError(f"Error setting {key} to {value}: {e}")
 
     @property
     def config(self) -> QEnvConfig:
@@ -759,14 +769,28 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def physical_neighbor_qubits(self):
-        return retrieve_neighbor_qubits(self.backend_info.coupling_map, self.physical_target_qubits)
+        if (
+            self.backend is not None
+            and hasattr(self.backend, "coupling_map")
+            and isinstance(self.backend.coupling_map, CouplingMap)
+        ):
+            return retrieve_neighbor_qubits(self.backend.coupling_map, self.physical_target_qubits)
+        else:
+            return
 
     @property
     def physical_next_neighbor_qubits(self):
-        return retrieve_neighbor_qubits(
-            self.backend_info.coupling_map,
-            self.physical_target_qubits + self.physical_neighbor_qubits,
-        )
+        if (
+            self.backend is not None
+            and hasattr(self.backend, "coupling_map")
+            and isinstance(self.backend.coupling_map, CouplingMap)
+        ):
+            return retrieve_neighbor_qubits(
+                self.backend.coupling_map,
+                self.physical_target_qubits + self.physical_neighbor_qubits,
+            )
+        else:
+            return
 
     @property
     def transpiled_circuits(self) -> Optional[List[QuantumCircuit]]:
@@ -774,7 +798,7 @@ class BaseQuantumEnvironment(ABC, Env):
         Return the transpiled circuits
         """
         if self.circuits:
-            return self.backend_info.custom_transpile(
+            return self.config.backend_config.custom_transpile(
                 self.circuits,
                 initial_layout=self.target.layout,
                 optimization_level=0,
@@ -867,6 +891,20 @@ class BaseQuantumEnvironment(ABC, Env):
             return False
         else:
             return self._episode_tracker % self.benchmark_cycle == 0
+
+    @property
+    def total_updates(self):
+        """
+        Return the total number of steps planned by the agent
+        """
+        return self._total_updates
+
+    @total_updates.setter
+    def total_updates(self, total_updates: int):
+        """
+        Set the total number of steps planned by the agent
+        """
+        self._total_updates = total_updates
 
     def _get_info(self) -> Any:
         step = self._episode_tracker
@@ -1053,22 +1091,11 @@ class BaseQuantumEnvironment(ABC, Env):
         return list(self.layout.get_physical_bits().keys())
 
     @property
-    def backend_info(self) -> BackendInfo:
-        """
-        Return the backend information object
-        """
-        return self.config.backend_info
-
-    @backend_info.setter
-    def backend_info(self, backend_info: BackendInfo):
-        self.config.backend_info = backend_info
-
-    @property
     def pass_manager(self) -> Optional[PassManager]:
         """
         Return the custom pass manager for transpilation (if specified)
         """
-        return self.backend_info.pass_manager
+        return self.config.backend_config.pass_manager
 
     @property
     def observables(self) -> SparsePauliOp:
@@ -1183,13 +1210,15 @@ class BaseQuantumEnvironment(ABC, Env):
             }
         )
 
-    def update_env_history(self, qc, total_shots):
+    def update_env_history(self, qc, total_shots, hardware_runtime=None):
         self._total_shots.append(total_shots)
-        if self.backend_info.instruction_durations is not None:
+        if hardware_runtime is not None:
+            self._hardware_runtime.append(hardware_runtime)
+        elif self.config.backend_config.instruction_durations is not None:
             self._hardware_runtime.append(
                 get_hardware_runtime_single_circuit(
                     qc,
-                    self.backend_info.instruction_durations.duration_by_name_qubits,
+                    self.config.backend_config.instruction_durations.duration_by_name_qubits,
                 )
                 * total_shots
             )

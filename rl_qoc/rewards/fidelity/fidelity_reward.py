@@ -10,9 +10,7 @@ from qiskit_aer.noise import NoiseModel
 
 from ..base_reward import Reward, Primitive
 from .fidelity_reward_data import FidelityRewardData, FidelityRewardDataList
-from ...environment.configuration.qconfig import QEnvConfig
-from ...environment.backend_info import BackendInfo
-from ...environment.target import Target, GateTarget
+from ...environment.configuration.qconfig import QEnvConfig, BackendConfig
 from ...helpers import has_noise_model, handle_n_reps
 from qiskit.primitives.containers.sampler_pub import SamplerPub
 
@@ -49,7 +47,7 @@ class FidelityReward(Reward):
             execution_config: Execution configuration
         """
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         new_qc = handle_n_reps(
             qc,
             execution_config.current_n_reps,
@@ -85,7 +83,7 @@ class FidelityReward(Reward):
         """
         env_config = reward_data.env_config
         target = reward_data.target
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         pubs = reward_data.pubs
         fidelities = []
         for pub in pubs:
@@ -111,7 +109,7 @@ class FidelityReward(Reward):
         qc: QuantumCircuit,
         params: np.ndarray,
         target: Target,
-        backend_info: BackendInfo,
+        backend_info: BackendConfig,
         n_reps: Optional[int] = 1,
     ):
         """
@@ -177,7 +175,7 @@ class FidelityReward(Reward):
         qc: QuantumCircuit,
         params: np.ndarray,
         target: Target,
-        backend_info: BackendInfo,
+        backend_info: BackendConfig,
         n_reps: Optional[int] = 1,
     ):
         """

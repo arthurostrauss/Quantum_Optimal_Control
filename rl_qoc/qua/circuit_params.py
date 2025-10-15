@@ -20,7 +20,7 @@ class CircuitParams:
     max_input_state: Optional[QuaParameter] = None
     max_observables: Optional[QuaParameter] = None
     real_time_circuit_parameters: Optional[ParameterTable] = None
-    context_parameters: Optional[ParameterTable] = None
+    context_parameters: List[Optional[ParameterTable]] = None
 
     @classmethod
     def from_circuit(
@@ -28,7 +28,7 @@ class CircuitParams:
         qc: QuantumCircuit,
         input_type: InputType,
         config: QEnvConfig,
-        context_parameters: Sequence[Parameter] = (),
+        context_parameters: Sequence[Sequence[Parameter]] = (),
     ) -> "CircuitParams":
         input_state_vars = ParameterTable.from_qiskit(
             qc,
@@ -94,12 +94,15 @@ class CircuitParams:
             filter_function=lambda x: isinstance(x, Parameter) and x not in context_parameters,
             name="real_time_circuit_parameters",
         )
-        context_parameters_table = ParameterTable.from_qiskit(
-            qc,
-            input_type=None,
-            filter_function=lambda x: isinstance(x, Parameter) and x in context_parameters,
-            name="context_parameters",
-        )
+        context_parameters_table = [
+            ParameterTable.from_qiskit(
+                qc,
+                input_type=None,
+                filter_function=lambda x: isinstance(x, Parameter) and x in context_parameters[i],
+                name=f"context_parameters_{i}",
+            )
+            for i in range(len(context_parameters))
+        ]
 
         return cls(
             input_state_vars=input_state_vars,

@@ -97,18 +97,21 @@ def add_custom_gate(
     physical_qubits: Optional[Sequence[int]] = None,
     backend: Optional[BackendV2] = None,
     instruction_properties: Optional[InstructionProperties] = None,
+    inplace: bool = True,
 ) -> QuantumCircuit:
     """
     Add a custom gate to the Quantum Circuit and register it in the backend target for the specified physical qubits
     (if provided).
     Args:
         qc: Quantum Circuit to which the gate is to be added
-        gate: Gate to be added (can be a Gate, QuantumCircuit, or string name of the gate)
+        gate: Gate to be added (can be a Gate, QuantumCircuit, or string name of the gate).
+            If a string name is provided, a Gate object is created with the name and the provided parameters, whereas the number of qubits is inferred from the qubits argument.
         qubits: Virtual qubits on which the gate is to be applied (within qc.qubits)
         parameters: Parameters of the gate (if applicable, e.g., for parametrized gates)
         physical_qubits: Physical qubits on which the gate is to be applied (if applicable)
         backend: Backend instance to register the gate in the target
         instruction_properties: Instruction properties for the gate (if applicable)
+        inplace: Whether to add the gate in place to the Quantum Circuit or return a new Quantum Circuit with the gate added
     """
     if isinstance(gate, str):
         gate = Gate(
@@ -123,7 +126,11 @@ def add_custom_gate(
             )
         gate = gate.to_gate()
     validate_qubits(qc, qubits)
-    qc.append(gate, qubits)
+    if inplace:
+        qc.append(gate, qubits)
+    else:
+        qc_new = qc.copy()
+        qc_new.append(gate, qubits)
 
     if instruction_properties:
         validate_qm_instruction_properties(instruction_properties, parameters)
@@ -134,7 +141,7 @@ def add_custom_gate(
             backend.target.update_instruction_properties(
                 gate.name, tuple(physical_qubits), instruction_properties
             )
-    return qc
+    return qc_new if not inplace else qc
 
 
 def validate_qm_instruction_properties(

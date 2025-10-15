@@ -1,11 +1,7 @@
 from typing import List, Union, Sequence, Optional, Tuple
 
-from qiskit.circuit import QuantumCircuit
-from qiskit.circuit.parametervector import (
-    ParameterVectorElement,
-    Parameter,
-    ParameterVector,
-)
+from qiskit.circuit import QuantumCircuit, Parameter
+from qiskit.circuit.parametervector import ParameterVectorElement
 
 from qm.qua import declare, assign, while_, if_, fixed, Cast, Util, for_, Random
 
@@ -111,12 +107,18 @@ def rescale_and_clip_wrapper(
 ):
     """
     Rescale and clip the action to the bounds of the environment's original action space.
+    This function is a QUA analog of the gymnasium.wrappers.utils.rescale_box function, followed
+    by a clip operation to the bounds of the original action space.
     """
     i = declare(int)
-    gradient_array = (new_box.high - new_box.low) / (action_space.high - action_space.low)
-    intercept_array = new_box.low - gradient_array * action_space.low
-    gradient = declare(fixed, value=gradient_array.tolist())
-    intercept = declare(fixed, value=intercept_array.tolist())
+    new_min = new_box.low
+    new_max = new_box.high
+
+    high_low_diff = action_space.high - action_space.low
+    gradient = (new_max - new_min) / high_low_diff
+    intercept = gradient * -action_space.low + new_min
+    gradient_inv = declare(fixed, value=(1.0 / gradient).tolist())
+    intercept_qua = declare(fixed, value=(-intercept / gradient).tolist())
     lower_bound = declare(fixed, value=action_space.low.tolist())
     upper_bound = declare(fixed, value=action_space.high.tolist())
 
@@ -126,8 +128,9 @@ def rescale_and_clip_wrapper(
         action_list = action
     with for_(i, 0, i < action_list[0].length(), i + 1):
         for action_ in action_list:
-            assign(action_[i], (action_[i] - intercept[i]) / gradient[i])
+            assign(action_[i], gradient_inv[i] * action_[i] + intercept_qua[i])
             clip_qua(action_[i], lower_bound[i], upper_bound[i])
+
     return action_list
 
 

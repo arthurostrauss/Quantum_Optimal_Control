@@ -67,7 +67,9 @@ class ChannelReward(Reward):
 
     @property
     def reward_args(self):
-        return {}
+        return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli,
+        "fiducials_seed": self.fiducials_seed,
+        "input_states_seed": self.input_states_seed}
 
     @property
     def reward_method(self):
@@ -109,7 +111,7 @@ class ChannelReward(Reward):
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         n_qubits = target.causal_cone_size
         dim = 2**n_qubits
 
@@ -294,7 +296,7 @@ class ChannelReward(Reward):
         self,
         reward_data: ChannelRewardDataList,
         estimator: BaseEstimatorV2,
-    ) -> np.array:
+    ) -> np.ndarray:
         """
         Retrieve the reward from the PUBs and the primitive
         """
@@ -408,7 +410,7 @@ class ChannelReward(Reward):
         if skip_transpilation:
             return qc
 
-        return env_config.backend_info.custom_transpile(
+        return env_config.backend_config.custom_transpile(
             qc,
             optimization_level=1,
             initial_layout=target.layout,
@@ -426,7 +428,24 @@ class ChannelReward(Reward):
         config: QEnvConfig,
         **push_args,
     ):
+        """
+        This function is used to compute the reward for the channel reward.
+        It is used in the QMEnvironment.step() function.
+
+        Args:
+            reward_data: Reward data to be used to compute the reward (can be used to send inputs to the QUA program and also to post-process measurement outcomes/counts coming out of the QUA program)
+            fetching_index: Index of the first measurement outcome to be fetched in stream processing / DGX Quantum stream
+            fetching_size: Number of measurement outcomes to be fetched
+            circuit_params: Parameters defining the quantum program to be executed, those are entrypoints towards streaming values to control-flow that define the program adaptively (e.g. input state, number of repetitions, observable, etc.)
+            reward: Reward parameter to be used to fetch measurement outcomes from the QUA program and compute the reward
+            config: Environment configuration
+            **push_args: Additional arguments to pass necessary entrypoints to communicate with the OPX (e.g. job, qm, verbosity, etc.)
+
+        Returns:
+            Reward array of shape (batch_size,)
+        """
         from ...qua.qm_config import QMConfig
+        from ..real_time_utils import push_circuit_context
 
         if not isinstance(config.backend_config, QMConfig):
             raise ValueError("Backend config must be a QMConfig")
@@ -442,9 +461,9 @@ class ChannelReward(Reward):
             len(reward_data.observables_indices[i]) for i in range(max_input_state)
         )
 
-        if circuit_params.circuit_choice_var is not None and isinstance(config.target, GateTarget):
-            circuit_params.circuit_choice_var.push_to_opx(config.target.circuit_choice, **push_args)
+        push_circuit_context(circuit_params, config.target, **push_args)
         if circuit_params.n_reps_var is not None:
+            # Number of repetitions of cycle circuit to vary
             circuit_params.n_reps_var.push_to_opx(config.current_n_reps, **push_args)
 
         circuit_params.max_input_state.push_to_opx(max_input_state, **push_args)
@@ -533,16 +552,15 @@ class ChannelReward(Reward):
             declare,
             Random,
             for_,
-            Util,
             stream_processing,
             assign,
-            save,
             fixed,
         )
-        from qiskit_qm_provider import QMBackend, Parameter as QuaParameter, ParameterTable
+        from qiskit_qm_provider import QMBackend
         from qiskit_qm_provider.backend import get_measurement_outcomes
         from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
         from ...qua.qm_config import QMConfig
+        from ..real_time_utils import load_circuit_context
 
         if not isinstance(config.backend, QMBackend):
             raise ValueError("Backend must be a QMBackend")
@@ -596,16 +614,14 @@ class ChannelReward(Reward):
 
             with for_(n_u, 0, n_u < num_updates, n_u + 1):
                 policy.load_input_values()
-                for var in [
-                    circuit_params.circuit_choice_var,
-                    circuit_params.n_reps_var,
-                    circuit_params.context_parameters,
-                ]:
-                    if var is not None and var.input_type is not None:
-                        if isinstance(var, QuaParameter):
-                            var.load_input_value()
-                        elif isinstance(var, ParameterTable):
-                            var.load_input_values()
+
+                # Load context
+                load_circuit_context(circuit_params)
+
+                n_reps_var = circuit_params.n_reps_var
+                if n_reps_var is not None and n_reps_var.input_type is not None:
+                    n_reps_var.load_input_value()
+
                 circuit_params.max_input_state.load_input_value()
                 with for_(i_idx, 0, i_idx < circuit_params.max_input_state.var, i_idx + 1):
                     circuit_params.input_state_vars.load_input_values()
@@ -649,7 +665,9 @@ class ChannelReward(Reward):
                                     result = config.backend.quantum_circuit_to_qua(
                                         qc, circuit_params.circuit_variables
                                     )
-                                    state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
+                                    state_int = get_measurement_outcomes(qc, result)[
+                                        qc.cregs[0].name
+                                    ]["state_int"]
                                     assign(counts[state_int], counts[state_int] + 1)
 
                                 reward.stream_back(reset=True)
@@ -690,7 +708,7 @@ class ChannelReward(Reward):
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
         execution_config = env_config.execution_config
-        backend_info = env_config.backend_info
+        backend_info = env_config.backend_config
         n_qubits = target.causal_cone_size
         n_reps = execution_config.current_n_reps
         control_flow = execution_config.control_flow_enabled

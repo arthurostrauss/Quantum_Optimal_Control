@@ -67,23 +67,25 @@ class Reward(ABC):
         Returns:
             List of pubs related to the reward method
         """
-        pass
+        raise NotImplementedError("This reward method does not support getting reward data")
 
     def get_reward_with_primitive(
         self,
         reward_data: RewardDataList,
         primitive: Primitive,
     ) -> np.ndarray:
-        pass
+        raise NotImplementedError(
+            "This reward method does not support getting reward with primitive"
+        )
 
-    def get_shot_budget(self, pubs: List[Pub]):
+    def get_shot_budget(self, pubs: List[Pub]) -> int:
         """
         Compute the total number of shots to be used for the reward computation
         """
-        pass
+        raise NotImplementedError("This reward method does not support shot budget")
 
     def set_reward_seed(self, seed: int):
-        pass
+        raise NotImplementedError("This reward method does not support setting reward seed")
 
     def get_real_time_circuit(
         self,
@@ -112,9 +114,7 @@ class Reward(ABC):
             A QuantumCircuit object containing the real-time control flow and logic to compute the reward.
 
         """
-        raise NotImplementedError(
-            "get_real_time_circuit is not implemented for this reward method."
-        )
+        raise NotImplementedError("This reward method does not support real-time circuit")
 
     def qm_step(
         self,
@@ -126,6 +126,23 @@ class Reward(ABC):
         config: QEnvConfig,
         **push_args,
     ):
+        """
+        This method is used to compute the classical processing that surrounds the QUA program execution in a step.
+        It is used in the QMEnvironment.step() function.
+
+        Args:
+            reward_data: Reward data to be used to compute the reward (can be used to send inputs to the QUA program and also to post-process measurement outcomes/counts coming out of the QUA program)
+            fetching_index: Index of the first measurement outcome to be fetched in stream processing / DGX Quantum stream
+            fetching_size: Number of measurement outcomes to be fetched
+            circuit_params: Parameters defining the quantum program to be executed, those are entrypoints towards streaming values to control-flow that define the program adaptively (e.g. input state, number of repetitions, observable, etc.)
+            reward: Reward parameter to be used to fetch measurement outcomes from the QUA program and compute the reward
+            config: Environment configuration
+            **push_args: Additional arguments to pass necessary entrypoints to communicate with the OPX (e.g. job, qm, verbosity, etc.)
+
+        Returns:
+            Reward array of shape (batch_size,)
+
+        """
         raise NotImplementedError("This reward method does not support QM step")
 
     def rl_qoc_training_qua_prog(
