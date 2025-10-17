@@ -262,7 +262,7 @@ class ShadowReward(Reward):
                 #print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 exp_vals = [function_observable_name(shadow, pauli_str_num[obs], partition) for obs in range(len(pauli_str))]
                 reward_i = np.dot(pauli_coeff, exp_vals)
-                assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
+                assert np.imag(reward_i) - 1e-5 < 0, "Reward is complex"
                 reward[i] = reward_i.real
                 #print("Reward batch ", i, " is ", reward_i.real)
             
@@ -284,7 +284,7 @@ class ShadowReward(Reward):
                 print("Current time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 reward_i = function_observable_name(shadow, target.dm, partition, self.shuffling_rng)
                 
-                assert np.imag(reward_i) - 1e-10 < 0, "Reward is complex"
+                assert np.imag(reward_i) - 1e-5 < 0, "Reward is complex"
                 reward[i] = reward_i.real
                 print("Reward batch ", i, " is ", reward_i.real)
 

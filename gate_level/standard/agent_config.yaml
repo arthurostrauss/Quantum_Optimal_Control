@@ -6,7 +6,7 @@ WANDB_CONFIG:
 RUN_NAME: "test" # Name of the run
 OPTIMIZER: "adam" # Optimizer for the policy network
 NUM_UPDATES: 1 # Number of policy updates
-N_EPOCHS: 20 # Number of epochs for each policy update
+N_EPOCHS: 8 # Number of epochs for each policy update
 MINIBATCH_SIZE: 16 # Number of samples per mini-batch
 LEARNING_RATE: 0.0005 # Learning rate
 GAMMA: 0.99 # Discount factor
