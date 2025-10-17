@@ -87,7 +87,7 @@ def get_backend(ϕ=np.pi / 2, γ=0.05, custom_rx_gate_label="rx_custom"):
     p0given1 = 0.0138  # IBM Sherbrooke
     p1given0 = 0.0116  # IBM Sherbrooke
     readout_error_matrix = ReadoutError([[1 - p1given0, p1given0], [p0given1, 1 - p0given1]])
-    noise_model.add_all_qubit_readout_error(readout_error_matrix, "measure")
+    noise_model.add_all_qubit_readout_error(readout_error_matrix)
     noise_model.add_all_qubit_quantum_error(reset_error(0.01), "reset")
 
     backend = AerSimulator(
