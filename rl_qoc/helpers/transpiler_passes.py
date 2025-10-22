@@ -1,9 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 
-import numpy as np
-from typing import List, Tuple, Optional, Callable, Dict, Any, Sequence, Union, get_args
-
+from typing import List, Tuple, Optional, Callable, Dict, Any, Sequence, Union
 from qiskit.circuit import (
     QuantumCircuit,
     CircuitInstruction,
@@ -12,7 +10,6 @@ from qiskit.circuit import (
     Qubit,
     Clbit,
     Instruction,
-    Parameter,
     ParameterVector,
     Gate,
 )
@@ -25,13 +22,21 @@ from collections import defaultdict
 
 
 class MomentAnalysisPass(AnalysisPass):
-    """Analysis pass to group operations into moments, storing results in the PropertySet."""
+    """
+    An analysis pass that groups operations into moments.
+    """
 
     def __init__(self):
         super().__init__()
         self.property_history = []
 
     def run(self, dag):
+        """
+        Runs the analysis pass.
+
+        Args:
+            dag: The DAG to analyze.
+        """
         moments = defaultdict(list)
         moment_index = 0
         for layer in dag.layers():
@@ -47,8 +52,13 @@ class MomentAnalysisPass(AnalysisPass):
 
 def format_input(input_val):
     """
-    Formats the input to be a list and validates that all its elements
-    are of the types specified in the Union.
+    Formats the input to be a list.
+
+    Args:
+        input_val: The input to format.
+
+    Returns:
+        The formatted input.
     """
     if not isinstance(input_val, list):
         input_val = [input_val]
@@ -56,10 +66,17 @@ def format_input(input_val):
 
 
 def _parse_instruction(instruction):
-    """Parses a user-provided instruction into a standardized (operation, qargs, cargs) tuple."""
+    """
+    Parses an instruction.
+
+    Args:
+        instruction: The instruction to parse.
+
+    Returns:
+        The parsed instruction.
+    """
     if isinstance(instruction, CircuitInstruction):
         return (instruction.operation, instruction.qubits, instruction.clbits)
-    # Handle case where instruction[0] is already a gate object (not a string)
     if isinstance(instruction[0], (Gate, Instruction)):
         op = instruction[0]
     else:
@@ -78,7 +95,15 @@ def _parse_instruction(instruction):
 
 
 def _parse_function(func):
-    """Parses a user-provided function or name into a callable or Instruction object."""
+    """
+    Parses a function.
+
+    Args:
+        func: The function to parse.
+
+    Returns:
+        The parsed function.
+    """
     if isinstance(func, str):
         try:
             return gate_map()[func]
@@ -90,19 +115,13 @@ def _parse_function(func):
 @dataclass
 class InstructionReplacement:
     """
-    Defines a replacement rule for a single target instruction.
-
-    This class validates and normalizes the relationship between the new elements
-    and their parameters, handling the "broadcasting" of parameters to a single
-    new element.
+    A class to represent an instruction replacement.
 
     Attributes:
-        target_instruction: The instruction to find and replace.
-        new_elements: A single replacement element (Gate, Circuit, Callable) or a
-            list of elements to cycle through for each instance of the target.
-        parameters: A list of parameter sets to cycle through. If `new_elements`
-            is a single element, these parameters will be broadcast to it.
-        parametrized_circuit_functions_args: Arguments for callable new elements.
+        target_instruction: The instruction to replace.
+        new_elements: The new elements to replace the instruction with.
+        parameters: The parameters for the new elements.
+        parametrized_circuit_functions_args: The arguments for the parametrized circuit functions.
     """
 
     target_instruction: Union[CircuitInstruction, Tuple]
@@ -110,23 +129,19 @@ class InstructionReplacement:
     parameters: Optional[Union[Dict, List[Parameter], ParameterVector]] = None
     parametrized_circuit_functions_args: Optional[Union[Dict, List]] = None
 
-    # These fields are processed and populated after initialization
     parsed_target: Tuple = field(init=False, repr=False)
     functions_to_cycle: List[Union[Callable, Gate, QuantumCircuit]] = field(init=False, repr=False)
     params_to_cycle: List[Optional[Union[Dict, List]]] = field(init=False, repr=False)
     args_to_cycle: List[Dict] = field(init=False, repr=False)
 
     def __post_init__(self):
-        """Validate and normalize the inputs after the dataclass is created."""
         self.parsed_target = _parse_instruction(self.target_instruction)
 
-        # Normalize new_elements into a list of functions/gates/circuits
         norm_elements = (
             self.new_elements if isinstance(self.new_elements, list) else [self.new_elements]
         )
         self.functions_to_cycle = [_parse_function(f) for f in norm_elements]
 
-        # Normalize parameters and args
         norm_params = (
             self.parameters
             if isinstance(self.parameters, list)
@@ -142,12 +157,10 @@ class InstructionReplacement:
         elif isinstance(norm_args, dict):
             norm_args = [norm_args]
 
-        # --- Broadcasting and Validation Logic ---
         num_funcs = len(self.functions_to_cycle)
         num_params = len(norm_params)
         num_args = len(norm_args)
 
-        # Case 1: Broadcasting (1 function, N parameters/args)
         if num_funcs == 1:
             self.params_to_cycle = norm_params
             self.args_to_cycle = norm_args if num_args > 1 else [norm_args[0]] * num_params
@@ -156,9 +169,8 @@ class InstructionReplacement:
                     f"For target '{self.parsed_target[0].name}', broadcast mismatch: "
                     f"{num_params} parameter sets vs {num_args} argument sets."
                 )
-            return  # Logic is valid
+            return
 
-        # Case 2: Matched Lists (N functions, N parameters/args)
         if num_funcs > 1:
             if num_params > 1 and num_funcs != num_params:
                 raise ValueError(
@@ -173,26 +185,23 @@ class InstructionReplacement:
 
             self.params_to_cycle = norm_params if num_params > 1 else [norm_params[0]] * num_funcs
             self.args_to_cycle = norm_args if num_args > 1 else [norm_args[0]] * num_funcs
-            return  # Logic is valid
+            return
 
-        # Default case (1 function, 1 param, 1 arg)
         self.params_to_cycle = norm_params
         self.args_to_cycle = norm_args
 
 
 class CustomGateReplacementPass(TransformationPass):
     """
-    A transpiler pass that dynamically replaces instructions in a circuit
-    based on a list of replacement rules.
+    A transpiler pass that replaces custom gates with their definitions.
     """
 
     def __init__(self, replacements: Union[InstructionReplacement, List[InstructionReplacement]]):
         """
-        Initializes the gate replacement pass.
+        Initializes the pass.
 
         Args:
-            replacements: A single `InstructionReplacement` object or a list of them,
-                each defining a target and its corresponding replacements.
+            replacements: A list of instruction replacements.
         """
         super().__init__()
         self.replacements = format_input(replacements)
@@ -223,7 +232,15 @@ class CustomGateReplacementPass(TransformationPass):
         return circuit_to_dag(qc)
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
-        """Run the replacement pass on the given DAG."""
+        """
+        Runs the pass.
+
+        Args:
+            dag: The DAG to run the pass on.
+
+        Returns:
+            The modified DAG.
+        """
         self.replacement_counters = [0] * len(self.replacements)
 
         for node in list(dag.op_nodes()):
@@ -246,7 +263,6 @@ class CustomGateReplacementPass(TransformationPass):
                 ):
                     count = self.replacement_counters[i]
 
-                    # Cycle through the pre-processed lists from the dataclass
                     func = repl_rule.functions_to_cycle[count % len(repl_rule.functions_to_cycle)]
                     params = repl_rule.params_to_cycle[count % len(repl_rule.params_to_cycle)]
                     f_args = repl_rule.args_to_cycle[count % len(repl_rule.args_to_cycle)]
@@ -261,10 +277,8 @@ class CustomGateReplacementPass(TransformationPass):
                     self.replacement_counters[i] += 1
                     break
 
-        # The recursive part for control flow is now cleaner
         for node in list(dag.op_nodes()):
             if isinstance(node.op, ControlFlowOp):
-                # The recursive call uses the same, validated list of replacement rules
                 recursive_pass = CustomGateReplacementPass(self.replacements)
                 new_blocks = [
                     dag_to_circuit(recursive_pass.run(circuit_to_dag(block)))
@@ -277,6 +291,9 @@ class CustomGateReplacementPass(TransformationPass):
 
 
 class FilterLocalContext(TransformationPass):
+    """
+    A transpiler pass that filters the local context of a circuit.
+    """
 
     def __init__(
         self,
@@ -292,14 +309,12 @@ class FilterLocalContext(TransformationPass):
         occurrence_numbers: List[int] = None,
     ):
         """
-        Filter the local context of the circuit by removing all operations that are not involving the target qubits or
-        their nearest neighbors. Additionally, the user can specify the number of occurences of the target instructions
-        in the circuit context. If not specified, the pass will look for all occurences of the target instructions.
+        Initializes the pass.
 
         Args:
-            coupling_map: The coupling map of the backend
-            target_instructions: The target instructions to be calibrated in the circuit context
-            occurrence_numbers: The number of occurences of each target instruction to keep in the circuit context
+            coupling_map: The coupling map of the backend.
+            target_instructions: The target instructions.
+            occurrence_numbers: The occurrence numbers of the target instructions.
         """
 
         if isinstance(target_instructions, CircuitInstruction):
@@ -358,10 +373,13 @@ class FilterLocalContext(TransformationPass):
 
     def run(self, dag: DAGCircuit):
         """
-        Run the filtering of local context on the DAG. This step consists in removing all operations that are not
-        applied neither on the target qubits nor their nearest neighbors. It also checks the number of occurrences
-        of the provided set of instructions and truncate the circuit context accordingly to end up with the desired
-        number of occurrences and local context (the rest of the operations are filtered out).
+        Runs the pass.
+
+        Args:
+            dag: The DAG to run the pass on.
+
+        Returns:
+            The modified DAG.
         """
         qargs, cargs = self.get_tgt_args(dag)
         involved_qubits = qargs
@@ -382,10 +400,7 @@ class FilterLocalContext(TransformationPass):
         if not target_nodes:
             raise ValueError("Target instructions not found in circuit context")
         isolated_tgt_nodes = list(set(target_nodes))
-        node_instruction_mapping = {
-            node: target_instruction
-            for node, target_instruction in zip(isolated_tgt_nodes, self.target_instructions)
-        }
+
         count_occurrences = [0 for _ in range(len(isolated_tgt_nodes))]
         for node in target_nodes:
             count_occurrences[isolated_tgt_nodes.index(node)] += 1
@@ -447,6 +462,15 @@ class FilterLocalContext(TransformationPass):
         return dag
 
     def get_tgt_args(self, dag):
+        """
+        Gets the target arguments.
+
+        Args:
+            dag: The DAG.
+
+        Returns:
+            A tuple of the target qargs and cargs.
+        """
         qargs = []
         cargs = []
         current_qargs = ()
@@ -465,7 +489,7 @@ class FilterLocalContext(TransformationPass):
                     ), "Qubit index out of range"
                     current_qargs = tuple([dag.qubits[q] for q in inst_qargs])
                     qargs.extend(current_qargs)
-                else:  # Qubit instances
+                else:
                     for q in inst_qargs:
                         assert q in dag.qubits, "Qubit not found in DAG"
                     current_qargs = tuple(inst_qargs)
@@ -481,7 +505,7 @@ class FilterLocalContext(TransformationPass):
                     ), "Classical bit index out of range"
                     current_cargs = tuple([dag.clbits[c] for c in inst_cargs])
                     cargs.extend(current_cargs)
-                else:  # Clbit instances
+                else:
                     for c in inst_cargs:
                         assert c in dag.clbits, "Classical bit not found in DAG"
                     current_cargs = tuple(inst_cargs)
@@ -495,13 +519,31 @@ class FilterLocalContext(TransformationPass):
 
 
 class CausalConePass(TransformationPass):
+    """
+    A transpiler pass that extracts the causal cone of a circuit.
+    """
 
     def __init__(self, qubits: Sequence[int | Qubit] | QuantumRegister):
+        """
+        Initializes the pass.
+
+        Args:
+            qubits: The qubits to extract the causal cone for.
+        """
 
         self._causal_cone_qubits = qubits
         super().__init__()
 
     def run(self, dag: DAGCircuit):
+        """
+        Runs the pass.
+
+        Args:
+            dag: The DAG to run the pass on.
+
+        Returns:
+            The modified DAG.
+        """
         qubits = self._causal_cone_qubits
         if isinstance(qubits, Tuple) and all(isinstance(q, int) for q in qubits):
             qubits = [dag.qubits[q] for q in qubits]

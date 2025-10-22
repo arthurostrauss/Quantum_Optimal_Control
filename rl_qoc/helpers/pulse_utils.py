@@ -16,10 +16,10 @@ from qiskit.circuit import (
     WhileLoopOp,
 )
 from qiskit.circuit.library import get_standard_gate_name_mapping as gate_map, RZGate
-from qiskit.providers import BackendV1, BackendV2, BackendV2Converter
+from qiskit.providers import BackendV1, BackendV2
 from qiskit.qobj import QobjExperimentHeader
 from qiskit.qobj.common import QobjHeader
-from qiskit.qobj.utils import MeasLevel, MeasReturnType
+from qiskit.qobj.utils import MeasLevel
 from qiskit.quantum_info import (
     average_gate_fidelity,
     state_fidelity,
@@ -58,12 +58,15 @@ def perform_standard_calibrations(
     control_flow: bool = True,
 ):
     """
-    Generate baseline single qubit gates (X, SX, RZ, H) for all qubits using traditional calibration experiments
-    :param backend: Dynamics Backend on which calibrations should be run
-    :param calibration_files: Optional calibration files containing single qubit gate calibrations for provided
-        DynamicsBackend instance (Qiskit Experiments does not support this feature yet)
-    :param control_flow: Include control flow instructions in the backend
+    Performs standard calibrations for a given backend.
 
+    Args:
+        backend: The backend to perform the calibrations on.
+        calibration_files: The calibration files to use.
+        control_flow: Whether to use control flow.
+
+    Returns:
+        A tuple containing the calibrations and the experiment results.
     """
     if not isinstance(backend, DynamicsBackend):
         raise TypeError("Backend must be a DynamicsBackend instance (given: {type(backend)})")
@@ -98,7 +101,7 @@ def perform_standard_calibrations(
         coupling_map = [list(qubit_pair) for qubit_pair in control_channel_map]
         two_qubit_properties = {qubits: InstructionProperties() for qubits in control_channel_map}
 
-    standard_gates: Dict[str, Gate] = gate_map()  # standard gate library
+    standard_gates: Dict[str, Gate] = gate_map()
     fixed_phase_gates = {
         "z": np.pi,
         "s": np.pi / 2,
@@ -133,7 +136,7 @@ def perform_standard_calibrations(
         )
     if (
         len(target.instruction_schedule_map().instructions) <= 1
-    ):  # Check if instructions have already been added
+    ):
         for gate in single_qubit_gates:
             target.add_instruction(
                 standard_gates[gate], properties=deepcopy(single_qubit_properties)
@@ -145,7 +148,7 @@ def perform_standard_calibrations(
                 )
             backend._coupling_map = target.build_coupling_map(two_qubit_gates[0])
 
-    for qubit in qubits:  # Add calibrations for each qubit
+    for qubit in qubits:
         control_channels = (
             list(
                 filter(
@@ -156,16 +159,14 @@ def perform_standard_calibrations(
             if num_qubits > 1
             else []
         )
-        # Calibration of RZ gate, virtual Z-rotation
         with pulse.build(backend, name=f"rz{qubit}") as rz_cal:
             pulse.shift_phase(-phi, pulse.DriveChannel(qubit))
             for q in control_channels:
                 pulse.shift_phase(-phi, pulse.ControlChannel(q))
-        # Identity gate
         id_cal = pulse.Schedule(
             pulse.Delay(20, pulse.DriveChannel(qubit)),
             name=f"id{qubit}",
-        )  # Wait 20 cycles for identity gate
+        )
         reset_cal = pulse.Schedule(
             pulse.Delay(1000, pulse.DriveChannel(qubit)), name=f"reset{qubit}"
         )
@@ -174,7 +175,6 @@ def perform_standard_calibrations(
         with pulse.build(backend, name=f"delay{qubit}") as delay_cal:
             pulse.delay(delay_param, pulse.DriveChannel(qubit))
 
-        # Update backend Target by adding calibrations for all phase gates (fixed angle virtual Z-rotations)
         for name, cal, duration in zip(
             ("rz", "id", "delay", "reset"),
             (rz_cal, id_cal, delay_cal, id_cal),
@@ -189,10 +189,9 @@ def perform_standard_calibrations(
             instruction_prop = InstructionProperties(gate_cal.duration * dt, 0.0, gate_cal)
             target.update_instruction_properties(gate, (qubit,), instruction_prop)
 
-        # Perform calibration experiments (Rabi/Drag) for calibrating X and SX gates
         if not existing_cals and backend.options.subsystem_dims[qubit] > 1:
             backend_run = True
-            sampler = None  # BackendSamplerV2(backend=backend)
+            sampler = None
             rabi_exp = RoughXSXAmplitudeCal(
                 [qubit], cals, backend=backend, amplitudes=np.linspace(-0.2, 0.2, 100)
             )
@@ -206,7 +205,6 @@ def perform_standard_calibrations(
             print(f"Drag experiments done for qubit {qubit} done.")
             exp_results[qubit] = [rabi_result, drag_result]
 
-        # Build Hadamard gate schedule from following equivalence: H = S @ SX @ S
         sx_schedule = cals.get_schedule("sx", (qubit,))
         s_schedule = target.get_calibration("s", (qubit,))
         with pulse.build(backend, name="h") as h_schedule:
@@ -229,13 +227,7 @@ def perform_standard_calibrations(
         cals.save(overwrite=True, file_prefix="Custom" + backend.name)
     error_dict = {"x": single_qubit_errors, "sx": single_qubit_errors}
     target.update_from_instruction_schedule_map(cals.get_inst_map(), error_dict=error_dict)
-    # for qubit_pair in control_channel_map:
-    #     print(qubit_pair)
-    #     cr_ham_exp = CrossResonanceHamiltonian(physical_qubits=qubit_pair, flat_top_widths=np.linspace(0, 5000, 17),
-    #                                            backend=backend)
-    #     print("Calibrating CR for qubits", qubit_pair, "...")
-    #     data_cr = cr_ham_exp.run().block_for_results()
-    #     exp_results[qubit_pair] = data_cr
+
     if control_flow:
         for control_flow_op, control_op_name in zip(
             [SwitchCaseOp, ForLoopOp, IfElseOp, WhileLoopOp],
@@ -250,10 +242,12 @@ def perform_standard_calibrations(
 
 def add_ecr_gate(backend: BackendV2, basis_gates: Optional[List[str]] = None, coupling_map=None):
     """
-    Add ECR gate to basis gates if not present
-    :param backend: Backend instance
-    :param basis_gates: Basis gates of the backend
-    :param coupling_map: Coupling map of the backend
+    Adds the ECR gate to the basis gates of a backend.
+
+    Args:
+        backend: The backend to add the ECR gate to.
+        basis_gates: The basis gates of the backend.
+        coupling_map: The coupling map of the backend.
     """
     if "ecr" not in basis_gates and backend.num_qubits > 1:
         target = backend.target
@@ -286,22 +280,18 @@ def add_ecr_gate(backend: BackendV2, basis_gates: Optional[List[str]] = None, co
         for i, gate in enumerate(basis_gates):
             if gate == "cx":
                 basis_gates.pop(i)
-        # raise ValueError("Backend must carry 'ecr' as basis_gate for transpilation, will change in the
-        # future")
 
 
 def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
     """
-    Determine default parameters for ECR gate on provided backend (works even if basis gate of the IBM Backend is CX)
+    Gets the parameters for the ECR gate.
 
     Args:
-        backend: Backend instance
-        physical_qubits: Physical qubits on which ECR gate is to be performed
+        backend: The backend to get the parameters from.
+        physical_qubits: The physical qubits to get the parameters for.
+
     Returns:
-        default_params: Default parameters for ECR gate
-        pulse_features: Features of the pulse
-        basis_gate_instructions: Instructions for the basis gate
-        instructions_array: Array of instructions for the basis gate
+        A tuple containing the default parameters, pulse features, basis gate instructions, and instructions array.
     """
     if not isinstance(backend, (BackendV1, BackendV2)):
         raise TypeError("Backend must be defined")
@@ -404,17 +394,15 @@ def get_ecr_params(backend: Backend_type, physical_qubits: Sequence[int]):
 
 def get_pulse_params(backend: Backend_type, physical_qubit: Sequence[int], gate_name: str = "x"):
     """
-    Determine default parameters for SX or X gate on provided backend
+    Gets the parameters for a pulse.
 
     Args:
-        backend: Backend instance
-        physical_qubit: Physical qubit on which gate is to be performed
-        gate_name: Name of the gate (X or SX)
+        backend: The backend to get the parameters from.
+        physical_qubit: The physical qubit to get the parameters for.
+        gate_name: The name of the gate to get the parameters for.
+
     Returns:
-        default_params: Default parameters for X or SX gate
-        pulse_features: Features of the pulse
-        basis_gate_instructions: Instructions for the basis gate
-        instructions_array: Array of instructions for the basis gate
+        A tuple containing the default parameters, pulse features, basis gate instructions, and instructions array.
     """
     if not isinstance(backend, (BackendV1, BackendV2)):
         raise TypeError("Backend must be defined")
@@ -454,20 +442,24 @@ def new_params_ecr(
     include_baseline: bool = False,
 ):
     """
-    Helper function to parametrize a custom ECR gate using Qiskit Experiments Calibrations syntax.
-    :param params: Parameters of the Schedule/Custom gate.
-    :param qubits: Physical qubits on which custom gate is applied on.
-    :param backend: IBM Backend on which schedule shall be added.
-    :param pulse_features: List of pulse features to be parametrized.
-    :param keep_symmetry: Choose if the two parts of the ECR tone shall be jointly parametrized or not.
-    :param duration_window: Duration window for the pulse duration.
-    :param include_baseline: Include baseline calibration in the parameters.
-    :return: Dictionary of updated ECR parameters.
+    Creates a new set of parameters for the ECR gate.
+
+    Args:
+        params: The parameters to use.
+        qubits: The qubits to apply the gate to.
+        backend: The backend to use.
+        pulse_features: The pulse features to use.
+        keep_symmetry: Whether to keep the symmetry of the gate.
+        duration_window: The duration window to use.
+        include_baseline: Whether to include the baseline parameters.
+
+    Returns:
+        A dictionary of the new parameters.
     """
     qubits = tuple(qubits)
     new_params, available_features, _, _ = get_ecr_params(backend, qubits)
 
-    if keep_symmetry:  # Maintain symmetry between the two GaussianSquare pulses
+    if keep_symmetry:
         if len(pulse_features) != len(params):
             raise ValueError(
                 f"Number of pulse features ({len(pulse_features)}) and number of parameters ({len(params)})"
@@ -476,9 +468,9 @@ def new_params_ecr(
         for sched in ["cr45p", "cr45m"]:
             for i, feature in enumerate(pulse_features):
                 if feature != "duration" and feature in available_features:
-                    if include_baseline:  # Add the parameter to the pulse baseline calibration
+                    if include_baseline:
                         new_params[(feature, qubits, sched)] += params[i]
-                    else:  # Replace baseline calibration with the parameter
+                    else:
                         new_params[(feature, qubits, sched)] = 0.0 + params[i]
 
                 else:
@@ -516,15 +508,19 @@ def new_params_sq_gate(
     gate_name: str = "x",
 ):
     """
-    Helper function to parametrize a custom X or SX gate using Qiskit Experiments Calibrations syntax
-    :param params: Parameters of the Schedule/Custom gate
-    :param qubits: Physical qubits on which custom gate is applied on
-    :param backend: IBM Backend on which schedule shall be added
-    :param pulse_features: List of pulse features to be parametrized
-    :param duration_window: Duration window for the pulse duration
-    :param include_baseline: Include baseline calibration in the parameters
-    :param gate_name: Name of the gate ('x' or 'sx')
-    :return: Dictionary of updated X parameters
+    Creates a new set of parameters for a single-qubit gate.
+
+    Args:
+        params: The parameters to use.
+        qubits: The qubits to apply the gate to.
+        backend: The backend to use.
+        pulse_features: The pulse features to use.
+        duration_window: The duration window to use.
+        include_baseline: Whether to include the baseline parameters.
+        gate_name: The name of the gate.
+
+    Returns:
+        A dictionary of the new parameters.
     """
     new_params, available_features, _, _ = get_pulse_params(backend, qubits, gate_name)
     if len(pulse_features) != len(params):
@@ -534,9 +530,9 @@ def new_params_sq_gate(
         )
     for i, feature in enumerate(pulse_features):
         if feature != "duration" and feature in available_features:
-            if include_baseline:  # Add the parameter to the pulse baseline calibration
+            if include_baseline:
                 new_params[(feature, qubits, gate_name)] += params[i]
-            else:  # Replace baseline calibration with the parameter
+            else:
                 new_params[(feature, qubits, gate_name)] = 0.0 + params[i]
 
         else:
@@ -558,41 +554,26 @@ def custom_experiment_result_function(
     seed: Optional[int] = None,
     metadata: Optional[Dict] = None,
 ) -> ExperimentResult:
-    """Default routine for generating ExperimentResult object.
-
-    To generate the results for a given experiment, this method takes the following steps:
-
-    * The final state is transformed out of the rotating frame and into the lab frame using
-      ``backend.options.solver``.
-    * If ``backend.options.normalize_states==True``, the final state is normalized.
-    * Measurement results are computed, in the dressed basis, based on both the measurement-related
-      options in ``backend.options`` and the measurement specification extracted from the specific
-      experiment.
+    """
+    Creates a custom experiment result.
 
     Args:
-        experiment_name: Name of experiment.
-        solver_result: Result object from :class:`Solver.solve`.
-        measurement_subsystems: Labels of subsystems in the model being measured.
-        memory_slot_indices: Indices of memory slots to store the results in for each subsystem.
-        num_memory_slots: Total number of memory slots in the returned output. If ``None``,
-            ``max(memory_slot_indices)`` will be used.
-        backend: The backend instance that ran the simulation. Various options and properties
-            are utilized.
-        seed: Seed for any random number generation involved (e.g. when computing outcome samples).
-        metadata: Metadata to add to the header of the
-            :class:`~qiskit.result.models.ExperimentResult` object.
+        experiment_name: The name of the experiment.
+        solver_result: The result of the solver.
+        measurement_subsystems: The measurement subsystems.
+        memory_slot_indices: The memory slot indices.
+        num_memory_slots: The number of memory slots.
+        backend: The backend used for the experiment.
+        seed: The seed for the random number generator.
+        metadata: The metadata for the experiment.
 
     Returns:
-        :class:`~qiskit.result.models.ExperimentResult` object containing results.
-
-    Raises:
-        QiskitError: If a specified option is unsupported.
+        The custom experiment result.
     """
 
     yf = solver_result.y[-1]
     tf = solver_result.t[-1]
 
-    # Take state out of frame, put in dressed basis, and normalize
     yf = rotate_frame(yf, tf, backend)
 
     if backend.options.meas_level == MeasLevel.CLASSIFIED:
@@ -603,7 +584,6 @@ def custom_experiment_result_function(
             max_outcome_value=backend.options.max_outcome_level,
         )
 
-        # sample
         memory_samples = _sample_probability_dict(
             memory_slot_probabilities,
             shots=backend.options.shots,
@@ -612,7 +592,6 @@ def custom_experiment_result_function(
         )
         counts = _get_counts_from_samples(memory_samples)
 
-        # construct results object
         exp_data = ExperimentResultData(
             counts=counts,
             memory=memory_samples if backend.options.memory else None,
@@ -635,7 +614,6 @@ def custom_experiment_result_function(
     elif backend.options.meas_level == MeasLevel.KERNELED:
         iq_centers = backend.options.iq_centers
         if iq_centers is None:
-            # Default iq_centers
             iq_centers = []
             for sub_dim in backend.options.subsystem_dims:
                 theta = 2 * np.pi / sub_dim
@@ -643,7 +621,6 @@ def custom_experiment_result_function(
                     [(np.cos(idx * theta), np.sin(idx * theta)) for idx in range(sub_dim)]
                 )
 
-        # generate IQ
         measurement_data = _get_iq_data(
             yf,
             measurement_subsystems=measurement_subsystems,
@@ -658,7 +635,6 @@ def custom_experiment_result_function(
         if backend.options.meas_return == MeasReturnType.AVERAGE:
             measurement_data = np.average(measurement_data, axis=0)
 
-        # construct results object
         exp_data = ExperimentResultData(
             memory=measurement_data,
             statevector=projected_state(
@@ -688,17 +664,17 @@ def simulate_pulse_input(
     normalize: bool = True,
 ) -> Dict[str, Union[Operator, Statevector, float]]:
     """
-    Function extending the functionality of the DynamicsBackend to simulate pulse input (backend.solve)
-    by computing unitary simulation and state/gate fidelity calculation for the provided input.
+    Simulates a pulse input.
 
-    :param backend: DynamicsBackend or Solver instance
-    :param qc_input: (List of) Quantum Circuit(s) or Pulse Schedule(s) input to be simulated
-    :param target: Optional target unitary/state (or list thereof) for gate/state fidelity calculation (if input
-        is QuantumCircuit, target gate and state are automatically inferred).
-    :param initial_state: Optional initial state for state fidelity calculation  (if None and target_state is not None,
-    then initial state is assumed to be |0..0>)
-    :param normalize: Normalize the projected statevector or not
-    :return: Dictionary containing simulated unitary, statevector, projected unitary, projected statevector, gate fidelity, state fidelity
+    Args:
+        backend: The backend to use for the simulation.
+        qc_input: The quantum circuit or pulse schedule to simulate.
+        target: The target state or gate.
+        initial_state: The initial state for the simulation.
+        normalize: Whether to normalize the output state.
+
+    Returns:
+        A dictionary containing the simulation results.
     """
     solver: Solver = backend.options.solver
     subsystem_dims = list(filter(lambda x: x > 1, backend.options.subsystem_dims))
@@ -727,7 +703,6 @@ def simulate_pulse_input(
         for output_unitary in output_unitaries
     ]
 
-    # Rotate the frame of the output unitaries to lab frame
     output_ops = [
         rotate_frame(output_op, result.t[-1], backend)
         for output_op, result in zip(output_ops, results)
@@ -745,7 +720,6 @@ def simulate_pulse_input(
     projected_statevectors = [
         projected_state(final_state, subsystem_dims, normalize) for final_state in final_states
     ]
-    rotated_state = None
 
     if len(final_states) > 1:
         final_results = {
@@ -894,12 +868,14 @@ def simulate_pulse_input(
 
 def get_control_channel_map(backend: BackendV2, qubit_tgt_register: List[int]):
     """
-    Get reduced control_channel_map from Backend configuration (needs to be of type BackendV1)
-    :param backend: IBM Backend instance, must carry a channels_map attribute
-    :param qubit_tgt_register: Subsystem of interest from which to build control_channel_map
+    Gets the control channel map for a backend.
+
+    Args:
+        backend: The backend to get the control channel map from.
+        qubit_tgt_register: The qubit target register.
 
     Returns:
-    control_channel_map: Reduced control channel map for the qubit_tgt_register
+        The control channel map.
     """
     if not hasattr(backend, "channels_map"):
         raise AttributeError("Backend must have channels_map attribute")
@@ -916,14 +892,16 @@ def get_control_channel_map(backend: BackendV2, qubit_tgt_register: List[int]):
 
 def rotate_frame(yf: Any, tf: Any, backend: DynamicsBackend):
     """
-    Rotate the frame of the state or operator to the lab frame
+    Rotates the frame of a state or operator.
 
     Args:
-        yf: State or operator in the frame of the rotating frame
-        tf: Time at which the frame is rotated
-        backend: DynamicsBackend object containing the backend information
+        yf: The state or operator to rotate.
+        tf: The time to rotate to.
+        backend: The backend to use for the rotation.
+
+    Returns:
+        The rotated state or operator.
     """
-    # Take state out of frame, put in dressed basis, and normalize
     if isinstance(yf, Statevector):
         yf = np.array(backend.options.solver.model.rotating_frame.state_out_of_frame(t=tf, y=yf))
         yf = backend._dressed_states_adjoint @ yf
@@ -956,14 +934,13 @@ def rotate_frame(yf: Any, tf: Any, backend: DynamicsBackend):
 
 def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
     """
-    Build projector on qubit space from initial subsystem dimensions
-    The returned operator is a non-square matrix mapping the qudit space to the qubit space.
-    It can be applied to convert multi-qudit states/unitaries to multi-qubit states/unitaries.
+    Builds a projector onto the qubit space.
 
     Args:
-        initial_subsystem_dims: Initial subsystem dimensions
+        initial_subsystem_dims: The initial subsystem dimensions.
 
-    Returns: Projector on qubit space as a Qiskit Operator object
+    Returns:
+        The projector.
     """
     total_dim = np.prod(initial_subsystem_dims)
     output_dims = (2,) * len(initial_subsystem_dims)
@@ -972,18 +949,18 @@ def build_qubit_space_projector(initial_subsystem_dims: list) -> Operator:
         np.zeros((total_qubit_dim, total_dim), dtype=np.complex128),
         input_dims=tuple(initial_subsystem_dims),
         output_dims=output_dims,
-    )  # Projector initialized in the qudit space
-    for i in range(total_dim):  # Loop over all computational basis states in the qudit space
-        s = Statevector.from_int(i, initial_subsystem_dims)  # Computational qudit state
-        for key in s.to_dict().keys():  # Loop over all computational basis states
-            if all(c in "01" for c in key):  # Check if basis state is in the qubit space
-                s_qubit = Statevector.from_label(key)  # Computational qubit state
+    )
+    for i in range(total_dim):
+        s = Statevector.from_int(i, initial_subsystem_dims)
+        for key in s.to_dict().keys():
+            if all(c in "01" for c in key):
+                s_qubit = Statevector.from_label(key)
                 projector += Operator(
                     s_qubit.data.reshape(total_qubit_dim, 1)
                     @ s.data.reshape(total_dim, 1).conj().T,
                     input_dims=tuple(initial_subsystem_dims),
                     output_dims=output_dims,
-                )  # Add |s_qubit><s_qudit| to projector
+                )
                 break
             else:
                 continue
@@ -996,16 +973,19 @@ def projected_state(
     normalize: bool = True,
 ) -> Statevector | DensityMatrix:
     """
-    Project statevector on qubit space
+    Projects a state onto the qubit space.
 
     Args:
-        state: State, given as numpy array or QuantumState object
-        subsystem_dims: Subsystem dimensions
-        normalize: Normalize statevector
+        state: The state to project.
+        subsystem_dims: The subsystem dimensions.
+        normalize: Whether to normalize the projected state.
+
+    Returns:
+        The projected state.
     """
     if not isinstance(state, (np.ndarray, QuantumState)):
         raise TypeError("State must be either numpy array or QuantumState object")
-    proj = build_qubit_space_projector(subsystem_dims)  # Projector on qubit space (in qudit space)
+    proj = build_qubit_space_projector(subsystem_dims)
     if isinstance(state, np.ndarray):
         state_type = DensityMatrix if state.ndim == 2 else Statevector
         output_state: Statevector | DensityMatrix = state_type(state)
@@ -1015,7 +995,7 @@ def projected_state(
 
     if (
         normalize
-    ) and qubitized_state.trace() != 0:  # Normalize the projected state (which is for now unnormalized due to selection of components)
+    ) and qubitized_state.trace() != 0:
         qubitized_state = (
             qubitized_state / qubitized_state.trace()
             if isinstance(qubitized_state, DensityMatrix)
@@ -1027,42 +1007,47 @@ def projected_state(
 
 def qubit_projection(unitary: np.ndarray | Operator, subsystem_dims: List[int]) -> Operator:
     """
-    Project unitary on qubit space
+    Projects a unitary onto the qubit space.
 
     Args:
-        unitary: Unitary, given as numpy array or Operator object
-        subsystem_dims: Subsystem dimensions
+        unitary: The unitary to project.
+        subsystem_dims: The subsystem dimensions.
 
-    Returns: unitary projected on qubit space as a Qiskit Operator object
+    Returns:
+        The projected unitary.
     """
 
-    proj = build_qubit_space_projector(subsystem_dims)  # Projector on qubit space (in qudit space)
+    proj = build_qubit_space_projector(subsystem_dims)
     unitary_op = (
         Operator(unitary, input_dims=tuple(subsystem_dims), output_dims=tuple(subsystem_dims))
         if isinstance(unitary, np.ndarray)
         else unitary
-    )  # Unitary operator (in qudit space)
+    )
 
-    qubitized_op = proj @ unitary_op @ proj.adjoint()  # Projected unitary (in qubit space)
-    # (Note that is actually not unitary at this point, it's a Channel on the multi-qubit system)
+    qubitized_op = proj @ unitary_op @ proj.adjoint()
     return qubitized_op
 
 
 def rotate_unitary(x, op: Operator) -> Operator:
     """
-    Rotate input unitary with virtual Z rotations on all qubits
-    x: Rotation parameters
-    unitary: Rotated unitary
+    Rotates a unitary by a given angle.
+
+    Args:
+        x: The angle to rotate by.
+        op: The unitary to rotate.
+
+    Returns:
+        The rotated unitary.
     """
     assert len(x) % 2 == 0, "Rotation parameters should be a pair"
     ops = [
         Operator(RZGate(x[i])) for i in range(len(x))
-    ]  # Virtual Z rotations to be applied on all qubits
+    ]
     pre_rot, post_rot = (
         ops[0],
         ops[-1],
-    )  # Degrees of freedom before and after the unitary
-    for i in range(1, len(x) // 2):  # Apply virtual Z rotations on all qubits
+    )
+    for i in range(1, len(x) // 2):
         pre_rot = pre_rot.expand(ops[i])
         post_rot = post_rot.tensor(ops[-i - 1])
 
@@ -1073,11 +1058,15 @@ def get_optimal_z_rotation(
     unitary: Operator, target_gate: Gate | Operator, n_qubits: int
 ) -> OptimizeResult:
     """
-    Get optimal Z rotation angles for input unitary to match target gate (minimize gate infidelity)
+    Gets the optimal Z rotation for a given unitary.
+
     Args:
-        unitary: Unitary to be rotated
-        target_gate: Target gate
-        n_qubits: Number of qubits
+        unitary: The unitary to get the optimal Z rotation for.
+        target_gate: The target gate.
+        n_qubits: The number of qubits.
+
+    Returns:
+        The optimal Z rotation.
     """
 
     def cost_function(x):
@@ -1094,7 +1083,17 @@ def get_optimal_z_rotation(
 
 def handle_virtual_rotations(operations, fidelities, subsystem_dims, n_reps, target):
     """
-    Optimize gate fidelity by finding optimal Z-rotations before and after gate
+    Handles virtual rotations.
+
+    Args:
+        operations: The operations to handle.
+        fidelities: The fidelities of the operations.
+        subsystem_dims: The subsystem dimensions.
+        n_reps: The number of repetitions.
+        target: The target.
+
+    Returns:
+        The fidelities of the operations with virtual rotations.
     """
     best_op = operations[np.argmax(fidelities)]
     res = get_optimal_z_rotation(best_op, target.target_operator.power(n_reps), len(subsystem_dims))
@@ -1110,37 +1109,34 @@ def custom_schedule(
     params: ParameterVector,
 ) -> pulse.ScheduleBlock:
     """
-    Define parametrization of the pulse schedule characterizing the target gate.
-    This function can be customized at will, however one shall recall to make sure that number of actions match the
-    number of pulse parameters used within the function (through the params argument).
-        :param backend: IBM Backend on which schedule shall be added
-        :param physical_qubits: Physical qubits on which custom gate is applied on
-        :param params: Parameters of the Schedule/Custom gate
+    Creates a custom pulse schedule.
 
-        :return: Parametrized Schedule
+    Args:
+        backend: The backend to use.
+        physical_qubits: The physical qubits to apply the schedule to.
+        params: The parameters for the schedule.
+
+    Returns:
+        The custom pulse schedule.
     """
-
-    # Load here all pulse parameters names that should be tuned during model-free calibration.
-    # Here we focus on real time tunable pulse parameters (amp, angle, duration)
-
-    ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]  # For ECR gate
-    sq_pulse_features = ["amp"]  # For single qubit gates
-    sq_name = "x"  # Name of the single qubit gate baseline to pick ("x" or "sx")
+    ecr_pulse_features = ["amp", "angle", "tgt_amp", "tgt_angle"]
+    sq_pulse_features = ["amp"]
+    sq_name = "x"
     keep_symmetry = (
-        True  # Choose if the two parts of the ECR tone shall be jointly parametrized or not
+        True
     )
     include_baseline = (
-        False  # Choose if original calibration shall be included as baseline in parametrization
+        False
     )
-    include_duration = False  # Choose if pulse duration shall be included in parametrization
-    duration_window = 1  # Duration window for the pulse duration
+    include_duration = False
+    duration_window = 1
     if include_duration:
         ecr_pulse_features.append("duration")
         sq_pulse_features.append("duration")
 
     qubits = tuple(physical_qubits)
 
-    if len(qubits) == 2:  # Retrieve schedule for ECR gate
+    if len(qubits) == 2:
         new_params = new_params_ecr(
             params,
             qubits,
@@ -1150,7 +1146,7 @@ def custom_schedule(
             duration_window,
             include_baseline,
         )
-    elif len(qubits) == 1:  # Retrieve schedule for single qubit gate
+    elif len(qubits) == 1:
         new_params = new_params_sq_gate(
             params,
             qubits,
@@ -1176,18 +1172,13 @@ def custom_schedule(
 
     gate_name = "ecr" if len(physical_qubits) == 2 else sq_name
 
-    # Retrieve schedule (for now, works only with ECRGate(), as no library yet available for CX)
-
     basis_gate_sched = cals.get_schedule(gate_name, qubits, assign_params=new_params)
 
-    if isinstance(backend, BackendV1):  # Convert to BackendV2 if needed (to access Target)
+    if isinstance(backend, BackendV1):
         backend = BackendV2Converter(backend)
 
-    # Choose which gate to build here
     with pulse.build(backend, name="custom_sched") as custom_sched:
-        # pulse.call(backend.target.get_calibration("s", qubits))
         pulse.call(basis_gate_sched)
-        # pulse.call(backend.target.get_calibration("s", qubits))
 
     return custom_sched
 
@@ -1196,11 +1187,13 @@ def validate_pulse_kwargs(
     **kwargs,
 ) -> tuple[Optional[Gate], list[int], BackendV1 | BackendV2]:
     """
-    Validate the kwargs passed to the parametrized circuit function for pulse level calibration
-    :param kwargs: Additional arguments to be passed to the function (here target dict and backend object)
-        Target dict should contain the gate and physical qubits to be calibrated in the form of a dictionary
-        e.g. {"gate": Gate, "physical_qubits": [0, 1]}
-    :return: Gate, Physical qubits, Backend
+    Validates the kwargs for a pulse calibration.
+
+    Args:
+        **kwargs: The kwargs to validate.
+
+    Returns:
+        A tuple containing the gate, physical qubits, and backend.
     """
     if "target" not in kwargs or "backend" not in kwargs:
         raise ValueError("Missing target and backend in kwargs.")

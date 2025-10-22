@@ -28,10 +28,8 @@ from qiskit.transpiler import (
 
 from qiskit.providers import (
     BackendV2,
-    Options as AerOptions,
-    QiskitBackendNotFoundError,
 )
-
+from qiskit.providers.exceptions import QiskitBackendNotFoundError
 from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
 from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackendV2
 from qiskit_aer.backends.aerbackend import AerBackend
@@ -39,8 +37,6 @@ from qiskit_ibm_runtime import (
     Session,
     IBMBackend as RuntimeBackend,
     EstimatorV2 as RuntimeEstimatorV2,
-    Options as RuntimeOptions,
-    EstimatorOptions as RuntimeEstimatorOptions,
     SamplerV2 as RuntimeSamplerV2,
     QiskitRuntimeService,
 )
@@ -80,10 +76,13 @@ def retrieve_primitives(
     config: BackendConfig,
 ) -> Tuple[Estimator_type, Sampler_type]:
     """
-    Retrieve appropriate Qiskit primitives (estimator and sampler) from backend and layout
+    Retrieves the appropriate Qiskit primitives for the given backend configuration.
 
     Args:
-        config: BackendConfig object
+        config: The backend configuration.
+
+    Returns:
+        A tuple containing the estimator and sampler primitives.
     """
 
     backend = config.backend
@@ -128,7 +127,7 @@ def retrieve_primitives(
 
         estimator = AerEstimatorV2.from_backend(backend=backend)
         sampler = AerSamplerV2.from_backend(backend=backend)
-    elif backend is None:  # No backend specified, ideal state-vector simulation
+    elif backend is None:
         sampler = StatevectorSampler()
         estimator = StatevectorEstimator()
 
@@ -157,14 +156,15 @@ def handle_session(
     counter: Optional[int] = None,
 ):
     """
-    Handle session reopening for RuntimeEstimator or load necessary data for custom DynamicsBackendEstimator
+    Handles the session for a Qiskit Runtime estimator.
+
     Args:
-        estimator: Estimator instance
-        backend: Backend instance
-        counter: Optional session counter (for RuntimeEstimator) or circuit macro counter (for DynamicsBackendEstimator)
+        estimator: The estimator to handle the session for.
+        backend: The backend to use for the session.
+        counter: The session counter.
 
     Returns:
-        Updated Estimator instance
+        The estimator with the handled session.
     """
     if isinstance(estimator, RuntimeEstimatorV2) and estimator.mode.status() == "Closed":
         old_session = estimator.mode
@@ -190,20 +190,20 @@ def select_backend(
     calibration_files: Optional[str] = None,
 ) -> Optional[BackendV2]:
     """
-    Select backend to use for training among real backend or fake backend (Aer Simulator)
+    Selects a backend to use for the experiment.
 
     Args:
-        real_backend: Boolean indicating if real backend should be used
-        channel: Channel to use for Runtime Service
-        instance: Instance to use for Runtime Service
-        backend_name: Name of the backend to use for training
-        use_dynamics: Boolean indicating if DynamicsBackend should be used
-        physical_qubits: Physical qubits on which DynamicsBackend should be used
-        solver_options: Solver options for DynamicsBackend
-        calibration_files: Calibration files for DynamicsBackend
+        real_backend: Whether to use a real backend.
+        channel: The channel to use for the Qiskit Runtime service.
+        instance: The instance to use for the Qiskit Runtime service.
+        backend_name: The name of the backend to use.
+        use_dynamics: Whether to use a dynamics backend.
+        physical_qubits: The physical qubits to use for the dynamics backend.
+        solver_options: The solver options for the dynamics backend.
+        calibration_files: The calibration files for the dynamics backend.
 
     Returns:
-        backend: Backend instance
+        The selected backend.
     """
 
     backend = None
@@ -217,10 +217,7 @@ def select_backend(
             else:
                 backend = service.backend(backend_name)
 
-            # Specify options below if needed
-            # backend.set_options(**options)
         else:
-            # Fake backend initialization (Aer Simulator)
             try:
                 if not use_dynamics:
                     backend = FakeProviderForBackendV2().backend(
@@ -256,7 +253,14 @@ def convert_solver_options(
     solver_options: Optional[Dict], dt: Optional[float | int] = None
 ) -> Optional[Dict]:
     """
-    Convert solver options passed from YAML to correct format
+    Converts solver options to the correct format.
+
+    Args:
+        solver_options: The solver options to convert.
+        dt: The time step of the backend.
+
+    Returns:
+        The converted solver options.
     """
     if solver_options["hmax"] == "auto" and dt is not None:
         solver_options["hmax"] = dt
@@ -269,10 +273,13 @@ def convert_solver_options(
 
 def has_noise_model(backend: AerBackend):
     """
-    Check if Aer backend has noise model or not
+    Checks if a backend has a noise model.
 
     Args:
-        backend: AerBackend instance
+        backend: The backend to check.
+
+    Returns:
+        Whether the backend has a noise model.
     """
     if (
         backend.options.noise_model is None
@@ -286,10 +293,13 @@ def has_noise_model(backend: AerBackend):
 
 def load_q_env_from_yaml_file(file_path: str):
     """
-    Load Qiskit Quantum Environment from yaml file
+    Loads a quantum environment from a YAML file.
 
     Args:
-        file_path: File path
+        file_path: The path to the YAML file.
+
+    Returns:
+        A tuple containing the environment parameters, backend parameters, and runtime options.
     """
     from ..rewards import reward_dict
     from ..environment.configuration import (
@@ -408,10 +418,13 @@ def load_q_env_from_yaml_file(file_path: str):
 
 def get_lower_keys_dict(dictionary: Dict[str, Any]):
     """
-    Get dictionary with lower keys
+    Converts all keys in a dictionary to lowercase.
 
     Args:
-        dictionary: Dictionary
+        dictionary: The dictionary to convert.
+
+    Returns:
+        The dictionary with lowercase keys.
     """
     return {key.lower(): value for key, value in dictionary.items()}
 
@@ -433,18 +446,18 @@ def get_q_env_config(
     **backend_callable_kwargs,
 ):
     """
-    Get Qiskit Quantum Environment configuration from yaml file
+    Gets the quantum environment configuration from a YAML file.
 
     Args:
-        config_file_path: Configuration file path (yaml, should contain at least ENV and TARGET section)
-        parametrized_circ_func: Function to applying parametrized gate (should be defined in your Python config)
-        backend: Optional custom backend instance
-            (if None, backend will be selected based on configuration set in yaml file)
-        pass_manager: PassManager instance
-        instruction_durations: InstructionDurations instance
-        backend_callable_args: Additional arguments for backend if it was passed as a callable
+        config_file_path: The path to the YAML file.
+        parametrized_circ_func: The function to create the parametrized circuit.
+        backend: The backend to use.
+        pass_manager: The pass manager to use.
+        instruction_durations: The instruction durations to use.
+        **backend_callable_kwargs: Additional keyword arguments for the backend.
 
-
+    Returns:
+        The quantum environment configuration.
     """
     from ..environment.configuration import QEnvConfig
 
@@ -473,10 +486,13 @@ def get_q_env_config(
 
 def remove_none_values(dictionary: Dict):
     """
-    Remove None values from dictionary
+    Removes all None values from a dictionary.
 
     Args:
-        dictionary: Dictionary
+        dictionary: The dictionary to remove None values from.
+
+    Returns:
+        The dictionary with None values removed.
     """
     new_dict = {}
     for k, v in dictionary.items():
@@ -489,11 +505,14 @@ def remove_none_values(dictionary: Dict):
 
 def load_from_yaml_file(file_path: str, **kwargs):
     """
-    Load data from a yaml file
+    Loads data from a YAML file.
 
     Args:
-        file_path: Path to the yaml file
-        **kwargs: Additional keyword arguments to update the configuration dictionary
+        file_path: The path to the YAML file.
+        **kwargs: Additional keyword arguments to update the configuration.
+
+    Returns:
+        The loaded data.
     """
     with open(file_path, "r") as f:
         config = yaml.safe_load(f)
@@ -503,7 +522,15 @@ def load_from_yaml_file(file_path: str, **kwargs):
 
 
 def load_from_pickle(file_path: str):
-    """Load data from a pickle or gzip file."""
+    """
+    Loads data from a pickle file.
+
+    Args:
+        file_path: The path to the pickle file.
+
+    Returns:
+        The loaded data.
+    """
     try:
         if file_path.endswith(".gz"):
             with gzip.open(file_path, "rb") as file:
@@ -519,7 +546,13 @@ def load_from_pickle(file_path: str):
 
 
 def save_to_pickle(data, file_path: str) -> None:
-    """Save data as a pickle or gzip file."""
+    """
+    Saves data to a pickle file.
+
+    Args:
+        data: The data to save.
+        file_path: The path to the pickle file.
+    """
     dir = os.path.dirname(file_path)
     if not os.path.exists(dir):
         os.makedirs(dir)
@@ -536,17 +569,26 @@ def save_to_pickle(data, file_path: str) -> None:
 
 
 def create_hpo_agent_config(trial: optuna.trial.Trial, hpo_config: Dict):
+    """
+    Creates a hyperparameter optimization agent configuration.
+
+    Args:
+        trial: The optuna trial.
+        hpo_config: The hyperparameter optimization configuration.
+
+    Returns:
+        The hyperparameter optimization agent configuration.
+    """
     hyper_params = {}
     hyperparams_in_scope = []
 
-    # Loop through hpo_config and decide whether to optimize or use the provided value
     for param, values in hpo_config.items():
         if isinstance(values, list):
-            if len(values) == 2:  # If values is a list of length 2, optimize
+            if len(values) == 2:
                 if isinstance(values[0], int):
                     hyper_params[param] = trial.suggest_int(param, values[0], values[1])
                 elif isinstance(values[0], float):
-                    if param == "LR":  # If learning rate, suggest in log scale
+                    if param == "LR":
                         hyper_params[param] = trial.suggest_float(
                             param, values[0], values[1], log=True
                         )
@@ -555,28 +597,21 @@ def create_hpo_agent_config(trial: optuna.trial.Trial, hpo_config: Dict):
                 hyperparams_in_scope.append(param)
             elif (
                 len(values) > 2
-            ):  # If values is a list of more than 2, choose from list and optimize
+            ):
                 hyper_params[param] = trial.suggest_categorical(param, values)
                 hyperparams_in_scope.append(param)
         else:
             hyper_params[param] = values
 
-    # Dynamically calculate batchsize from minibatch_size and num_minibatches
-    print("MINIBATCH_SIZE", hyper_params.get("MINIBATCH_SIZE", None))
-    print("NUM_MINIBATCHES", hyper_params.get("NUM_MINIBATCHES", None))
     if "MINIBATCH_SIZE" in hyper_params and "NUM_MINIBATCHES" in hyper_params:
         hyper_params["BATCH_SIZE"] = (
             hyper_params["MINIBATCH_SIZE"] * hyper_params["NUM_MINIBATCHES"]
         )
 
-    # Print hyperparameters considered for HPO
     print("Hyperparameters considered for HPO:", hyperparams_in_scope)
 
-    # Print hyperparameters NOT considered for HPO
     hyperparams_not_in_scope = [param for param in hpo_config if param not in hyperparams_in_scope]
     print("Hyperparameters NOT in scope of HPO:", hyperparams_not_in_scope)
-
-    # Take over attributes from agent_config and populate hyper_params
 
     return hyper_params
 
@@ -585,6 +620,16 @@ def get_hardware_runtime_single_circuit(
     qc: QuantumCircuit,
     instruction_durations_dict: Dict[Tuple[str, Tuple[int, ...]], Tuple[float, str]],
 ):
+    """
+    Gets the hardware runtime of a single quantum circuit.
+
+    Args:
+        qc: The quantum circuit.
+        instruction_durations_dict: The instruction durations of the backend.
+
+    Returns:
+        The hardware runtime of the quantum circuit.
+    """
     total_time_per_qubit = {qubit: 0.0 for qubit in qc.qubits}
 
     for instruction in qc.data:
@@ -618,13 +663,12 @@ def get_hardware_runtime_single_circuit(
                 "Hardware runtimes of 3-qubit gates are not implemented currently."
             )
 
-    # Find the maximum execution time among all qubits
     reset_time = instruction_durations_dict.get(("reset", (0,)), [1e-6])[0]
     measure_time = instruction_durations_dict.get(("measure", (0,)), [1e-6])[0]
     total_execution_time = (
         max(total_time_per_qubit.values())
-        + reset_time  # Reset time is the same for all qubits
-        + measure_time  # Reset time is the same for all qubits
+        + reset_time
+        + measure_time
     )
 
     return total_execution_time
@@ -633,6 +677,17 @@ def get_hardware_runtime_single_circuit(
 def get_hardware_runtime_cumsum(
     qc: QuantumCircuit, circuit_gate_times: Dict, total_shots: List[int]
 ) -> np.array:
+    """
+    Gets the cumulative hardware runtime of a quantum circuit.
+
+    Args:
+        qc: The quantum circuit.
+        circuit_gate_times: The gate times of the circuit.
+        total_shots: The total number of shots.
+
+    Returns:
+        The cumulative hardware runtime.
+    """
     return np.cumsum(
         get_hardware_runtime_single_circuit(qc, circuit_gate_times) * np.array(total_shots)
     )
@@ -646,24 +701,20 @@ def generate_default_instruction_durations_dict(
     virtual_gates: Optional[List] = None,
 ):
     """
-    Generates a dictionary of default instruction durations for each gate and qubit combination. This allows for calculating the total execution time of a quantum circuit.
-    In particular, the metric of hardware runtime becomes relevant to benchmark the performance of different methods for the same calibration task.
+    Generates a default instruction durations dictionary.
 
     Args:
-        n_qubits (int): The number of qubits in the quantum circuit.
-        single_qubit_gate_time (float): The duration of a single-qubit gate.
-        two_qubit_gate_time (float): The duration of a two-qubit gate.
-        circuit_gate_times (dict): A dictionary mapping gate names to their respective durations.
-        virtual_gates (list): A list of gates that are performed by software and have zero duration.
+        n_qubits: The number of qubits.
+        single_qubit_gate_time: The duration of a single-qubit gate.
+        two_qubit_gate_time: The duration of a two-qubit gate.
+        circuit_gate_times: The gate times of the circuit.
+        virtual_gates: A list of virtual gates.
 
     Returns:
-        dict: A dictionary where the keys are tuples of the form (gate, qubits) and the values are tuples of the form (duration, unit).
-              The duration is the default duration for the gate and qubit combination, and the unit is the time unit (e.g., 's' for seconds).
-
+        The default instruction durations dictionary.
     """
     default_instruction_durations_dict = {}
 
-    # Identify single-qubit and two-qubit gates
     single_qubit_gates = []
     two_qubit_gates = []
 
@@ -677,7 +728,6 @@ def generate_default_instruction_durations_dict(
         elif circuit_gate_times[gate] == two_qubit_gate_time:
             two_qubit_gates.append(gate)
 
-    # Single qubit gates
     for gate in single_qubit_gates:
         for qubit in range(n_qubits):
             default_instruction_durations_dict[(gate, (qubit,))] = (
@@ -685,7 +735,6 @@ def generate_default_instruction_durations_dict(
                 "s",
             )
 
-    # Two qubit gates (assuming all-to-all connectivity)
     for gate in two_qubit_gates:
         for qubit1 in range(n_qubits):
             for qubit2 in range(n_qubits):
@@ -695,7 +744,6 @@ def generate_default_instruction_durations_dict(
                         "s",
                     )
 
-    # Reset and Measure operations
     for qubit in range(n_qubits):
         default_instruction_durations_dict[("measure", (qubit,))] = (
             circuit_gate_times["measure"],
@@ -706,7 +754,6 @@ def generate_default_instruction_durations_dict(
             "s",
         )
 
-    # Gates done by software
     if virtual_gates is not None:
         for gate in virtual_gates:
             for qubit in range(n_qubits):
@@ -716,6 +763,13 @@ def generate_default_instruction_durations_dict(
 
 
 def validate_circuit_and_target(prep_circuits, targets):
+    """
+    Validates the circuits and targets.
+
+    Args:
+        prep_circuits: The preparation circuits.
+        targets: The targets.
+    """
     from ..environment.target import GateTarget
 
     if len(prep_circuits) != len(targets):

@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import keyword
-import re
-from inspect import signature
-from typing import Tuple, Optional, Sequence, List, Union, Dict, Callable
-
 import numpy as np
 from qiskit.circuit import (
     QuantumCircuit,
@@ -30,7 +25,6 @@ from qiskit.quantum_info.states.quantum_state import QuantumState
 from qiskit.transpiler import PassManager, CouplingMap, InstructionProperties
 from qiskit.providers import BackendV2
 
-# Qiskit Experiments imports
 from qiskit_experiments.framework import BaseAnalysis, BatchExperiment
 from qiskit_experiments.library import ProcessTomography, StateTomography
 from qiskit_experiments.library.tomography.basis import (
@@ -39,37 +33,50 @@ from qiskit_experiments.library.tomography.basis import (
 )
 
 from .transpiler_passes import CustomGateReplacementPass
+from typing import Tuple, Optional, Sequence, List, Union, Dict, Callable
 
 QuantumTarget = Union[Statevector, Operator, DensityMatrix]
 
 
 def shots_to_precision(n_shots: int) -> float:
     """
-    Convert number of shots to precision on expectation value
+    Converts the number of shots to a precision value.
+
+    Args:
+        n_shots: The number of shots.
+
+    Returns:
+        The precision value.
     """
     return 1 / np.sqrt(n_shots)
 
 
 def precision_to_shots(precision: float) -> int:
     """
-    Convert precision on expectation value to number of shots
+    Converts a precision value to the number of shots.
+
+    Args:
+        precision: The precision value.
+
+    Returns:
+        The number of shots.
     """
     return int(np.ceil(1 / precision**2))
 
 
 def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flow=True):
     """
-    Returns a Quantum Circuit with qc repeated n_reps times
-    Depending on the backend and the control_flow flag,
-    the circuit is repeated using the built-in for_loop method if available
+    Repeats a quantum circuit a given number of times.
 
     Args:
-        qc: Quantum Circuit
-        n_reps: Number of repetitions
-        backend: Backend instance
-        control_flow: Control flow flag (uses for_loop if True and backend supports it)
+        qc: The quantum circuit to repeat.
+        n_reps: The number of repetitions.
+        backend: The backend to use for the repetition.
+        control_flow: Whether to use control flow for the repetition.
+
+    Returns:
+        The repeated quantum circuit.
     """
-    # Repeat the circuit n_reps times and prepend the input state preparation
     if n_reps == 1:
         return qc.copy()
     if isinstance(backend, BackendV2) and "for_loop" in backend.operation_names and control_flow:
@@ -93,18 +100,20 @@ def add_custom_gate(
     inplace: bool = True,
 ) -> QuantumCircuit:
     """
-    Add a custom gate to the Quantum Circuit and register it in the backend target for the specified physical qubits
-    (if provided).
+    Adds a custom gate to a quantum circuit.
+
     Args:
-        qc: Quantum Circuit to which the gate is to be added
-        gate: Gate to be added (can be a Gate, QuantumCircuit, or string name of the gate).
-            If a string name is provided, a Gate object is created with the name and the provided parameters, whereas the number of qubits is inferred from the qubits argument.
-        qubits: Virtual qubits on which the gate is to be applied (within qc.qubits)
-        parameters: Parameters of the gate (if applicable, e.g., for parametrized gates)
-        physical_qubits: Physical qubits on which the gate is to be applied (if applicable)
-        backend: Backend instance to register the gate in the target
-        instruction_properties: Instruction properties for the gate (if applicable)
-        inplace: Whether to add the gate in place to the Quantum Circuit or return a new Quantum Circuit with the gate added
+        qc: The quantum circuit to add the gate to.
+        gate: The gate to add.
+        qubits: The qubits to apply the gate to.
+        parameters: The parameters for the gate.
+        physical_qubits: The physical qubits to apply the gate to.
+        backend: The backend to use for the gate.
+        instruction_properties: The instruction properties for the gate.
+        inplace: Whether to add the gate in place.
+
+    Returns:
+        The quantum circuit with the added gate.
     """
     if isinstance(gate, str):
         gate = Gate(
@@ -141,7 +150,13 @@ def validate_qm_instruction_properties(
     instruction_properties: InstructionProperties,
     parameters: ParameterVector | List[Parameter] | List[float],
 ):
-    # Validate the qua_pulse_macro if provided
+    """
+    Validates the QUA pulse macro for a custom gate.
+
+    Args:
+        instruction_properties: The instruction properties for the gate.
+        parameters: The parameters for the gate.
+    """
     if hasattr(instruction_properties, "qua_pulse_macro"):
         qua_pulse_macro = instruction_properties.qua_pulse_macro
         if qua_pulse_macro:
@@ -157,7 +172,11 @@ def validate_qm_instruction_properties(
 
 def validate_qubits(qc: QuantumCircuit, qubits: QuantumRegister | Sequence[Qubit | int]):
     """
-    Validate that the specified qubits are part of the QuantumCircuit.
+    Validates that the given qubits are valid for the given quantum circuit.
+
+    Args:
+        qc: The quantum circuit.
+        qubits: The qubits to validate.
     """
     if isinstance(qubits, QuantumRegister):
         if not all(q in qc.qubits for q in qubits):
@@ -179,11 +198,14 @@ def causal_cone_circuit(
     qubits: Sequence[int | Qubit] | QuantumRegister,
 ) -> Tuple[QuantumCircuit, List[Qubit]]:
     """
-    Get the causal cone circuit of the specified qubits as well as the qubits involved in the causal cone
+    Returns the causal cone circuit for the given qubits.
 
     Args:
-        circuit: Quantum Circuit
-        qubits: Qubits of interest
+        circuit: The quantum circuit.
+        qubits: The qubits to get the causal cone for.
+
+    Returns:
+        The causal cone circuit and the qubits involved in the causal cone.
     """
 
     dag = circuit_to_dag(circuit)
@@ -202,7 +224,13 @@ def causal_cone_circuit(
 
 def count_gates(qc: QuantumCircuit):
     """
-    Count number of gates in a Quantum Circuit
+    Counts the number of gates in a quantum circuit.
+
+    Args:
+        qc: The quantum circuit.
+
+    Returns:
+        A dictionary mapping each qubit to the number of gates acting on it.
     """
     gate_count = {qubit: 0 for qubit in qc.qubits}
     for gate in qc.data:
@@ -214,7 +242,13 @@ def count_gates(qc: QuantumCircuit):
 
 def remove_unused_wires(qc: QuantumCircuit):
     """
-    Remove unused wires from a Quantum Circuit
+    Removes unused wires from a quantum circuit.
+
+    Args:
+        qc: The quantum circuit.
+
+    Returns:
+        The quantum circuit with unused wires removed.
     """
     gate_count = count_gates(qc)
     for qubit, count in gate_count.items():
@@ -227,23 +261,26 @@ def remove_unused_wires(qc: QuantumCircuit):
 
 
 def get_instruction_timings(circuit: QuantumCircuit):
-    # Initialize the timings for each qubit
+    """
+    Gets the timings of the instructions in a quantum circuit.
+
+    Args:
+        circuit: The quantum circuit.
+
+    Returns:
+        A list of the start times of the instructions.
+    """
     qubit_timings = {i: 0 for i in range(circuit.num_qubits)}
 
-    # Initialize the list of start times
     start_times = []
 
-    # Loop over each instruction in the circuit
     for instruction in circuit.data:
         qubits = instruction.qubits
         qubit_indices = [circuit.find_bit(qubit).index for qubit in qubits]
-        # Find the maximum time among the qubits involved in the instruction
         start_time = max(qubit_timings[i] for i in qubit_indices)
 
-        # Add the start time to the list of start times
         start_times.append(start_time)
 
-        # Update the time for each qubit involved in the instruction
         for i in qubit_indices:
             qubit_timings[i] = start_time + 1
 
@@ -252,28 +289,20 @@ def get_instruction_timings(circuit: QuantumCircuit):
 
 def density_matrix_to_statevector(density_matrix: DensityMatrix):
     """
-    Convert a density matrix to a statevector (if the density matrix represents a pure state)
+    Converts a density matrix to a statevector.
 
     Args:
-        density_matrix: DensityMatrix object representing the pure state
+        density_matrix: The density matrix to convert.
 
     Returns:
-        Statevector: Statevector object representing the pure state
-
-    Raises:
-        ValueError: If the density matrix does not represent a pure state
+        The converted statevector.
     """
-    # Check if the state is pure by examining if Tr(rho^2) is 1
     if np.isclose(density_matrix.purity(), 1):
-        # Eigenvalue decomposition
         eigenvalues, eigenvectors = np.linalg.eigh(density_matrix.data)
 
-        # Find the eigenvector corresponding to the eigenvalue 1 (pure state)
-        # The statevector is the eigenvector corresponding to the maximum eigenvalue
         max_eigenvalue_index = np.argmax(eigenvalues)
         statevector = eigenvectors[:, max_eigenvalue_index]
 
-        # Return the Statevector object
         return Statevector(statevector)
     else:
         raise ValueError("The density matrix does not represent a pure state.")
@@ -288,16 +317,18 @@ def fidelity_from_tomography(
     **run_options,
 ):
     """
-    Extract average state or gate fidelity from batch of Quantum Circuit for target state or gate
+    Calculates the fidelity of a quantum circuit using tomography.
 
     Args:
-        qc_input: Quantum Circuit input to benchmark (Note that we handle removing final measurements if any)
-        backend: Backend instance
-        physical_qubits: Physical qubits on which state or process tomography is to be performed
-        analysis: Analysis instance
-        target: Target state or gate for fidelity calculation (must be either Operator or QuantumState)
+        qc_input: The quantum circuit(s) to calculate the fidelity for.
+        backend: The backend to use for the tomography.
+        physical_qubits: The physical qubits to perform the tomography on.
+        target: The target state or gate.
+        analysis: The analysis method to use.
+        **run_options: Additional run options.
+
     Returns:
-        avg_fidelity: Average state or gate fidelity (over the batch of Quantum Circuits)
+        The fidelity of the quantum circuit(s).
     """
     if isinstance(qc_input, QuantumCircuit):
         qc_input = [qc_input.remove_final_measurements(False)]
@@ -337,7 +368,6 @@ def fidelity_from_tomography(
     for fid, tgt, child_data in zip(fids, target, exp_data.child_data()):
         result = child_data.analysis_results(fid).value
         if fid == "process_fidelity" and tgt.is_unitary():
-            # Convert to average gate fidelity metric
             dim, _ = tgt.dim
             result = dim * result / (dim + 1)
         results.append(result)
@@ -347,7 +377,13 @@ def fidelity_from_tomography(
 
 def get_gate(gate: Gate | str) -> Gate:
     """
-    Get gate from gate_map
+    Gets a gate from the standard gate map.
+
+    Args:
+        gate: The name of the gate or a Gate object.
+
+    Returns:
+        The Gate object.
     """
     if isinstance(gate, str):
         if gate.lower() == "cnot":
@@ -371,15 +407,17 @@ def substitute_target_gate(
     parameters: ParameterVector | List[Parameter] | List[float] = None,
 ):
     """
-    Substitute target gate in Quantum Circuit with a parametrized version of the gate.
-    The parametrized_circuit function signature should match the expected one for a QiskitConfig instance.
+    Substitutes a target gate in a quantum circuit with a custom gate.
 
     Args:
-        circuit: Quantum Circuit instance
-        target_gate: Target gate to be substituted
-        custom_gate: Custom gate to be substituted with
-        qubits: Physical qubits on which the gate is to be applied (if None, all qubits of input circuit are considered)
-        parameters: Parameters for the custom gate
+        circuit: The quantum circuit.
+        target_gate: The target gate to substitute.
+        custom_gate: The custom gate to substitute with.
+        qubits: The qubits to apply the gate to.
+        parameters: The parameters for the custom gate.
+
+    Returns:
+        The quantum circuit with the substituted gate.
     """
 
     if isinstance(custom_gate, str):
@@ -402,14 +440,14 @@ def substitute_target_gate(
 
 def retrieve_neighbor_qubits(coupling_map: CouplingMap, target_qubits: List):
     """
-    Retrieve neighbor qubits of target qubits
+    Retrieves the neighbor qubits of a set of target qubits.
 
     Args:
-        coupling_map: Coupling map
-        target_qubits: Target qubits
+        coupling_map: The coupling map of the backend.
+        target_qubits: The target qubits.
 
     Returns:
-        neighbor_qubits: List of neighbor qubits indices for specified target qubits
+        A list of the neighbor qubits.
     """
     neighbors = set()
     for target_qubit in target_qubits:
@@ -419,10 +457,14 @@ def retrieve_neighbor_qubits(coupling_map: CouplingMap, target_qubits: List):
 
 def isolate_qubit_instructions(circuit: QuantumCircuit, physical_qubits: list[int]):
     """
-    Extracts instructions from a circuit that act on the specified physical qubits
-    :param circuit: QuantumCircuit to extract instructions from
-    :param physical_qubits: List of physical qubits to extract instructions for
-    :return: List of instructions that act on the specified physical qubits
+    Isolates the instructions in a quantum circuit that act on a given set of physical qubits.
+
+    Args:
+        circuit: The quantum circuit.
+        physical_qubits: The physical qubits to isolate the instructions for.
+
+    Returns:
+        A list of the isolated instructions.
     """
     qubits_to_index = {qubit: circuit.find_bit(qubit).index for qubit in circuit.qubits}
     instructions = filter(
@@ -434,11 +476,14 @@ def isolate_qubit_instructions(circuit: QuantumCircuit, physical_qubits: list[in
 
 def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     """
-    Retrieve count of target instruction in Quantum Circuit
+    Retrieves the number of target instructions in a quantum circuit.
 
     Args:
-        qc: Quantum Circuit (ideally already transpiled)
-        target: Target in form of {"gate": "X", "physical_qubits": [0, 1]}
+        qc: The quantum circuit.
+        target: The target instruction.
+
+    Returns:
+        The number of target instructions.
     """
     tgt_instruction = CircuitInstruction(
         target["gate"], [qc.qubits[i] for i in target["physical_qubits"]]
@@ -448,8 +493,13 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
 
 def get_single_qubit_input_states(input_state_choice) -> List[QuantumCircuit]:
     """
-    Get single qubit input states for a given choice of input states
-    (pauli4, pauli6, 2-design)
+    Gets a list of single-qubit input states.
+
+    Args:
+        input_state_choice: The choice of input states.
+
+    Returns:
+        A list of single-qubit input states.
     """
     if input_state_choice == "pauli4":
         input_states = [PauliPreparationBasis().circuit([i]) for i in range(4)]
@@ -468,8 +518,13 @@ def get_single_qubit_input_states(input_state_choice) -> List[QuantumCircuit]:
 
 def get_input_states_cardinality_per_qubit(input_state_choice: str) -> int:
     """
-    Get the cardinality of the input states for a given choice of input states
-    (pauli4, pauli6, 2-design)
+    Gets the cardinality of the input states per qubit.
+
+    Args:
+        input_state_choice: The choice of input states.
+
+    Returns:
+        The cardinality of the input states per qubit.
     """
     if input_state_choice == "pauli4":
         return 4
@@ -483,29 +538,29 @@ def get_input_states_cardinality_per_qubit(input_state_choice: str) -> int:
 
 def get_2design_input_states(d: int = 4) -> List[Statevector]:
     """
-    Function that return the 2-design input states (used for CAFE reward scheme)
-    Follows this Reference: https://arxiv.org/pdf/1008.1138 (see equations 2 and 13)
+    Gets a list of 2-design input states.
+
+    Args:
+        d: The dimension of the Hilbert space.
+
+    Returns:
+        A list of 2-design input states.
     """
-    # Define constants
     golden_ratio = (np.sqrt(5) - 1) / 2
     omega = np.exp(2 * np.pi * 1j / d)
 
-    # Define computational basis states
-    e0 = np.array([1, 0, 0, 0], dtype=complex)  # |00⟩
-    e1 = np.array([0, 1, 0, 0], dtype=complex)  # |01⟩
-    e2 = np.array([0, 0, 1, 0], dtype=complex)  # |10⟩
-    e3 = np.array([0, 0, 0, 1], dtype=complex)  # |11⟩
+    e0 = np.array([1, 0, 0, 0], dtype=complex)
+    e1 = np.array([0, 1, 0, 0], dtype=complex)
+    e2 = np.array([0, 0, 1, 0], dtype=complex)
+    e3 = np.array([0, 0, 0, 1], dtype=complex)
 
-    # Create the Z matrix (diagonal matrix with powers of omega)
     Z = np.diag([omega**r for r in range(d)])
 
-    # Create the X matrix (shift matrix)
     X = np.zeros((d, d), dtype=complex)
     for r in range(d - 1):
         X[r, r + 1] = 1
-    X[d - 1, 0] = 1  # Wrap-around to satisfy the condition for |e_0>
+    X[d - 1, 0] = 1
 
-    # Define the fiducial state from Eq. (13)
     coefficients = (
         1
         / (2 * np.sqrt(3 + golden_ratio))
@@ -522,11 +577,9 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
     fiducial_state = (
         coefficients[0] * e0 + coefficients[1] * e1 + coefficients[2] * e2 + coefficients[3] * e3
     ).reshape(d, 1)
-    # Prepare all 16 states
     states = []
     for k in range(0, d):
         for l in range(0, d):
-            # state = apply_hw_group(p1, p2, coefficients)
             state = np.linalg.matrix_power(X, k) @ np.linalg.matrix_power(Z, l) @ fiducial_state
             states.append(Statevector(state))
 
@@ -537,10 +590,13 @@ def observables_to_indices(
     observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str,
 ):
     """
-    Get single qubit indices of Pauli observables for the reward computation.
+    Converts a list of observables to a list of indices.
 
     Args:
-        observables: Pauli observables to sample
+        observables: The observables to convert.
+
+    Returns:
+        A list of indices.
     """
     if isinstance(observables, (str, Pauli)):
         observables = PauliList(Pauli(observables) if isinstance(observables, str) else observables)
@@ -556,13 +612,13 @@ def observables_to_indices(
         if isinstance(observables, (SparsePauliOp, PauliList))
         else observables
     )
-    for obs_group in observables_grouping:  # Get indices of Pauli observables
+    for obs_group in observables_grouping:
         current_indices = []
         paulis = obs_group.paulis if isinstance(obs_group, SparsePauliOp) else obs_group
         reference_pauli = Pauli((np.logical_or.reduce(paulis.z), np.logical_or.reduce(paulis.x)))
         for pauli_term in reversed(
             reference_pauli.to_label()
-        ):  # Get individual qubit indices for each Pauli term
+        ):
             if pauli_term == "I" or pauli_term == "Z":
                 current_indices.append(0)
             elif pauli_term == "X":
@@ -575,22 +631,24 @@ def observables_to_indices(
 
 def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]):
     """
-    Convert the input state to single qubit state indices for the reward computation
+    Converts a Pauli input to a list of indices.
 
     Args:
-        prep: Pauli input state
-        inputs: List of binary numbers indicating which eigenstate is selected (0 -> +1 eigenstate, 1 -> -1 eigenstate)
+        prep: The Pauli input.
+        inputs: The list of inputs.
+
+    Returns:
+        A list of indices.
     """
     prep = prep if isinstance(prep, Pauli) else Pauli(prep)
     prep_indices = []
     assert all(input < 2 for input in inputs), "Only single qubit inputs are supported"
     for i, pauli_op in enumerate(reversed(prep.to_label())):
-        # Build input state in Pauli6 basis from Pauli prep: look at each qubit individually
         if pauli_op == "X":
             prep_indices.append(2 + inputs[i])
         elif pauli_op == "Y":
             prep_indices.append(4 + inputs[i])
-        else:  # pauli_op == "I" or pauli_op == "Z"
+        else:
             prep_indices.append(inputs[i])
     return prep_indices
 
@@ -599,16 +657,20 @@ def extend_input_state_prep(
     input_circuit: QuantumCircuit, qc: QuantumCircuit, gate_target, indices
 ) -> Tuple[QuantumCircuit, Tuple[int, ...]]:
     """
-    Extend the input state preparation to all qubits in the quantum circuit if necessary
+    Extends the input state preparation to all qubits in a quantum circuit.
 
     Args:
-        input_circuit: Input state preparation circuit
-        qc: Quantum circuit to be executed on quantum system
-        gate_target: Target gate to prepare (possibly within a wider circuit context)
+        input_circuit: The input state preparation circuit.
+        qc: The quantum circuit.
+        gate_target: The target gate.
+        indices: The indices of the qubits to apply the input state preparation to.
+
+    Returns:
+        The extended quantum circuit and the new indices.
     """
     if (
         qc.num_qubits > gate_target.causal_cone_size
-    ):  # Add random input state on all qubits (not part of reward calculation)
+    ):
         other_qubits_indices = set(range(qc.num_qubits)) - set(
             gate_target.causal_cone_qubits_indices
         )
@@ -632,15 +694,15 @@ def extend_observables(
     observables: SparsePauliOp, qc: QuantumCircuit, target_qubit_indices: List[int]
 ) -> SparsePauliOp:
     """
-    Extend the observables to all qubits in the quantum circuit if necessary
+    Extends the observables to all qubits in a quantum circuit.
 
     Args:
-        observables: Pauli observables to sample
-        qc: Quantum circuit to be executed on quantum system
-        target_qubit_indices: Target qubit indices for the observables
+        observables: The observables to extend.
+        qc: The quantum circuit.
+        target_qubit_indices: The indices of the target qubits.
 
     Returns:
-        Extended Pauli observables
+        The extended observables.
     """
 
     size = len(target_qubit_indices)

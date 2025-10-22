@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from typing import Union, Callable, Any, Optional, Dict, Iterable, List
+from typing import Union, Callable, Any, Optional, Dict, List
 
 from qiskit import QiskitError, QuantumCircuit, QuantumRegister
 from qiskit.circuit import ParameterVector, Parameter
@@ -22,16 +22,10 @@ from qiskit.circuit.controlflow import CONTROL_FLOW_OP_NAMES
 @dataclass
 class BackendConfig(ABC):
     """
-    Abstract base class for backend configurations.
+    An abstract base class for backend configurations.
 
-    Args:
-        parametrized_circuit: Function applying parametrized transformation to a quantum circuit (Qiskit or QUA)
-        backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
-        parametrized_circuit_kwargs: Additional arguments to feed the parametrized_circuit function
-        pass_manager: Pass manager to transpile the circuit
-        instruction_durations: Dictionary containing the durations of the instructions in the circuit
-        primitive_options: Options to feed the primitives (estimator or sampler). If None, the default options of each primitive are used.
-
+    This class provides a common interface for backend configurations, including methods for transpiling circuits
+    and accessing backend properties.
     """
 
     parametrized_circuit: Optional[
@@ -55,12 +49,30 @@ class BackendConfig(ABC):
     @property
     @abstractmethod
     def config_type(self):
+        """The type of the backend configuration."""
         pass
 
     def custom_transpile(self, qc_input, *args, **kwargs) -> QuantumCircuit | List[QuantumCircuit]:
+        """
+        Transpiles the given quantum circuit(s).
+
+        Args:
+            qc_input: The quantum circuit(s) to transpile.
+            *args: Additional arguments.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            The transpiled quantum circuit(s).
+        """
         pass
 
     def as_dict(self):
+        """
+        Returns a dictionary representation of the backend configuration.
+
+        Returns:
+            A dictionary representation of the backend configuration.
+        """
         return {
             "parametrized_circuit": self.parametrized_circuit,
             "backend": self.backend,
@@ -72,6 +84,7 @@ class BackendConfig(ABC):
 
     @property
     def instruction_durations(self):
+        """The instruction durations of the backend."""
         if (
             isinstance(self.backend, QiskitBackend)
             and self.backend.instruction_durations.duration_by_name_qubits
@@ -83,14 +96,7 @@ class BackendConfig(ABC):
 @dataclass
 class QiskitConfig(BackendConfig):
     """
-    Qiskit configuration elements.
-
-    Args:
-        parametrized_circuit: Function applying parametrized transformation to a quantum circuit (Qiskit or QUA)
-        backend: Quantum backend, if None is provided, then statevector simulation is used (not doable for pulse sim)
-        parametrized_circuit_kwargs: Additional arguments to feed the parametrized_circuit function
-        pass_manager
-        instruction_durations: Dictionary containing the durations of the instructions in the circuit
+    A backend configuration for Qiskit backends.
     """
 
     backend: Optional[QiskitBackend] = None
@@ -98,6 +104,7 @@ class QiskitConfig(BackendConfig):
 
     @property
     def config_type(self):
+        """The type of the backend configuration."""
         return "qiskit"
 
     def custom_transpile(
@@ -109,7 +116,17 @@ class QiskitConfig(BackendConfig):
         remove_final_measurements: bool = True,
     ):
         """
-        Custom transpile function to transpile the quantum circuit
+        Transpiles the given quantum circuit(s) using a Qiskit backend.
+
+        Args:
+            qc_input: The quantum circuit(s) to transpile.
+            initial_layout: The initial layout for the transpilation.
+            scheduling: Whether to perform scheduling.
+            optimization_level: The optimization level for the transpilation.
+            remove_final_measurements: Whether to remove final measurements.
+
+        Returns:
+            The transpiled quantum circuit(s).
         """
         if self.backend is None and self.instruction_durations is None and scheduling:
             raise QiskitError("Backend or instruction durations should be provided for scheduling")
@@ -162,9 +179,7 @@ class QiskitConfig(BackendConfig):
 
     @property
     def basis_gates(self):
-        """
-        Retrieve the basis gates of the backend (default is ['x', 'sx', 'cx', 'rz', 'measure', 'reset'])
-        """
+        """The basis gates of the backend."""
         return (
             self.backend.operation_names
             if isinstance(self.backend, QiskitBackend)
@@ -173,16 +188,12 @@ class QiskitConfig(BackendConfig):
 
     @property
     def dt(self):
-        """
-        Retrieve the time unit of the backend (default is 1e-9)
-        """
+        """The time unit of the backend."""
         return self.backend.dt if isinstance(self.backend, QiskitBackend) else 1e-9
 
     @property
     def instruction_durations(self):
-        """
-        Retrieve the instruction durations of the backend (default is None)
-        """
+        """The instruction durations of the backend."""
         return (
             self.backend.instruction_durations
             if isinstance(self.backend, QiskitBackend)
@@ -192,9 +203,7 @@ class QiskitConfig(BackendConfig):
 
     @property
     def control_flow(self) -> bool:
-        """
-        Assess if the backend supports real-time control flow
-        """
+        """Whether the backend supports control flow."""
         if isinstance(self.backend, QiskitBackend):
             if any(
                 operation_name in CONTROL_FLOW_OP_NAMES
@@ -207,12 +216,7 @@ class QiskitConfig(BackendConfig):
 @dataclass
 class DynamicsConfig(QiskitConfig):
     """
-    Qiskit Dynamics configuration elements.
-
-    Args:
-        calibration_files: load existing gate calibrations from json file for DynamicsBackend
-        do_calibrations: whether to do gate calibrations for the backend
-
+    A backend configuration for Qiskit Dynamics backends.
     """
 
     calibration_files: Optional[str] = None
@@ -220,9 +224,16 @@ class DynamicsConfig(QiskitConfig):
 
     @property
     def config_type(self):
+        """The type of the backend configuration."""
         return "dynamics"
 
     def as_dict(self):
+        """
+        Returns a dictionary representation of the backend configuration.
+
+        Returns:
+            A dictionary representation of the backend configuration.
+        """
         return super().as_dict() | {
             "calibration_files": self.calibration_files,
             "do_calibrations": self.do_calibrations,

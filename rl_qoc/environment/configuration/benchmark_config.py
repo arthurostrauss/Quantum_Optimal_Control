@@ -7,10 +7,15 @@ from typing import Tuple, Literal
 @dataclass
 class BenchmarkConfig:
     """
-    Configuration for benchmarking the policy through fidelity estimation
+    Configuration for benchmarking the policy through fidelity estimation.
 
-    Args:
-        benchmark_cycle: benchmark_cycle (int, optional): Number of epochs between two fidelity benchmarking.
+    Attributes:
+        benchmark_cycle: Number of epochs between two fidelity benchmarking runs.
+        benchmark_batch_size: The batch size for benchmarking.
+        check_on_exp: Whether to check on the experiment.
+        tomography_analysis: The analysis method for tomography.
+        dfe_precision: The precision for direct fidelity estimation.
+        method: The benchmarking method to use.
     """
 
     benchmark_cycle: int = 0  # 0 means no benchmarking

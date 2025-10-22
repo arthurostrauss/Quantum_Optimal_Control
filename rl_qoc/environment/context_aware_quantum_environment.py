@@ -20,7 +20,7 @@ from typing import (
 )
 
 import numpy as np
-from gymnasium.spaces import Box, Discrete, Dict as DictSpace
+from gymnasium.spaces import Box, Dict as DictSpace
 
 # Qiskit imports
 from qiskit.circuit import (
@@ -34,12 +34,9 @@ from qiskit.circuit import (
     Qubit,
 )
 from qiskit.circuit.parametervector import ParameterVectorElement
-from qiskit.converters import circuit_to_dag, dag_to_circuit
-from qiskit.dagcircuit import DAGOpNode
 from qiskit.providers import BackendV2
 from qiskit.quantum_info import Operator
 from qiskit.transpiler import (
-    Layout,
     InstructionProperties,
     PassManager,
 )
@@ -47,7 +44,6 @@ from qiskit.transpiler import (
 from qiskit_experiments.library import ProcessTomography
 
 from ..helpers import (
-    MomentAnalysisPass,
     CustomGateReplacementPass,
     InstructionReplacement,
 )
@@ -73,6 +69,17 @@ ActType = TypeVar("ActType")
 
 
 def create_array(circ_trunc, batchsize, n_actions):
+    """
+    Creates a numpy array of objects.
+
+    Args:
+        circ_trunc: The size of the first dimension of the array.
+        batchsize: The size of the second dimension of the array.
+        n_actions: The size of the third dimension of the array.
+
+    Returns:
+        A numpy array of objects with the specified dimensions.
+    """
     arr = np.empty((circ_trunc,), dtype=object)
     for i in range(circ_trunc):
         arr[i] = np.zeros((i + 1, batchsize, n_actions))
@@ -83,11 +90,14 @@ def target_instruction_timings(
     circuit_context: QuantumCircuit, target_instruction: CircuitInstruction
 ) -> tuple[List[int], List[int]]:
     """
-    Return the timings of the target instructions in the circuit context
+    Return the timings of the target instructions in the circuit context.
 
     Args:
-        circuit_context: The circuit context containing the target instruction
-        target_instruction: The target instruction to be found in the circuit context
+        circuit_context: The circuit context containing the target instruction.
+        target_instruction: The target instruction to be found in the circuit context.
+
+    Returns:
+        A tuple containing the start times of all operations and the start times of the target instructions.
     """
     try:
         op_start_times = circuit_context.op_start_times
@@ -102,34 +112,27 @@ def target_instruction_timings(
 
 
 class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
+    """
+    A quantum environment for context-aware gate calibration.
+
+    This environment is designed to calibrate a quantum gate within a specific circuit context.
+    It uses a reinforcement learning approach to find the optimal parameters for the gate.
+    """
 
     def __init__(
         self,
-        training_config: QEnvConfig,
+        config: QEnvConfig,
         **context_kwargs,
     ):
         """
-        Class for wrapping a quantum environment enabling the calibration of a gate in a context-aware manner, that
-        is with respect to an input circuit context. The input circuit context is assumed to have been transpiled and
-        scheduled, and the target gate to be calibrated is assumed to be present in this circuit context. The class will
-        look for the locations of the target gates in the circuit context and will enable the writing of new parametrized
-        circuits, where each gate instance is replaced by a custom gate defined by the Callable parametrized_circuit_func.
+        Initializes the ContextAwareQuantumEnvironment.
 
         Args:
-            training_config: The configuration of the training environment
-            circuit_context: The circuit context containing the target gate to be calibrated. If None, a new circuit
-                context will be created with the target gate appended to it on the target qubits. Can also be a list of
-                circuits, in which case training will be performed by switching between the circuits at random at each
-                training step.
-            virtual_target_qubits: The virtual target qubits to be used in the circuit context. If None, will be set to
-                the first qubits of the circuit context.
-            training_steps_per_gate: The number of training steps per gate instance
-            intermediate_rewards: Whether to provide intermediate rewards during the training
-            context_kwargs: Additional keyword arguments to be passed to the context-aware environment (e.g.
-            backend containing circuit dependent noise model)
+            config: The configuration for the training environment.
+            **context_kwargs: Additional keyword arguments for the environment.
         """
 
-        super().__init__(training_config)
+        super().__init__(config)
 
         self.circ_tgt_register = None
         self.custom_instructions: List[Instruction] = []
@@ -172,11 +175,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     def define_circuits(self) -> list[QuantumCircuit]:
         """
-        Define the circuits to be used in the environment.
-        This method should be overridden by the subclass.
+        Defines the circuits to be used in the environment.
+
+        This method can be overridden by subclasses to provide custom circuit definitions.
 
         Returns:
-            list[QuantumCircuit]: A list of QuantumCircuit objects.
+            A list of QuantumCircuit objects.
         """
         circuits = []
         for i, circ in enumerate(self.target.circuits):
@@ -187,11 +191,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         return circuits
 
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
-        # trunc_index tells us which circuit truncation should be trained
-        # Dependent on global_step and method select_trunc_index
-        # Figure out if in middle of param loading or should compute the final reward (step_status < trunc_index or ==)
-        step_status = self._inside_trunc_tracker
+        """
+        Performs a single step in the environment.
 
+        Args:
+            action: The action to be performed.
+
+        Returns:
+            A tuple containing the observation, reward, whether the episode has ended,
+            whether the episode was truncated, and additional information.
+        """
         if self._episode_ended:
             terminated = True
             return (
@@ -235,8 +244,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     def _get_obs(self) -> ObsType:
         """
-        Return the observation of the environment.
-        This method should be overridden by the subclass.
+        Returns the observation of the environment.
+
+        This method can be overridden by subclasses to provide custom observations.
+
+        Returns:
+            The observation of the environment.
         """
 
         if isinstance(self.observation_space, DictSpace):
@@ -247,55 +260,19 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self, qc: QuantumCircuit, params: np.ndarray, update_env_history=True
     ) -> np.ndarray:
         """
-        Method to store in lists all relevant data to assess performance of training (fidelity information)
-        :param params: Batch of actions
-        """
+        Computes benchmarks for the given circuit and parameters.
 
+        Args:
+            qc: The quantum circuit to benchmark.
+            params: The parameters for the circuit.
+            update_env_history: Whether to update the environment's history.
+
+        Returns:
+            An array of fidelity values.
+        """
         if (
             self.config.check_on_exp
         ):  # Perform real experiments to retrieve from measurement data fidelities
-            # Assess circuit fidelity with ComputeUncompute algo
-            # try:
-            #     print("Starting Direct Fidelity Estimation...")
-            #     input_state = np.random.choice(self.target.input_states)
-            #     observables, shots = retrieve_observables(
-            #         input_state.target_state,
-            #         self.config.benchmark_config.dfe_precision,
-            #         sampling_paulis=self.sampling_pauli_space,
-            #         c_factor=self.c_factor
-            #     )
-            #     observables = extend_observables(observables, qc, self.target)
-            #     if self.abstraction_level == "circuit":
-            #         qc = self.backend_info.custom_transpile(
-            #             qc,
-            #             initial_layout=self.layout,
-            #             scheduling=False,
-            #         )
-            #     pubs = [
-            #         (
-            #             qc,
-            #             obs.apply_layout(qc.layout),
-            #             [self.mean_action],
-            #             1 / np.sqrt(shot),
-            #         )
-            #         for obs, shot in zip(
-            #             observables.group_commuting(qubit_wise=True), shots
-            #         )
-            #     ]
-            #     if isinstance(self.estimator, EstimatorV2):
-            #         self.estimator.options.update(
-            #             job_tags=[f"DFE_step{self._step_tracker}"]
-            #         )
-            #     job = self.estimator.run(pubs=pubs)
-            #     results = job.result()
-            #     circuit_fidelities = np.sum(
-            #         [result.data.evs for result in results], axis=0
-            #     ) / len(observables)
-            #     print("Finished DFE")
-            #     return circuit_fidelities
-            # except Exception as exc:
-            #     self.close()
-            #     raise exc
             raise NotImplementedError(
                 "Direct Fidelity Estimation is not yet supported in the context-aware environment"
             )
@@ -319,20 +296,17 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     @property
     def parameters(self) -> List[ParameterVector] | List[List[Parameter]]:
+        """The parameters of the environment."""
         return self._parameters
 
     @property
     def target(self) -> GateTarget | StateTarget:
-        """
-        Return current target to be calibrated
-        """
+        """The current target to be calibrated."""
         return self.config.target
 
     @property
     def virtual_target_qubits(self) -> List[Qubit] | QuantumRegister:
-        """
-        Return the virtual target qubits used in the circuit context
-        """
+        """The virtual target qubits used in the circuit context."""
         if isinstance(self.config.target, GateTarget):
             return self.config.target.virtual_target_qubits
         else:
@@ -340,16 +314,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     @property
     def optimal_action(self):
-        """
-        Return optimal action for current gate instance
-        """
+        """The optimal action for the current gate instance."""
         return self._optimal_actions[self.circuit_choice]
 
     def optimal_actions(self, indices: Optional[int | List[int]] = None):
         """
-        Return optimal actions for selected circuit truncation index.
-        If no indices are provided, return list of all optimal actions.
+        Returns the optimal actions for the selected circuit truncation index.
 
+        Args:
+            indices: The indices of the optimal actions to return. If None, all optimal actions are returned.
+
+        Returns:
+            A list of optimal actions.
         """
         if isinstance(indices, int):
             return self._optimal_actions[indices]
@@ -359,15 +335,27 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
             return self._optimal_actions
 
     def episode_length(self, global_step: int) -> int:
+        """
+        Returns the length of an episode.
+
+        Args:
+            global_step: The current global step.
+
+        Returns:
+            The length of the episode.
+        """
         return 1
 
     def clear_history(self) -> None:
-        """Reset all counters related to training"""
+        """Resets all counters related to training."""
         super().clear_history()
 
     def set_env_params(self, **kwargs):
         """
-        Set the circuit context for the environment.
+        Sets the environment parameters.
+
+        Args:
+            **kwargs: The keyword arguments to set.
         """
         if "circuit_choice" in kwargs:
             self.circuit_choice = kwargs.pop("circuit_choice")
@@ -387,46 +375,46 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
 
     @property
     def circuit_context(self) -> QuantumCircuit:
-        """
-        Return the current circuit context
-        """
+        """The current circuit context."""
         return self.target.circuit
 
     @property
     def circuit_choice(self) -> int:
-        """
-        Return the index of the circuit choice in the context-aware environment.
-        """
+        """The index of the circuit choice in the context-aware environment."""
         return super().circuit_choice
 
     @circuit_choice.setter
     def circuit_choice(self, value: int):
         """
-        Set the index of the circuit choice in the context-aware environment.
+        Sets the index of the circuit choice in the context-aware environment.
+
+        Args:
+            value: The new index.
         """
         self.config.target.circuit_choice = value
 
     @property
     def has_context(self) -> bool:
         """
-        Check if the environment has a circuit context (i.e., different from circuit containing only the target gate).
-        :return: Boolean indicating if the environment has a circuit context
+        Checks if the environment has a circuit context.
+
+        Returns:
+            True if the environment has a circuit context, False otherwise.
         """
         return self.target.has_context
 
     def update_gate_calibration(self, gate_names: Optional[List[str]] = None):
         """
-        Update gate calibrations with optimal actions
+        Updates the gate calibrations with the optimal actions.
 
         Args:
-            gate_names: Names of the custom gates to be created
+            gate_names: The names of the custom gates to be created.
         """
         try:
-            from qiskit import schedule, pulse
+            from qiskit import schedule
             from qiskit_dynamics import DynamicsBackend
             from ..helpers.pulse_utils import (
                 simulate_pulse_input,
-                get_optimal_z_rotation,
             )
         except ImportError as e:
             raise ImportError(
@@ -459,8 +447,6 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
                         param_index = int(param.name.split("_")[2])
                         value_dicts[i][param] = self.optimal_actions(vector_index)[param_index]
 
-            # context_qc = self.custom_circuit_context.assign_parameters(
-            #     value_dicts[-1], inplace=False)
             contextual_schedules = schedule(self.circuits, self.backend)
 
             gate_qc = [
@@ -533,143 +519,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
     @property
     def involved_qubits_list(self):
         """
-        Returns a list of lists of physical qubits involved in each circuit truncation
+        Returns a list of lists of physical qubits involved in each circuit truncation.
+
+        Returns:
+            A list of lists of physical qubits.
         """
         involved_qubits = []
         for target in self._target:
             involved_qubits.extend(list(target.layout.get_physical_bits().keys()))
         return involved_qubits
-
-    # def define_target_and_circuits(self):
-    #     """
-    #     Define target gates and circuits for calibration
-    #     """
-    #     if self.circuit_context.parameters:
-    #         raise ValueError("Circuit context still contains unassigned parameters")
-    #     # assert isinstance(self.config.target, GateTargetConfig), "Target should be a gate"
-
-    #     if self.backend_info.coupling_map.size() == 0 and self.backend is None:
-    #         # Build a fully connected coupling map if no backend is provided
-    #         self.backend_info.num_qubits = self.circuit_context.num_qubits
-    #     tgt_instruction_counts = self.tgt_instruction_counts
-    #     moment_pass = MomentAnalysisPass()
-    #     pm = PassManager(moment_pass)
-    #     _ = pm.run(self.circuit_context)
-    #     moments = pm.property_set["moments"]  # type: dict[int, list[DAGOpNode]]
-    #     layouts = [
-    #         Layout(
-    #             {
-    #                 qubit: q
-    #                 for q, qubit in zip(self.physical_target_qubits, self.circuit_context.qubits)
-    #             }
-    #         )
-    #         for _ in range(tgt_instruction_counts)
-    #     ]
-    #     context_dag = circuit_to_dag(self.circuit_context)
-    #     baseline_dags = [context_dag.copy_empty_like() for _ in range(tgt_instruction_counts)]
-
-    #     target_op_nodes = context_dag.named_nodes(self.target_instruction.operation.name)
-    #     target_op_nodes: List[DAGOpNode] = list(
-    #         filter(
-    #             lambda node: node.qargs == self.target_instruction.qubits
-    #             and node.cargs == self.target_instruction.clbits,
-    #             target_op_nodes,
-    #         )
-    #     )
-
-    #     if isinstance(self.backend, BackendV2):
-    #         operations_mapping = {
-    #             op.name: op for op in self.backend.operations if hasattr(op, "name")
-    #         }
-    #     else:
-    #         operations_mapping = {}
-
-    #     # Case 1: Each truncation is a different layer of the full circuit, with only one ref to target gate
-    #     counts = 0
-    #     for moment in moments.values():
-    #         switch_truncation = False
-    #         for op in moment:
-    #             baseline_dags[counts].apply_operation_back(op.op, op.qargs, op.cargs)
-    #             if (
-    #                 target_op_nodes[0].op == op.op
-    #                 and target_op_nodes[0].qargs == op.qargs
-    #                 and target_op_nodes[0].cargs == op.cargs
-    #             ):
-    #                 # if DAGOpNode.semantic_eq(
-    #                 #     target_op_nodes[0], op, bit_indices, bit_indices
-    #                 # ):
-    #                 switch_truncation = True
-    #         if switch_truncation:
-    #             counts += 1
-    #         if counts == tgt_instruction_counts:
-    #             break
-
-    #     baseline_circuits = [dag_to_circuit(dag) for dag in baseline_dags]
-
-    #     custom_gate_pass = [
-    #         CustomGateReplacementPass(
-    #             [self.target_instruction],
-    #             [self.parametrized_circuit_func],
-    #             [self.parameters[i]],
-    #             [self._func_args],
-    #         )
-    #         for i in range(tgt_instruction_counts)
-    #     ]
-
-    #     pms = [PassManager(pass_) for pass_ in custom_gate_pass]
-    #     custom_circuits = [
-    #         pm.run(circ).copy(f"custom_circ_{i}")
-    #         for i, (pm, circ) in enumerate(zip(pms, baseline_circuits))
-    #     ]
-
-    #     # Case 2: each truncation concatenates the previous ones:
-    #     # for i in range(tgt_instruction_counts, 0, -1):
-    #     #     ref_dag = baseline_dags[0].copy_empty_like()
-    #     #     custom_circ = custom_circuits[0].copy_empty_like()
-    #     #     for j in range(i):
-    #     #         ref_dag.compose(baseline_dags[j], inplace=True)
-    #     #         custom_circ.compose(custom_circuits[j], inplace=True)
-    #     #     baseline_dags[i - 1] = ref_dag
-    #     #     custom_circuits[i - 1] = custom_circ
-
-    #     for i in range(tgt_instruction_counts):
-    #         custom_circuits[i].metadata["baseline_circuit"] = baseline_circuits[i].copy(
-    #             f"baseline_circ_{i}"
-    #         )
-
-    #     input_states_choice = getattr(
-    #         self.config.reward.reward_args, "input_states_choice", "pauli4"
-    #     )
-    #     if isinstance(self.backend, BackendV2):
-    #         for op in self.backend.operations:
-    #             if hasattr(op, "name") and op.name not in operations_mapping:
-    #                 # If a new custom instruction was added, store it and update operation mapping
-    #                 self.custom_instructions.append(op)
-    #                 operations_mapping[op.name] = op
-
-    #     target = (
-    #         [
-    #             GateTarget(
-    #                 self.config.target.gate,
-    #                 self.physical_target_qubits,
-    #                 baseline_circuit,
-    #                 self.virtual_target_qubits,
-    #                 self.circ_tgt_register,
-    #                 layout,
-    #                 input_states_choice=input_states_choice,
-    #             )
-    #             for baseline_circuit, layout in zip(baseline_circuits, layouts)
-    #         ]
-    #         if isinstance(self.config.target, GateTargetConfig)
-    #         else [
-    #             StateTarget(
-    #                 self.config.target.state,
-    #                 baseline_circuit,
-    #                 self.physical_target_qubits,
-    #                 self.circ_tgt_register,
-    #                 layout,
-    #             )
-    #             for baseline_circuit, layout in zip(baseline_circuits, layouts)
-    #         ]
-    #     )
-    #     return target, custom_circuits, baseline_circuits

@@ -14,6 +14,19 @@ def select_optimizer(
     concurrent_optimization: bool = True,
     lr2: Optional[float] = None,
 ):
+    """
+    Selects an optimizer for the actor and critic networks.
+
+    Args:
+        lr: The learning rate for the optimizer.
+        optimizer: The name of the optimizer to use.
+        grad_clip: The value to clip the gradients to.
+        concurrent_optimization: Whether to use the same optimizer for the actor and critic.
+        lr2: The learning rate for the critic optimizer if `concurrent_optimization` is False.
+
+    Returns:
+        The selected optimizer(s).
+    """
     if concurrent_optimization:
         if optimizer == "Adam":
             return Adam(learning_rate=lr, clipvalue=grad_clip)
@@ -27,10 +40,28 @@ def select_optimizer(
 
 
 def constrain_mean_value(mu_var):
+    """
+    Constrains the mean value of a variable to be between -1 and 1.
+
+    Args:
+        mu_var: The variable to constrain.
+
+    Returns:
+        The constrained variable.
+    """
     return [clip_by_value(m, -1.0, 1.0) for m in mu_var]
 
 
 def constrain_std_value(std_var):
+    """
+    Constrains the standard deviation of a variable to be between 1e-3 and 3.
+
+    Args:
+        std_var: The variable to constrain.
+
+    Returns:
+        The constrained variable.
+    """
     return [clip_by_value(std, 1e-3, 3) for std in std_var]
 
 
@@ -42,14 +73,18 @@ def generate_model(
     hidden_units_critic: Optional[Union[List, Tuple]] = None,
 ):
     """
-    Helper function to generate fully connected NN
-    :param input_shape: Input shape of the NN
-    :param hidden_units: List containing number of neurons per hidden layer
-    :param n_actions: Output shape of the NN on the actor part, i.e. dimension of action space
-    :param actor_critic_together: Decide if actor and critic network should be distinct or should be sharing layers
-    :param hidden_units_critic: If actor_critic_together set to False, List containing number of neurons per hidden
-           layer for critic network
-    :return: Model or Tuple of two Models for actor critic network
+    Generates a fully connected neural network model.
+
+    Args:
+        input_shape: The input shape of the model.
+        hidden_units: A list of the number of units in each hidden layer.
+        n_actions: The number of actions in the output layer.
+        actor_critic_together: Whether to use the same model for the actor and critic.
+        hidden_units_critic: A list of the number of units in each hidden layer of the critic network if
+            `actor_critic_together` is False.
+
+    Returns:
+        The generated model(s).
     """
     input_layer = Input(shape=input_shape)
     Net = Dense(
@@ -69,11 +104,10 @@ def generate_model(
             name=f"hidden_{i}",
         )(Net)
 
-    mean_param = Dense(n_actions, activation="tanh", name="mean_vec")(Net)  # Mean vector output
+    mean_param = Dense(n_actions, activation="tanh", name="mean_vec")(Net)
     sigma_param = Dense(n_actions, activation="softplus", name="sigma_vec")(
         Net
-    )  # Diagonal elements of cov matrix
-    # output
+    )
 
     if actor_critic_together:
         critic_output = Dense(1, activation="linear", name="critic_output")(Net)

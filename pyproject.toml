@@ -1,7 +1,7 @@
 [project]
 name = "rl_qoc"
 version = "0.1.0"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 description = "Reinforcement Learning for Quantum Optimal Control"
 readme = "README.md"
 authors = [
@@ -32,8 +32,7 @@ dependencies = [
     "tensorboard",
     "pylatexenc",
     "wandb",
-    "torch==2.7.1; sys_platform != 'linux'",
-    "torch==2.7.1+cpu ; sys_platform =='linux'",
+    "torch==2.7.1",
 ]
 
 [tool.uv]

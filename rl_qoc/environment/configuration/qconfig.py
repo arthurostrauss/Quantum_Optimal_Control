@@ -21,10 +21,13 @@ from .benchmark_config import BenchmarkConfig
 from ...helpers import load_q_env_from_yaml_file, select_backend
 
 if TYPE_CHECKING:
-    from ...rewards import Reward, REWARD_STRINGS
+    from ...rewards import Reward
 
 
 def default_benchmark_config():
+    """
+    Returns a default benchmark configuration.
+    """
     return BenchmarkConfig()
 
 
@@ -32,15 +35,17 @@ def default_benchmark_config():
 class QEnvConfig:
     """
     Quantum Environment configuration.
-    This is used to define all hyperparameters characterizing the QuantumEnvironment.
 
-    Args:
-        target (Dict): Target state or target gate to prepare
-        backend_config (rl_qoc.environment.configuration.backend_config.BackendConfig): Backend configuration
-        action_space (Space): Action space
-        execution_config (ExecutionConfig): Execution configuration
-        reward (Reward): Reward configuration
-        benchmark_config (BenchmarkConfig): Benchmark configuration
+    This class holds all the configuration parameters for a quantum environment.
+
+    Attributes:
+        target: The target state or gate to be prepared.
+        backend_config: The configuration for the backend.
+        action_space: The action space for the agent.
+        execution_config: The configuration for the execution of the policy.
+        reward: The reward function to be used.
+        benchmark_config: The configuration for benchmarking.
+        env_metadata: Additional metadata for the environment.
     """
 
     target: GateTarget | StateTarget
@@ -69,6 +74,7 @@ class QEnvConfig:
 
     @property
     def backend(self) -> Optional[BackendV2]:
+        """The backend to be used for the environment."""
         return self.backend_config.backend
 
     @backend.setter
@@ -78,6 +84,7 @@ class QEnvConfig:
 
     @property
     def parametrized_circuit(self):
+        """The parametrized circuit to be used for the environment."""
         if self.backend_config.parametrized_circuit is not None:
             return self.backend_config.parametrized_circuit
         else:
@@ -92,8 +99,7 @@ class QEnvConfig:
     @property
     def parametrized_circuit_kwargs(self):
         """
-        Additional keyword arguments to feed the parametrized_circuit function
-        Returns: Dictionary of additional keyword arguments with their values
+        Additional keyword arguments to feed the parametrized_circuit function.
         """
         return self.backend_config.parametrized_circuit_kwargs
 
@@ -103,10 +109,12 @@ class QEnvConfig:
 
     @property
     def physical_qubits(self):
+        """The physical qubits to be used for the environment."""
         return self.target.physical_qubits
 
     @property
     def batch_size(self):
+        """The batch size for training."""
         return self.execution_config.batch_size
 
     @batch_size.setter
@@ -116,6 +124,7 @@ class QEnvConfig:
 
     @property
     def sampling_paulis(self):
+        """The number of Pauli strings to sample for fidelity estimation."""
         return self.execution_config.sampling_paulis
 
     @sampling_paulis.setter
@@ -124,6 +133,7 @@ class QEnvConfig:
 
     @property
     def n_shots(self):
+        """The number of shots for each circuit execution."""
         return self.execution_config.n_shots
 
     @n_shots.setter
@@ -133,9 +143,7 @@ class QEnvConfig:
 
     @property
     def n_reps(self) -> List[int]:
-        """
-        List of possible number of repetitions / circuit depths for reward computation
-        """
+        """A list of the number of repetitions for the circuit."""
         return self.execution_config.n_reps
 
     @n_reps.setter
@@ -148,23 +156,17 @@ class QEnvConfig:
 
     @property
     def current_n_reps(self) -> int:
-        """
-        Current number of repetitions / circuit depth for reward computation
-        """
+        """The current number of repetitions for the circuit."""
         return self.execution_config.current_n_reps
 
     @property
     def c_factor(self):
-        """
-        Reward scaling factor
-        """
+        """The renormalization factor for the reward."""
         return self.execution_config.c_factor
 
     @property
     def seed(self):
-        """
-        Random seed superseding the whole training
-        """
+        """The seed for the random number generator."""
         return self.execution_config.seed
 
     @seed.setter
@@ -173,6 +175,7 @@ class QEnvConfig:
 
     @property
     def benchmark_cycle(self):
+        """The number of epochs between two fidelity benchmarking runs."""
         return self.benchmark_config.benchmark_cycle
 
     @benchmark_cycle.setter
@@ -181,6 +184,7 @@ class QEnvConfig:
 
     @property
     def benchmark_batch_size(self):
+        """The batch size for benchmarking."""
         return self.benchmark_config.benchmark_batch_size
 
     @benchmark_batch_size.setter
@@ -189,14 +193,17 @@ class QEnvConfig:
 
     @property
     def tomography_analysis(self):
+        """The analysis method for tomography."""
         return self.benchmark_config.tomography_analysis
 
     @property
     def check_on_exp(self):
+        """Whether to check on the experiment."""
         return self.benchmark_config.check_on_exp
 
     @property
     def reward_method(self):
+        """The reward method to be used."""
         return self.reward.reward_method
 
     @reward_method.setter
@@ -212,31 +219,27 @@ class QEnvConfig:
 
     @property
     def dfe(self):
-        """
-        Indicates if Direct Fidelity Estimation is used for the reward computation (true if reward_method is "channel"
-        or "state" and false otherwise)
-        Returns: Boolean indicating if DFE is used
-
-        """
+        """Whether direct fidelity estimation is used."""
         return self.reward.dfe
 
     @property
     def n_actions(self):
-        """
-        Number of actions in the action space (number of parameters to tune in the parametrized circuit)
-        """
+        """The number of actions in the action space."""
         return self.action_space.shape[-1]
 
     @property
     def channel_estimator(self):
+        """Whether the channel estimator is used."""
         return self.reward_method == "channel"
 
     @property
     def fidelity_access(self):
+        """Whether fidelity access is used."""
         return self.reward_method == "fidelity"
 
     @property
     def instruction_durations_dict(self):
+        """The instruction durations of the backend."""
         return self.backend_config.instruction_durations
 
     @instruction_durations_dict.setter
@@ -245,6 +248,7 @@ class QEnvConfig:
 
     @property
     def pass_manager(self):
+        """The pass manager for the backend."""
         return self.backend_config.pass_manager
 
     @pass_manager.setter
@@ -252,6 +256,12 @@ class QEnvConfig:
         self.backend_config.pass_manager = value
 
     def as_dict(self):
+        """
+        Returns a dictionary representation of the configuration.
+
+        Returns:
+            A dictionary representation of the configuration.
+        """
         config = {
             "target": self.target.as_dict(),
             "backend_config": self.backend_config.as_dict(),
@@ -300,19 +310,18 @@ class QEnvConfig:
         **backend_callback_kwargs: Any,
     ) -> QEnvConfig:
         """
-        Get Quantum Environment configuration from a YAML file and additional parameters.
+        Creates a QEnvConfig from a YAML file.
 
         Args:
-            config_file_path (str): Path to the YAML configuration file
-            parametrized_circ_func (Callable): Function to create the parametrized circuit
-            backend (BackendV2 or Callable): Optional custom backend or function to create a backend (if None,
-                                              backend will be created from the backend_config in the YAML file)
-            pass_manager (PassManager): Pass manager instance for custom transpilation
-            instruction_durations (InstructionDurations): Instruction durations to specify durations for custom gates
-            **backend_callback_kwargs: Additional keyword arguments to pass to the backend callback function
+            config_file_path: The path to the YAML file.
+            parametrized_circ_func: The function to create the parametrized circuit.
+            backend: The backend to be used.
+            pass_manager: The pass manager for the backend.
+            instruction_durations: The instruction durations for the backend.
+            **backend_callback_kwargs: Additional keyword arguments for the backend.
 
         Returns:
-            QEnvConfig: Quantum Environment configuration object
+            A QEnvConfig object.
         """
 
         params, backend_params, runtime_options = load_q_env_from_yaml_file(config_file_path)
@@ -367,7 +376,19 @@ class QEnvConfig:
         **backend_callback_kwargs: Any,
     ) -> QEnvConfig:
         """
-        Get Quantum Environment configuration from a dictionary and additional parameters.
+        Creates a QEnvConfig from a dictionary.
+
+        Args:
+            config_dict: The dictionary to create the QEnvConfig from.
+            backend_config_type: The type of the backend configuration.
+            parametrized_circ_func: The function to create the parametrized circuit.
+            backend: The backend to be used.
+            pass_manager: The pass manager for the backend.
+            instruction_durations: The instruction durations for the backend.
+            **backend_callback_kwargs: Additional keyword arguments for the backend.
+
+        Returns:
+            A QEnvConfig object.
         """
         import numpy as np
 
