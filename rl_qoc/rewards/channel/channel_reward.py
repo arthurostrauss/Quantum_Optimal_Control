@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Optional, TYPE_CHECKING
+from typing import List, Tuple, Optional, TYPE_CHECKING, Literal
 from itertools import product
 
 from qiskit import ClassicalRegister
@@ -67,7 +67,7 @@ class ChannelReward(Reward):
 
     @property
     def reward_args(self):
-        return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli,
+        return {"sorting": self.sorting,
         "fiducials_seed": self.fiducials_seed,
         "input_states_seed": self.input_states_seed}
 
@@ -116,6 +116,7 @@ class ChannelReward(Reward):
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
         n_qubits = target.causal_cone_size
+       
         dim = 2**n_qubits
 
         n_reps = execution_config.current_n_reps
