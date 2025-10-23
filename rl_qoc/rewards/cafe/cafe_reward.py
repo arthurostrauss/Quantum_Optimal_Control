@@ -60,7 +60,6 @@ class CAFEReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.array,
-        target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
     ) -> CAFERewardDataList:
@@ -74,10 +73,11 @@ class CAFEReward(Reward):
             env_config: QEnvConfig containing the backend information and execution configuration
             baseline_circuit: Ideal circuit that qc should implement
         """
-        if not isinstance(target, GateTarget):
-            raise ValueError("CAFE reward can only be computed for a target gate")
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        target = env_config.target
+        if not isinstance(target, GateTarget):
+            raise ValueError("CAFE reward can only be computed for a target gate")
 
         if baseline_circuit is not None:
             circuit_ref = baseline_circuit.copy()

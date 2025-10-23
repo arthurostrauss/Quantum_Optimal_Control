@@ -77,7 +77,6 @@ class StateReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: StateTarget | GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
     ) -> StateRewardDataList:
@@ -97,6 +96,7 @@ class StateReward(Reward):
         """
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        target = env_config.target
         input_circuit = qc.copy_empty_like()
 
         prep_circuit = qc

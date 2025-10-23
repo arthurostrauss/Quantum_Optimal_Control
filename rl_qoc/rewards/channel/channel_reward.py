@@ -86,9 +86,9 @@ class ChannelReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
+        *args,
     ) -> ChannelRewardDataList:
         """
         Compute reward data related to the reward method
@@ -103,6 +103,11 @@ class ChannelReward(Reward):
         Returns:
             List of pubs related to the reward method
         """
+        
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_config
+        target = env_config.target
+
         if not isinstance(target, GateTarget):
             raise ValueError("Channel reward can only be computed for a target gate")
 
@@ -110,8 +115,6 @@ class ChannelReward(Reward):
             raise ValueError(
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
-        execution_config = env_config.execution_config
-        backend_info = env_config.backend_config
         n_qubits = target.causal_cone_size
         dim = 2**n_qubits
 
