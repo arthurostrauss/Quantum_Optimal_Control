@@ -1,26 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple, Literal
+from typing import Dict, List, Optional, Tuple, Literal
 
 
 @dataclass
 class ExecutionConfig:
     """
-    Configuration for the execution of the policy
+    Configuration for the execution of the policy.
 
-    Args:
-        batch_size: Batch size (iterate over a bunch of actions per policy to estimate expected return). Defaults to 50.
-        sampling_paulis: Number of Paulis to sample for the fidelity estimation scheme. For ORBIT, this would be the number of
-            random Clifford sequences to sample.
-        n_shots: Number of shots per Pauli for the fidelity estimation. Defaults to 1.
-        n_reps: Number of repetitions of cycle circuit (can be an integer or a list of integers to play multiple lengths)
-        c_factor: Renormalization factor. Defaults to 0.5.
-        seed: General seed for Environment internal sampling mechanisms (e.g. input state, observable, n_reps). Defaults to 1234.
-        dfe_precision: Precision for the DFE. Defaults to None.
-            Should be a tuple indicating expected additive error and failure probability.
-        control_flow_enabled: Flag to enable control flow design of runnable circuit (relevant for involving
-            real time control-flow). Defaults to True.
+    Attributes:
+        batch_size: The batch size for training.
+        sampling_paulis: The number of Pauli strings to sample for fidelity estimation.
+        n_shots: The number of shots for each circuit execution.
+        n_reps: A list of the number of repetitions for the circuit.
+        c_factor: The renormalization factor for the reward.
+        seed: The seed for the random number generator.
+        dfe_precision: The precision for direct fidelity estimation.
+        control_flow_enabled: Whether to enable control flow in the circuit.
+        n_reps_mode: The mode for handling repetitions.
     """
 
     batch_size: int = 100
@@ -39,6 +37,12 @@ class ExecutionConfig:
         self._n_reps_index = 0
 
     def as_dict(self):
+        """
+        Returns a dictionary representation of the execution configuration.
+
+        Returns:
+            A dictionary representation of the execution configuration.
+        """
         return {
             "batch_size": self.batch_size,
             "sampling_paulis": self.sampling_paulis,
@@ -52,10 +56,20 @@ class ExecutionConfig:
 
     @classmethod
     def from_dict(cls, data: Dict):
+        """
+        Creates an ExecutionConfig from a dictionary.
+
+        Args:
+            data: The dictionary to create the ExecutionConfig from.
+
+        Returns:
+            An ExecutionConfig object.
+        """
         return cls(**data)
 
     @property
     def n_reps_index(self) -> int:
+        """The index of the current number of repetitions."""
         return self._n_reps_index
 
     @n_reps_index.setter
@@ -65,4 +79,5 @@ class ExecutionConfig:
 
     @property
     def current_n_reps(self) -> int:
+        """The current number of repetitions."""
         return self.n_reps[self.n_reps_index]

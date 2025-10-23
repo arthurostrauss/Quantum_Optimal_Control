@@ -9,22 +9,16 @@ Last updated: 05/09/2024
 
 from __future__ import annotations
 
-from dataclasses import asdict
-
-# For compatibility for options formatting between Estimators.
 from typing import List, Any, SupportsFloat, Tuple, Optional
 import numpy as np
 from gymnasium.core import ObsType, ActType
 from gymnasium.spaces import Box
 
 # Qiskit imports
-from qiskit.circuit import QuantumCircuit, ParameterVector, Parameter, QuantumRegister
-
-# Qiskit Quantum Information, for fidelity benchmarking
+from qiskit.circuit import QuantumCircuit, Parameter
 from qiskit.quantum_info import Operator
 from qiskit.transpiler import InstructionProperties
 
-from qiskit_experiments.library import ProcessTomography
 
 from .base_q_env import (
     BaseQuantumEnvironment,
@@ -37,44 +31,57 @@ from .configuration.qconfig import QEnvConfig
 
 
 class QuantumEnvironment(BaseQuantumEnvironment):
+    """
+    A quantum environment for reinforcement learning.
+
+    This environment is designed to be used with PyTorch and Qiskit. It allows an agent to interact with a quantum
+    system and learn to perform a specific task, such as gate calibration or state preparation.
+    """
 
     def __init__(self, training_config: QEnvConfig):
         """
-        Initialize the Quantum Environment
+        Initializes the QuantumEnvironment.
+
         Args:
-            training_config: QEnvConfig object containing the training configuration
+            training_config: The configuration for the training environment.
         """
-        # self._parameters = ParameterVector("θ", training_config.n_actions)
         self._parameters = [Parameter(f"a_{i}") for i in range(training_config.n_actions)]
 
         super().__init__(training_config)
 
         self.circuits = self.define_circuits()
-        # self.observation_space = Box(
-        #     low=np.array([0, 0] + [-5] * (2 ** self.n_qubits) ** 2),
-        #     high=np.array([1, 1] + [5] * (2 ** self.n_qubits) ** 2),
-        #     dtype=np.float32,
-        # )
         self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
 
     @property
     def parameters(self):
+        """The parameters of the environment."""
         return self._parameters
 
     @property
     def circuit_choice(self) -> int:
+        """The index of the circuit to be used."""
         return 0
 
     def episode_length(self, global_step: int) -> int:
+        """
+        Determines the length of an episode.
+
+        Args:
+            global_step: The current step in the training loop.
+
+        Returns:
+            The length of the episode.
+        """
         return 1
 
     def define_circuits(
         self,
     ) -> List[QuantumCircuit]:
         """
-        Define the target to be used in the environment
+        Defines the circuits to be used in the environment.
+
         Returns:
-            target: GateTarget or StateTarget object
+            A list of quantum circuits.
         """
 
         custom_circuit = QuantumCircuit(self.config.target.tgt_register, name="custom_circuit")
@@ -92,6 +99,12 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         return [custom_circuit]
 
     def _get_obs(self):
+        """
+        Returns the observation of the environment.
+
+        Returns:
+            The observation of the environment.
+        """
         if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
             return np.array(
                 [
@@ -104,6 +117,16 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             return np.array([0, 0])
 
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+        """
+        Performs a single step in the environment.
+
+        Args:
+            action: The action to be performed.
+
+        Returns:
+            A tuple containing the observation, reward, whether the episode has ended,
+            whether the episode was truncated, and additional information.
+        """
         if self._episode_ended:
             print("Resetting environment")
             terminated = True
@@ -133,50 +156,29 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         assert not np.any(np.isinf(reward)) and not np.any(
             np.isnan(reward)
         ), "Reward table contains NaN or Inf values"
-        # Using Negative Log Error as the Reward
         optimal_error_precision = 1e-6
         max_fidelity = 1.0 - optimal_error_precision
         reward = np.clip(reward, a_min=0.0, a_max=max_fidelity)
         reward = -np.log10(1.0 - reward)
         return self._get_obs(), reward, terminated, False, self._get_info()
 
-    # def check_reward(self):
-    #     if self.training_with_cal:
-    #         print("Checking reward to adjust C Factor...")
-    #         example_obs, _ = self.reset()
-    #         if example_obs.shape != self.observation_space.shape:
-    #             raise ValueError(
-    #                 f"Training Config observation space ({self.observation_space.shape}) does not "
-    #                 f"match Environment observation shape ({example_obs.shape})"
-    #             )
-    #         sample_action = np.random.normal(
-    #             loc=(self.action_space.low + self.action_space.high) / 2,
-    #             scale=(self.action_space.high - self.action_space.low) / 2,
-    #             size=(self.batch_size, self.action_space.shape[-1]),
-    #         )
-    #
-    #         batch_rewards = self.perform_action(sample_action)
-    #         mean_reward = np.mean(batch_rewards)
-    #         if not np.isclose(mean_reward, self.fidelity_history[-1], atol=1e-2):
-    #             self.c_factor *= self.fidelity_history[-1] / mean_reward
-    #             self.c_factor = np.round(self.c_factor, 1)
-    #             print("C Factor adjusted to", self.c_factor)
-    #         self.clear_history()
-    #     else:
-    #         pass
-
     def compute_benchmarks(
         self, qc: QuantumCircuit, params: np.array, update_env_history=True
     ) -> np.array:
         """
-        Method to store in lists all relevant data to assess performance of training (fidelity information)
-        :param params: List of Action vectors to execute on quantum system
-        :return: None
+        Computes benchmarks for the given circuit and parameters.
+
+        Args:
+            qc: The quantum circuit to benchmark.
+            params: The parameters for the circuit.
+            update_env_history: Whether to update the environment's history.
+
+        Returns:
+            An array of fidelity values.
         """
 
         if self.config.check_on_exp:
 
-            # Experiment based fidelity estimation
             try:
                 if not self.config.reward_method == "fidelity":
                     if self.config.benchmark_config.benchmark_batch_size > 1:
@@ -184,7 +186,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                             np.random.normal(
                                 self.mean_action,
                                 self.std_action,
-                                size=(self.config.benchmark_batch_size, self.n_actions),
+                                size=(self.config.benchmark_config.benchmark_batch_size, self.n_actions),
                             ),
                             self.action_space.low,
                             self.action_space.high,
@@ -220,13 +222,13 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             else:
                 self.avg_fidelity_history.append(np.mean(fids))
 
-        else:  # Simulation based fidelity estimation (Aer for circuit level, Dynamics for pulse)
+        else:
             print("Starting simulation benchmark...")
             if not self.config.reward_method == "fidelity":
-                params = np.array([self.mean_action])  # Benchmark policy only through mean action
-            if self.abstraction_level == "circuit":  # Circuit simulation
+                params = np.array([self.mean_action])
+            if self.abstraction_level == "circuit":
                 fids = self.simulate_circuit(qc, params, update_env_history)
-            else:  # Pulse simulation
+            else:
                 fids = self.simulate_pulse_circuit(qc, params, update_env_history)
             if self.target.target_type == "state":
                 print("State fidelity:", fids)
@@ -237,12 +239,13 @@ class QuantumEnvironment(BaseQuantumEnvironment):
 
     def update_gate_calibration(self, gate_name: Optional[str] = None):
         """
-        Update backend target with the optimal action found during training
+        Updates the gate calibration with the optimal actions.
 
-        :param gate_name: Name of custom gate to add to target (if None,
-         use target gate and update its attached calibration)
+        Args:
+            gate_name: The name of the custom gate to be created.
 
-        :return: Pulse calibration for the custom gate
+        Returns:
+            The pulse calibration for the custom gate.
         """
         try:
             from qiskit import schedule, pulse

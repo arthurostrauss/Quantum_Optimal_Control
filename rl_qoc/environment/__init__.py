@@ -1,6 +1,4 @@
 from .configuration import (
-    QiskitConfig,
-    DynamicsConfig,
     BackendConfig,
     ExecutionConfig,
     QEnvConfig,
@@ -16,8 +14,6 @@ from .wrappers import (
 from .target import GateTarget, StateTarget
 
 __all__ = [
-    "QiskitConfig",
-    "DynamicsConfig",
     "BackendConfig",
     "ExecutionConfig",
     "QEnvConfig",

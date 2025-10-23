@@ -13,8 +13,14 @@ def test_custom_gate_replacement_pass():
     circuit.ry(0.2, qr[0])
 
     # Define the pass
+    from rl_qoc.helpers.transpiler_passes import InstructionReplacement
+
     pass_ = CustomGateReplacementPass(
-        target_instructions=("ry", (0,)), new_elements=custom_gate, parameters=[[0.3]]
+        InstructionReplacement(
+            target_instruction=("ry", (0,)),
+            new_elements=custom_gate,
+            parameters=[[0.3]],
+        )
     )
 
     # Run the pass

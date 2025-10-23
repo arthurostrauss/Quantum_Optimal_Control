@@ -1,10 +1,17 @@
 # Feedback-based Quantum Control using Reinforcement Learning 
 
-This repository is dedicated to the writing of Python scripts enabling the realization of quantum control tasks based on closed-loop optimization that incorporates measurements. We build upon the work of Volodymir Sivak on Model-Free Quantum Control with Reinforcement Learning (https://link.aps.org/doi/10.1103/PhysRevX.12.011059) to enable a generic framework for arbitrary state preparation and quantum gate calibration based on Qiskit modules. The interest here is that this repo enables the execution of the algorithm over both simulation and real IBM Backends seamlessly, and therefore enables an in-depth analysis of the robustness of the method for a variety of different backends. In the future, we will add compatibility with further providers. Additionally, this repository is dedicated to the investigation of contextual gate calibration.
+This repository provides a comprehensive framework for feedback-based quantum control using reinforcement learning. It builds upon the foundational work of Volodymir Sivak on Model-Free Quantum Control to offer a versatile toolkit for tasks like arbitrary state preparation and quantum gate calibration.
 
-The repo is currently divided in five main folders. The first one is the folder "paper_results", where adaptation of the state preparation algorithm developed by Sivak for bosonic systems is adapted to a multiqubit system simulated with a Qiskit ``` QuantumCircuit``` running on a ```QasmSimulator``` backend instance.
+The framework has two primary focuses:
 
-The two other folders extend the state preparation protocols by integrating quantum gate calibration procedures, that can be described using a usual gate level abstraction (that is one seeks to optimize gate parameters, in the spirit of a variational quantum algorithm), or at the pulse level abstraction, for more expressivity and harware-aware noise suppression. The novelty of this gate calibration procedure is that it can be tailormade to a quantum circuit context, enabling the suppression of spatially and temporally correlated noise.
+1.  **Full Support for Qiskit Primitives**: We provide complete integration with the Qiskit primitives model, allowing for a high-level, hardware-agnostic approach to defining and executing RL-based quantum control workflows. This enables seamless execution on both simulated and real IBM backends, facilitating in-depth analysis of the method's robustness across different platforms.
+
+2.  **Advanced Real-Time Embedded RL with Quantum Machines**: For advanced users, we offer support for real-time embedded reinforcement learning on the Quantum Orchestration Platform (QOP) from Quantum Machines. This powerful feature significantly reduces execution overhead by enabling:
+    *   **On-the-fly action sampling**: Actions are sampled and applied in real-time, eliminating the need for pre-compiled sequences.
+    *   **Real-time parameter adjustment**: The agent can adjust parameters on the fly, responding dynamically to the system's behavior.
+    *   **Zero compilation latency**: By leveraging real-time control flow (like for-loops and switch statements), we eliminate compilation latency, leading to massive speedups. The core strategy relies on the ability to run real-time control flow and real-time parameter adjustment, while maintaining a highly flexible communication workflow between classical and quantum resources for making the program fully parametric and dynamic.
+
+This repository is a powerful tool for researchers and developers interested in exploring the frontiers of quantum control, from high-level, context-aware gate calibration to real-time, hardware-embedded reinforcement learning. The folder `paper_results` contains an adaptation of the state preparation algorithm for a multiqubit system, while other folders extend this to gate calibration at both the gate and pulse level, with a focus on context-aware calibration to suppress correlated noise.
 
 We briefly explain the overall logic of the algorithm below.
 
@@ -78,62 +85,59 @@ Finally, the last hyperparameter of the overall RL algorithm is the number of ep
 
 ### b. Modelling the quantum system through Qiskit: the ```QuantumCircuit```workflow
 
-Our repo relies on the modelling of the quantum system as a class ```QuantumEnvironment```, which is characterized by the following attributes:
+Our repo relies on the modelling of the quantum system as a class `QuantumEnvironment`, which is characterized by a dataclass `QEnvConfig`. The config contains the following attributes:
 
-- ``` target: Dict```: a dictionary containing information about the target that the RL agent should prepare. It could either be a target state or a target gate. This dictionary should contain the following keys:
-    - ```gate: qiskit.circuit.Gate```: if the target type is a gate, which quantum gate is the target the agent should calibrate
-    - ```circuit: qiskit.circuit.QuantumCircuit```: If target type is a state, provides an ideal quantum circuit that should prepare the target state of interest
-    - ```dm: qiskit.quantum_info.DensityMatrix```: Alternatively to the ```circuit```key, one can provide a ```DensityMatrix```describing the target state of interest (if target type is a state).
-    - ```register: Union[QuantumRegister, List[int]]```: List of qubits on which the target state/gate shall be prepared. The indices provided in this list should match the number of qubits addressed by the target gate/state.
-    - ```input_states: Optional[List[Dict[Union["circuit", "dm"]]: Union[qiskit.circuit.QuantumCircuit, qiskit.quantum_info.DensityMatrix]]]```: If target type is a gate, optional list of possible input states that should be prepared for forcing the agent to perform simultaneous successful state preparation. In order to maximize learning, the set of input states should be tomographically complete. Each input state should be provided as if it was a target state (either provide a quantum circuit enabling its perfect preparation, or a DensityMatrix). Note that it does not need to be provided, and the default will load a tomographically complete set.
-- ```abstraction_level: str = Union["gate", "pulse"]```: The abstraction level at which the parametrized circuit enabling the target preparation is expressed. If the gate level is chosen, then the simulator that is used is a Statevector simulator, and significantly speeds up the simulation, unless another ```AerBackend``` object is provided in the ```Qiskit_config```below. Contrariwise, if the pulse level is chosen, all gates provided in the parametrized circuit should contain a dedicated pulse description, and the simulation of the pulse schedule associated to the circuit is done through Qiskit Dynamics module (https://qiskit.org/documentation/dynamics). 
-- ```Qiskit_config: QiskitConfig```: A dataclass object containing necessary information to execute the algorithm on real/simulated hardware. It should contain the following keys:
-    - ```backend: Optional[qiskit.providers.Backend]```: An IBM Backend on which should be executed the overall workflow. If a real backend is selected, then the user should ensure that he has opened an IBM account to access the resource, and that this backend is selected among the ones enabling the execution of Qiskit Runtime (see code examples about how to declare such real backend). If the ```abstraction_level```is set to ```"gate"```, and the user wants to run on a simulated noiseless backend, the ```backend``` can be set to ```None```. Alternatively, the user can provide a custom ```AerBackend``` with a custom noise model. Finally, if the user wants to run the workflow on a simulated backend at the pulse level, a ```qiskit_dynamics.DynamicsBackend``` instance should be provided (see pulse level abstraction folder).
-    - ```parametrized_circuit: Callable[qiskit.circuit.QuantumCircuit, Optional[qiskit.circuit.ParameterVector], Optional[qiskit.circuit.QuantumRegister]] ```: A function taking as input a ```QuantumCircuit```instance and appending to it a custom parametrized gate (specified either as a pulse schedule or a parametrized gate depending on the abstraction level). This is the key function that should introduce circuit parameters (```qiskit.circuit.Parameter``` or ```qiskit.circuit.ParameterVector```) which will be replaced by the set of actions that the agent will apply on the system.
-    - Other optional arguments can be provided if a real backend or pulse level abstraction are selected. They can be found in the notebook contained in the pulse level abstraction folder.
-- ```sampling_Pauli_space: int```: As mentioned earlier, indicates how many indices should be sampled for estimating the fidelity from Pauli observables.
-- ```n_shots: int```: Minimum number of shots per expectation value sampling subroutine.
-- ```c_factor: float```: Normalization factor for the reward, should be chosen such that average reward curve matches average gate fidelity curve (if target type is a gate) or state fidelity curve (if target type is a state).
-
+- `target`: A `GateTarget` or `StateTarget` object containing information about the target that the RL agent should prepare.
+- `backend_config`: A dataclass object (`BackendConfig`) with the necessary information to execute the algorithm on real or simulated hardware. It includes:
+    - `backend`: An optional Qiskit `Backend` object. If not provided, a noiseless statevector simulator is used.
+    - `parametrized_circuit`: A callable that adds a custom parametrized gate to a `QuantumCircuit`. This is where you define the actions the agent can take.
+- `execution_config`: A dataclass object (`ExecutionConfig`) that specifies execution parameters, such as:
+    - `n_shots`: The number of shots per expectation value sampling.
+    - `sampling_paulis`: The number of Pauli observables to sample for fidelity estimation.
+    - `batchsize`: The number of actions to sample from the policy for each update.
+    - `n_reps`: The ability to repeat a circuit multiple times to amplify sensitivity to small noise.
+- `action_space`: The Gym `Box` space defining the range of possible actions.
+- `benchmark_config`: An optional dataclass object (`BenchmarkConfig`) for specifying benchmarking parameters.
 
 ### c. The subtlety of the pulse level: Integrating Qiskit Dynamics and Qiskit Experiments
 
-While a ```QuantumCircuit``` can be simulated using Statevector simulation when only dealing with the circuit level abstraction, and does not necessarily require an actual
-backend (although one might want to use the ```ibmq_qasm_simulator```), simulating the circuit by providing a pulse level description requires a dedicated simulation backend.
-As our main code revolves around Qiskit structure, we use the recently released Qiskit Dynamics extension, which is a framework for simulating arbitrary pulse schedules.
-More specifically, we leverage the introduction of the ```DynamicsBackend``` object to emulate a real backend, receiving Pulse gates (you can learn more by checking Qiskit and Dynamics documentations).
-The DynamicsBackend can be declared in two main ways:
-1. Using the ```from_backend(BackendV1)``` method, which creates a ```DynamicsBackend``` carrying all the properties (in particular the Hamiltonian) of a real IBM backend.
-2. Creating a custom Hamiltonian (or Linbladian) describing our quantum system of interest, and declare a ```Solver``` object which will be provided to the backend.
+Simulating at the pulse level requires a dedicated simulation backend. We use Qiskit Dynamics and its `DynamicsBackend` to emulate a real backend. This can be created from a `FakeBackend` or a custom Hamiltonian.
 
-We provide examples of both declarations in the pulse_level_abstraction folder.
-
-The subtlety behind this ```DynamicsBackend``` is that this backend does not carry calibrations for elementary quantum gates on the qubits.
-This is an issue, as the current reward scheme is built on the ability to perform Pauli expectation sampling on the quantum computer.
-Indeed, since we only have access to a Z-basis measurement in the backend, one needs to be able to perform Pauli basis rotation gates in order to ensure we can extract all Pauli operators. As a consequence, each qubit should have at the start calibrated Hadamard and S gates. The whole idea is to provide such baseline calibration for the
-custom ```DynamicsBackend``` instance. To do so, we use the library of elementary calibrations provided in the Qiskit Experiments module (which provide calibration workflows for elementary gates).
-Therefore, each time the ```QuantumEnvironment``` object is initialized with a ```DynamicsBackend``` object, a series of baseline calibrations will automatically start, such that the Estimator primitive (in this case the ```BackendEstimator``` present in Qiskit primitives)
-can append the appropriate gates for all Pauli expectation value sampling tasks.
+A key subtlety is that `DynamicsBackend` does not come with pre-calibrated elementary gates. Since our reward scheme relies on Pauli basis rotations (Hadamard and S gates), we need these calibrations. Our framework automatically handles this by using Qiskit Experiments to perform baseline calibrations for X and SX gates whenever a `DynamicsBackend` is initialized. This ensures that the `BackendEstimator` can perform the necessary Pauli expectation value sampling.
 
 ## 2. Integrating context awareness to the Environment
 
-In this repo, there are mainly two RL workflows that are used: Tensorflow 2 and PyTorch. While Tensorflow is used for the earlier examples of state preparation and gate calibration, we have for now fixed the context aware calibration workflow on PyTorch for more clarity. More specifically, the whole RL workflow is based on a "Gymified" ```QuantumEnvironment``` called ```TorchEnvironment``` and an Agent built on Torch modules. The implementation of the PPO follows closely the one proposed by the CleanRL library (http://docs.cleanrl.dev/).
+The context-aware gate calibration workflow is built on a "Gymified" `QuantumEnvironment` called `ContextAwareQuantumEnvironment` and an Agent built on PyTorch. The PPO implementation follows the CleanRL library.
 
-In what follows, we explain the logic behind the context-aware gate calibration workflow.
+### a. the `ContextAwareQuantumEnvironment` wrapper
 
-### a. the ```TorchQuantumEnvironment``` wrapper
+Traditional gate calibration often averages out noise from specific gate sequences. However, spatio-temporal noise like non-Markovianity and crosstalk can significantly impact gate quality depending on the circuit context.
 
-The main motivation behind this work comes from the realization that in most traditional gate calibration procedures, the noise that could emerge from a specific sequence of logical operations is often neglected or averaged out over a large series of different sequences to build an "on-average" noise robust calibration of the target gate.
-While this paradigm inherent to the gate model modular structure is certainly convenient for the execution of complex quantum circuits, we have to acknowledge that this might not be enough to reach satisfying circuit fidelities in the near-term. In fact, spatio-temporally correlated noise sources such as non-Markovianity or crosstalk could impact significantly the quality of a typical gate. It is to be noted that such effect is typically dependent on the operations that are executed around the target gate. 
-Characterizing this noise is known to be tedious because of the computational heaviness of the process (e.g. Simultaneous RB for crosstalk, Process tensor tomography for non-Markovianity). In typical experiments, we first spend some time characterizing the noise channels, and then derive a series of gate calibrations countering all the effects simultaneously. 
-In our quantum control approach, we decide to intertwine the characterization and the calibration procedure, by letting the RL agent build from its training an internal representation of the contextual noise concurrently to the trial of new controls for suppressing it.
+Our `ContextAwareQuantumEnvironment` addresses this by intertwining noise characterization and calibration. The RL agent learns an internal representation of the contextual noise while simultaneously trying new controls to suppress it.
 
-Earlier, we have defined our ```QuantumEnvironment``` to include all details regarding the reward computation and the quantum system access (simulation or real backend). In this new ```TorchQuantumEnvironment``` class, we include all the details regarding the calibration done within a circuit context training.
+To use it, you first declare the `ContextAwareQuantumEnvironment` as follows:
 
-For this, we first declare the ```TorchQuantumEnvironment``` as follows:
+```python
+from rl_qoc import ContextAwareQuantumEnvironment, QEnvConfig, ExecutionConfig, GateTarget, BackendConfig
+from gymnasium.spaces import Box
 
+# Define the configuration for the environment
+q_env_config = QEnvConfig(
+    target=GateTarget(gate=ECRGate(), physical_qubits=[0, 1]),
+    backend_config=BackendConfig(
+        parametrized_circuit=apply_parametrized_circuit,
+        backend=backend,
+    ),
+    execution_config=ExecutionConfig(batchsize=300, sampling_paulis=50, n_shots=200),
+    action_space=Box(low=-0.1, high=0.1, shape=(4,)),
+)
 
-
+# Define the circuit context and training steps per gate
+env = ContextAwareQuantumEnvironment(
+    q_env_config,
+    circuit_context=transpiled_circ,
+)
+```
 
 ## 3. The RL Agent: PPO algorithm
 
