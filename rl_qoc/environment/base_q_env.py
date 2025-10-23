@@ -297,7 +297,6 @@ class BaseQuantumEnvironment(ABC, Env):
             reward_data = rewarder.get_reward_data(
                 qc,
                 params,
-                self.target,
                 self.config,
                 additional_input,
             )
