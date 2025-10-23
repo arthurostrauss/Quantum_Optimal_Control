@@ -12,6 +12,7 @@ from .fidelity_reward_data import FidelityRewardData, FidelityRewardDataList
 from ...environment.configuration.qconfig import QEnvConfig, BackendConfig
 from ...helpers import has_noise_model, handle_n_reps
 from qiskit.primitives.containers.sampler_pub import SamplerPub
+from ...environment.target import Target, GateTarget
 
 
 @dataclass
@@ -31,7 +32,6 @@ class FidelityReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: Target,
         env_config: QEnvConfig,
         *args,
     ) -> FidelityRewardDataList:
@@ -47,6 +47,7 @@ class FidelityReward(Reward):
         """
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        target = env_config.target
         new_qc = handle_n_reps(
             qc,
             execution_config.current_n_reps,

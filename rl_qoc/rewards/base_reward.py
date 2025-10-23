@@ -53,7 +53,6 @@ class Reward(ABC):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: Target,
         env_config: QEnvConfig,
         *args,
     ) -> RewardDataList:
@@ -63,10 +62,8 @@ class Reward(ABC):
         Args:
             qc: Quantum circuit to be executed on quantum system
             params: Parameters to feed the parametrized circuit
-            target: Target gate or state to prepare
-            backend_info: Backend information
-            execution_config: Execution configuration
-            n_reps: Number of repetitions of cycle circuit
+            env_config: Environment configuration
+            *args: Optional arguments for the reward method
 
         Returns:
             List of pubs related to the reward method

@@ -65,13 +65,15 @@ class XEBReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
     ) -> XEBRewardDataList:
         """
         Compute pubs related to the reward method
         """
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_config
+        target = env_config.target
         depth = env_config.current_n_reps
         seqs = env_config.sampling_paulis
         n_shots = env_config.n_shots
