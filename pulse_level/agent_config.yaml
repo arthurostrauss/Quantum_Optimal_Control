@@ -1,0 +1,12 @@
+learning_rate: 0.01
+n_epochs: 1000
+actor_optimizer: "Adam"
+critic_optimizer: "Adam"
+actor_layers: [100, 100, 100]
+critic_layers: [100, 100, 100]
+actor_grad_clip: 0.1
+critic_grad_clip: 0.1
+critic_loss_coeff: 0.5
+PPO_epsilon: 0.2
+adam_eps: 1.0e-7
+seed: 3590

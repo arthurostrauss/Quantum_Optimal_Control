@@ -190,8 +190,8 @@ def get_instruction_durations(backend: Optional[BackendV2] = None):
 # Do not touch part below, just retrieve in your notebook training_config and circuit_context
 q_env_config = get_q_env_config(
     config_file_address,
-    get_backend,
-    apply_parametrized_circuit,
+    backend_fn=get_backend,
+    parametrized_circuit=apply_parametrized_circuit,
 )
 q_env_config.backend_config.parametrized_circuit_kwargs = {
     "target": q_env_config.target,
