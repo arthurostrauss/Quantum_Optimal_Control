@@ -192,7 +192,7 @@ class ChannelReward(Reward):
         for c, idx in zip(counts, sampled_group_indices):
             chi_group = grouped_chi[idx]
             chi_squared_sum = np.sum([chi**2 for chi in chi_group])
-            reward_factor = c_factor * c * chi_group / (dim * chi_squared_sum)
+            reward_factor = c_factor * c * chi_group / (dim * chi_squared_sum * pauli_sampling)
             prep, obs_list = grouped_pauli_pairs[idx]
             sampled_grouped_pauli_pairs.append((prep, SparsePauliOp(obs_list, reward_factor)))
 
@@ -244,10 +244,10 @@ class ChannelReward(Reward):
                     target.causal_cone_qubits,
                     inplace=False,
                 )
-                input_circuit, extended_prep_indices = extend_input_state_prep(
-                    input_circuit, qc, target, prep_indices
-                )  # Add random input state on other qubits
-                input_circuit.metadata["indices"] = extended_prep_indices
+                # input_circuit, extended_prep_indices = extend_input_state_prep(
+                #     input_circuit, qc, target, prep_indices
+                # )  # Add random input state on other qubits
+                # input_circuit.metadata["indices"] = extended_prep_indices
                 # Prepend input state to custom circuit with front composition
                 prep_circuit = repeated_circuit.compose(
                     input_circuit,
@@ -288,7 +288,7 @@ class ChannelReward(Reward):
                         n_reps,
                         target.causal_cone_qubits_indices,
                         prep_group,
-                        extended_prep_indices,
+                        prep_indices,
                         observables_to_indices(SparsePauliOp.sum(obs_).simplify()),
                     )
                 )
@@ -309,7 +309,7 @@ class ChannelReward(Reward):
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
         reward *= (dim**2 - 1) / dim**2
-        reward /= reward_data.pauli_sampling
+        # reward /= reward_data.pauli_sampling
         reward += reward_data.id_coeff
 
         reward = (dim * reward + 1) / (dim + 1)
