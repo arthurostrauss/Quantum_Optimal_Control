@@ -24,6 +24,9 @@ class FidelityReward(Reward):
     _ideal_sim_methods = ("statevector", "unitary")
     _noisy_sim_methods = ("density_matrix", "superop")
 
+    def set_reward_seed(self, seed: int):
+        pass
+
     @property
     def reward_method(self):
         return "fidelity"
@@ -41,9 +44,8 @@ class FidelityReward(Reward):
         Args:
             qc: Quantum circuit to be executed on quantum system
             params: Parameters to feed the parametrized circuit
-            target: Target gate or state to prepare
-            backend_info: Backend information
-            execution_config: Execution configuration
+            env_config: QEnvConfig containing the backend information and execution configuration
+            args: Additional arguments to be passed to the reward method
         """
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
@@ -102,7 +104,7 @@ class FidelityReward(Reward):
                     self.get_fidelity(qc, params, target, backend_info, n_reps=n_reps)
                 )
 
-        return np.mean(fidelities, axis=0)
+        return np.array(fidelities)
 
     def get_fidelity(
         self,
@@ -168,7 +170,7 @@ class FidelityReward(Reward):
         outputs = [result.data(i)[output] for i in range(len(params))]
         fidelities = [target.fidelity(exp, n_reps) for exp in outputs]
 
-        return fidelities[0] if len(fidelities) == 1 else fidelities
+        return fidelities
 
     def get_pulse_fidelity(
         self,
