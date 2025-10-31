@@ -130,7 +130,7 @@ class ChannelReward(Reward):
         cutoff = 1e-4  # Cutoff for negligible probabilities
         non_zero_indices = np.nonzero(np.abs(Chi) > cutoff)[0]
         # Remove index 0 from non_zero_indices as it corresponds to the identity Pauli
-        non_zero_indices = non_zero_indices[non_zero_indices != 0]
+        # non_zero_indices = non_zero_indices[non_zero_indices != 0]
         # Sort indices by Chi value (descending order)
         sorted_indices = np.argsort(np.abs(Chi[non_zero_indices]))[::-1]
 
@@ -138,7 +138,7 @@ class ChannelReward(Reward):
         basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
         id_coeff = c_factor * (Chi[0]/dim**2)  # Coefficient for the identity Pauli
-        # id_coeff = 0
+        id_coeff = 0
         non_zero_indices = non_zero_indices[sorted_indices]
         pair_indices = [
             np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices
@@ -160,8 +160,8 @@ class ChannelReward(Reward):
             )
             for group in grouped_pauli_pairs
         ]
-        grouped_probabilities = [np.sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_chi]
-        grouped_probabilities = np.array(grouped_probabilities) / np.sum(grouped_probabilities)
+        grouped_probabilities = [sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_chi]
+        grouped_probabilities = np.array(grouped_probabilities) / sum(grouped_probabilities)
 
         # Build repeated circuit
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
@@ -172,6 +172,7 @@ class ChannelReward(Reward):
             print("DFE precision guarantee", dfe_precision)
             eps, delta = dfe_precision
             pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
+            print("Pauli sampling", pauli_sampling)
         else:
             # User-defined hyperparameter
             pauli_sampling = execution_config.sampling_paulis
@@ -191,8 +192,8 @@ class ChannelReward(Reward):
         sampled_grouped_pauli_pairs = []
         for c, idx in zip(counts, sampled_group_indices):
             chi_group = grouped_chi[idx]
-            chi_squared_sum = np.sum([chi**2 for chi in chi_group])
-            reward_factor = c_factor * c * chi_group / (dim * chi_squared_sum * pauli_sampling)
+            chi_squared_sum = sum([chi**2 for chi in chi_group])
+            reward_factor = c_factor *  chi_group / (dim * chi_squared_sum)
             prep, obs_list = grouped_pauli_pairs[idx]
             sampled_grouped_pauli_pairs.append((prep, SparsePauliOp(obs_list, reward_factor)))
 
@@ -213,12 +214,13 @@ class ChannelReward(Reward):
                 # Number of shots per Pauli eigenstate (divided equally)
                 dedicated_shots = counts_input_states * n_shots
             else: # DFE precision guarantee
-                dedicated_shots = 2 * np.log(2 / delta) / (pauli_sampling * eps**2)
-                dedicated_shots *= np.sum(grouped_chi[sampled_group_indices[g]]) ** 2
+                dedicated_shots = 2* np.log(2 / delta) / (pauli_sampling * eps**2)
+                dedicated_shots *= np.sum([np.abs(grouped_chi[sampled_group_indices[g]][i]) for i in range(len(grouped_chi[sampled_group_indices[g]]))]) ** 2
                 dedicated_shots /= np.sum(grouped_chi[sampled_group_indices[g]] ** 2) ** 2 
                 dedicated_shots *= counts_input_states # Convert into an array for each sampled input state
+                dedicated_shots = np.ceil(dedicated_shots)
 
-            for pure_eig_state, shots in zip(selected_input_states, dedicated_shots):
+            for c_input_state, pure_eig_state, shots in zip(counts_input_states, selected_input_states, dedicated_shots):
                 # Convert input state to Pauli6 basis:
                 # preparing pure eigenstates of Pauli_prep
                 if shots == 0:
@@ -262,14 +264,14 @@ class ChannelReward(Reward):
                     optimization_level=0,
                 )
 
-                obs_ = [p * o for p, o in zip(parity, obs_group)]
+                obs_ = [p * (c_input_state/pauli_sampling) * o for p, o in zip(parity, obs_group)]
                 pub_obs = extend_observables(
                     SparsePauliOp.sum(obs_).simplify(),
                     prep_circuit,
                     target.causal_cone_qubits_indices,
                 )
                 # Check if coeff array is all 0. If so, skip this pub
-                if np.all(pub_obs.coeffs <= 1e-6):
+                if np.all(np.abs(pub_obs.coeffs) <= 1e-6):
                     continue
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
                 # Add PUB
@@ -308,7 +310,7 @@ class ChannelReward(Reward):
         dim = 2**reward_data.num_qubits
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        reward *= (dim**2 - 1) / dim**2
+        # reward *= (dim**2 - 1) / dim**2
         # reward /= reward_data.pauli_sampling
         reward += reward_data.id_coeff
 

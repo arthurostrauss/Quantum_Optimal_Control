@@ -215,7 +215,8 @@ class BaseQuantumEnvironment(ABC, Env):
             for i in range(len(self.config.execution_config.n_reps)):
                 self.config.execution_config.n_reps_index = i
                 print("Number of repetitions:", self.n_reps)
-                reward = self.perform_action(params, update_env_history=False)
+                data = self.config.reward.get_reward_data(self.circuit, params, self.config)
+                reward = self.config.reward.get_reward_with_primitive(data, self.primitive)
                 reward_data[m].append(np.mean(reward))
             if fit_function is None or inverse_fit_function is None:
 
