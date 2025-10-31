@@ -362,8 +362,9 @@ class GateTarget(BaseTarget):
         Initialize the gate target for the quantum environment.
         :param gate: Gate to be calibrated. It can be a Gate object or a string representing the gate name.
         :param physical_qubits: Physical qubits forming the target gate.
-        :param circuit_context: Circuit to be used for context-aware calibration (default is the gate to be calibrated).
-        :param virtual_target_qubits: Virtual target qubits to be used for the context-aware calibration.
+        :param circuit_context: Circuit to be used for context-aware calibration (default is the gate to be calibrated). Can also be a list of circuits.
+        :param virtual_target_qubits: Virtual target qubits to be used for the context-aware calibration. 
+            Those are the qubits within the virtual circuit context (not necessarily the same as the physical qubits after transpilation).
         :param layout: Specify layout if already declared
         """
         gate = get_gate(gate)

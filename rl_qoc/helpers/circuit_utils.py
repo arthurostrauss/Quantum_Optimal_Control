@@ -100,7 +100,7 @@ def add_custom_gate(
     inplace: bool = True,
 ) -> QuantumCircuit:
     """
-    Add a custom gate to the Quantum Circuit and register it in the backend target for the specified physical qubits
+    Add a custom gate to the QuantumCircuit and register it in the backend target for the specified physical qubits
     (if provided).
     Args:
         qc: Quantum Circuit to which the gate is to be added

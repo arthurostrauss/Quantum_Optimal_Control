@@ -241,7 +241,7 @@ class QEnvConfig:
 
     @instruction_durations_dict.setter
     def instruction_durations_dict(self, value: InstructionDurations):
-        self.backend_config.instruction_durations = value
+        self.backend_config.custom_instruction_durations = value
 
     @property
     def pass_manager(self):
