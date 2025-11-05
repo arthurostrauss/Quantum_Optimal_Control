@@ -68,8 +68,10 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             skip_transpilation=True,
         )
         self.circuit_params = CircuitParams.from_circuit(
-            self.real_time_circuit, self.input_type, self.config,
-            self.target.all_context_parameters if isinstance(self.target, GateTarget) else ()
+            self.real_time_circuit,
+            self.input_type,
+            self.config,
+            self.target.all_context_parameters if isinstance(self.target, GateTarget) else (),
         )
 
         if (
@@ -178,7 +180,11 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         # reward = np.clip(reward, 0.0, 1.0 - 1e-6)
         self.reward_history.append(reward)
-        self.update_env_history(self.real_time_circuit, reward_data.total_shots, hardware_runtime=time.time() - start_time)
+        self.update_env_history(
+            self.real_time_circuit,
+            reward_data.total_shots,
+            hardware_runtime=time.time() - start_time,
+        )
         # reward = -np.log10(1.0 - reward)  # Convert to negative log10 scale
 
         return self._get_obs(), reward, True, False, self._get_info()

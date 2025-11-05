@@ -463,7 +463,7 @@ def get_q_env_config(
         parametrized_circ_func,
         backend,
         pass_manager=pass_manager,
-        instruction_durations=instruction_durations,
+        custom_instruction_durations=instruction_durations,
         primitive_options=(runtime_options if isinstance(backend, RuntimeBackend) else None),
     )
 

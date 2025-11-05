@@ -65,7 +65,9 @@ class ChannelReward(Reward):
 
     @property
     def reward_args(self):
-        return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli}
+        return {"num_eigenstates_per_pauli": self.num_eigenstates_per_pauli,
+        "fiducials_seed": self.fiducials_seed,
+        "input_states_seed": self.input_states_seed}
 
     @property
     def reward_method(self):
@@ -82,9 +84,9 @@ class ChannelReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
+        *args,
     ) -> ChannelRewardDataList:
         """
         Compute reward data related to the reward method
@@ -99,6 +101,11 @@ class ChannelReward(Reward):
         Returns:
             List of pubs related to the reward method
         """
+        
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_config
+        target = env_config.target
+
         if not isinstance(target, GateTarget):
             raise ValueError("Channel reward can only be computed for a target gate")
 
@@ -106,8 +113,6 @@ class ChannelReward(Reward):
             raise ValueError(
                 "Channel reward can only be computed for a target gate with causal cone size <= 3"
             )
-        execution_config = env_config.execution_config
-        backend_info = env_config.backend_config
         n_qubits = target.causal_cone_size
         dim = 2**n_qubits
         nb_states = self.num_eigenstates_per_pauli
@@ -694,7 +699,9 @@ class ChannelReward(Reward):
                                     result = config.backend.quantum_circuit_to_qua(
                                         qc, circuit_params.circuit_variables
                                     )
-                                    state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
+                                    state_int = get_measurement_outcomes(qc, result)[
+                                        qc.cregs[0].name
+                                    ]["state_int"]
                                     assign(counts[state_int], counts[state_int] + 1)
 
                                 reward.stream_back(reset=True)

@@ -38,7 +38,6 @@ class ORBITReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
     ) -> ORBITRewardDataList:
@@ -55,10 +54,11 @@ class ORBITReward(Reward):
         Returns:
             List of pubs related to the reward method
         """
-        if not isinstance(target, GateTarget):
-            raise ValueError("ORBIT reward can only be computed for a target gate")
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        target = env_config.target
+        if not isinstance(target, GateTarget):
+            raise ValueError("ORBIT reward can only be computed for a target gate")
         layout = target.layout
         if baseline_circuit is not None:
             circuit_ref = baseline_circuit

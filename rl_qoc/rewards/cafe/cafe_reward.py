@@ -42,7 +42,8 @@ class CAFEReward(Reward):
 
     @property
     def reward_args(self):
-        return {"input_states_choice": self.input_states_choice}
+        return {"input_states_choice": self.input_states_choice,
+        "input_states_seed": self.input_states_seed}
 
     @property
     def reward_method(self):
@@ -59,7 +60,6 @@ class CAFEReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.array,
-        target: GateTarget,
         env_config: QEnvConfig,
         baseline_circuit: Optional[QuantumCircuit] = None,
     ) -> CAFERewardDataList:
@@ -73,10 +73,11 @@ class CAFEReward(Reward):
             env_config: QEnvConfig containing the backend information and execution configuration
             baseline_circuit: Ideal circuit that qc should implement
         """
-        if not isinstance(target, GateTarget):
-            raise ValueError("CAFE reward can only be computed for a target gate")
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        target = env_config.target
+        if not isinstance(target, GateTarget):
+            raise ValueError("CAFE reward can only be computed for a target gate")
 
         if baseline_circuit is not None:
             circuit_ref = baseline_circuit.copy()
@@ -595,7 +596,9 @@ class CAFEReward(Reward):
                                 result = config.backend.quantum_circuit_to_qua(
                                     qc, circuit_params.circuit_variables
                                 )
-                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
+                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name][
+                                    "state_int"
+                                ]
                                 assign(counts[state_int], counts[state_int] + 1)
 
                             reward.stream_back(reset=True)

@@ -54,6 +54,7 @@ backend = FluxTunableTransmonBackend(machine)
 path = os.path.join(os.path.dirname(__file__), "agent_config.yaml")
 ppo_config = load_from_yaml_file(path)
 
+
 def apply_parametrized_circuit(
     qc: QuantumCircuit, params: List[Parameter], q_reg: QuantumRegister, **kwargs
 ):
@@ -77,11 +78,11 @@ physical_qubits = (0,)
 
 target_name = "x"
 target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
-reward =  ChannelReward()
+reward = ChannelReward()
 
 target_name = "1"
 target = StateTarget(state=target_name, physical_qubits=physical_qubits)
-reward =  PiPulseReward()
+reward = PiPulseReward()
 
 
 # Action space specification
@@ -134,17 +135,7 @@ rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
 
 # Générer le fichier sync_hook.py avant l'exécution
 sync_hook_path = generate_sync_hook(
-    target=target,
-    reward=reward,
-    param_bounds=param_bounds,
-    seed=seed,
-    batch_size=batch_size,
-    n_shots=n_shots,
-    pauli_sampling=pauli_sampling,
-    n_reps=n_reps,
-    num_updates=num_updates,
-    input_type=input_type,
-    backend_config=backend_config,
+    env=rescaled_env,
     ppo_config=ppo_config,
 )
 print(f"Sync hook file generated at: {sync_hook_path}")

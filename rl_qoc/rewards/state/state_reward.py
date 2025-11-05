@@ -60,7 +60,9 @@ class StateReward(Reward):
 
     @property
     def reward_args(self):
-        return {"input_states_choice": self.input_states_choice}
+        return {"input_states_choice": self.input_states_choice,
+        "input_state_seed": self.input_state_seed,
+        "observables_seed": self.observables_seed}
 
     def set_reward_seed(self, seed: int):
         """
@@ -75,7 +77,6 @@ class StateReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: StateTarget | GateTarget,
         env_config: QEnvConfig,
         dfe_precision: Optional[Tuple[float, float]] = None,
     ) -> StateRewardDataList:
@@ -95,6 +96,7 @@ class StateReward(Reward):
         """
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        target = env_config.target
         input_circuit = qc.copy_empty_like()
 
         prep_circuit = qc
@@ -385,6 +387,7 @@ class StateReward(Reward):
         binary = lambda n, l: bin(n)[2:].zfill(l)
         if isinstance(config.target, GateTarget):
             from ..real_time_utils import push_circuit_context
+
             push_circuit_context(circuit_params, config.target, **push_args)
 
         if circuit_params.n_reps_var is not None:
@@ -470,15 +473,7 @@ class StateReward(Reward):
         num_updates: int = 1000,
         test: bool = False,
     ) -> Program:
-        from qm.qua import (
-            program,
-            declare,
-            Random,
-            for_,
-            stream_processing,
-            assign,
-            fixed
-        )
+        from qm.qua import program, declare, Random, for_, stream_processing, assign, fixed
         from qiskit_qm_provider import QMBackend
         from ...qua.qua_utils import rand_gauss_moller_box, rescale_and_clip_wrapper
         from qiskit_qm_provider.backend import get_measurement_outcomes
@@ -587,11 +582,13 @@ class StateReward(Reward):
                                 result = config.backend.quantum_circuit_to_qua(
                                     qc, circuit_params.circuit_variables
                                 )
-                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name]["state_int"]
+                                state_int = get_measurement_outcomes(qc, result)[qc.cregs[0].name][
+                                    "state_int"
+                                ]
                                 assign(counts[state_int], counts[state_int] + 1)
 
                             reward.stream_back(reset=True)
-                            
+
             with stream_processing():
                 buffer = (config.batch_size, dim)
                 reward.stream_processing(buffer=buffer)

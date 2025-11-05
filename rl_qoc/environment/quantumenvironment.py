@@ -55,7 +55,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         #     high=np.array([1, 1] + [5] * (2 ** self.n_qubits) ** 2),
         #     dtype=np.float32,
         # )
-        self.observation_space = Box(low=np.array([0, 0]), high=np.array([1, 1]), dtype=np.float32)
+        self.observation_space = Box(low=np.array([0]), high=np.array([1]), dtype=np.float32)
 
     @property
     def parameters(self):
@@ -91,17 +91,11 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         )
         return [custom_circuit]
 
-    def _get_obs(self):
-        if isinstance(self.target, GateTarget) and self.config.reward_method == "state":
-            return np.array(
-                [
-                    0.0,
-                    0.0,
-                ]
-                + list(self._observable_to_observation())
-            )
-        else:
-            return np.array([0, 0])
+    def _get_obs(self) -> np.ndarray:
+        """
+        Return the observation of the environment
+        """
+        return np.array([0])
 
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         if self._episode_ended:
@@ -213,7 +207,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             else:
                 print("Avg gate fidelity:", fids)
             print("Finished simulation benchmark")
-        return fids
+        return np.array(fids)
 
     def update_gate_calibration(self, gate_name: Optional[str] = None):
         """

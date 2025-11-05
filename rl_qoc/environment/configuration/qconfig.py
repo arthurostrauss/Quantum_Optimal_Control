@@ -8,7 +8,6 @@ from qiskit.circuit import ParameterVector, Parameter
 from qiskit.providers import BackendV2
 from qiskit.transpiler import InstructionDurations, PassManager
 from qiskit.version import get_version_info
-from qiskit_ibm_runtime import IBMBackend
 
 from .backend_config import (
     BackendConfig,
@@ -67,7 +66,7 @@ class QEnvConfig:
 
             if not isinstance(self.reward, Reward):
                 raise ValueError("Reward configuration must be a string or a Reward instance")
-    
+
     @property
     def backend(self) -> Optional[BackendV2]:
         return self.backend_config.backend
@@ -238,7 +237,7 @@ class QEnvConfig:
 
     @instruction_durations_dict.setter
     def instruction_durations_dict(self, value: InstructionDurations):
-        self.backend_config.instruction_durations = value
+        self.backend_config.custom_instruction_durations = value
 
     @property
     def pass_manager(self):
@@ -373,6 +372,9 @@ class QEnvConfig:
 
         target = config_dict["target"]
         backend_config = config_dict["backend_config"]
+        if isinstance(backend, Callable):
+            backend = backend(**backend_callback_kwargs)
+            backend_config["backend"] = backend
 
         if isinstance(target, dict):
             if "gate" in target:
@@ -387,7 +389,7 @@ class QEnvConfig:
                     parametrized_circuit=parametrized_circ_func,
                     backend=backend,
                     pass_manager=pass_manager,
-                    instruction_durations=instruction_durations,
+                    custom_instruction_durations=instruction_durations,
                 )
             elif backend_config_type == "dynamics":
                 backend_config = DynamicsConfig(
@@ -395,15 +397,7 @@ class QEnvConfig:
                     parametrized_circuit=parametrized_circ_func,
                     backend=backend,
                     pass_manager=pass_manager,
-                    instruction_durations=instruction_durations,
-                )
-            elif backend_config_type == "runtime":
-                backend_config = QiskitRuntimeConfig(
-                    **backend_config,
-                    parametrized_circuit=parametrized_circ_func,
-                    backend=backend,
-                    pass_manager=pass_manager,
-                    instruction_durations=instruction_durations,
+                    custom_instruction_durations=instruction_durations,
                 )
             elif backend_config_type == "qm":
                 from ...qua.qm_config import QMConfig
@@ -413,7 +407,7 @@ class QEnvConfig:
                     parametrized_circuit=parametrized_circ_func,
                     backend=backend,
                     pass_manager=pass_manager,
-                    instruction_durations=instruction_durations,
+                    custom_instruction_durations=instruction_durations,
                 )
 
         return cls(

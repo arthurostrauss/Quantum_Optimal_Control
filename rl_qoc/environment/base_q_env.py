@@ -297,7 +297,6 @@ class BaseQuantumEnvironment(ABC, Env):
             reward_data = rewarder.get_reward_data(
                 qc,
                 params,
-                self.target,
                 self.config,
                 additional_input,
             )
@@ -370,12 +369,14 @@ class BaseQuantumEnvironment(ABC, Env):
         qc_state_nreps = qc.repeat(self.n_reps).decompose()
         names = ["qc_channel", "qc_state", "qc_channel_nreps", "qc_state_nreps"]
 
-        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = self.config.backend_config.custom_transpile(
-            [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
-            optimization_level=0,
-            initial_layout=self.target.layout,
-            scheduling=False,
-            remove_final_measurements=False,
+        qc_channel, qc_state, qc_channel_nreps, qc_state_nreps = (
+            self.config.backend_config.custom_transpile(
+                [qc_channel, qc_state, qc_channel_nreps, qc_state_nreps],
+                optimization_level=0,
+                initial_layout=self.target.layout,
+                scheduling=False,
+                remove_final_measurements=False,
+            )
         )
         for circ, name in zip([qc_channel, qc_state, qc_channel_nreps, qc_state_nreps], names):
             circ.name = name
@@ -762,14 +763,22 @@ class BaseQuantumEnvironment(ABC, Env):
 
     @property
     def physical_neighbor_qubits(self):
-        if self.backend is not None and hasattr(self.backend, "coupling_map") and isinstance(self.backend.coupling_map, CouplingMap):
+        if (
+            self.backend is not None
+            and hasattr(self.backend, "coupling_map")
+            and isinstance(self.backend.coupling_map, CouplingMap)
+        ):
             return retrieve_neighbor_qubits(self.backend.coupling_map, self.physical_target_qubits)
         else:
-            return 
+            return
 
     @property
     def physical_next_neighbor_qubits(self):
-        if self.backend is not None and hasattr(self.backend, "coupling_map") and isinstance(self.backend.coupling_map, CouplingMap):
+        if (
+            self.backend is not None
+            and hasattr(self.backend, "coupling_map")
+            and isinstance(self.backend.coupling_map, CouplingMap)
+        ):
             return retrieve_neighbor_qubits(
                 self.backend.coupling_map,
                 self.physical_target_qubits + self.physical_neighbor_qubits,
@@ -876,14 +885,14 @@ class BaseQuantumEnvironment(ABC, Env):
             return False
         else:
             return self._episode_tracker % self.benchmark_cycle == 0
-        
+
     @property
     def total_updates(self):
         """
         Return the total number of steps planned by the agent
         """
         return self._total_updates
-    
+
     @total_updates.setter
     def total_updates(self, total_updates: int):
         """

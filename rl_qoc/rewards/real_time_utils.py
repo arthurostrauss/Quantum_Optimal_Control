@@ -289,6 +289,7 @@ def handle_real_time_n_reps(
                     with case_reps(n):
                         apply_real_time_n_reps(n, qc, prep_circuit)
 
+
 def push_circuit_context(circuit_params, target: GateTarget, **push_args):
     """
     Code to load to the OPX all context parameters, which can be either
@@ -300,13 +301,16 @@ def push_circuit_context(circuit_params, target: GateTarget, **push_args):
     if circuit_params.context_parameters[target.circuit_choice] is not None:
         # Different symbolic parameters to load for context
         circuit_params.context_parameters[target.circuit_choice].push_to_opx(
-            {p.name: val for p, val in target.context_parameters.items()}, **push_args)
+            {p.name: val for p, val in target.context_parameters.items()}, **push_args
+        )
+
 
 def load_circuit_context(circuit_params):
     """
     QUA macro to load all relevant circuit context parameters
     """
     from qm.qua import switch_, case_
+
     c_var = circuit_params.circuit_choice_var
     c_params = circuit_params.context_parameters
     if c_var is not None:

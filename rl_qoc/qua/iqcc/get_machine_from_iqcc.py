@@ -4,6 +4,7 @@ import os
 import json
 from iqcc_calibration_tools.quam_config.components import Quam
 
+
 def get_machine_from_iqcc(backend_name: str, api_token: Optional[str] = None):
     iqcc = IQCC_Cloud(quantum_computer_backend=backend_name, api_token=api_token)
 

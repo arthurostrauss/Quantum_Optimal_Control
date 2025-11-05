@@ -12,6 +12,7 @@ from .fidelity_reward_data import FidelityRewardData, FidelityRewardDataList
 from ...environment.configuration.qconfig import QEnvConfig, BackendConfig
 from ...helpers import has_noise_model, handle_n_reps
 from qiskit.primitives.containers.sampler_pub import SamplerPub
+from ...environment.target import Target, GateTarget
 
 
 @dataclass
@@ -23,6 +24,9 @@ class FidelityReward(Reward):
     _ideal_sim_methods = ("statevector", "unitary")
     _noisy_sim_methods = ("density_matrix", "superop")
 
+    def set_reward_seed(self, seed: int):
+        pass
+
     @property
     def reward_method(self):
         return "fidelity"
@@ -31,7 +35,6 @@ class FidelityReward(Reward):
         self,
         qc: QuantumCircuit,
         params: np.ndarray,
-        target: Target,
         env_config: QEnvConfig,
         *args,
     ) -> FidelityRewardDataList:
@@ -41,12 +44,12 @@ class FidelityReward(Reward):
         Args:
             qc: Quantum circuit to be executed on quantum system
             params: Parameters to feed the parametrized circuit
-            target: Target gate or state to prepare
-            backend_info: Backend information
-            execution_config: Execution configuration
+            env_config: QEnvConfig containing the backend information and execution configuration
+            args: Additional arguments to be passed to the reward method
         """
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        target = env_config.target
         new_qc = handle_n_reps(
             qc,
             execution_config.current_n_reps,
@@ -101,7 +104,7 @@ class FidelityReward(Reward):
                     self.get_fidelity(qc, params, target, backend_info, n_reps=n_reps)
                 )
 
-        return np.mean(fidelities, axis=0)
+        return np.array(fidelities)
 
     def get_fidelity(
         self,
@@ -167,7 +170,7 @@ class FidelityReward(Reward):
         outputs = [result.data(i)[output] for i in range(len(params))]
         fidelities = [target.fidelity(exp, n_reps) for exp in outputs]
 
-        return fidelities[0] if len(fidelities) == 1 else fidelities
+        return fidelities
 
     def get_pulse_fidelity(
         self,

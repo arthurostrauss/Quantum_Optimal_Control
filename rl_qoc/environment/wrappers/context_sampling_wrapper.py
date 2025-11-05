@@ -1,11 +1,12 @@
 import gymnasium as gym
 import numpy as np
 from typing import Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from ..context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from ..target import GateTarget
 from gymnasium.spaces import Box, Dict as DictSpace
 from abc import ABC, abstractmethod
+
 
 @dataclass
 class ContextSamplingWrapperConfig:
@@ -23,7 +24,7 @@ class ContextSamplingWrapperConfig:
         return cls(**config_dict)
 
 
-class ContextSamplingWrapper(gym.Wrapper, ABC):
+class ContextSamplingWrapper(gym.Wrapper, gym.utils.RecordConstructorArgs, ABC):
     """
     A Gymnasium wrapper that implements reward-guided context sampling.
 
@@ -38,9 +39,14 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
         env: ContextAwareQuantumEnvironment,
         config: ContextSamplingWrapperConfig | Dict[str, Any],
     ):
+        gym.utils.RecordConstructorArgs.__init__(self, config=config if isinstance(config, dict) else asdict(config))
         super().__init__(env)
         # Store hyperparameters
-        self.context_config = config if isinstance(config, ContextSamplingWrapperConfig) else ContextSamplingWrapperConfig.from_dict(config)
+        self.context_config = (
+            config
+            if isinstance(config, ContextSamplingWrapperConfig)
+            else ContextSamplingWrapperConfig.from_dict(config)
+        )
 
         # Buffers for context sampling logic
         self.context_buffer = []
@@ -64,9 +70,7 @@ class ContextSamplingWrapper(gym.Wrapper, ABC):
         """
         return super().observation_space
 
-    def _add_to_buffer(
-        self, context:Dict[str, Any], reward: float, mean_action: np.ndarray
-    ):
+    def _add_to_buffer(self, context: Dict[str, Any], reward: float, mean_action: np.ndarray):
         """Adds context, reward, and action to buffers with eviction logic."""
         if context is None or mean_action is None:
             return  # Don't add if context/action aren't set

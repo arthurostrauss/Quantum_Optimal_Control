@@ -105,13 +105,15 @@ class CircuitParams:
             filter_function=lambda x: isinstance(x, Parameter) and x not in context_parameters,
             name="real_time_circuit_parameters",
         )
-        context_parameters_table = [ParameterTable.from_qiskit(
-            qc,
-            input_type=None,
-            filter_function=lambda x: isinstance(x, Parameter) and x in context_parameters[i],
-            name=f"context_parameters_{i}",
-        )
-        for i in range(len(context_parameters))]
+        context_parameters_table = [
+            ParameterTable.from_qiskit(
+                qc,
+                input_type=None,
+                filter_function=lambda x: isinstance(x, Parameter) and x in context_parameters[i],
+                name=f"context_parameters_{i}",
+            )
+            for i in range(len(context_parameters))
+        ]
 
         return cls(
             input_state_vars=input_state_vars,

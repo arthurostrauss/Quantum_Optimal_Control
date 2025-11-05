@@ -8,10 +8,14 @@ from typing import Union, Callable, Any, Optional, Dict, Iterable, List
 from qiskit import QiskitError, QuantumCircuit, QuantumRegister
 from qiskit.circuit import ParameterVector, Parameter
 from qiskit.providers import BackendV2 as QiskitBackend
-from qiskit.transpiler import(PassManager,
-                              InstructionDurations,
-                              Target, Layout, CouplingMap,
-                              generate_preset_pass_manager)
+from qiskit.transpiler import (
+    PassManager,
+    InstructionDurations,
+    Target,
+    Layout,
+    CouplingMap,
+    generate_preset_pass_manager,
+)
 from qiskit.circuit.controlflow import CONTROL_FLOW_OP_NAMES
 
 
@@ -68,9 +72,13 @@ class BackendConfig(ABC):
 
     @property
     def instruction_durations(self):
-        if isinstance(self.backend, QiskitBackend) and self.backend.instruction_durations.duration_by_name_qubits:
+        if (
+            isinstance(self.backend, QiskitBackend)
+            and self.backend.instruction_durations.duration_by_name_qubits
+        ):
             return self.backend.instruction_durations
         return self.custom_instruction_durations
+
 
 @dataclass
 class QiskitConfig(BackendConfig):
@@ -91,7 +99,7 @@ class QiskitConfig(BackendConfig):
     @property
     def config_type(self):
         return "qiskit"
-    
+
     def custom_transpile(
         self,
         qc_input: Union[QuantumCircuit, List[QuantumCircuit]],
@@ -114,7 +122,7 @@ class QiskitConfig(BackendConfig):
             circuit = qc_input
         if isinstance(self.backend, QiskitBackend):
             num_qubits = self.backend.num_qubits
-            coupling_map = self.backend.coupling_map 
+            coupling_map = self.backend.coupling_map
         elif isinstance(qc_input, QuantumCircuit):
             num_qubits = qc_input.num_qubits
             coupling_map = CouplingMap.from_full(num_qubits)
@@ -151,7 +159,6 @@ class QiskitConfig(BackendConfig):
                 else:
                     circuit = [circ.decompose() for circ in circuit]
         return circuit
-    
 
     @property
     def basis_gates(self):

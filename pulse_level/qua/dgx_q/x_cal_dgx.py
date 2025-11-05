@@ -1,49 +1,56 @@
-import base64
-import numpy as np
-from qiskit.circuit import QuantumCircuit, QuantumRegister, Parameter, Gate
-from typing import List, Optional, Union, Dict, Any, Tuple
-from gymnasium.spaces import Box
-from rl_qoc.qua import QMEnvironment, QMConfig
-from iqcc_calibration_tools.quam_config.components import Quam, Transmon
-from qiskit_qm_provider import (
-    FluxTunableTransmonBackend,
-    QMInstructionProperties,
-    InputType,
-    ParameterPool,
-)
-from qiskit_qm_provider.backend.backend_utils import add_basic_macros_to_machine
-from rl_qoc.agent.ppo_config import (
-    TotalUpdates,
-    TrainingConfig,
-)
-from rl_qoc import (
-    RescaleAndClipAction,
-    ChannelReward,
-    StateReward,
-    CAFEReward,
-    ExecutionConfig,
-    QEnvConfig,
-    BenchmarkConfig,
-    StateTarget,
-    GateTarget,
-    PPOConfig,
-)
-from rl_qoc.helpers import add_custom_gate
-from rl_qoc.helpers import load_from_yaml_file
-from iqcc_cloud_client import IQCC_Cloud
+"""
+Linear demonstration script for running x_cal on DGX-Quantum (DGX-Q) using rl_qoc.
+
+This mirrors the style of the sync-hook main.py: build environment inline, then
+at the end switch to the DGX workflow:
+  1) Start the OPX QUA program with local QM manager/machine
+  2) Generate the DGX-side Python program
+  3) Deploy and run that program on the DGX over SSH with streaming
+  4) Close the environment when done
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional, Sequence, Tuple
 import json
 import os
-from pathlib import Path
 
-from rl_qoc.qua.pi_pulse_reward.pi_pulse_reward import PiPulseReward
-from rl_qoc.qua.qua_ppo import CustomQMPPO
-from rl_qoc.rewards.base_reward import Reward
-from rl_qoc.qua.iqcc import generate_sync_hook, get_machine_from_iqcc
+from rl_qoc.agent.ppo_config import TotalUpdates
+from rl_qoc.environment.wrappers.custom_wrappers import RescaleAndClipAction
+from rl_qoc.qua.dgx_q.generate_dgx_program import generate_dgx_program
+from rl_qoc.qua.dgx_q.ssh_ops import deploy_and_run_script
+from rl_qoc.qua.qm_environment import QMEnvironment
+from rl_qoc import QEnvConfig, ExecutionConfig, BenchmarkConfig, GateTarget, StateTarget
+from rl_qoc.qua import QMConfig
+from rl_qoc import ChannelReward
+from qiskit_qm_provider import (
+    FluxTunableTransmonBackend,
+    InputType,
+)
+from qiskit.circuit import QuantumCircuit, QuantumRegister, Parameter, Gate
+from typing import List
+from qiskit_qm_provider.backend.backend_utils import add_basic_macros_to_machine
+from rl_qoc.qua.iqcc import get_machine_from_iqcc
+import numpy as np
+from gymnasium.spaces import Box
+from rl_qoc.helpers import load_from_yaml_file
+from iqcc_calibration_tools.quam_config.components import Transmon
+from qiskit_qm_provider import QMInstructionProperties
+from rl_qoc.helpers import add_custom_gate
 
 # Set your quantum computer backend
-path = Path.home() / "iqcc_token.json"
-with open(path, "r") as f:
+iqcc_token_path = Path.home() / "iqcc_token.json"
+gh_token_path = Path.home() / "dgx_suite_config.json"
+with open(iqcc_token_path, "r") as f:
     iqcc_config = json.load(f)
+
+with open(gh_token_path, "r") as f:
+    gh_config = json.load(f)
+
+gh_username = gh_config["GH_USER"]
+gh_password = gh_config["GH_SP"]
+gh_host = gh_config["GH_HOST"]
 
 backend_name = "gilboa"
 
@@ -53,6 +60,8 @@ add_basic_macros_to_machine(machine)
 backend = FluxTunableTransmonBackend(machine)
 path = os.path.join(os.path.dirname(__file__), "agent_config.yaml")
 ppo_config = load_from_yaml_file(path)
+
+path_to_python_wrapper = "path_to_python_wrapper.py"
 
 
 def apply_parametrized_circuit(
@@ -79,10 +88,6 @@ physical_qubits = (0,)
 target_name = "x"
 target = GateTarget(gate=target_name, physical_qubits=physical_qubits)
 reward = ChannelReward()
-
-target_name = "1"
-target = StateTarget(state=target_name, physical_qubits=physical_qubits)
-reward = PiPulseReward()
 
 
 # Action space specification
@@ -118,7 +123,7 @@ execution_config = ExecutionConfig(
     batch_size=batch_size,
     sampling_paulis=pauli_sampling,
     n_shots=n_shots,
-    n_reps=n_reps,
+    n_reps=[n_reps],
     seed=seed,
 )
 q_env_config = QEnvConfig(
@@ -133,28 +138,18 @@ q_env_config = QEnvConfig(
 q_env = QMEnvironment(training_config=q_env_config)
 rescaled_env = RescaleAndClipAction(q_env, -1.0, 1.0)
 
-# Générer le fichier sync_hook.py avant l'exécution
-sync_hook_path = generate_sync_hook(
-    env=rescaled_env,
+
+###############################
+# Start OPX job and run DGX    #
+###############################
+
+# 1) Start the OPX-side QUA program
+# qm_job = q_env.start_program()
+
+# 2) Generate DGX-side program locally
+local_prog_path = generate_dgx_program(
+    env=q_env,
     ppo_config=ppo_config,
+    path_to_python_wrapper=path_to_python_wrapper,
 )
-print(f"Sync hook file generated at: {sync_hook_path}")
-
-
-if hasattr(q_env.real_time_circuit, "calibrations") and q_env.real_time_circuit.calibrations:
-    backend.update_calibrations(qc=q_env.real_time_circuit, input_type=input_type)
-backend.update_compiler_from_target()
-prog = q_env.rl_qoc_training_qua_prog(num_updates=num_updates.total_updates)
-run_data = iqcc.execute(
-    prog,
-    backend.qm_config,
-    terminal_output=True,
-    options={"sync_hook": sync_hook_path, "timeout": 600, "profiling": False},
-)
-# base64_str = run_data["result"]["__sync_hook"]["cprofile"]
-# binary_data = base64.b64decode(base64_str.encode("utf-8"))
-
-# with open("profile.dat", "wb") as output_file:
-#     output_file.write(binary_data)
-print("Job submitted successfully.")
-# print(f"Run data: {run_data}")
+print(local_prog_path)

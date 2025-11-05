@@ -136,10 +136,16 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self.new_gates: List[Gate] = []
 
         if isinstance(self.target, GateTarget) and self.target.context_parameters:
-            self.observation_space = DictSpace({p.name: Box(0., np.pi, shape=(1,), dtype=np.float32)
-                                                for p in self.target.context_parameters})
+            self.observation_space = DictSpace(
+                {
+                    p.name: Box(0.0, np.pi, shape=(1,), dtype=np.float32)
+                    for p in self.target.context_parameters
+                }
+            )
         else:
-            self.observation_space = Box(0.0, 1.0, shape=(1,), dtype=np.float32, seed=self.seed + 98)
+            self.observation_space = Box(
+                0.0, 1.0, shape=(1,), dtype=np.float32, seed=self.seed + 98
+            )
         self._parameters = [
             [Parameter(f"a_{j}_{i}") for i in range(self.n_actions)]
             for j in range(len(self.target.circuits))
@@ -148,16 +154,18 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self._optimal_actions = [
             np.zeros(self.config.n_actions) for _ in range(len(self.target.circuits))
         ]
-        
-        self._pm = [PassManager(
-            CustomGateReplacementPass(
-                InstructionReplacement(self.target.target_instructions[i],
-                    self.parametrized_circuit_func,
-                    self.parameters[i],
-                    self._func_args,
+
+        self._pm = [
+            PassManager(
+                CustomGateReplacementPass(
+                    InstructionReplacement(
+                        self.target.target_instructions[i],
+                        self.parametrized_circuit_func,
+                        self.parameters[i],
+                        self._func_args,
+                    )
                 )
             )
-        )
             for i in range(len(self.target.circuits))
         ]
         self.circuits = self.define_circuits()
