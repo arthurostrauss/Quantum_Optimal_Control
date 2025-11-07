@@ -130,7 +130,7 @@ class ChannelReward(Reward):
         cutoff = 1e-4  # Cutoff for negligible probabilities
         non_zero_indices = np.nonzero(np.abs(Chi) > cutoff)[0]
         # Remove index 0 from non_zero_indices as it corresponds to the identity Pauli
-        # non_zero_indices = non_zero_indices[non_zero_indices != 0]
+        non_zero_indices = non_zero_indices[non_zero_indices != 0]
         # Sort indices by Chi value (descending order)
         sorted_indices = np.argsort(np.abs(Chi[non_zero_indices]))[::-1]
 
@@ -154,6 +154,10 @@ class ChannelReward(Reward):
             for i, pair in enumerate(pauli_pairs)
         }
         grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
+        grouped_pauli_pairs.append((PauliList([Pauli("I"*n_qubits)]), PauliList([Pauli("I"*n_qubits)])))
+        Chi_dict[(Pauli("I"*n_qubits), Pauli("I"*n_qubits))] = {"chi": Chi[0], "indices": np.array([0, 0]), "index": 0}
+        print(grouped_pauli_pairs)
+        print(Chi_dict)
         grouped_chi = [
             np.array(
                 [Chi_dict[(pauli_in, pauli_obs)]["chi"] for pauli_in, pauli_obs in zip(*group)]
