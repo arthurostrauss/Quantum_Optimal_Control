@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, Any
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, Any, Iterable
 
 from qiskit.circuit import (
     CircuitInstruction,
@@ -18,6 +18,13 @@ from qiskit.circuit.library.standard_gates import (
     get_standard_gate_name_mapping as gate_map,
 )
 
+InstructionTuple = Tuple[Union[Instruction, Gate], Tuple[Union[int, Qubit], ...], Tuple[Union[int, Clbit], ...]]
+TargetInstructionType = Union[CircuitInstruction, InstructionTuple, Instruction, str]
+ReplacementElement = Union[Callable[[QuantumCircuit, Any], QuantumCircuit], Instruction, QuantumCircuit]
+ParameterSet = Union[Dict[Union[str, Parameter], Any], List[Parameter], ParameterVector]
+ArgumentSet = Union[Dict[str, Any], List[Any]]
+ParameterSets = Union[ParameterSet, Iterable[ParameterSet]]
+ArgumentSets = Union[ArgumentSet, Iterable[ArgumentSet]]
 
 def format_input(input_val):
     if not isinstance(input_val, list):
@@ -25,7 +32,7 @@ def format_input(input_val):
     return input_val
 
 
-def _parse_instruction(instruction: Union[CircuitInstruction, Tuple, Instruction, str]) -> Tuple[Instruction, Tuple[Union[int, Qubit], ...], Tuple[Union[int, Clbit], ...]]:
+def _parse_instruction(instruction: TargetInstructionType) -> InstructionTuple:
     if isinstance(instruction, Instruction):
         return (instruction, tuple(range(instruction.num_qubits)), tuple(range(instruction.num_clbits)))
     if isinstance(instruction, CircuitInstruction):
@@ -85,29 +92,37 @@ class InstructionReplacement:
     Defines a replacement rule for a single target instruction.
 
     Attributes:
-        target_instruction: The instruction to find and replace.
-        new_elements: A single replacement element (Gate, Circuit, Callable) or a
-            list of elements to cycle through for each instance of the target.
-        parameters: A list of parameter sets to cycle through. If `new_elements`
-            is a single element, these parameters will be broadcast to it.
-        parametrized_circuit_functions_args: Arguments for callable new elements.
-
+        target_instruction: The instruction to find and replace. This should be specified in general as a tuple containing the instruction to find and the qubits/clbits it acts on.
+            Few formats are supported:
+            - An instruction object (or instruction name if it is a standard gate). The qubits/clbits are inferred from the number of qubits/clbits of the instruction.
+            - A tuple containing the instruction (or instruction name if it is a standard gate) and the qubits/clbits it acts on.
+            - A CircuitInstruction object.
+            
+        custom_instruction: A single replacement element (Instruction, QuantumCircuit, Callable) or a
+            list of elements to cycle through for each instance of the target. If a list is provided, then each instance of the target will be replaced by a different element from the list in 
+            a cyclic manner.
+        parameters: A list of parameter sets (list of parameters) to cycle through and to attach to the custom instruction. If `custom_instruction`
+            is a single element, and a list of parameter sets is provided, the parameters will be cycled through for each instance of the target.
+            However, if both a list of custom instructions and a list of parameter sets are provided, the lengths of the lists must match. If the custom instruction is a callable, the second argument of the callable should be the parameter set (while the first argument should be the quantum circuit).
+        parametrized_circuit_functions_args: Arguments for callable custom instructions. If `custom_instruction`
+            is a single element, and a list of argument sets is provided, the arguments will be cycled through for each instance of the target.
+            However, if both a list of custom instructions and a list of argument sets are provided, the lengths of the lists must match.
     Example usages:
         - Single function, multiple param sets broadcasted:
-            new_elements = rx_gate, parameters = [{"theta": 0.1}, {"theta": 0.2}]
+            custom_instruction = rx_gate, parameters = [{"theta": 0.1}, {"theta": 0.2}]
         - Multiple functions, single shared args replicated to N functions:
-            new_elements = [rx_gate, ry_gate], parametrized_circuit_functions_args = {"foo": 1}
+            custom_instruction = [rx_gate, ry_gate], parametrized_circuit_functions_args = {"foo": 1}
     """
 
-    target_instruction: Union[CircuitInstruction, Tuple, Instruction, str]
-    new_elements: Union[Callable, Gate, QuantumCircuit, str, List]
-    parameters: Optional[Union[Dict, List[Parameter], ParameterVector]] = None
-    parametrized_circuit_functions_args: Optional[Union[Dict, List]] = None
+    target_instruction: TargetInstructionType
+    custom_instruction: Union[ReplacementElement, Iterable[ReplacementElement]]
+    parameters: Optional[ParameterSets] = None
+    parametrized_circuit_functions_args: Optional[ArgumentSets] = None
 
-    parsed_target: Tuple = field(init=False, repr=False)
-    functions_to_cycle: List[Union[Callable, Instruction, QuantumCircuit]] = field(init=False, repr=False)
-    params_to_cycle: List[Any] = field(init=False, repr=False)
-    args_to_cycle: List[Dict] = field(init=False, repr=False)
+    parsed_target: InstructionTuple = field(init=False, repr=False)
+    functions_to_cycle: List[ReplacementElement] = field(init=False, repr=False)
+    params_to_cycle: ParameterSets = field(init=False, repr=False)
+    args_to_cycle: ArgumentSets = field(init=False, repr=False)
     # Exposed metadata
     target_operation: Instruction = field(init=False, repr=False)
     target_qargs: Tuple[Union[int, Qubit], ...] = field(init=False, repr=False)
@@ -121,10 +136,10 @@ class InstructionReplacement:
         self.target_qargs = qargs
         self.target_cargs = cargs
 
-        norm_elements = format_input(self.new_elements)
+        norm_elements = format_input(self.custom_instruction)
         self.functions_to_cycle = [_parse_function(f) for f in norm_elements]
 
-        norm_params = self.parameters if isinstance(self.parameters, list) and all(isinstance(p, list) for p in self.parameters) else [self.parameters]
+        norm_params = self.parameters if isinstance(self.parameters, Iterable) and all(isinstance(p, Iterable) for p in self.parameters) else [self.parameters]
         norm_args = (
             format_input(self.parametrized_circuit_functions_args)
             if self.parametrized_circuit_functions_args is not None
