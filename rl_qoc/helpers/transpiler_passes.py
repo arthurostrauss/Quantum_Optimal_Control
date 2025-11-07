@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from typing import List, Tuple, Optional, Callable, Dict, Any, Sequence, Union, get_args
+from typing import Iterable, List, Tuple, Optional, Callable, Dict, Any, Sequence, Union, TYPE_CHECKING
 
 from qiskit.circuit import (
     QuantumCircuit,
@@ -22,7 +22,12 @@ from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 from qiskit.transpiler import TransformationPass, AnalysisPass
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from collections import defaultdict
+if TYPE_CHECKING:
+    from ..environment.instruction_replacement import InstructionReplacement
+    from ..environment.instruction_rolling import InstructionRolling
 
+
+__all__ = ["CustomGateReplacementPass", "MomentAnalysisPass", "ForLoopWrapperPass"]
 
 class MomentAnalysisPass(AnalysisPass):
     """Analysis pass to group operations into moments, storing results in the PropertySet."""
@@ -53,132 +58,67 @@ def format_input(input_val):
     if not isinstance(input_val, list):
         input_val = [input_val]
     return input_val
+        
 
-
-def _parse_instruction(instruction):
-    """Parses a user-provided instruction into a standardized (operation, qargs, cargs) tuple."""
-    if isinstance(instruction, CircuitInstruction):
-        return (instruction.operation, instruction.qubits, instruction.clbits)
-    # Handle case where instruction[0] is already a gate object (not a string)
-    if isinstance(instruction[0], (Gate, Instruction)):
-        op = instruction[0]
-    else:
-        op = gate_map().get(instruction[0], instruction[0])
-    qargs = (
-        tuple(instruction[1])
-        if isinstance(instruction[1], (QuantumRegister, Sequence))
-        else (instruction[1],)
-    )
-    cargs = (
-        tuple(instruction[2])
-        if len(instruction) > 2 and isinstance(instruction[2], (ClassicalRegister, Sequence))
-        else ()
-    )
-    return (op, qargs, cargs)
-
-
-def _parse_function(func):
-    """Parses a user-provided function or name into a callable or Instruction object."""
-    if isinstance(func, str):
-        try:
-            return gate_map()[func]
-        except KeyError:
-            raise ValueError(f"Instruction name '{func}' not found in standard gate map.")
-    return func
-
-
-@dataclass
-class InstructionReplacement:
+class ForLoopWrapperPass(TransformationPass):
     """
-    Defines a replacement rule for a single target instruction.
-
-    This class validates and normalizes the relationship between the new elements
-    and their parameters, handling the "broadcasting" of parameters to a single
-    new element.
-
-    Attributes:
-        target_instruction: The instruction to find and replace.
-        new_elements: A single replacement element (Gate, Circuit, Callable) or a
-            list of elements to cycle through for each instance of the target.
-        parameters: A list of parameter sets to cycle through. If `new_elements`
-            is a single element, these parameters will be broadcast to it.
-        parametrized_circuit_functions_args: Arguments for callable new elements.
+    A transpiler pass that wraps all instructions of a circuit in a for loop.
     """
+    def __init__(self, replacements: Union[InstructionRolling, List[InstructionRolling]]):
+        super().__init__()
+        self.replacements = format_input(replacements)
+    
+    def _create_for_loop_dag(self, node: DAGOpNode, n_reps: int|str|Iterable[int]|None, n_counter: int) -> DAGCircuit:
+        """
+        Create a for loop DAG for the given node.
+        """
+        qc = QuantumCircuit()
+        qc.add_bits(node.qargs + node.cargs)
+        if n_reps is None or isinstance(n_reps, str):
+            from qiskit.circuit.classical import expr, types
+            name = f"_n_{n_counter}" if n_reps is None else n_reps
+            n = qc.add_input(name, types.Uint(64))
+            r = expr.Range(expr.lift(0, types.Uint(64)), n)
+        elif isinstance(n_reps, Iterable):
+            r = list(n_reps)
+        else:
+            r = range(n_reps)
 
-    target_instruction: Union[CircuitInstruction, Tuple]
-    new_elements: Union[Callable, Gate, QuantumCircuit, str, List]
-    parameters: Optional[Union[Dict, List[Parameter], ParameterVector]] = None
-    parametrized_circuit_functions_args: Optional[Union[Dict, List]] = None
+        with qc.for_loop(r):
+            qc.append(node.op, node.qargs, node.cargs)
+        
+        return circuit_to_dag(qc)
 
-    # These fields are processed and populated after initialization
-    parsed_target: Tuple = field(init=False, repr=False)
-    functions_to_cycle: List[Union[Callable, Gate, QuantumCircuit]] = field(init=False, repr=False)
-    params_to_cycle: List[Optional[Union[Dict, List]]] = field(init=False, repr=False)
-    args_to_cycle: List[Dict] = field(init=False, repr=False)
+    def run(self, dag: DAGCircuit) -> DAGCircuit:
+        """
+        Run the pass on the given DAG.
+        """
+        n_counter = 0
+        for node in dag.op_nodes():
+            if not hasattr(node.op, "name"):
+                continue
 
-    def __post_init__(self):
-        """Validate and normalize the inputs after the dataclass is created."""
-        self.parsed_target = _parse_instruction(self.target_instruction)
-
-        # Normalize new_elements into a list of functions/gates/circuits
-        norm_elements = (
-            self.new_elements if isinstance(self.new_elements, list) else [self.new_elements]
-        )
-        self.functions_to_cycle = [_parse_function(f) for f in norm_elements]
-
-        # Normalize parameters and args
-        norm_params = (
-            self.parameters
-            if isinstance(self.parameters, list)
-            and all(isinstance(p, List) for p in self.parameters)
-            else [self.parameters]
-        )
-        if self.parameters is None:
-            norm_params = [None]
-
-        norm_args = self.parametrized_circuit_functions_args
-        if norm_args is None:
-            norm_args = [{}]
-        elif isinstance(norm_args, dict):
-            norm_args = [norm_args]
-
-        # --- Broadcasting and Validation Logic ---
-        num_funcs = len(self.functions_to_cycle)
-        num_params = len(norm_params)
-        num_args = len(norm_args)
-
-        # Case 1: Broadcasting (1 function, N parameters/args)
-        if num_funcs == 1:
-            self.params_to_cycle = norm_params
-            self.args_to_cycle = norm_args if num_args > 1 else [norm_args[0]] * num_params
-            if num_params > 1 and num_args > 1 and num_params != num_args:
-                raise ValueError(
-                    f"For target '{self.parsed_target[0].name}', broadcast mismatch: "
-                    f"{num_params} parameter sets vs {num_args} argument sets."
+            for i, repl_rule in enumerate(self.replacements):
+                op_template, qargs_template, cargs_template = repl_rule.parsed_target
+                mapped_qargs = tuple(
+                    dag.qubits[q] if isinstance(q, int) else q for q in qargs_template
                 )
-            return  # Logic is valid
-
-        # Case 2: Matched Lists (N functions, N parameters/args)
-        if num_funcs > 1:
-            if num_params > 1 and num_funcs != num_params:
-                raise ValueError(
-                    f"Mismatch for target '{self.parsed_target[0].name}': "
-                    f"{num_funcs} new elements vs {num_params} parameter sets."
-                )
-            if num_args > 1 and num_funcs != num_args:
-                raise ValueError(
-                    f"Mismatch for target '{self.parsed_target[0].name}': "
-                    f"{num_funcs} new elements vs {num_args} argument sets."
+                mapped_cargs = tuple(
+                    dag.clbits[c] if isinstance(c, int) else c for c in cargs_template
                 )
 
-            self.params_to_cycle = norm_params if num_params > 1 else [norm_params[0]] * num_funcs
-            self.args_to_cycle = norm_args if num_args > 1 else [norm_args[0]] * num_funcs
-            return  # Logic is valid
+                if (
+                    node.op.name == op_template.name
+                    and node.qargs == mapped_qargs
+                    and node.cargs == mapped_cargs
+                ):
+                    for_loop_dag = self._create_for_loop_dag(node, repl_rule.n_reps, n_counter)
+                    dag.substitute_node_with_dag(node, for_loop_dag, wires=node.qargs + node.cargs)
+                    n_counter += 1
+                    break
 
-        # Default case (1 function, 1 param, 1 arg)
-        self.params_to_cycle = norm_params
-        self.args_to_cycle = norm_args
-
+        return dag
+                   
 
 class CustomGateReplacementPass(TransformationPass):
     """
@@ -186,17 +126,19 @@ class CustomGateReplacementPass(TransformationPass):
     based on a list of replacement rules.
     """
 
-    def __init__(self, replacements: Union[InstructionReplacement, List[InstructionReplacement]]):
+    def __init__(self, replacements: Union[InstructionReplacement, List[InstructionReplacement]], opaque_gates: bool = False):
         """
         Initializes the gate replacement pass.
 
         Args:
             replacements: A single `InstructionReplacement` object or a list of them,
                 each defining a target and its corresponding replacements.
+            opaque_gates: Whether to treat the replaced gates as opaque gates (meaning definitions are removed and replaced with a new gate object)
         """
         super().__init__()
         self.replacements = format_input(replacements)
         self.replacement_counters = [0] * len(self.replacements)
+        self.opaque_gates = opaque_gates
 
     def _create_replacement_dag(
         self,
@@ -208,18 +150,29 @@ class CustomGateReplacementPass(TransformationPass):
     ) -> DAGCircuit:
         qc = QuantumCircuit()
         qc.add_bits(qargs + cargs)
-        local_qargs = tuple(qc.qubits[qargs.index(q)] for q in qargs)
-        local_cargs = tuple(qc.clbits[cargs.index(c)] for c in cargs)
+        # Directly reference bits already present in the new circuit:
+        local_qargs = qc.qubits
+        local_cargs = qc.clbits
+
+        # Handle QuantumCircuit and Gate types
         if isinstance(func, QuantumCircuit):
-            bound_circ = func.assign_parameters(params) if params is not None else func
-            qc.append(bound_circ, qargs=local_qargs, cargs=local_cargs)
+            new_instr = func.assign_parameters(params) if params is not None else func
+            new_instr = new_instr.to_instruction()
+            if self.opaque_gates:
+                new_instr.definition = None
+            qc.append(new_instr, local_qargs, local_cargs)
         elif isinstance(func, Gate):
             new_gate = func.copy()
             if params is not None:
-                new_gate.params = params.params if isinstance(params, ParameterVector) else params
+                # params can be ParameterVector or just values
+                new_gate.params = getattr(params, "params", params)
+                if new_gate.definition is not None:
+                    new_gate.definition.assign_parameters(params, inplace=True)
+            if self.opaque_gates:
+                new_gate.definition = None
             qc.append(new_gate, local_qargs, local_cargs)
         else:
-            func(qc, params, list(local_qargs) + list(local_cargs), **f_args)
+            func(qc, params, local_qargs + local_cargs, **f_args)
         return circuit_to_dag(qc)
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:

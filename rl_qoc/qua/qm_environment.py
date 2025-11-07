@@ -119,7 +119,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         reward_data = self.config.reward.get_reward_data(
             self.circuit,
             np.zeros((1, self.n_actions)),
-            self.target,
             self.config,
             additional_input,
         )
@@ -301,16 +300,16 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         return [
             param
             for param in [
-                self.real_time_circuit_parameters,
-                self.max_input_state,
-                self.input_state_vars,
+                self.circuit_params.real_time_circuit_parameters,
+                self.circuit_params.max_input_state,
+                self.circuit_params.input_state_vars,
                 self.policy,
                 self.reward,
-                self.circuit_choice_var,
-                self.n_reps_var,
-                self.max_observables,
-                self.n_shots,
-                self.observable_vars,
+                self.circuit_params.circuit_choice_var,
+                self.circuit_params.n_reps_var,
+                self.circuit_params.max_observables,
+                self.circuit_params.n_shots,
+                self.circuit_params.observable_vars,
             ]
             if param is not None
         ]

@@ -8,6 +8,8 @@ from .rewards import (
 from .environment.configuration.qconfig import *
 from .environment.configuration.backend_config import *
 from .environment.target import GateTarget, StateTarget
+from .environment.instruction_replacement import InstructionReplacement
+from .environment.instruction_rolling import InstructionRolling
 from .environment.base_q_env import BaseQuantumEnvironment
 from .environment.quantumenvironment import QuantumEnvironment
 from .environment.context_aware_quantum_environment import (
