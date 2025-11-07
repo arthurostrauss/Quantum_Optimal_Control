@@ -119,7 +119,6 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
         reward_data = self.config.reward.get_reward_data(
             self.circuit,
             np.zeros((1, self.n_actions)),
-            self.target,
             self.config,
             additional_input,
         )
