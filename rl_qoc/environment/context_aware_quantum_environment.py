@@ -49,7 +49,6 @@ from qiskit_experiments.library import ProcessTomography
 from ..helpers import (
     MomentAnalysisPass,
     CustomGateReplacementPass,
-    InstructionReplacement,
 )
 from ..helpers.circuit_utils import get_instruction_timings
 from .configuration.qconfig import QEnvConfig
@@ -58,6 +57,7 @@ from .base_q_env import (
     StateTarget,
     BaseQuantumEnvironment,
 )
+from .instruction_replacement import InstructionReplacement
 
 import logging
 

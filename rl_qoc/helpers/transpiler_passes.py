@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from typing import Iterable, List, Tuple, Optional, Callable, Dict, Any, Sequence, Union, get_args
+from typing import Iterable, List, Tuple, Optional, Callable, Dict, Any, Sequence, Union, TYPE_CHECKING
 
 from qiskit.circuit import (
     QuantumCircuit,
@@ -22,8 +22,12 @@ from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 from qiskit.transpiler import TransformationPass, AnalysisPass
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from collections import defaultdict
+if TYPE_CHECKING:
+    from ..environment.instruction_replacement import InstructionReplacement
+    from ..environment.instruction_rolling import InstructionRolling
 
-__all__ = ["CustomGateReplacementPass", "MomentAnalysisPass", "InstructionReplacement", "ForLoopWrapperPass", "InstructionRolling"]
+
+__all__ = ["CustomGateReplacementPass", "MomentAnalysisPass", "ForLoopWrapperPass"]
 
 class MomentAnalysisPass(AnalysisPass):
     """Analysis pass to group operations into moments, storing results in the PropertySet."""
@@ -54,56 +58,6 @@ def format_input(input_val):
     if not isinstance(input_val, list):
         input_val = [input_val]
     return input_val
-
-
-def _parse_instruction(instruction):
-    """Parses a user-provided instruction into a standardized (operation, qargs, cargs) tuple."""
-    if isinstance(instruction, CircuitInstruction):
-        return (instruction.operation, instruction.qubits, instruction.clbits)
-    # Handle case where instruction[0] is already a gate object (not a string)
-    if isinstance(instruction[0], (Gate, Instruction)):
-        op = instruction[0]
-    else:
-        op = gate_map().get(instruction[0], instruction[0])
-    qargs = (
-        tuple(instruction[1])
-        if isinstance(instruction[1], (QuantumRegister, Sequence))
-        else (instruction[1],)
-    )
-    cargs = (
-        tuple(instruction[2])
-        if len(instruction) > 2 and isinstance(instruction[2], (ClassicalRegister, Sequence))
-        else ()
-    )
-    return (op, qargs, cargs)
-
-
-def _parse_function(func):
-    """Parses a user-provided function or name into a callable or Instruction object."""
-    if isinstance(func, str):
-        try:
-            return gate_map()[func]
-        except KeyError:
-            raise ValueError(f"Instruction name '{func}' not found in standard gate map.")
-    return func
-
-@dataclass
-class InstructionRolling:
-    """
-    Defines a rolling instruction replacement rule for a single target instruction.
-    The number of repetitions can be specified as an integer, a string (the name of the input variable) or a list of integers.
-    """
-    target_instruction: Union[CircuitInstruction, Tuple]
-    n_reps: Optional[int|str|List[int]] = None
-
-    parsed_target: Tuple = field(init=False, repr=False)
-    functions_to_cycle: List[Union[Callable, Gate, QuantumCircuit]] = field(init=False, repr=False)
-    params_to_cycle: List[Optional[Union[Dict, List]]] = field(init=False, repr=False)
-    args_to_cycle: List[Dict] = field(init=False, repr=False)
-
-    def __post_init__(self):
-        """Validate and normalize the inputs after the dataclass is created."""
-        self.parsed_target = _parse_instruction(self.target_instruction)
         
 
 class ForLoopWrapperPass(TransformationPass):
@@ -165,100 +119,6 @@ class ForLoopWrapperPass(TransformationPass):
 
         return dag
                    
-
-        
-@dataclass
-class InstructionReplacement:
-    """
-    Defines a replacement rule for a single target instruction.
-
-    This class validates and normalizes the relationship between the new elements
-    and their parameters, handling the "broadcasting" of parameters to a single
-    new element.
-
-    Attributes:
-        target_instruction: The instruction to find and replace.
-        new_elements: A single replacement element (Gate, Circuit, Callable) or a
-            list of elements to cycle through for each instance of the target.
-        parameters: A list of parameter sets to cycle through. If `new_elements`
-            is a single element, these parameters will be broadcast to it.
-        parametrized_circuit_functions_args: Arguments for callable new elements.
-    """
-
-    target_instruction: Union[CircuitInstruction, Tuple]
-    new_elements: Union[Callable, Gate, QuantumCircuit, str, List]
-    parameters: Optional[Union[Dict, List[Parameter], ParameterVector]] = None
-    parametrized_circuit_functions_args: Optional[Union[Dict, List]] = None
-
-    # These fields are processed and populated after initialization
-    parsed_target: Tuple = field(init=False, repr=False)
-    functions_to_cycle: List[Union[Callable, Gate, QuantumCircuit]] = field(init=False, repr=False)
-    params_to_cycle: List[Optional[Union[Dict, List]]] = field(init=False, repr=False)
-    args_to_cycle: List[Dict] = field(init=False, repr=False)
-
-    def __post_init__(self):
-        """Validate and normalize the inputs after the dataclass is created."""
-        self.parsed_target = _parse_instruction(self.target_instruction)
-
-        # Normalize new_elements into a list of functions/gates/circuits
-        norm_elements = (
-            self.new_elements if isinstance(self.new_elements, list) else [self.new_elements]
-        )
-        self.functions_to_cycle = [_parse_function(f) for f in norm_elements]
-
-        # Normalize parameters and args
-        norm_params = (
-            self.parameters
-            if isinstance(self.parameters, list)
-            and all(isinstance(p, List) for p in self.parameters)
-            else [self.parameters]
-        )
-        if self.parameters is None:
-            norm_params = [None]
-
-        norm_args = self.parametrized_circuit_functions_args
-        if norm_args is None:
-            norm_args = [{}]
-        elif isinstance(norm_args, dict):
-            norm_args = [norm_args]
-
-        # --- Broadcasting and Validation Logic ---
-        num_funcs = len(self.functions_to_cycle)
-        num_params = len(norm_params)
-        num_args = len(norm_args)
-
-        # Case 1: Broadcasting (1 function, N parameters/args)
-        if num_funcs == 1:
-            self.params_to_cycle = norm_params
-            self.args_to_cycle = norm_args if num_args > 1 else [norm_args[0]] * num_params
-            if num_params > 1 and num_args > 1 and num_params != num_args:
-                raise ValueError(
-                    f"For target '{self.parsed_target[0].name}', broadcast mismatch: "
-                    f"{num_params} parameter sets vs {num_args} argument sets."
-                )
-            return  # Logic is valid
-
-        # Case 2: Matched Lists (N functions, N parameters/args)
-        if num_funcs > 1:
-            if num_params > 1 and num_funcs != num_params:
-                raise ValueError(
-                    f"Mismatch for target '{self.parsed_target[0].name}': "
-                    f"{num_funcs} new elements vs {num_params} parameter sets."
-                )
-            if num_args > 1 and num_funcs != num_args:
-                raise ValueError(
-                    f"Mismatch for target '{self.parsed_target[0].name}': "
-                    f"{num_funcs} new elements vs {num_args} argument sets."
-                )
-
-            self.params_to_cycle = norm_params if num_params > 1 else [norm_params[0]] * num_funcs
-            self.args_to_cycle = norm_args if num_args > 1 else [norm_args[0]] * num_funcs
-            return  # Logic is valid
-
-        # Default case (1 function, 1 param, 1 arg)
-        self.params_to_cycle = norm_params
-        self.args_to_cycle = norm_args
-
 
 class CustomGateReplacementPass(TransformationPass):
     """
