@@ -87,7 +87,6 @@ class ChannelReward(Reward):
         qc: QuantumCircuit,
         params: np.ndarray,
         env_config: QEnvConfig,
-        dfe_precision: Optional[Tuple[float, float]] = None,
         *args,
     ) -> ChannelRewardDataList:
         """
@@ -123,6 +122,7 @@ class ChannelReward(Reward):
         n_shots = execution_config.n_shots
         control_flow = execution_config.control_flow_enabled
         c_factor = execution_config.c_factor
+        dfe_precision = execution_config.dfe_precision
 
         Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
         if Chi is None:
@@ -135,10 +135,9 @@ class ChannelReward(Reward):
         sorted_indices = np.argsort(np.abs(Chi[non_zero_indices]))[::-1]
 
         basis = pauli_basis(num_qubits=n_qubits)
-        basis_to_indices = {pauli: i for i, pauli in enumerate(basis)}
 
         id_coeff = c_factor * (Chi[0]/dim**2)  # Coefficient for the identity Pauli
-        id_coeff = 0
+        # id_coeff = 0
         non_zero_indices = non_zero_indices[sorted_indices]
         pair_indices = [
             np.unravel_index(sorted_index, (dim**2, dim**2)) for sorted_index in non_zero_indices
@@ -154,17 +153,16 @@ class ChannelReward(Reward):
             for i, pair in enumerate(pauli_pairs)
         }
         grouped_pauli_pairs = group_pauli_pairs_by_qwc(pauli_pairs)
-        grouped_pauli_pairs.append((PauliList([Pauli("I"*n_qubits)]), PauliList([Pauli("I"*n_qubits)])))
-        Chi_dict[(Pauli("I"*n_qubits), Pauli("I"*n_qubits))] = {"chi": Chi[0], "indices": np.array([0, 0]), "index": 0}
-        print(grouped_pauli_pairs)
-        print(Chi_dict)
+        # grouped_pauli_pairs.append((PauliList([Pauli("I"*n_qubits)]), PauliList([Pauli("I"*n_qubits)])))
+        # Chi_dict[(Pauli("I"*n_qubits), Pauli("I"*n_qubits))] = {"chi": Chi[0], "indices": np.array([0, 0]), "index": 0}
+
         grouped_chi = [
             np.array(
                 [Chi_dict[(pauli_in, pauli_obs)]["chi"] for pauli_in, pauli_obs in zip(*group)]
             )
             for group in grouped_pauli_pairs
         ]
-        grouped_probabilities = [sum([chi**2 for chi in Chi]) / (dim**2) for Chi in grouped_chi]
+        grouped_probabilities = [sum([chi**2 for chi in Chi_group]) / (dim**2) for Chi_group in grouped_chi]
         grouped_probabilities = np.array(grouped_probabilities) / sum(grouped_probabilities)
 
         # Build repeated circuit
@@ -197,7 +195,7 @@ class ChannelReward(Reward):
         for c, idx in zip(counts, sampled_group_indices):
             chi_group = grouped_chi[idx]
             chi_squared_sum = sum([chi**2 for chi in chi_group])
-            reward_factor = c_factor *  chi_group / (dim * chi_squared_sum)
+            reward_factor = c_factor * chi_group / (dim * chi_squared_sum)
             prep, obs_list = grouped_pauli_pairs[idx]
             sampled_grouped_pauli_pairs.append((prep, SparsePauliOp(obs_list, reward_factor)))
 
@@ -261,19 +259,20 @@ class ChannelReward(Reward):
                     inplace=False,
                 )
                 # Transpile circuit to decompose input state preparation
-                prep_circuit: QuantumCircuit = backend_info.custom_transpile(
+                prep_circuit = backend_info.custom_transpile(
                     prep_circuit,
                     initial_layout=target.layout,
                     scheduling=False,
                     optimization_level=0,
                 )
 
-                obs_ = [p * (c_input_state/pauli_sampling) * o for p, o in zip(parity, obs_group)]
+                obs_ = [p * (c/pauli_sampling) * o for p, o in zip(parity, obs_group)]
                 pub_obs = extend_observables(
                     SparsePauliOp.sum(obs_).simplify(),
                     prep_circuit,
                     target.causal_cone_qubits_indices,
                 )
+        
                 # Check if coeff array is all 0. If so, skip this pub
                 if np.all(np.abs(pub_obs.coeffs) <= 1e-6):
                     continue
@@ -294,7 +293,7 @@ class ChannelReward(Reward):
                         n_reps,
                         target.causal_cone_qubits_indices,
                         prep_group,
-                        prep_indices,
+                        tuple(prep_indices),
                         observables_to_indices(SparsePauliOp.sum(obs_).simplify()),
                     )
                 )
@@ -314,7 +313,7 @@ class ChannelReward(Reward):
         dim = 2**reward_data.num_qubits
         pub_results = job.result()
         reward = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        # reward *= (dim**2 - 1) / dim**2
+        reward *= (dim**2 - 1) / dim**2
         # reward /= reward_data.pauli_sampling
         reward += reward_data.id_coeff
 
