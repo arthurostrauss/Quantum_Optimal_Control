@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
@@ -7,7 +8,7 @@ from qiskit.quantum_info import Statevector, Operator
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
 
-from ..base_reward import Reward, Pub, Primitive, Target, GateTarget
+from ..base_reward import Reward, Primitive
 from .fidelity_reward_data import FidelityRewardData, FidelityRewardDataList
 from ...environment.configuration.qconfig import QEnvConfig, BackendConfig
 from ...helpers import has_noise_model, handle_n_reps

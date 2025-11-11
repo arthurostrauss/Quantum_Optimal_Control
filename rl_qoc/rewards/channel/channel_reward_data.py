@@ -4,7 +4,7 @@ from typing import List, Tuple, Optional
 from dataclasses import dataclass
 from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPubLike
 from qiskit.circuit import QuantumCircuit
-from qiskit.quantum_info import SparsePauliOp, Pauli
+from qiskit.quantum_info import SparsePauliOp, Pauli, PauliList
 from ..reward_data import RewardData, RewardDataList
 from ...helpers import precision_to_shots
 
@@ -20,7 +20,7 @@ class ChannelRewardData(RewardData):
     observables: SparsePauliOp | List[SparsePauliOp]
     n_reps: int
     causal_cone_qubits_indices: List[int]
-    input_pauli: Optional[Pauli] = None
+    input_pauli: Optional[Pauli | PauliList] = None
     input_indices: Optional[Tuple[int]] = None
     observables_indices: Optional[List[Tuple[int]]] = None
 
@@ -41,7 +41,7 @@ class ChannelRewardData(RewardData):
         Return the Hamiltonian to be estimated.
         """
         return (
-            sum(observable for observable in self.observables).simplify()
+            SparsePauliOp.sum(self.observables).simplify()
             if isinstance(self.observables, List)
             else self.observables.simplify()
         )
@@ -97,7 +97,18 @@ class ChannelRewardData(RewardData):
         state = "|"
         if self.input_pauli is not None and self.input_indices is not None:
             input_indices = [self.input_indices[i] for i in self.causal_cone_qubits_indices]
-            for i, term in enumerate(reversed(self.input_pauli.to_label())):
+            if isinstance(self.input_pauli, Pauli):
+                input_pauli = self.input_pauli
+            else:
+                import numpy as np
+
+                input_pauli = Pauli(
+                    (
+                        np.logical_or.reduce(self.input_pauli.z),
+                        np.logical_or.reduce(self.input_pauli.x),
+                    )
+                )
+            for i, term in enumerate(reversed(input_pauli.to_label())):
                 if term == "Z" or term == "I":
                     if input_indices[i] % 2 == 0:
                         state += "0"
@@ -110,11 +121,27 @@ class ChannelRewardData(RewardData):
                         state += "-"
                 else:
                     if input_indices[i] % 2 == 0:
-                        state += "+y"
+                        state += "+i"
                     else:
-                        state += "-y"
+                        state += "-i"
         state += ">"
         return state
+
+    @property
+    def pauli_rep(self) -> Pauli:
+        """
+        Return the Pauli representative of the commuting group formed by the input PauliList.
+        """
+        if isinstance(self.input_pauli, PauliList):
+            import numpy as np
+
+            return Pauli(
+                (np.logical_or.reduce(self.input_pauli.z), np.logical_or.reduce(self.input_pauli.x))
+            )
+        elif isinstance(self.input_pauli, Pauli):
+            return self.input_pauli
+        else:
+            raise TypeError("input_pauli not set or not of type Pauli or PauliList")
 
 
 @dataclass
@@ -177,23 +204,24 @@ class ChannelRewardDataList(RewardDataList):
         return sum(reward_data.total_shots for reward_data in self.reward_data)
 
     @property
-    def hamiltonian(self) -> SparsePauliOp:
+    def hamiltonian(self) -> List[SparsePauliOp]:
         """
         Return the Hamiltonian to be estimated.
         """
-        ham = SparsePauliOp("I" * self.num_qubits, coeffs=self.id_coeff)
-        used_labels = []
+        ham = [SparsePauliOp("I" * self.num_qubits, coeffs=self.id_coeff)]
         for reward_data in self.reward_data:
-            if reward_data.input_pauli.to_label() not in used_labels and all(
-                index % 2 == 0
-                for index in [
-                    reward_data.input_indices[i] for i in reward_data.causal_cone_qubits_indices
-                ]
-            ):
-                ham += reward_data.hamiltonian
-                used_labels.append(reward_data.input_pauli.to_label())
+            if isinstance(reward_data.observables, List):
+                ham += reward_data.observables
+            else:
+                ham.append(reward_data.observables)
+        return ham
 
-        return ham.simplify()
+    @property
+    def observables(self) -> List[SparsePauliOp]:
+        """
+        Return the observables.
+        """
+        return [reward_data.observables for reward_data in self.reward_data]
 
     @property
     def input_paulis(self) -> List[Pauli]:
@@ -201,6 +229,20 @@ class ChannelRewardDataList(RewardDataList):
         Return the input Pauli operators.
         """
         return [reward_data.input_pauli for reward_data in self.reward_data]
+
+    @property
+    def input_circuits(self) -> List[QuantumCircuit]:
+        """
+        Return the input circuits.
+        """
+        return [reward_data.input_circuit for reward_data in self.reward_data]
+
+    @property
+    def pauli_eigenstates(self) -> List[str]:
+        """
+        Return the Pauli eigenstates.
+        """
+        return [reward_data.pauli_eigenstate for reward_data in self.reward_data]
 
     @property
     def input_indices(self) -> List[Tuple[int]]:

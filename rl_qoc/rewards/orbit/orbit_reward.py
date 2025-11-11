@@ -8,7 +8,7 @@ from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.classical.types import Uint
 from qiskit.primitives import BaseSamplerV2
 from qiskit.primitives.containers.sampler_pub import SamplerPub
-from qiskit.quantum_info import random_clifford, Operator, Clifford
+from qiskit.quantum_info import random_clifford, Operator
 
 from ..base_reward import Reward
 from .orbit_reward_data import ORBITRewardDataList, ORBITRewardData

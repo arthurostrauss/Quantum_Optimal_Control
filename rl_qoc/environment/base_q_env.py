@@ -215,7 +215,8 @@ class BaseQuantumEnvironment(ABC, Env):
             for i in range(len(self.config.execution_config.n_reps)):
                 self.config.execution_config.n_reps_index = i
                 print("Number of repetitions:", self.n_reps)
-                reward = self.perform_action(params, update_env_history=False)
+                data = self.config.reward.get_reward_data(self.circuit, params, self.config)
+                reward = self.config.reward.get_reward_with_primitive(data, self.primitive)
                 reward_data[m].append(np.mean(reward))
             if fit_function is None or inverse_fit_function is None:
 
@@ -345,16 +346,16 @@ class BaseQuantumEnvironment(ABC, Env):
         qc: QuantumCircuit,
         params: np.ndarray,
         update_env_history: bool = True,
-        output_fidelity: Literal["cycle", "nreps"] = "cycle",
+        output_fidelity: Literal["cycle", "nreps", "all"] = "cycle",
     ) -> np.ndarray:
         """
-        Method to store in lists all relevant data to assess performance of training (fidelity information)
-        This method should be called only when the abstraction level is "circuit"
-        :param qc: QuantumCircuit to execute on quantum system
-        :param params: List of Action vectors to execute on quantum system
-        :param update_env_history: Boolean to update the environment history
+        Method to store in lists all relevant data to assess performance of training (fidelity information).
+        This method should be called only when the abstraction level is "circuit".
+        :param qc: QuantumCircuit to execute on quantum system.
+        :param params: List of Action vectors to execute on quantum system.
+        :param update_env_history: Boolean to update the environment history.
         :param output_fidelity: Fidelity output to return (cycle fidelity or fidelity for
-            circuit with n_reps repetitions)
+            circuit with n_reps repetitions or both).
         :return: Fidelity metric or array of fidelities for all actions in the batch
         """
 
@@ -467,6 +468,8 @@ class BaseQuantumEnvironment(ABC, Env):
                     returned_fidelities = fidelities
                 elif output_fidelity == "nreps" and n_reps > 1:
                     returned_fidelities = fidelities
+                elif output_fidelity == "all":
+                    returned_fidelities.append(fidelities)
             elif (
                 method == "density_matrix" or method == "statevector"
             ) and returned_fidelity_type == "state":
@@ -474,6 +477,9 @@ class BaseQuantumEnvironment(ABC, Env):
                     returned_fidelities = fidelities
                 elif output_fidelity == "nreps" and n_reps > 1:
                     returned_fidelities = fidelities
+                elif output_fidelity == "all":
+                    returned_fidelities.append(fidelities)
+
             if update_env_history:
                 fid_array.append(np.mean(fidelities))
 

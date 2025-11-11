@@ -1,7 +1,6 @@
 from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Union, Optional, TYPE_CHECKING
 from qiskit.circuit import QuantumCircuit
 from qiskit.primitives.containers.sampler_pub import SamplerPub, SamplerPubLike
@@ -9,19 +8,18 @@ from qiskit.primitives.containers.estimator_pub import EstimatorPub, EstimatorPu
 from qiskit.primitives.base import BaseEstimatorV2, BaseSamplerV2
 
 from .reward_data import RewardData, RewardDataList
-from ..environment.configuration.qconfig import QEnvConfig
-from ..environment.target import StateTarget, GateTarget
 import numpy as np
 
 if TYPE_CHECKING:
     from qiskit_qm_provider.parameter_table import ParameterTable, Parameter as QuaParameter
     from ..qua.circuit_params import CircuitParams
     from qm import Program
+    from ..environment.configuration.qconfig import QEnvConfig
+    from ..environment.target import Target
 
 PubLike = Union[SamplerPubLike, EstimatorPubLike]
 Pub = Union[SamplerPub, EstimatorPub]
 Primitive = Union[BaseEstimatorV2, BaseSamplerV2]
-Target = Union[StateTarget, GateTarget]
 
 
 @dataclass

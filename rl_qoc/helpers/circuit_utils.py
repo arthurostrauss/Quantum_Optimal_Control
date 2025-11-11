@@ -3,7 +3,7 @@ from __future__ import annotations
 import keyword
 import re
 from inspect import signature
-from typing import Tuple, Optional, Sequence, List, Union, Dict, Callable
+from typing import Tuple, Optional, Sequence, List, Union, Dict, Callable, TYPE_CHECKING
 
 import numpy as np
 from qiskit.circuit import (
@@ -55,7 +55,12 @@ def precision_to_shots(precision: float) -> int:
     return int(np.ceil(1 / precision**2))
 
 
-def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flow=True):
+def handle_n_reps(
+    qc: QuantumCircuit,
+    n_reps: int = 1,
+    backend: Optional[BackendV2] = None,
+    control_flow: bool = True,
+):
     """
     Returns a Quantum Circuit with qc repeated n_reps times
     Depending on the backend and the control_flow flag,
@@ -65,7 +70,7 @@ def handle_n_reps(qc: QuantumCircuit, n_reps: int = 1, backend=None, control_flo
         qc: Quantum Circuit
         n_reps: Number of repetitions
         backend: Backend instance
-        control_flow: Control flow flag (uses for_loop if True and backend supports it)
+        control_flow: Control flow flag (uses for_loop if True and if backend supports it)
     """
     # Repeat the circuit n_reps times and prepend the input state preparation
     if n_reps == 1:
@@ -536,6 +541,44 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
     return states
 
 
+def observables_from_array(pauli_array: np.ndarray, coeff_array: np.ndarray) -> list:
+    """
+    Convert a numpy array to a list of SparsePauliOp objects.
+    Args:
+        pauli_array: Last dimension of the array is the Pauli string per qubit
+        coeff_array: Coefficients for each Pauli string
+
+    Returns:
+        list: List of SparsePauliOp objects
+
+    """
+    pauli_list = []
+    if pauli_array.shape[:-1] != coeff_array.shape:
+        raise ValueError("Shapes of pauli_array and coeff_array do not match")
+
+    # Mapping for Pauli operators
+    pauli_map = {0: "I", 1: "X", 2: "Y", 3: "Z"}
+
+    # Flatten all dimensions except the last one
+    flat_paulis = pauli_array.reshape(-1, pauli_array.shape[-1])
+    flat_coeffs = coeff_array.flatten()
+
+    for pauli_string, coeff in zip(flat_paulis, flat_coeffs):
+        # Convert numbers to Pauli string
+        pauli_str = "".join(pauli_map[int(p)] for p in pauli_string)
+        pauli_list.append(SparsePauliOp.from_list([(pauli_str, coeff)]))
+
+    # Manually reshape using the original shape
+    def nested_reshape(flat_list, shape):
+        """Recursively reshape a flat list into nested lists."""
+        if not shape:
+            return flat_list.pop(0)
+        size = shape[0]
+        return [nested_reshape(flat_list, shape[1:]) for _ in range(size)]
+
+    return nested_reshape(pauli_list.copy(), list(coeff_array.shape))
+
+
 def observables_to_indices(
     observables: List[SparsePauliOp, Pauli, str] | SparsePauliOp | PauliList | Pauli | str,
 ):
@@ -576,7 +619,7 @@ def observables_to_indices(
     return observable_indices
 
 
-def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]):
+def pauli_input_to_indices(prep: Pauli | str, inputs: Sequence[int]):
     """
     Convert the input state to single qubit state indices for the reward computation
 
@@ -599,7 +642,10 @@ def pauli_input_to_indices(prep: Pauli | str, inputs: List[int]):
 
 
 def extend_input_state_prep(
-    input_circuit: QuantumCircuit, qc: QuantumCircuit, gate_target, indices
+    input_circuit: QuantumCircuit,
+    qc: QuantumCircuit,
+    gate_target: GateTarget,
+    indices: Sequence[int],
 ) -> Tuple[QuantumCircuit, Tuple[int, ...]]:
     """
     Extend the input state preparation to all qubits in the quantum circuit if necessary
@@ -608,6 +654,7 @@ def extend_input_state_prep(
         input_circuit: Input state preparation circuit
         qc: Quantum circuit to be executed on quantum system
         gate_target: Target gate to prepare (possibly within a wider circuit context)
+        indices: Indices of the input state preparation (in Pauli6 basis)
     """
     if (
         qc.num_qubits > gate_target.causal_cone_size
@@ -654,3 +701,83 @@ def extend_observables(
         )
 
     return observables
+
+
+def pauli_weight(pauli_obj: Union[Pauli, SparsePauliOp, PauliList]) -> Union[int, List[int]]:
+    """
+    Return the weight(s) of a Pauli object:
+    - For Pauli: returns a single int (number of non-identity terms).
+    - For SparsePauliOp: returns a list of ints (one per Pauli term).
+    - For PauliList: returns a list of ints (one per Pauli term).
+    """
+
+    if isinstance(pauli_obj, Pauli):
+        return pauli_obj.x | pauli_obj.z
+    elif isinstance(pauli_obj, SparsePauliOp):
+        return np.sum(pauli_obj.paulis.x | pauli_obj.paulis.z, axis=1).tolist()
+    elif isinstance(pauli_obj, PauliList):
+        return np.sum(pauli_obj.x | pauli_obj.z, axis=1).tolist()
+    else:
+        raise TypeError(f"Input must be a Pauli or SparsePauliOp, got {type(pauli_obj)}")
+
+
+def are_qubit_wise_commuting(p1: Pauli, p2: Pauli) -> bool:
+    """Check qubit-wise commutation: commute on each qubit independently."""
+    for c1, c2 in zip(p1.to_label(), p2.to_label()):
+        if c1 != "I" and c2 != "I" and c1 != c2:
+            return False
+    return True
+
+
+def group_input_paulis_by_qwc(input_paulis: PauliList, counts) -> List[PauliList]:
+    """Group input Pauli operators by qubit-wise commutation (QWC), sorted by descending importance.
+
+    Each group is returned as a PauliList.
+    """
+    # Extract input Pauli operators
+
+    # Sort input Paulis by descending count importance
+    sorted_indices = sorted(range(len(counts)), key=lambda i: -counts[i])
+    sorted_paulis = [input_paulis[i] for i in sorted_indices]
+
+    grouped = []
+    while sorted_paulis:
+        ref = sorted_paulis.pop(0)
+        group = [ref]
+        to_remove = []
+        for i, other in enumerate(sorted_paulis):
+            if are_qubit_wise_commuting(ref, other):
+                group.append(other)
+                to_remove.append(i)
+        for i in reversed(to_remove):
+            sorted_paulis.pop(i)
+        grouped.append(PauliList(group))  # Convert to PauliList
+
+    return grouped
+
+
+def group_pauli_pairs_by_qwc(
+    pauli_pairs: List[Tuple[Pauli, Pauli]],
+) -> List[Tuple[PauliList, PauliList]]:
+    """
+    Group pairs of Pauli operators by qubit-wise commutation (QWC). Sorting is assumed to be done a priori and the
+    group creation is done greedyly, i.e., the first pair is always added to the group, and then
+    later pairs are added if they commute with all existing pairs in the group.
+    """
+
+    groups = []
+
+    for p1, p2 in pauli_pairs:
+        placed = False
+        for group_p1, group_p2 in groups:
+            if all(are_qubit_wise_commuting(p1, p1_) for p1_ in group_p1) and all(
+                are_qubit_wise_commuting(p2, p2_) for p2_ in group_p2
+            ):
+                group_p1.append(p1)
+                group_p2.append(p2)
+                placed = True
+                break
+        if not placed:
+            groups.append(([p1], [p2]))
+
+    return [(PauliList(g1), PauliList(g2)) for g1, g2 in groups]  # Convert to PauliList

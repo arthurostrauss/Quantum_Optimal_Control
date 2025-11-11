@@ -1,9 +1,8 @@
 SERVICE: # Relevant only when using the Qiskit runtime service
-  CHANNEL: "ibm_quantum"
-  INSTANCE: "ibm-q/open/main"
+  CHANNEL: null
+  INSTANCE: null
 
 RUNTIME_OPTIONS: # Relevant only when using the Qiskit runtime service
-  optimization_level: 0
   resilience_level: null
   max_execution_time: null
   execution:
@@ -32,7 +31,7 @@ RUNTIME_OPTIONS: # Relevant only when using the Qiskit runtime service
     job_tags: null
 
 BACKEND: # Backend configuration (If all set to null, the user needs to specify its own backend in q_env_config.py's get_backend() function)
-  REAL_BACKEND: null # True: real, False: fake backend, null: custom backend specified in config.py
+  REAL_BACKEND: True # True: real, False: fake backend, null: custom backend specified in config.py
   NAME: null # "fake_jakarta" # Name of the backend
   DYNAMICS: # Use a DynamicsBackend (if fields above are not null, build a DynamicsBackend.from_backend() with the specified backend)
     USE_DYNAMICS: null # Whether to use a DynamicsBackend
@@ -47,7 +46,7 @@ BACKEND: # Backend configuration (If all set to null, the user needs to specify 
 TARGET: # Target Gate configuration
   GATE: "CX"
   # STATE: "0" # Target state (if GATE is null)
-  PHYSICAL_QUBITS: [ 0, 1 ]
+  PHYSICAL_QUBITS: [ 1, 0 ]
 
 ENV: # Environment configuration
   EXECUTION:
@@ -69,7 +68,7 @@ ENV: # Environment configuration
     NUM_EIGENSTATES_PER_PAULI: null # Number of eigenstates per Pauli to consider for channel fidelity reward
     INPUT_STATES_CHOICE: null # Choice of input states for CAFE or state reward ("pauli4", "2-design", "pauli6")
   BENCHMARKING:
-    BENCHMARK_CYCLE: 1 # Number of steps between two fidelity benchmarks
+    BENCHMARK_CYCLE: 0 # Number of steps between two fidelity benchmarks
     BENCHMARK_BATCH_SIZE: 1 # Number of actions to evaluate per fidelity benchmark
     CHECK_ON_EXP: False # Whether to perform fidelity benchmarking with tomographic experiments or just using simulation
     TOMOGRAPHY_ANALYSIS: "default" # Analysis method for tomography experiment

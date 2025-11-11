@@ -254,8 +254,12 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self, qc: QuantumCircuit, params: np.ndarray, update_env_history=True
     ) -> np.ndarray:
         """
-        Method to store in lists all relevant data to assess performance of training (fidelity information)
+        Method to store in lists all relevant data to assess performance of training (fidelity information).
         :param params: Batch of actions
+        :param qc: Quantum circuit to be benchmarked
+        :param update_env_history: Whether to update the environment history with the fidelity information
+        :param output_fidelity: Whether to return the fidelity information for each cycle or for each repetition or both.
+
         """
 
         if (
@@ -310,18 +314,31 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         else:  # Perform simulation at circuit or pulse level
             print("Starting simulation benchmark...")
             if not self.config.reward_method == "fidelity":
+                logging.log(0, "Benchmarking through mean of the policy")
                 params = np.array([self.mean_action])  # Benchmark policy only through mean action
             if self.abstraction_level == "circuit":
-                fids = self.simulate_circuit(qc, params, update_env_history)
+                output_fidelity = "all"
+                fids = self.simulate_circuit(qc, params, update_env_history, output_fidelity)
+
             else:  # Pulse simulation
+                output_fidelity = None
                 fids = self.simulate_pulse_circuit(qc, params, update_env_history)
             print("Finished simulation benchmark \n")
 
             fidelity_type = "Gate" if self.target.causal_cone_size <= 3 else "State"
-            if len(fids) == 1:
-                print(f"{fidelity_type} Fidelity (per Cycle): ", fids[0])
+            if output_fidelity != "all":
+                if len(fids) == 1:
+                    print(f"{fidelity_type} Fidelity (per Cycle): ", fids[0])
+                else:
+                    print(f"{fidelity_type} Fidelities (per Cycle): ", np.mean(fids))
             else:
-                print(f"{fidelity_type} Fidelities (per Cycle): ", np.mean(fids))
+                if params.shape[0] == 1:
+                    print(f"{fidelity_type} Fidelity (per Cycle): ", fids[0][0])
+                    print(f"{fidelity_type} Fidelity (Repetitions): ", fids[1][0])
+                else:
+                    print(f"{fidelity_type} Fidelities (per Cycle): ", np.mean(fids[0]))
+                    print(f"{fidelity_type} Fidelities (Repetitions): ", np.mean(fids[1]))
+
             return fids
 
     @property
