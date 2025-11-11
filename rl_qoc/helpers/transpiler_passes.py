@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from typing import Iterable, List, Tuple, Optional, Callable, Dict, Any, Sequence, Union, TYPE_CHECKING
+from typing import Iterable, List, Tuple, Optional, Dict, Any, Sequence, Union, TYPE_CHECKING
 
 from qiskit.circuit import (
     QuantumCircuit,
@@ -22,6 +22,7 @@ from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 from qiskit.transpiler import TransformationPass, AnalysisPass
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from collections import defaultdict
+from qiskit.providers import BackendV2
 if TYPE_CHECKING:
     from ..environment.instruction_replacement import InstructionReplacement
     from ..environment.instruction_rolling import InstructionRolling
@@ -123,10 +124,13 @@ class ForLoopWrapperPass(TransformationPass):
 class CustomGateReplacementPass(TransformationPass):
     """
     A transpiler pass that dynamically replaces instructions in a circuit
-    based on a list of replacement rules.
+    based on a list of replacement rules. Can also wrap instructions in for loops
+    when n_reps is specified.
     """
 
-    def __init__(self, replacements: Union[InstructionReplacement, List[InstructionReplacement]], opaque_gates: bool = False):
+    def __init__(self, replacements: Union[InstructionReplacement, List[InstructionReplacement]],
+                       backend: Optional[BackendV2] = None,
+                       opaque_gates: bool = False):
         """
         Initializes the gate replacement pass.
 
@@ -138,13 +142,13 @@ class CustomGateReplacementPass(TransformationPass):
         super().__init__()
         self.replacements = format_input(replacements)
         self.replacement_counters = [0] * len(self.replacements)
+        self.n_reps_counters = [0] * len(self.replacements)
         self.opaque_gates = opaque_gates
-
+        self.backend = backend
     def _create_replacement_dag(
         self,
-        func: Union[Callable, Gate, QuantumCircuit],
+        func: Union[QuantumCircuit, Instruction],
         params: Optional[Union[Dict, List]],
-        f_args: Dict,
         qargs: Tuple[Qubit, ...],
         cargs: Tuple[Clbit, ...],
     ) -> DAGCircuit:
@@ -161,7 +165,7 @@ class CustomGateReplacementPass(TransformationPass):
             if self.opaque_gates:
                 new_instr.definition = None
             qc.append(new_instr, local_qargs, local_cargs)
-        elif isinstance(func, Gate):
+        elif isinstance(func, Instruction):
             new_gate = func.copy()
             if params is not None:
                 # params can be ParameterVector or just values
@@ -172,12 +176,56 @@ class CustomGateReplacementPass(TransformationPass):
                 new_gate.definition = None
             qc.append(new_gate, local_qargs, local_cargs)
         else:
-            func(qc, params, local_qargs + local_cargs, **f_args)
+            # This should not happen as only Instruction/QuantumCircuit are allowed
+            raise ValueError(
+                f"Invalid replacement element type: {type(func)}. "
+                f"Only Instruction or QuantumCircuit are allowed."
+            )
+        return circuit_to_dag(qc)
+
+    def _create_for_loop_dag(
+        self,
+        node: DAGOpNode,
+        n_reps: Union[int, str, Iterable[int], None],
+        n_counter: int,
+    ) -> DAGCircuit:
+        """
+        Create a for loop DAG for the given node.
+        
+        Args:
+            node: The DAG node to wrap in a for loop
+            n_reps: Number of repetitions. Can be:
+                - An integer: fixed number of repetitions
+                - A string: name of an input variable for the number of repetitions
+                - A list of integers: cycle through different repetition counts
+                - None: no for loop wrapping (should not happen)
+            n_counter: Counter for generating unique variable names when n_reps is None
+        """
+        qc = QuantumCircuit()
+        qc.add_bits(node.qargs + node.cargs)
+        
+        if n_reps is None or isinstance(n_reps, str):
+            from qiskit.circuit.classical import expr, types
+            name = f"_n_{n_counter}" if n_reps is None else n_reps
+            n = qc.add_input(name, types.Uint(64))
+            r = expr.Range(expr.lift(0, types.Uint(64)), n)
+        elif isinstance(n_reps, (list, tuple)):
+            r = list(n_reps)
+        elif isinstance(n_reps, int):
+            r = range(n_reps)
+        else:
+            raise ValueError(f"Invalid n_reps type: {type(n_reps)}. Expected int, str, list, or None.")
+
+        with qc.for_loop(r):
+            qc.append(node.op, node.qargs, node.cargs)
+        
         return circuit_to_dag(qc)
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
         """Run the replacement pass on the given DAG."""
         self.replacement_counters = [0] * len(self.replacements)
+        self.n_reps_counters = [0] * len(self.replacements)
+        
 
         for node in list(dag.op_nodes()):
             if not hasattr(node.op, "name"):
@@ -197,21 +245,73 @@ class CustomGateReplacementPass(TransformationPass):
                     and node.qargs == mapped_qargs
                     and node.cargs == mapped_cargs
                 ):
-                    count = self.replacement_counters[i]
+                    # Determine what to do based on custom_instruction and n_reps
+                    has_custom_instr = len(repl_rule.functions_to_cycle) > 0
+                    has_n_reps = repl_rule.n_reps is not None
+                    
+                    if has_custom_instr and has_n_reps:
+                        # Replace with custom instruction AND wrap in for loop
+                        count = self.replacement_counters[i]
+                        func = repl_rule.functions_to_cycle[count % len(repl_rule.functions_to_cycle)]
+                        params_list = list(repl_rule.params_to_cycle) if isinstance(repl_rule.params_to_cycle, (list, tuple)) else [repl_rule.params_to_cycle]
+                        params = params_list[count % len(params_list)] if len(params_list) > 0 else None
+                        
+                        # Create replacement DAG
+                        replacement_dag = self._create_replacement_dag(
+                            func, params, node.qargs, node.cargs
+                        )
+                        
+                        # Convert back to circuit to wrap in for loop
+                        replacement_circuit = dag_to_circuit(replacement_dag)
+                        
+                        # Create a temporary node from the replacement circuit to wrap
+                        temp_dag = circuit_to_dag(replacement_circuit)
+                        temp_node = list(temp_dag.op_nodes())[0]  # Get the first (and only) operation node
+                        
+                        # Wrap in for loop
+                        n_reps_count = self.n_reps_counters[i]
+                        n_reps = repl_rule.n_reps
+                        if isinstance(n_reps, list):
+                            n_reps = n_reps[n_reps_count % len(n_reps)]
+                        
+                        for_loop_dag = self._create_for_loop_dag(temp_node, n_reps, n_reps_count)
+                        dag.substitute_node_with_dag(
+                            node, for_loop_dag, wires=node.qargs + node.cargs
+                        )
+                        
+                        self.replacement_counters[i] += 1
+                        self.n_reps_counters[i] += 1
+                        
+                    elif has_custom_instr:
+                        # Only replace with custom instruction (no for loop)
+                        count = self.replacement_counters[i]
+                        func = repl_rule.functions_to_cycle[count % len(repl_rule.functions_to_cycle)]
+                        params_list = list(repl_rule.params_to_cycle) if isinstance(repl_rule.params_to_cycle, (list, tuple)) else [repl_rule.params_to_cycle]
+                        params = params_list[count % len(params_list)] if len(params_list) > 0 else None
 
-                    # Cycle through the pre-processed lists from the dataclass
-                    func = repl_rule.functions_to_cycle[count % len(repl_rule.functions_to_cycle)]
-                    params = repl_rule.params_to_cycle[count % len(repl_rule.params_to_cycle)]
-                    f_args = repl_rule.args_to_cycle[count % len(repl_rule.args_to_cycle)]
+                        replacement_dag = self._create_replacement_dag(
+                            func, params, node.qargs, node.cargs
+                        )
+                        dag.substitute_node_with_dag(
+                            node, replacement_dag, wires=node.qargs + node.cargs
+                        )
 
-                    replacement_dag = self._create_replacement_dag(
-                        func, params, f_args, node.qargs, node.cargs
-                    )
-                    dag.substitute_node_with_dag(
-                        node, replacement_dag, wires=node.qargs + node.cargs
-                    )
-
-                    self.replacement_counters[i] += 1
+                        self.replacement_counters[i] += 1
+                        
+                    elif has_n_reps:
+                        # Only wrap original instruction in for loop (no replacement)
+                        n_reps_count = self.n_reps_counters[i]
+                        n_reps = repl_rule.n_reps
+                        if isinstance(n_reps, list):
+                            n_reps = n_reps[n_reps_count % len(n_reps)]
+                        
+                        for_loop_dag = self._create_for_loop_dag(node, n_reps, n_reps_count)
+                        dag.substitute_node_with_dag(
+                            node, for_loop_dag, wires=node.qargs + node.cargs
+                        )
+                        
+                        self.n_reps_counters[i] += 1
+                    
                     break
 
         # The recursive part for control flow is now cleaner
@@ -226,6 +326,10 @@ class CustomGateReplacementPass(TransformationPass):
                 new_op = node.op.replace_blocks(new_blocks)
                 dag.substitute_node(node, new_op)
 
+        if self.backend is not None:
+            for repl_rule in self.replacements:
+                if repl_rule.instruction_properties is not None:
+                    repl_rule.add_instruction_properties(self.backend)
         return dag
 
 

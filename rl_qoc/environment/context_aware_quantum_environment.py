@@ -154,15 +154,22 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self._optimal_actions = [
             np.zeros(self.config.n_actions) for _ in range(len(self.target.circuits))
         ]
+        # Prioritize parametrized circuit function over potential existing instruction replacement withing GateTarget
+        if self.parametrized_circuit_func is not None:
+            replacement_qc = QuantumCircuit(self.target.virtual_target_qubits)
+            self.parametrized_circuit_func(replacement_qc, self.parameters[0], self.target.virtual_target_qubits, **self._func_args)
+        elif isinstance(self.target, GateTarget) and self.target.instruction_replacement is not None:
+            replacement_qc = self.target.instruction_replacement.custom_instruction
+        else:
+            raise ValueError("No parametrized circuit function or instruction replacement found for target gate")
 
         self._pm = [
             PassManager(
                 CustomGateReplacementPass(
                     InstructionReplacement(
                         self.target.target_instructions[i],
-                        self.parametrized_circuit_func,
+                        replacement_qc,
                         self.parameters[i],
-                        self._func_args,
                     )
                 )
             )

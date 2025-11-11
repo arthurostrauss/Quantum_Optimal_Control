@@ -41,6 +41,7 @@ from ..helpers.circuit_utils import (
     causal_cone_circuit,
     get_2design_input_states,
 )
+from .instruction_replacement import InstructionReplacement
 import warnings
 
 
@@ -85,9 +86,9 @@ class BaseTarget(ABC):
 
     def __init__(
         self,
-        physical_qubits: Sequence[int] | int,
+        physical_qubits: Sequence[int] | int | Sequence[Sequence[int]],
         tgt_register: QuantumRegister | Sequence[Qubit] | Sequence[Sequence[Qubit]],
-        layout: Layout | List[Layout],
+        layout: Layout | Sequence[Layout],
     ):
         """
         Initialize the base target for the quantum environment.
@@ -97,23 +98,33 @@ class BaseTarget(ABC):
         all physical qubits present in a circuit)
 
         """
-        self.physical_qubits = (
+        self._physical_qubits = (
             list(range(physical_qubits)) if isinstance(physical_qubits, int) else physical_qubits
         )
         self._tgt_register = tgt_register
-        self._layout: Layout = layout
-        self._n_qubits = len(self.physical_qubits)
+        self._layout = layout
+        self._n_qubits = len(self._physical_qubits) if isinstance(self._physical_qubits, Sequence) and all(isinstance(q, int) for q in self._physical_qubits) else len(self._physical_qubits[0]) 
 
     @property
-    def tgt_register(self):
-        return self._tgt_register
+    def physical_qubits(self) -> Sequence[int]:
+        """
+        Physical qubits on which the target is defined
+        """
+        raise NotImplementedError("Physical qubits not implemented")
+
+    @property
+    def tgt_register(self) -> Sequence[Qubit]:
+        """
+        Target register on which the target is defined
+        """
+        raise NotImplementedError("Target register not implemented")
 
     @property
     def layout(self) -> Layout:
         """
         Layout for the target
         """
-        return self._layout
+        raise NotImplementedError("Layout not implemented")
 
     @layout.setter
     def layout(self, layout: Layout):
@@ -122,16 +133,18 @@ class BaseTarget(ABC):
         self._layout = layout
 
     @property
-    def n_qubits(self):
+    def n_qubits(self) -> int:
+        """
+        Number of qubits on which the target is defined
+        """
         return self._n_qubits
 
     @property
-    @abstractmethod
-    def target_type(self):
+    def target_type(self) -> str:
         """
         Type of the target (state / gate)
         """
-        pass
+        raise NotImplementedError("Target type not implemented")
 
 
 class StateTarget(BaseTarget):
@@ -202,15 +215,27 @@ class StateTarget(BaseTarget):
             tgt_register=tgt_register,
             layout=layout,
         )
+    
+    @property
+    def physical_qubits(self) -> Sequence[int]:
+        """
+        Physical qubits on which the target is defined
+        """
+        return self._physical_qubits
 
     @property
-    def circuits(self) -> List[QuantumCircuit]:
+    def tgt_register(self) -> Sequence[Qubit]:
         """
-        Get the circuits for the target state
+        Target register on which the target is defined
         """
-        return [self.circuit]
+        return self._tgt_register
 
     @property
+    def layout(self) -> Layout:
+        """
+        Layout for the target
+        """
+        return self._layout
     def target_instruction(self) -> CircuitInstruction:
         """
         Get the target instruction
@@ -352,10 +377,10 @@ class GateTarget(BaseTarget):
 
     def __init__(
         self,
-        gate: Gate | str,
-        physical_qubits: Optional[Sequence[int]] = None,
+        gate: Gate | str | InstructionReplacement,
+        physical_qubits: Optional[Sequence[int] | Sequence[Sequence[int]]] = None,
         circuit_context: Optional[QuantumCircuit | List[QuantumCircuit]] = None,
-        virtual_target_qubits: Optional[Sequence[int | Qubit]] = None,
+        virtual_target_qubits: Optional[Sequence[int | Qubit] | Sequence[Sequence[int | Qubit]]] = None,
         layout: Optional[Layout | List[Layout]] = None,
     ):
         """
@@ -364,55 +389,135 @@ class GateTarget(BaseTarget):
         :param physical_qubits: Physical qubits forming the target gate.
         :param circuit_context: Circuit to be used for context-aware calibration (default is the gate to be calibrated). Can also be a list of circuits.
         :param virtual_target_qubits: Virtual target qubits to be used for the context-aware calibration. 
+            Can be a single sequence (applied to all circuits) or a sequence of sequences (one per circuit).
             Those are the qubits within the virtual circuit context (not necessarily the same as the physical qubits after transpilation).
         :param layout: Specify layout if already declared
         """
-        gate = get_gate(gate)
+        if isinstance(gate, InstructionReplacement):
+            if not isinstance(gate.target_operation, Gate):
+                raise ValueError("Target operation must be a Gate object")
+            self._gate = gate.target_operation
+            self._instruction_replacement = gate
+            
+        else:
+            self._gate = get_gate(gate)
+            self._instruction_replacement = None
+        # Normalize physical_qubits
         if physical_qubits is None:
-            physical_qubits = list(range(gate.num_qubits))
-        self.gate = gate
+            physical_qubits = list(range(self._gate.num_qubits))
+        elif isinstance(physical_qubits, Sequence) and len(physical_qubits) > 0:
+            # Check if it's a sequence of sequences
+            if isinstance(physical_qubits[0], Sequence):
+                # Sequence of sequences - one per circuit
+                if circuit_context is not None:
+                    if isinstance(circuit_context, QuantumCircuit):
+                        num_circuits = 1
+                    else:
+                        num_circuits = len(circuit_context)
+                    if len(physical_qubits) != num_circuits:
+                        raise ValueError(
+                            f"Number of physical qubit sequences ({len(physical_qubits)}) "
+                            f"must match number of circuit contexts ({num_circuits})"
+                        )
+                # Keep as sequence of sequences
+                pass
+            else:
+                # Single sequence - will be applied to all circuits
+                pass
+        
+        self._virtual_target_qubits = None
+        self._virtual_target_qubits_indices = None
         self._circuit_choice = 0
         if circuit_context is None:  # If no context is provided, use the gate itself
             self._has_context = False
-            tgt_register = QuantumRegister(gate.num_qubits, "tgt")
-            circuit_context = QuantumCircuit(tgt_register)
-            circuit_context.append(gate, tuple(q for q in tgt_register))
-            circuit_context = [circuit_context]
+            tgt_register = QuantumRegister(self._gate.num_qubits, "tgt")
+            circuit_context = [QuantumCircuit(tgt_register)]    
+            circuit_context[0].append(self._gate, tuple(q for q in tgt_register))
             self._virtual_target_qubits = [tgt_register]
-            self._virtual_target_qubits_indices = list(range(gate.num_qubits))
+            self._virtual_target_qubits_indices = list(range(self._gate.num_qubits))
         else:
             self._has_context = True
             if isinstance(circuit_context, QuantumCircuit):
                 circuit_context = [circuit_context]
-            if any(circ.num_qubits < gate.num_qubits for circ in circuit_context):
+            if any(circ.num_qubits < self._gate.num_qubits for circ in circuit_context):
                 raise ValueError(
                     "Circuit context must have at least as many qubits as the target gate"
                 )
             if virtual_target_qubits is None:
-                if any(circ.num_qubits > gate.num_qubits for circ in circuit_context):
-                    raise ValueError(
-                        "If circuit context is larger than target gate, virtual_target_qubits must be provided"
-                    )
-                self._virtual_target_qubits = [[q for q in circ.qubits] for circ in circuit_context]
-                self._virtual_target_qubits_indices = [
-                    [circ.find_bit(q).index for q in circ.qubits] for circ in circuit_context
-                ]
-            else:
-                if all(isinstance(q, Qubit) for q in virtual_target_qubits):
-                    if not all(
-                        q in circ.qubits for circ in circuit_context for q in virtual_target_qubits
-                    ):
-                        raise ValueError("Virtual target qubits must be in the circuit context")
-                    self._virtual_target_qubits = [virtual_target_qubits for _ in circuit_context]
-
-                else:
-                    if not all(isinstance(q, int) for q in virtual_target_qubits):
+                if any(circ.num_qubits > self._gate.num_qubits for circ in circuit_context):
+                    if self._instruction_replacement is None:
                         raise ValueError(
-                            "Virtual target qubits must be a list of Qubit objects or a list of integers"
+                            "If circuit context is larger than target gate, virtual_target_qubits must be provided"
                         )
-                    self._virtual_target_qubits = [
-                        [circ.qubits[q] for q in virtual_target_qubits] for circ in circuit_context
-                    ]
+                    else:
+                        if all(isinstance(q, Qubit) and q in circ.qubits for q in self._instruction_replacement.target_qargs for circ in circuit_context):
+                            self._virtual_target_qubits = [self._instruction_replacement.target_qargs for _ in circuit_context]
+                        elif all(isinstance(q, int) for q in self._instruction_replacement.target_qargs):
+                            self._virtual_target_qubits = [[circ.qubits[q] for q in self._instruction_replacement.target_qargs] for circ in circuit_context]
+                if self._virtual_target_qubits is None:
+                    self._virtual_target_qubits = [[q for q in circ.qubits] for circ in circuit_context]
+                    
+            else:
+                # Check if virtual_target_qubits is a sequence of sequences (one per circuit)
+                if isinstance(virtual_target_qubits, Sequence) and len(virtual_target_qubits) > 0 and isinstance(virtual_target_qubits[0], Sequence):
+
+                    if len(virtual_target_qubits) != len(circuit_context):
+                        raise ValueError(
+                            f"Number of virtual qubit sequences ({len(virtual_target_qubits)}) "
+                            f"must match number of circuit contexts ({len(circuit_context)})"
+                        )
+                    # Sequence of sequences - one per circuit
+                    self._virtual_target_qubits = []
+                    for i, vq_seq in enumerate(virtual_target_qubits):
+                        circ = circuit_context[i]
+                        if not isinstance(vq_seq, Sequence):
+                            raise ValueError(f"Virtual qubit sequence {i} must be a sequence")
+                        vq_list = list(vq_seq)
+                        if all(isinstance(q, Qubit) for q in vq_list):
+                            if not all(q in circ.qubits for q in vq_list):
+                                raise ValueError(
+                                    f"Virtual target qubits for circuit {i} must be in the circuit context."
+                                )
+                            self._virtual_target_qubits.append(vq_list)
+                        elif all(isinstance(q, int) for q in vq_list):
+                            self._virtual_target_qubits.append([circ.qubits[q] for q in vq_list])
+                        else:
+                            raise ValueError(
+                                f"Virtual target qubits for circuit {i} must be a sequence of "
+                                f"Qubit objects or a sequence of integers"
+                            )
+                else:
+                    # Single sequence - apply to all circuits
+                    # Check if it's a flat sequence of Qubits or integers
+                    if len(virtual_target_qubits) > 0:
+                        first_item = virtual_target_qubits[0]
+                        if isinstance(first_item, Qubit):
+                            if not all(isinstance(q, Qubit) for q in virtual_target_qubits):
+                                raise ValueError(
+                                    "Virtual target qubits must be a sequence of Qubit objects, "
+                                    "a sequence of integers, or a sequence of such sequences"
+                                )
+                            if not all(
+                                q in circ.qubits for circ in circuit_context for q in virtual_target_qubits
+                            ):
+                                raise ValueError("Virtual target qubits must be in the circuit contexts.")
+                            self._virtual_target_qubits = [list(virtual_target_qubits) for _ in circuit_context]
+                        elif isinstance(first_item, int):
+                            if not all(isinstance(q, int) for q in virtual_target_qubits):
+                                raise ValueError(
+                                    "Virtual target qubits must be a sequence of Qubit objects, "
+                                    "a sequence of integers, or a sequence of such sequences"
+                                )
+                            self._virtual_target_qubits = [
+                                [circ.qubits[q] for q in virtual_target_qubits] for circ in circuit_context
+                            ]
+                        else:
+                            raise ValueError(
+                                "Virtual target qubits must be a sequence of Qubit objects, "
+                                "a sequence of integers, or a sequence of such sequences"
+                            )
+                    else:
+                        raise ValueError("Virtual target qubits cannot be empty")
 
         self._virtual_target_qubits_indices = [
             [circ.find_bit(q).index for q in vq]
@@ -424,14 +529,47 @@ class GateTarget(BaseTarget):
             if len(layout) != len(circuit_context):
                 raise ValueError("Layout should be provided for each circuit in the context")
         else:
-            if any(circ.num_qubits > gate.num_qubits for circ in circuit_context):
+            if any(circ.num_qubits > self._gate.num_qubits for circ in circuit_context):
                 raise ValueError(
                     "If circuit context is larger than target gate, layout must be provided"
                 )
-            layout = [
-                Layout({tgt_reg[i]: physical_qubits[i] for i in range(len(physical_qubits))})
-                for tgt_reg in self._virtual_target_qubits
-            ]
+            # Handle physical_qubits as single sequence or sequence of sequences
+            if isinstance(physical_qubits, Sequence) and len(physical_qubits) > 0:
+                first_phys = physical_qubits[0]
+                if isinstance(first_phys, Sequence):
+                    # Sequence of sequences - one per circuit
+                    if len(physical_qubits) != len(self._virtual_target_qubits):
+                        raise ValueError(
+                            f"Number of physical qubit sequences ({len(physical_qubits)}) "
+                            f"must match number of virtual qubit sequences ({len(self._virtual_target_qubits)})"
+                        )
+                    layout = []
+                    for tgt_reg, phys_q_seq in zip(self._virtual_target_qubits, physical_qubits):
+                        if not isinstance(phys_q_seq, Sequence):
+                            raise ValueError("Each physical qubit entry must be a sequence")
+                        if len(tgt_reg) != len(phys_q_seq):
+                            raise ValueError(
+                                f"Length mismatch: virtual qubits ({len(tgt_reg)}) vs physical qubits ({len(phys_q_seq)})"
+                            )
+                        layout.append(Layout({tgt_reg[i]: phys_q_seq[i] for i in range(len(phys_q_seq))}))
+                else:
+                    # Single sequence - apply to all circuits
+                    if not isinstance(physical_qubits, Sequence):
+                        raise ValueError("Physical qubits must be a sequence")
+                    phys_list = list(physical_qubits)
+                    layout = [
+                        Layout({tgt_reg[i]: phys_list[i] for i in range(len(phys_list))})
+                        for tgt_reg in self._virtual_target_qubits
+                    ]
+            elif isinstance(physical_qubits, int):
+                # Single integer - create range
+                phys_list = list(range(physical_qubits))
+                layout = [
+                    Layout({tgt_reg[i]: phys_list[i] for i in range(len(phys_list))})
+                    for tgt_reg in self._virtual_target_qubits
+                ]
+            else:
+                raise ValueError(f"Invalid physical_qubits type: {type(physical_qubits)}")
         super().__init__(
             physical_qubits=physical_qubits, tgt_register=self._virtual_target_qubits, layout=layout
         )
@@ -442,6 +580,20 @@ class GateTarget(BaseTarget):
         self._context_parameters: List[Dict[Parameter, float | None]] = [
             {p: None for p in circ.parameters} for circ in circuit_context
         ]
+
+    @property
+    def gate(self) -> Gate:
+        """
+        Get the target gate
+        """
+        return self._gate
+    
+    @property
+    def instruction_replacement(self) -> Optional[InstructionReplacement]:
+        """
+        Get the instruction replacement for the target gate if defined.
+        """
+        return self._instruction_replacement
 
     def Chi(self, n_reps: int = 1):
         """
@@ -623,6 +775,13 @@ class GateTarget(BaseTarget):
         Check if the target has a circuit context attached or if only composed of the target gate
         """
         return self._has_context
+    
+    @property
+    def physical_qubits(self) -> Sequence[int]:
+        """
+        Physical qubits on which the target is defined
+        """
+        return self._physical_qubits[self._circuit_choice]
 
     @property
     def virtual_target_qubits(self) -> List[Qubit]:
@@ -726,6 +885,13 @@ class GateTarget(BaseTarget):
         Get the layout of the target gate
         """
         return self._layout[self._circuit_choice]
+
+    @layout.setter
+    def layout(self, layout: Layout):
+        """
+        Set the layout of the target gate
+        """
+        self._layout[self._circuit_choice] = layout
 
     @property
     def tgt_register(self) -> List[Qubit]:
@@ -873,3 +1039,231 @@ class GateTarget(BaseTarget):
 
 
 Target = Union[StateTarget, GateTarget]
+
+class MultiTarget:
+    """
+    Class to represent a collection of targets that can be defined simultaneously for a single collection of circuit contexts.
+    """
+
+    def __init__(self, target_instructions: List[InstructionReplacement], 
+                       circuit_contexts: Union[QuantumCircuit, List[QuantumCircuit]],
+                       layout: Optional[Union[Layout, List[int], Sequence[Union[Layout, List[int]]]]] = None,
+                       ):
+        """
+        Initialize the multi-target for the quantum environment
+        :param targets: List of instruction replacements to be defined simultaneously. The targets must act on different qubits subsets to be simultaneously considered.
+        :param circuit_contexts: List of circuit contexts to be used for the multi-target. All specified circuit contexts
+            should contain the same qubit objects as the ones specified in the InstructionReplacement objects. The layout of the circuit contexts
+            will be used to map the virtual target qubits to physical qubits. 
+        :param layout: Physical Layout for all qubits present in the circuit contexts. If not provided, a trivial layout will be used for each circuit context.
+        """
+        # Validate the target instructions
+        if not all(isinstance(target_instruction, InstructionReplacement) for target_instruction in target_instructions):
+            raise ValueError("All target instructions must be InstructionReplacement objects")
+        
+        # Validate the circuit contexts
+        if isinstance(circuit_contexts, QuantumCircuit):
+            circuit_contexts = [circuit_contexts]
+        if not all(isinstance(circuit_context, QuantumCircuit) for circuit_context in circuit_contexts):
+            raise ValueError("All circuit contexts must be QuantumCircuit objects")
+
+        # Validate that the circuit contexts contain all the target qubits for each instruction and that they do not overlap
+        for circ in circuit_contexts:
+            used_qubits = set()
+            for target_instruction in target_instructions:
+                # Validate qargs based on their type
+                qargs = target_instruction.target_qargs
+                
+                if isinstance(qargs, QuantumRegister):
+                    # Qubits from QuantumRegister should be in the circuit
+                    if qargs not in circ.qregs:
+                        raise ValueError(
+                            f"QuantumRegister {qargs} from target instruction {target_instruction} "
+                            f"not found in circuit context {circ}"
+                        )
+                    if not all(q in circ.qubits for q in qargs):
+                        raise ValueError(
+                            f"Not all qubits from QuantumRegister {qargs} are in circuit context {circ}"
+                        )
+                elif isinstance(qargs, Sequence) and len(qargs) > 0:
+                    if all(isinstance(q, Qubit) for q in qargs):
+                        # Qubit objects should be directly in the circuit
+                        if not all(q in circ.qubits for q in qargs):
+                            raise ValueError(
+                                f"Not all Qubit objects from target instruction {target_instruction} "
+                                f"are in circuit context {circ}"
+                            )
+                    elif all(isinstance(q, int) for q in qargs):
+                        # Integer indices - check circuit width
+                        max_index = max(qargs)
+                        if max_index >= circ.num_qubits:
+                            raise ValueError(
+                                f"Target instruction {target_instruction} has qubit index {max_index} "
+                                f"but circuit context {circ} only has {circ.num_qubits} qubits"
+                            )
+                    else:
+                        raise ValueError(
+                            f"Invalid qargs type in target instruction {target_instruction}: "
+                            f"expected Qubit objects or integers"
+                        )
+                
+                # Check for overlap with other instructions (disjoint check)
+                if not target_instruction.check_qubits(circ):
+                    raise ValueError(
+                        f"Circuit context {circ} does not contain all target qubits for instruction {target_instruction}"
+                    )
+                current_qubits = target_instruction.get_qubits(circ)
+                if not used_qubits.isdisjoint(current_qubits):
+                    raise ValueError(
+                        f"Target qubits for instruction {target_instruction} overlap with other instructions qubits: "
+                        f"{used_qubits.intersection(current_qubits)}"
+                    )
+                used_qubits.update(current_qubits)
+        
+        # Validate and normalize layouts
+        num_circuits = len(circuit_contexts)
+        
+        # Normalize layout to a list
+        if layout is None:
+            # Generate trivial layouts for each circuit
+            layouts = [Layout.generate_trivial_layout(*circ.qregs) for circ in circuit_contexts]
+        elif isinstance(layout, Layout):
+            # Single layout provided - use for all circuits
+            if num_circuits > 1:
+                raise ValueError(f"Single Layout provided but {num_circuits} circuit contexts given. Provide a list of layouts.")
+            layouts = [layout]
+        elif isinstance(layout, list) and len(layout) > 0:
+            # List of layouts or list of integers
+            if len(layout) != num_circuits:
+                raise ValueError(f"Layout list length ({len(layout)}) must match number of circuit contexts ({num_circuits})")
+            
+            layouts = []
+            for i, layout_item in enumerate(layout):
+                circ = circuit_contexts[i]
+                
+                if isinstance(layout_item, Layout):
+                    # Already a Layout object
+                    # Validate qubit count matches
+                    if len(layout_item) != circ.num_qubits:
+                        raise ValueError(
+                            f"Layout {i} has {len(layout_item)} qubits but circuit {i} has {circ.num_qubits} qubits"
+                        )
+                    layouts.append(layout_item)
+                elif isinstance(layout_item, list) and all(isinstance(x, int) for x in layout_item):
+                    # List of integers - convert to Layout
+                    if len(layout_item) != circ.num_qubits:
+                        raise ValueError(
+                            f"Layout {i} (list of integers) has length {len(layout_item)} but circuit {i} has {circ.num_qubits} qubits"
+                        )
+                    # Convert list of integers to Layout using from_intlist
+                    layout_obj = Layout.from_intlist(layout_item, *circ.qregs)
+                    layouts.append(layout_obj)
+                else:
+                    raise ValueError(
+                        f"Invalid layout type at index {i}: {type(layout_item)}. "
+                        f"Expected Layout or List[int]"
+                    )
+        elif isinstance(layout, Sequence):
+            # Sequence (tuple, etc.) - convert to list and process
+            layout_list = list(layout)
+            if len(layout_list) != num_circuits:
+                raise ValueError(f"Layout sequence length ({len(layout_list)}) must match number of circuit contexts ({num_circuits})")
+            
+            layouts = []
+            for i, layout_item in enumerate(layout_list):
+                circ = circuit_contexts[i]
+                
+                if isinstance(layout_item, Layout):
+                    if len(layout_item) != circ.num_qubits:
+                        raise ValueError(
+                            f"Layout {i} has {len(layout_item)} qubits but circuit {i} has {circ.num_qubits} qubits"
+                        )
+                    layouts.append(layout_item)
+                elif isinstance(layout_item, (list, tuple)) and all(isinstance(x, int) for x in layout_item):
+                    layout_item = list(layout_item)
+                    if len(layout_item) != circ.num_qubits:
+                        raise ValueError(
+                            f"Layout {i} (list of integers) has length {len(layout_item)} but circuit {i} has {circ.num_qubits} qubits"
+                        )
+                    layout_obj = Layout.from_intlist(layout_item, *circ.qregs)
+                    layouts.append(layout_obj)
+                else:
+                    raise ValueError(
+                        f"Invalid layout type at index {i}: {type(layout_item)}. "
+                        f"Expected Layout or List[int]"
+                    )
+        else:
+            raise ValueError(
+                f"Invalid layout type: {type(layout)}. "
+                f"Expected Layout, List[int], List[Layout], or Sequence[Union[Layout, List[int]]]"
+            )
+        
+        # Store validated layouts
+        self.layouts = layouts
+        self.target_instructions = target_instructions
+        self.circuit_contexts = circuit_contexts
+        
+        # Create GateTarget objects for each target instruction
+        self.gate_targets: List[GateTarget] = []
+        
+        for target_instruction in target_instructions:
+            # Extract virtual qubits for each circuit context
+            virtual_qubits_per_circuit = []
+            physical_qubits_per_circuit = []
+            
+            for circ, layout_obj in zip(circuit_contexts, layouts):
+                # Get virtual qubits from the circuit
+                virtual_qubits = target_instruction.get_qubits(circ)
+                virtual_qubits_per_circuit.append(virtual_qubits)
+                
+                # Map virtual qubits to physical qubits using the layout
+                physical_qubits = []
+                for vq in virtual_qubits:
+                    # Find the physical qubit index for this virtual qubit
+                    if vq in layout_obj:
+                        physical_qubit = layout_obj[vq]
+                        physical_qubits.append(physical_qubit)
+                    else:
+                        raise ValueError(
+                            f"Virtual qubit {vq} not found in layout for circuit context. "
+                            f"Ensure all target instruction qubits are mapped in the layout."
+                        )
+                physical_qubits_per_circuit.append(physical_qubits)
+            
+            # Check if physical qubits are consistent across circuits
+            # If consistent, use single sequence; otherwise use sequence of sequences
+            reference_physical_qubits = physical_qubits_per_circuit[0]
+            physical_qubits_consistent = all(
+                phys_q == reference_physical_qubits for phys_q in physical_qubits_per_circuit[1:]
+            )
+            
+            if physical_qubits_consistent:
+                # All circuits use the same physical qubits - use single sequence
+                final_physical_qubits: Sequence[int] | Sequence[Sequence[int]] = reference_physical_qubits
+            else:
+                # Different physical qubits per circuit - use sequence of sequences
+                final_physical_qubits = physical_qubits_per_circuit
+            
+            # Check if virtual qubits are consistent across circuits
+            reference_virtual_qubits = virtual_qubits_per_circuit[0]
+            virtual_qubits_consistent = all(
+                vq == reference_virtual_qubits for vq in virtual_qubits_per_circuit[1:]
+            )
+            
+            if virtual_qubits_consistent:
+                # All circuits use the same virtual qubits - use single sequence
+                final_virtual_qubits: Sequence[int | Qubit] | Sequence[Sequence[int | Qubit]] = reference_virtual_qubits
+            else:
+                # Different virtual qubits per circuit - use sequence of sequences
+                final_virtual_qubits = virtual_qubits_per_circuit
+            
+            # Create GateTarget with all circuit contexts
+            gate_target = GateTarget(
+                gate=target_instruction,
+                physical_qubits=final_physical_qubits,
+                circuit_context=circuit_contexts,
+                virtual_target_qubits=final_virtual_qubits,
+                layout=layouts,
+            )
+            self.gate_targets.append(gate_target)
+            
