@@ -85,7 +85,6 @@ class ChannelReward(Reward):
         qc: QuantumCircuit,
         params: np.ndarray,
         env_config: QEnvConfig,
-        dfe_precision: Optional[Tuple[float, float]] = None,
         *args,
     ) -> ChannelRewardDataList:
         """
@@ -125,6 +124,7 @@ class ChannelReward(Reward):
         n_shots = execution_config.n_shots
         control_flow = execution_config.control_flow_enabled
         c_factor = execution_config.c_factor
+        dfe_precision = execution_config.dfe_precision
 
         Chi = target.Chi(n_reps)  # Characteristic function for cycle circuit repeated n_reps times
 
@@ -169,13 +169,8 @@ class ChannelReward(Reward):
         # Filter out case where identity ('I'*n_qubits) is sampled (trivial case)
         identity_terms = np.where(pauli_indices[:, 1] == 0)[0]
         id_coeff = (
-            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
+            c_factor * np.sum(counts[identity_terms] / Chi[samples[identity_terms]])
         )
-        # Additional dim factor to account for all eigenstates of identity input state
-        self.id_coeff = (
-            c_factor * dim * np.sum(counts[identity_terms] / (dim * Chi[samples[identity_terms]]))
-        )  # Additional dim factor to account for all eigenstates of identity input state
-        self._id_count = len(identity_terms)
 
         pauli_indices = np.delete(pauli_indices, identity_terms, axis=0)
         samples = np.delete(samples, identity_terms)
@@ -186,10 +181,6 @@ class ChannelReward(Reward):
             (basis[p[0]], SparsePauliOp(basis[p[1]], r))
             for p, r in zip(pauli_indices, reward_factor)
         ]
-
-        self._observables = SparsePauliOp("I" * n_qubits, self.id_coeff) + sum(
-            [obs for _, obs in fiducials_list]
-        )
 
         obs_dict = {}
         # Regroup observables for same input Pauli
@@ -205,15 +196,13 @@ class ChannelReward(Reward):
                     max(ref_count, counts[i]),
                 )
 
-        filtered_fiducials_list = [(prep, obs) for prep, obs, _ in obs_dict.values()]
-        filtered_pauli_shots = [count for _, _, count in obs_dict.values()]
-
-        fiducials = filtered_fiducials_list
-        pauli_shots = filtered_pauli_shots
-
+        fiducials = [(prep, obs) for prep, obs, _ in obs_dict.values()]
+        pauli_shots = [count for _, _, count in obs_dict.values()]
         used_prep_indices = {}
 
         for (prep, obs_list), shots in zip(fiducials, pauli_shots):
+            prep: Pauli
+            obs_list: List[SparsePauliOp]
             # Each prep is a Pauli input state, that we need to decompose in its pure eigenbasis.
             # Below, we select at random a subset of pure input states to prepare for each prep.
             # If nb_states = 1, we prepare all pure input states for each Pauli prep (no random selection)
@@ -221,17 +210,12 @@ class ChannelReward(Reward):
             # self._fiducials_indices.append(([], observables_to_indices(obs_list)))
             # self._full_fiducials.append(([], obs_list))
             max_input_states = dim // nb_states
-            selected_input_states: List[int] = self.input_states_rng.choice(
-                dim, size=max_input_states, replace=False
-            )
+            selected_input_states, dedicated_shots = np.unique(self.input_states_rng.choice(
+                dim, size=shots), return_counts=True)
+            
             prep_label = prep.to_label()
-            dedicated_shots = (
-                shots * n_shots // max_input_states
-            )  # Number of shots per Pauli eigenstate (divided equally)
-            if dedicated_shots == 0:
-                continue
 
-            for pure_eig_state in selected_input_states:
+            for pure_eig_state, dedicated_shot in zip(selected_input_states, dedicated_shots):
                 # Convert input state to Pauli6 basis:
                 # preparing pure eigenstates of Pauli_prep
 
@@ -261,10 +245,11 @@ class ChannelReward(Reward):
                 input_circuit.metadata["indices"] = extended_prep_indices
                 # Prepend input state to custom circuit with front composition
                 prep_circuit = repeated_circuit.compose(
-                    input_circuit,
+                    input_circuit.decompose(),
                     front=True,
                     inplace=False,
                 )
+                print("prep_circuit", prep_circuit)
                 # Transpile circuit to decompose input state preparation
                 prep_circuit = backend_info.custom_transpile(
                     prep_circuit,
@@ -276,49 +261,23 @@ class ChannelReward(Reward):
                 obs_ = parity * obs_list
                 pub_obs = extend_observables(obs_, prep_circuit, target.causal_cone_qubits_indices)
                 # pub_obs = pub_obs.apply_layout(prep_circuit.layout)
-                if prep_indices not in used_prep_indices:  # Add new PUB
-                    # Add PUB
-                    pub = (
-                        prep_circuit,
-                        pub_obs,
-                        params,
-                        shots_to_precision(dedicated_shots),
-                    )
-                    used_prep_indices[prep_indices] = ChannelRewardData(
-                        pub,
-                        input_circuit,
-                        obs_,
-                        n_reps,
-                        target.causal_cone_qubits_indices,
-                        prep,
-                        extended_prep_indices,
-                        observables_to_indices(obs_),
-                    )
-
-                else:  # Update PUB (regroup observables for same input circuit, redundant for I/Z terms)
-                    ref_prep = used_prep_indices[prep_indices].pub.circuit
-                    ref_obs = used_prep_indices[prep_indices].observables
-                    ref_precision = used_prep_indices[prep_indices].precision
-
-                    ref_shots = precision_to_shots(ref_precision)
-                    new_precision = shots_to_precision(dedicated_shots)
-                    new_obs = (ref_obs + obs_).simplify()
-
-                    used_prep_indices[prep_indices].observables = new_obs
-                    used_prep_indices[prep_indices].pub = EstimatorPub.coerce(
-                        (
-                            ref_prep,
-                            extend_observables(
-                                new_obs, prep_circuit, target.causal_cone_qubits_indices
-                            ),
-                            params,
-                            min(ref_precision, new_precision),
-                        ),
-                    )
-
-                    used_prep_indices[prep_indices].observables_indices = observables_to_indices(
-                        new_obs
-                    )
+                # Add PUB
+                pub = (
+                    prep_circuit,
+                    pub_obs,
+                    params,
+                    shots_to_precision(dedicated_shot),
+                )
+                used_prep_indices[prep_indices] = ChannelRewardData(
+                    pub,
+                    input_circuit,
+                    obs_,
+                    n_reps,
+                    target.causal_cone_qubits_indices,
+                    prep,
+                    extended_prep_indices,
+                    observables_to_indices(obs_),
+                )
 
         reward_data = []
         for data in used_prep_indices.values():
