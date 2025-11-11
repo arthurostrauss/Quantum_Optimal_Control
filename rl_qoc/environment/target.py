@@ -105,7 +105,6 @@ class BaseTarget(ABC):
         self._layout = layout
         self._n_qubits = len(self._physical_qubits) if isinstance(self._physical_qubits, Sequence) and all(isinstance(q, int) for q in self._physical_qubits) else len(self._physical_qubits[0]) 
 
-    @abstractmethod
     @property
     def physical_qubits(self) -> Sequence[int]:
         """
@@ -113,7 +112,6 @@ class BaseTarget(ABC):
         """
         raise NotImplementedError("Physical qubits not implemented")
 
-    @abstractmethod
     @property
     def tgt_register(self) -> Sequence[Qubit]:
         """
@@ -121,7 +119,6 @@ class BaseTarget(ABC):
         """
         raise NotImplementedError("Target register not implemented")
 
-    @abstractmethod
     @property
     def layout(self) -> Layout:
         """
@@ -143,7 +140,6 @@ class BaseTarget(ABC):
         return self._n_qubits
 
     @property
-    @abstractmethod
     def target_type(self) -> str:
         """
         Type of the target (state / gate)
