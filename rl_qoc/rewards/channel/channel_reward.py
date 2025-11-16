@@ -195,7 +195,7 @@ class ChannelReward(Reward):
         for c, idx in zip(counts, sampled_group_indices):
             chi_group = grouped_chi[idx]
             chi_squared_sum = sum([chi**2 for chi in chi_group])
-            reward_factor = c_factor * chi_group / (dim * chi_squared_sum)
+            reward_factor = c_factor * chi_group / chi_squared_sum
             prep, obs_list = grouped_pauli_pairs[idx]
             sampled_grouped_pauli_pairs.append((prep, SparsePauliOp(obs_list, reward_factor)))
 
@@ -216,9 +216,10 @@ class ChannelReward(Reward):
                 # Number of shots per Pauli eigenstate (divided equally)
                 dedicated_shots = counts_input_states * n_shots
             else: # DFE precision guarantee
+                group_idx = sampled_group_indices[g]
                 dedicated_shots = 2* np.log(2 / delta) / (pauli_sampling * eps**2)
-                dedicated_shots *= np.sum([np.abs(grouped_chi[sampled_group_indices[g]][i]) for i in range(len(grouped_chi[sampled_group_indices[g]]))]) ** 2
-                dedicated_shots /= np.sum(grouped_chi[sampled_group_indices[g]] ** 2) ** 2 
+                dedicated_shots *= np.sum([np.abs(grouped_chi[group_idx][i]) for i in range(len(grouped_chi[group_idx]))]) ** 2
+                dedicated_shots /= np.sum(grouped_chi[group_idx] ** 2) ** 2 
                 dedicated_shots *= counts_input_states # Convert into an array for each sampled input state
                 dedicated_shots = np.ceil(dedicated_shots)
 
@@ -266,7 +267,7 @@ class ChannelReward(Reward):
                     optimization_level=0,
                 )
 
-                obs_ = [p * (c/pauli_sampling) * o for p, o in zip(parity, obs_group)]
+                obs_ = [p * (c_input_state/pauli_sampling) * o for p, o in zip(parity, obs_group)]
                 pub_obs = extend_observables(
                     SparsePauliOp.sum(obs_).simplify(),
                     prep_circuit,
