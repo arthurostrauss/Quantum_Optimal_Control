@@ -249,7 +249,6 @@ class ChannelReward(Reward):
                     front=True,
                     inplace=False,
                 )
-                print("prep_circuit", prep_circuit)
                 # Transpile circuit to decompose input state preparation
                 prep_circuit = backend_info.custom_transpile(
                     prep_circuit,
