@@ -86,7 +86,7 @@ class QuantumEnvironment(BaseQuantumEnvironment):
             **self._func_args,
         )
 
-        custom_circuit.metadata["baseline_circuit"] = self.config.target.circuits[0].copy(
+        custom_circuit.metadata["baseline_circuit"] = self.config.target.circuit.copy(
             "baseline_circuit"
         )
         return [custom_circuit]

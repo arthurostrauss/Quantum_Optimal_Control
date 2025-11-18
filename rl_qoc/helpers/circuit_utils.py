@@ -104,11 +104,12 @@ def add_custom_gate(
         instruction_properties: Instruction properties for the gate (if applicable)
         inplace: Whether to add the gate in place to the Quantum Circuit or return a new Quantum Circuit with the gate added
     """
+    params = [] if parameters is None else getattr(parameters, "params", parameters)
     if isinstance(gate, str):
         gate = Gate(
             gate.lower(),
             num_qubits=len(qubits),
-            params=parameters.params if isinstance(parameters, ParameterVector) else parameters,
+            params=params,
         )
     elif isinstance(gate, QuantumCircuit):
         if gate.num_qubits != len(qubits):

@@ -21,7 +21,7 @@ from .benchmark_config import BenchmarkConfig
 from ...helpers import load_q_env_from_yaml_file, select_backend
 
 if TYPE_CHECKING:
-    from ...rewards import Reward, REWARD_STRINGS
+    from ...rewards import Reward
 
 
 def default_benchmark_config():

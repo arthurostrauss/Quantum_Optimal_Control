@@ -156,8 +156,10 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         ]
         # Prioritize parametrized circuit function over potential existing instruction replacement withing GateTarget
         if self.parametrized_circuit_func is not None:
-            replacement_qc = QuantumCircuit(self.target.virtual_target_qubits)
-            self.parametrized_circuit_func(replacement_qc, self.parameters[0], self.target.virtual_target_qubits, **self._func_args)
+            custom_op = self.target.gate.name + "_cal" if isinstance(self.target, GateTarget) else "state_prep_cal"
+            replacement_qc = QuantumCircuit(self.target.tgt_register, name=custom_op)
+            self.parametrized_circuit_func(replacement_qc, self.parameters[0], self.target.tgt_register, **self._func_args)
+            replacement_qc = replacement_qc.to_instruction()
         elif isinstance(self.target, GateTarget) and self.target.instruction_replacement is not None:
             replacement_qc = self.target.instruction_replacement.custom_instruction
         else:
