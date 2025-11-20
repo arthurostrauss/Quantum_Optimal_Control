@@ -560,7 +560,7 @@ class CausalConePass(TransformationPass):
 
     def run(self, dag: DAGCircuit):
         qubits = self._causal_cone_qubits
-        if isinstance(qubits, Tuple) and all(isinstance(q, int) for q in qubits):
+        if isinstance(qubits, Sequence) and all(isinstance(q, int) for q in qubits):
             qubits = [dag.qubits[q] for q in qubits]
         involved_qubits = [dag.quantum_causal_cone(q) for q in qubits]
         involved_qubits = list(set([q for sublist in involved_qubits for q in sublist]))
