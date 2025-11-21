@@ -21,7 +21,7 @@ from .benchmark_config import BenchmarkConfig
 from ...helpers import load_q_env_from_yaml_file, select_backend
 
 if TYPE_CHECKING:
-    from ...rewards import Reward, REWARD_STRINGS
+    from ...rewards import Reward
 
 
 def default_benchmark_config():
@@ -77,10 +77,14 @@ class QEnvConfig:
         self.backend_config.parametrized_circuit_kwargs["backend"] = backend
 
     @property
-    def parametrized_circuit(self):
+    def parametrized_circuit(self) -> Optional[Callable[[QuantumCircuit, ParameterVector | List[Parameter], QuantumRegister, Dict[str, Any]], None]]:
+        """
+        Parametrized circuit function to be used for the target gate.
+        Returns: Parametrized circuit function if defined in backend_config or if no instruction replacement is defined for the target gate.
+        """
         if self.backend_config.parametrized_circuit is not None:
             return self.backend_config.parametrized_circuit
-        else:
+        elif (isinstance(self.target, GateTarget) and self.target.instruction_replacement is None) or (isinstance(self.target, StateTarget)):
             op_name = self.target.gate.name if isinstance(self.target, GateTarget) else "state_prep"
             custom_op = op_name + "_cal"
             from ...helpers.circuit_utils import add_custom_gate
@@ -88,6 +92,8 @@ class QEnvConfig:
             return lambda qc, params, q_reg, **kwargs: add_custom_gate(
                 qc, custom_op, q_reg, params, self.target.physical_qubits, self.backend
             )
+        else:
+            return None
 
     @property
     def parametrized_circuit_kwargs(self):

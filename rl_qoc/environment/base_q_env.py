@@ -290,15 +290,12 @@ class BaseQuantumEnvironment(ABC, Env):
             #     return fids
 
         # Check if the reward method exists in the dictionary
-        additional_input = (
-            self.config.execution_config.dfe_precision if self.config.dfe else self.baseline_circuit
-        )
         if self.config.execution_config.n_reps_mode == "sequential":
             reward_data = rewarder.get_reward_data(
                 qc,
                 params,
                 self.config,
-                additional_input,
+                self.baseline_circuit,
             )
             total_shots = reward_data.total_shots
             if update_env_history:

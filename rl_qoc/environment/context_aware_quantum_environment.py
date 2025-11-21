@@ -49,7 +49,6 @@ from qiskit_experiments.library import ProcessTomography
 from ..helpers import (
     MomentAnalysisPass,
     CustomGateReplacementPass,
-    InstructionReplacement,
 )
 from ..helpers.circuit_utils import get_instruction_timings
 from .configuration.qconfig import QEnvConfig
@@ -58,6 +57,7 @@ from .base_q_env import (
     StateTarget,
     BaseQuantumEnvironment,
 )
+from .instruction_replacement import InstructionReplacement
 
 import logging
 
@@ -154,15 +154,24 @@ class ContextAwareQuantumEnvironment(BaseQuantumEnvironment):
         self._optimal_actions = [
             np.zeros(self.config.n_actions) for _ in range(len(self.target.circuits))
         ]
+        # Prioritize parametrized circuit function over potential existing instruction replacement withing GateTarget
+        if self.parametrized_circuit_func is not None:
+            custom_op = self.target.gate.name + "_cal" if isinstance(self.target, GateTarget) else "state_prep_cal"
+            replacement_qc = QuantumCircuit(self.target.tgt_register, name=custom_op)
+            self.parametrized_circuit_func(replacement_qc, self.parameters[0], self.target.tgt_register, **self._func_args)
+            replacement_qc = replacement_qc.to_instruction()
+        elif isinstance(self.target, GateTarget) and self.target.instruction_replacement is not None:
+            replacement_qc = self.target.instruction_replacement.custom_instruction
+        else:
+            raise ValueError("No parametrized circuit function or instruction replacement found for target gate")
 
         self._pm = [
             PassManager(
                 CustomGateReplacementPass(
                     InstructionReplacement(
                         self.target.target_instructions[i],
-                        self.parametrized_circuit_func,
+                        replacement_qc,
                         self.parameters[i],
-                        self._func_args,
                     )
                 )
             )

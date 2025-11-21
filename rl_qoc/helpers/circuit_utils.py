@@ -38,8 +38,6 @@ from qiskit_experiments.library.tomography.basis import (
     Pauli6PreparationBasis,
 )
 
-from .transpiler_passes import CustomGateReplacementPass
-
 QuantumTarget = Union[Statevector, Operator, DensityMatrix]
 
 
@@ -106,11 +104,12 @@ def add_custom_gate(
         instruction_properties: Instruction properties for the gate (if applicable)
         inplace: Whether to add the gate in place to the Quantum Circuit or return a new Quantum Circuit with the gate added
     """
+    params = [] if parameters is None else getattr(parameters, "params", parameters)
     if isinstance(gate, str):
         gate = Gate(
             gate.lower(),
             num_qubits=len(qubits),
-            params=parameters.params if isinstance(parameters, ParameterVector) else parameters,
+            params=params,
         )
     elif isinstance(gate, QuantumCircuit):
         if gate.num_qubits != len(qubits):
@@ -360,6 +359,11 @@ def get_gate(gate: Gate | str) -> Gate:
             gate = gate_map()[gate.lower()]
         except KeyError:
             raise ValueError("Invalid target gate name")
+    elif isinstance(gate, QuantumCircuit):
+        try:
+            gate = gate.to_gate()
+        except Exception:
+            raise ValueError(f"Invalid gate: {gate} could not be converted to a Gate object")
     return gate
 
 
@@ -381,7 +385,7 @@ def substitute_target_gate(
         qubits: Physical qubits on which the gate is to be applied (if None, all qubits of input circuit are considered)
         parameters: Parameters for the custom gate
     """
-
+    from .transpiler_passes import CustomGateReplacementPass
     if isinstance(custom_gate, str):
         try:
             custom_gate2 = gate_map()[custom_gate]

@@ -1,24 +1,24 @@
 from qiskit.circuit import QuantumCircuit, Parameter
-from iqcc_cloud_client import IQCC_Cloud
+from qiskit_qm_provider import IQCCProvider
 from qiskit_qm_provider import FluxTunableTransmonBackend, InputType, QMSamplerV2, QMSamplerOptions
 from qiskit import transpile
 from qiskit_qm_provider.backend.backend_utils import add_basic_macros_to_machine
 import numpy as np
 from pathlib import Path
 import json
-from rl_qoc.qua.iqcc import get_machine_from_iqcc
 
 # Set your quantum computer backend
 path = Path.home() / "iqcc_token.json"
 with open(path, "r") as f:
     iqcc_config = json.load(f)
 
-backend_name = "gilboa"
+backend_name = "arbel"
 
-machine, iqcc = get_machine_from_iqcc(backend_name, iqcc_config[backend_name])
+iqcc_provider = IQCCProvider()
+machine = iqcc_provider.get_machine(backend_name)
 
 add_basic_macros_to_machine(machine)
-backend = FluxTunableTransmonBackend(machine)
+backend = iqcc_provider.get_backend(machine)
 
 qc = QuantumCircuit(1)
 param = Parameter("param")

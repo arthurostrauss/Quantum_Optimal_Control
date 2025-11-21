@@ -6,6 +6,8 @@ from .configuration import (
     QEnvConfig,
 )
 from .quantumenvironment import QuantumEnvironment
+from .instruction_replacement import InstructionReplacement
+from .instruction_rolling import InstructionRolling
 from .context_aware_quantum_environment import ContextAwareQuantumEnvironment
 from .wrappers import (
     RescaleAndClipAction,
