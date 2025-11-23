@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple, Literal
 from ..environment.target import GateTarget, StateTarget
-from ..environment.configuration.qconfig import QEnvConfig, BenchmarkConfig
+from ..environment.configuration.qconfig import QEnvConfig
 from ..helpers.circuit_utils import get_single_qubit_input_states, causal_cone_circuit
 from qiskit.circuit import QuantumCircuit, ClassicalRegister
 from qiskit.circuit.classical.types import Uint
@@ -324,7 +324,7 @@ def load_circuit_context(circuit_params):
     elif len(c_params) == 1 and c_params[0] is not None:
         c_params[0].load_input_values()
 
-def benchmark_cycle_macro(benchmark_cycle_var, benchmark_config: BenchmarkConfig):
+def benchmark_cycle_macro(benchmark_cycle_var, policy, config: QEnvConfig):
     """
     QUA macro to perform benchmarking cycle based on the benchmark config type
     """
@@ -333,5 +333,5 @@ def benchmark_cycle_macro(benchmark_cycle_var, benchmark_config: BenchmarkConfig
         benchmark_cycle_var.load_input_value()
 
         with if_(benchmark_cycle_var.var):
-            benchmark_config.benchmark_qm_macro()
+            config.benchmark_config.benchmark_qm_macro(policy, config)
             
