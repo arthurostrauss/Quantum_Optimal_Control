@@ -165,7 +165,9 @@ class CustomGateReplacementPass(TransformationPass):
             if self.opaque_gates:
                 new_instr = new_instr.to_instruction()
                 new_instr.definition = None
-            dag.compose(circuit_to_dag(new_instr), local_qargs, local_cargs, inplace=True)
+                dag.apply_operation_back(new_instr, local_qargs, local_cargs)
+            else:
+                dag.compose(circuit_to_dag(new_instr), local_qargs, local_cargs, inplace=True)
         elif isinstance(func, Instruction):
             new_gate = func.copy()
             if params is not None:
