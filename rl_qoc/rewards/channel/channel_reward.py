@@ -361,7 +361,7 @@ class ChannelReward(Reward):
         ]
         input_circuits = [circ.decompose() for circ in get_single_qubit_input_states("pauli6")]
 
-        for q, qubit in enumerate(qc.qubits):
+        for q, qubit in enumerate(target.causal_cone_qubits):
             # Input state prep (over all qubits of the circuit context)
             with qc.switch(input_state_vars[q]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):

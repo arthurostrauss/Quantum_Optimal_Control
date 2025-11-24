@@ -435,7 +435,7 @@ def _normalize_virtual_target_qubits(
     
     # Check if it's a sequence of sequences (one per circuit)
     if isinstance(virtual_target_qubits, Sequence) and len(virtual_target_qubits) > 0:
-        if isinstance(virtual_target_qubits[0], Sequence):
+        if isinstance(virtual_target_qubits[0], Sequence) and not all(isinstance(q, Qubit) for q in virtual_target_qubits[0]):
             # Sequence of sequences - one per circuit
             if len(virtual_target_qubits) != num_circuits:
                 raise ValueError(
@@ -535,7 +535,7 @@ def _normalize_physical_qubits(
         if len(physical_qubits) == 0:
             raise ValueError("Physical qubits cannot be empty")
         
-        if isinstance(physical_qubits[0], Sequence):
+        if isinstance(physical_qubits[0], Sequence) and all(isinstance(q, Sequence) for q in physical_qubits):
             # Sequence of sequences - one per circuit
             if len(physical_qubits) != num_circuits:
                 raise ValueError(
@@ -604,26 +604,22 @@ def _normalize_layout(
         return layout_list
     
     # No layout provided - create from virtual_target_qubits and physical_qubits
-    if any(circ.num_qubits > gate.num_qubits for circ in circuit_context):
-        # Need layout when circuit is larger than gate
-        if len(virtual_target_qubits) != num_circuits or len(physical_qubits) != num_circuits:
-            raise ValueError(
-                "When circuit context is larger than target gate, "
-                "layout must be provided or virtual_target_qubits and physical_qubits "
-                "must match number of circuit contexts"
-            )
-        
-        layout_list = []
-        for virt_qs, phys_qs in zip(virtual_target_qubits, physical_qubits):
-            if len(virt_qs) != len(phys_qs):
-                raise ValueError(
-                    f"Length mismatch: virtual qubits ({len(virt_qs)}) vs physical qubits ({len(phys_qs)})"
-                )
-            layout_list.append(Layout({virt_qs[i]: phys_qs[i] for i in range(len(virt_qs))}))
-        return layout_list
+    if len(virtual_target_qubits) != num_circuits or len(physical_qubits) != num_circuits:
+        raise ValueError(
+            "When circuit context is larger than target gate, "
+            "layout must be provided or virtual_target_qubits and physical_qubits "
+            "must match number of circuit contexts"
+        )
     
-    # Circuit size matches gate size - no layout needed, but create empty layouts for consistency
-    return [Layout() for _ in range(num_circuits)]
+    layout_list = []
+    for virt_qs, phys_qs in zip(virtual_target_qubits, physical_qubits):
+        if len(virt_qs) != len(phys_qs):
+            raise ValueError(
+                f"Length mismatch: virtual qubits ({len(virt_qs)}) vs physical qubits ({len(phys_qs)})"
+            )
+        layout_list.append(Layout({virt_qs[i]: phys_qs[i] for i in range(len(virt_qs))}))
+    return layout_list
+
 
 
 class GateTarget(BaseTarget):

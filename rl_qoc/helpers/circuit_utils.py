@@ -450,21 +450,29 @@ def retrieve_tgt_instruction_count(qc: QuantumCircuit, target: Dict):
     return qc.data.count(tgt_instruction)
 
 
-def get_single_qubit_input_states(input_state_choice) -> List[QuantumCircuit]:
+def get_single_qubit_input_states(input_state_choice, num_qubits: int = 1) -> List[QuantumCircuit]:
     """
     Get single qubit input states for a given choice of input states
     (pauli4, pauli6, 2-design)
+    If pauli4 or pauli6, the list of circuits are just the list of circuits for one qubit, to be composed later in the context of the circuit.
+    If 2-design, the explicit list of circuits to compose for num_qubits qubits is returned.
+
+    Args:
+        input_state_choice: Choice of input states
+        num_qubits: Number of qubits
+
+    Returns:
+        List of input circuits for one qubit (if pauli4 or pauli6) or for num_qubits qubits (if 2-design)
     """
     if input_state_choice == "pauli4":
-        input_states = [PauliPreparationBasis().circuit([i]) for i in range(4)]
+        input_states = [PauliPreparationBasis().circuit([i]).decompose() for i in range(4)]
     elif input_state_choice == "pauli6":
-        input_states = [Pauli6PreparationBasis().circuit([i]) for i in range(6)]
+        input_states = [Pauli6PreparationBasis().circuit([i]).decompose() for i in range(6)]
     elif input_state_choice == "2-design":
-        states = get_2design_input_states(2)
-        input_circuits = [QuantumCircuit(1) for _ in states]
-        for input_circ, state in zip(input_circuits, states):
-            input_circ.prepare_state(state)
-        input_states = input_circuits
+        states = get_2design_input_states(2**num_qubits)
+        input_states = [QuantumCircuit(num_qubits) for _ in states]
+        for input_state, state in zip(input_states, states):
+            input_state.prepare_state(state)
     else:
         raise ValueError("Invalid input state choice")
     return input_states
@@ -490,6 +498,19 @@ def get_2design_input_states(d: int = 4) -> List[Statevector]:
     Function that return the 2-design input states (used for CAFE reward scheme)
     Follows this Reference: https://arxiv.org/pdf/1008.1138 (see equations 2 and 13)
     """
+
+    if d == 2:
+        X = np.array([[0, 1], [1, 0]])
+        Z = np.array([[1, 0], [0, -1]])
+        
+        phi = 1/np.sqrt(2) * np.array([1, np.exp(1j * np.pi / 3)]).reshape(2, 1)
+        states = []
+        for k in range(2):
+            for l in range(2):
+                state = np.linalg.matrix_power(X, k) @ np.linalg.matrix_power(Z, l) @ phi
+                states.append(Statevector(state))
+        return states
+    
     # Define constants
     golden_ratio = (np.sqrt(5) - 1) / 2
     omega = np.exp(2 * np.pi * 1j / d)

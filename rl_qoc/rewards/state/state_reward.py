@@ -299,7 +299,7 @@ class StateReward(Reward):
         ]
 
         input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(num_qubits)]
-        for q, qubit in enumerate(qc.qubits):
+        for q, qubit in enumerate(causal_cone_qubits):
             # Input state prep (over all qubits of the circuit context)
             with qc.switch(input_state_vars[q]) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):

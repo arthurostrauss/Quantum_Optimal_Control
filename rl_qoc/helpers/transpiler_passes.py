@@ -5,6 +5,7 @@ import numpy as np
 from typing import Iterable, List, Tuple, Optional, Dict, Any, Sequence, Union, TYPE_CHECKING
 
 from qiskit.circuit import (
+    ForLoopOp,
     QuantumCircuit,
     CircuitInstruction,
     QuantumRegister,
@@ -152,19 +153,19 @@ class CustomGateReplacementPass(TransformationPass):
         qargs: Tuple[Qubit, ...],
         cargs: Tuple[Clbit, ...],
     ) -> DAGCircuit:
-        qc = QuantumCircuit()
-        qc.add_bits(qargs + cargs)
-        # Directly reference bits already present in the new circuit:
-        local_qargs = qc.qubits
-        local_cargs = qc.clbits
+        dag = DAGCircuit()
+        dag.add_qubits(qargs)
+        dag.add_clbits(cargs)
 
+        local_qargs = dag.qubits
+        local_cargs = dag.clbits
         # Handle QuantumCircuit and Gate types
         if isinstance(func, QuantumCircuit):
             new_instr = func.assign_parameters(params) if params is not None else func
-            new_instr = new_instr.to_instruction()
+            # new_instr = new_instr.to_instruction()
             if self.opaque_gates:
                 new_instr.definition = None
-            qc.append(new_instr, local_qargs, local_cargs)
+            dag.compose(circuit_to_dag(new_instr), local_qargs, local_cargs, inplace=True)
         elif isinstance(func, Instruction):
             new_gate = func.copy()
             if params is not None:
@@ -174,14 +175,14 @@ class CustomGateReplacementPass(TransformationPass):
                     new_gate.definition.assign_parameters(params, inplace=True)
             if self.opaque_gates:
                 new_gate.definition = None
-            qc.append(new_gate, local_qargs, local_cargs)
+            dag.apply_operation_back(new_gate, local_qargs, local_cargs)
         else:
             # This should not happen as only Instruction/QuantumCircuit are allowed
             raise ValueError(
                 f"Invalid replacement element type: {type(func)}. "
                 f"Only Instruction or QuantumCircuit are allowed."
             )
-        return circuit_to_dag(qc)
+        return dag
 
     def _create_for_loop_dag(
         self,
@@ -201,13 +202,16 @@ class CustomGateReplacementPass(TransformationPass):
                 - None: no for loop wrapping (should not happen)
             n_counter: Counter for generating unique variable names when n_reps is None
         """
-        qc = QuantumCircuit()
-        qc.add_bits(node.qargs + node.cargs)
-        
+        dag = DAGCircuit()
+        dag.add_qubits(node.qargs)
+        dag.add_clbits(node.cargs)
+        local_qargs = dag.qubits
+        local_cargs = dag.clbits
         if n_reps is None or isinstance(n_reps, str):
             from qiskit.circuit.classical import expr, types
             name = f"_n_{n_counter}" if n_reps is None else n_reps
-            n = qc.add_input(name, types.Uint(64))
+            n = expr.Var.new(name, types.Uint(64))
+            dag.add_input_var(n)
             r = expr.Range(expr.lift(0, types.Uint(64)), n)
         elif isinstance(n_reps, (list, tuple)):
             r = list(n_reps)
@@ -215,11 +219,13 @@ class CustomGateReplacementPass(TransformationPass):
             r = range(n_reps)
         else:
             raise ValueError(f"Invalid n_reps type: {type(n_reps)}. Expected int, str, list, or None.")
+        qc = QuantumCircuit()
+        qc.add_bits(node.qargs + node.cargs)
+        qc.append(node.op, node.qargs, node.cargs)
+        for_loop_op = ForLoopOp(r, None, qc)
 
-        with qc.for_loop(r):
-            qc.append(node.op, node.qargs, node.cargs)
-        
-        return circuit_to_dag(qc)
+        dag.apply_operation_back(for_loop_op, local_qargs, local_cargs)
+        return dag
 
     def run(self, dag: DAGCircuit) -> DAGCircuit:
         """Run the replacement pass on the given DAG."""
