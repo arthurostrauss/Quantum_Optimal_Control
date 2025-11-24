@@ -19,12 +19,13 @@ class BenchmarkConfig:
 
     benchmark_cycle: int = 0  # 0 means no benchmarking
 
-    def benchmark_qm_macro(self, policy):
+    def benchmark_qm_macro(self, policy, config: QEnvConfig):
         """
         QUA macro to perform benchmarking cycle based on the benchmark config type
 
         Args:
             policy: Policy to benchmark
+            config: Quantum environment configuration
         """
         raise NotImplementedError("This benchmark config does not have a QUA macro for benchmarking")
 
@@ -93,9 +94,13 @@ class SingleQubitRBBenchmarkConfig(BenchmarkConfig):
         """
         return True
     
-    def benchmark_qm_macro(self, policy):
+    def benchmark_qm_macro(self, policy, config: QEnvConfig):
         """
         QUA macro to perform benchmarking cycle based on the benchmark config type
+
+        Args:
+            policy: Policy to benchmark
+            config: Quantum environment configuration
         """
         raise NotImplementedError("This benchmark config does not have a QUA macro for benchmarking")
     
