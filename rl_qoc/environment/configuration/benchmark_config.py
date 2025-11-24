@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple, Literal, Optional, Sequence, TYPE_CHECKING
+from typing import Literal, Optional, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .qconfig import QEnvConfig
-    from ..target import GateTarget
 
 
 @dataclass
@@ -60,11 +59,11 @@ class BenchmarkConfig:
     
 class SingleQubitRBBenchmarkConfig(BenchmarkConfig):
     """
-    Configuration for benchmarking the policy throug real-time single qubit Randomized Benchmarking (in QUA)
+    Configuration for benchmarking the policy through real-time single qubit Randomized Benchmarking (in QUA)
     """
     interleaved_gate_operation: Literal["I", "x180", "y180", "x90", "-x90", "y90", "-y90"] = "x180"
     """The single qubit gate to interleave. Default is 'x180'."""
-    use_state_discrimination: bool = False
+    use_state_discrimination: bool = True
     """Perform qubit state discrimination. Default is True."""
     use_strict_timing: bool = False
     """Use strict timing in the QUA program. Default is False."""
@@ -140,7 +139,7 @@ class CAFEBenchmarkConfig(BenchmarkConfig):
         if not isinstance(config.target, GateTarget):
             raise ValueError("CAFE reward is only supported for GateTarget")
 
-        reward = CAFEReward("2-design")
+        raise NotImplementedError("This benchmark config does not have a QUA macro for benchmarking.")
 
     
     def benchmark_qm_stream_processing(self):
