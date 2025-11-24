@@ -177,9 +177,10 @@ class CircuitParams:
             ]
             if param is not None
         ]
-        for cp in self.context_parameters:
-            if cp is not None:
-                params.extend(cp)
+        if self.context_parameters is not None:
+            for cp in self.context_parameters:
+                if cp is not None:
+                    params.append(cp)
         return params
 
     @property
@@ -198,9 +199,10 @@ class CircuitParams:
             ]
             if param is not None
         ]
-        for cp in self.context_parameters:
-            if cp is not None:
-                params.extend(cp)
+        if self.context_parameters is not None:
+            for cp in self.context_parameters:
+                if cp is not None:
+                    params.append(cp)
         return params
 
     @property

@@ -435,7 +435,7 @@ def _normalize_virtual_target_qubits(
     
     # Check if it's a sequence of sequences (one per circuit)
     if isinstance(virtual_target_qubits, Sequence) and len(virtual_target_qubits) > 0:
-        if isinstance(virtual_target_qubits[0], Sequence) and not all(isinstance(q, Qubit) for q in virtual_target_qubits[0]):
+        if isinstance(virtual_target_qubits[0], Sequence) and all(isinstance(q, Sequence) for q in virtual_target_qubits):
             # Sequence of sequences - one per circuit
             if len(virtual_target_qubits) != num_circuits:
                 raise ValueError(
