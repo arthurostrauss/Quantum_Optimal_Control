@@ -162,8 +162,8 @@ class CustomGateReplacementPass(TransformationPass):
         # Handle QuantumCircuit and Gate types
         if isinstance(func, QuantumCircuit):
             new_instr = func.assign_parameters(params) if params is not None else func
-            # new_instr = new_instr.to_instruction()
             if self.opaque_gates:
+                new_instr = new_instr.to_instruction()
                 new_instr.definition = None
             dag.compose(circuit_to_dag(new_instr), local_qargs, local_cargs, inplace=True)
         elif isinstance(func, Instruction):

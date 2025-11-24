@@ -21,6 +21,7 @@ from ...helpers import validate_circuit_and_target
 from ...helpers.circuit_utils import (
     extend_input_state_prep,
     extend_observables,
+    get_2design_input_states,
     observables_to_indices,
     shots_to_precision,
     precision_to_shots,
@@ -274,7 +275,6 @@ class StateReward(Reward):
 
         qc = prep_circuits[0].copy_empty_like("real_time_state_qc")
         qc.reset(qc.qubits)
-        num_qubits = qc.num_qubits
         n_reps_var = qc.add_input("n_reps", Uint(32)) if len(all_n_reps) > 1 else n_reps
         if is_gate_target:
             causal_cone_qubits = target.causal_cone_qubits
@@ -294,20 +294,34 @@ class StateReward(Reward):
         observables_vars = [
             qc.add_input(f"observable_{i}", Uint(32)) for i in range(causal_cone_size)
         ]
-        input_circuits = [
-            circ.decompose() for circ in get_single_qubit_input_states(self.input_states_choice)
-        ]
+        input_circuits = get_single_qubit_input_states(self.input_states_choice)
 
-        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(num_qubits)]
-        for q, qubit in enumerate(causal_cone_qubits):
-            # Input state prep (over all qubits of the circuit context)
-            with qc.switch(input_state_vars[q]) as case_input_state:
+        input_choice = self.input_states_choice
+        if input_choice in ["pauli4", "pauli6"]:
+            input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(causal_cone_size)]
+            input_circuits = get_single_qubit_input_states(input_choice)
+            for q, qubit in enumerate(causal_cone_qubits):
+                # Input state prep (over all qubits of the circuit context)
+                with qc.switch(input_state_vars[q]) as case_input_state:
+                    for i, input_circuit in enumerate(input_circuits):
+                        with case_input_state(i):
+                            if input_circuit.data:
+                                qc.compose(input_circuit, qubit, inplace=True)
+                            else:
+                                qc.delay(16, qubit)
+        else:  # 2-design
+            input_states = get_2design_input_states(2**causal_cone_size)
+            input_circuits = [QuantumCircuit(causal_cone_size) for _ in input_states]
+            for input_circuit, input_state in zip(input_circuits, input_states):
+                input_circuit.prepare_state(input_state)
+            input_state_var = qc.add_input("input_state", Uint(32))
+            with qc.switch(input_state_var) as case_input_state:
                 for i, input_circuit in enumerate(input_circuits):
                     with case_input_state(i):
                         if input_circuit.data:
-                            qc.compose(input_circuit, qubit, inplace=True)
+                            qc.compose(input_circuit, causal_cone_qubits, inplace=True)
                         else:
-                            qc.delay(16, qubit)
+                            qc.delay(16, causal_cone_qubits)
 
         if len(prep_circuits) > 1:  # Switch over possible contexts
             circuit_choice = qc.add_input("circuit_choice", Uint(32))
