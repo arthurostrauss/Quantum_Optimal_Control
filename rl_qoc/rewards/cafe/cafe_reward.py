@@ -258,15 +258,14 @@ class CAFEReward(Reward):
 
         qc = prep_circuits[0].copy_empty_like(name="real_time_cafe_qc")
         qc.reset(qc.qubits)
-        num_qubits = qc.num_qubits
         all_n_reps = execution_config.n_reps
         n_reps = execution_config.current_n_reps
 
         def _compose_or_delay(compose_circuit, qubit_args):
-                if compose_circuit.data:
-                    qc.compose(compose_circuit, qubit_args, inplace=True)
-                else:
-                    qc.delay(16, qubit_args)
+            if compose_circuit.data:
+                qc.compose(compose_circuit, qubit_args, inplace=True)
+            else:
+                qc.delay(16, qubit_args)
 
 
         n_reps_var = qc.add_input("n_reps", Uint(32)) if len(all_n_reps) > 1 else n_reps
@@ -280,7 +279,7 @@ class CAFEReward(Reward):
 
         input_choice = self.input_states_choice
         if input_choice in ["pauli4", "pauli6"]:
-            input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(num_qubits)]
+            input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(target.causal_cone_size)]
             input_circuits = get_single_qubit_input_states(input_choice)
 
             for q, qubit in enumerate(target.causal_cone_qubits):
@@ -290,8 +289,8 @@ class CAFEReward(Reward):
                         with case_input_state(i):
                             _compose_or_delay(input_circuit, qubit)
         else: # 2-design
-            input_states = get_2design_input_states(2**num_qubits)
-            input_circuits = [QuantumCircuit(num_qubits) for _ in input_states]
+            input_states = get_2design_input_states(2**target.causal_cone_size)
+            input_circuits = [QuantumCircuit(target.causal_cone_size) for _ in input_states]
             for input_circuit, input_state in zip(input_circuits, input_states):
                 input_circuit.prepare_state(input_state)
             input_state_var = qc.add_input("input_state", Uint(32))

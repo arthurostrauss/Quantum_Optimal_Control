@@ -294,7 +294,6 @@ class StateReward(Reward):
         observables_vars = [
             qc.add_input(f"observable_{i}", Uint(32)) for i in range(causal_cone_size)
         ]
-        input_circuits = get_single_qubit_input_states(self.input_states_choice)
 
         input_choice = self.input_states_choice
         if input_choice in ["pauli4", "pauli6"]:
