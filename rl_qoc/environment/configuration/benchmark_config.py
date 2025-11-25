@@ -56,7 +56,7 @@ class BenchmarkConfig:
         """
         return False
 
-    
+@dataclass
 class SingleQubitRBBenchmarkConfig(BenchmarkConfig):
     """
     Configuration for benchmarking the policy through real-time single qubit Randomized Benchmarking (in QUA)
@@ -103,6 +103,7 @@ class SingleQubitRBBenchmarkConfig(BenchmarkConfig):
         """
         raise NotImplementedError("This benchmark config does not have a QUA macro for benchmarking")
     
+@dataclass
 class CAFEBenchmarkConfig(BenchmarkConfig):
     """
     Configuration for benchmarking the policy through CAFE fidelity estimation
