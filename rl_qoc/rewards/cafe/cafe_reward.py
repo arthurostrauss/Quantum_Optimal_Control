@@ -310,7 +310,7 @@ class CAFEReward(Reward):
             handle_real_time_n_reps(all_n_reps, n_reps_var, prep_circuits[0], qc)
 
         # Inversion step: compute the ideal reverse unitaries
-        ref_circuits = [circ.metadata.get("baseline_circuit", None) for circ in prep_circuits]
+        ref_circuits: List[Optional[QuantumCircuit]] = [circ.metadata.get("baseline_circuit", None) for circ in prep_circuits]
         cycle_circuit_inverses = [[] for _ in range(len(ref_circuits))]
         input_state_inverses = [input_circuit.inverse() for input_circuit in input_circuits]
         for i, ref_circ in enumerate(ref_circuits):
