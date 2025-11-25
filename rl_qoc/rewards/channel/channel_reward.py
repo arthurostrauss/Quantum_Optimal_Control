@@ -355,7 +355,7 @@ class ChannelReward(Reward):
             if meas.size != target.causal_cone_size:
                 raise ValueError("Classical register size must match the target causal cone size")
 
-        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(num_qubits)]
+        input_state_vars = [qc.add_input(f"input_state_{i}", Uint(32)) for i in range(target.causal_cone_size)]
         observables_vars = [
             qc.add_input(f"observable_{i}", Uint(32)) for i in range(target.causal_cone_size)
         ]
