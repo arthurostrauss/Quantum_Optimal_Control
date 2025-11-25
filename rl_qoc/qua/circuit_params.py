@@ -20,7 +20,8 @@ class CircuitParams:
     max_input_state: Optional[QuaParameter] = None
     max_observables: Optional[QuaParameter] = None
     real_time_circuit_parameters: Optional[ParameterTable] = None
-    context_parameters: List[Optional[ParameterTable]] = None
+    context_parameters: Optional[List[Optional[ParameterTable]]] = None
+    benchmark_cycle_var: Optional[QuaParameter] = None
 
     @classmethod
     def from_circuit(
@@ -41,6 +42,16 @@ class CircuitParams:
             input_type=input_type,
             filter_function=lambda x: "observable" in x.name,
             name="observable_vars",
+        )
+        benchmark_cycle_var = (
+            QuaParameter(
+                "benchmark_cycle",
+                False,
+                input_type=input_type,
+                direction=Direction.OUTGOING,
+            )
+            if config.benchmark_cycle > 0 and config.check_on_exp
+            else None
         )
         n_reps_var = (
             QuaParameter(
@@ -91,13 +102,13 @@ class CircuitParams:
         real_time_circuit_parameters = ParameterTable.from_qiskit(
             qc,
             input_type=None,
-            filter_function=lambda x: isinstance(x, Parameter) and x not in context_parameters,
+            filter_function=lambda x: isinstance(x, Parameter) and not any(x in cp for cp in context_parameters),
             name="real_time_circuit_parameters",
         )
         context_parameters_table = [
             ParameterTable.from_qiskit(
                 qc,
-                input_type=None,
+                input_type=input_type,
                 filter_function=lambda x: isinstance(x, Parameter) and x in context_parameters[i],
                 name=f"context_parameters_{i}",
             )
@@ -114,6 +125,7 @@ class CircuitParams:
             max_observables=max_observables,
             real_time_circuit_parameters=real_time_circuit_parameters,
             context_parameters=context_parameters_table,
+            benchmark_cycle_var=benchmark_cycle_var,
         )
 
     def reset(self):
@@ -150,7 +162,7 @@ class CircuitParams:
         """
         Return all the parameters of the circuit params that are not None
         """
-        return [
+        params = [
             param
             for param in [
                 self.input_state_vars,
@@ -161,16 +173,22 @@ class CircuitParams:
                 self.max_input_state,
                 self.max_observables,
                 self.real_time_circuit_parameters,
+                self.benchmark_cycle_var,
             ]
             if param is not None
         ]
+        if self.context_parameters is not None:
+            for cp in self.context_parameters:
+                if cp is not None:
+                    params.append(cp)
+        return params
 
     @property
     def circuit_variables(self) -> List[QuaParameter | ParameterTable]:
         """
         Return all the parameters of the circuit embedded variables and parameters that are not None
         """
-        return [
+        params = [
             param
             for param in [
                 self.input_state_vars,
@@ -181,6 +199,11 @@ class CircuitParams:
             ]
             if param is not None
         ]
+        if self.context_parameters is not None:
+            for cp in self.context_parameters:
+                if cp is not None:
+                    params.append(cp)
+        return params
 
     @property
     def fiducials_variables(self) -> List[QuaParameter]:

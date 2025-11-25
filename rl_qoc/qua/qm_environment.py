@@ -83,7 +83,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         self._qm_job: Optional[RunningQmJob] = job
         if self.backend is not None:
-            self.backend.update_compiler_from_target(self.input_type)
+            self.backend.update_target(self.input_type)
             if (
                 hasattr(self.real_time_circuit, "calibrations")
                 and self.real_time_circuit.calibrations
@@ -126,6 +126,8 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
 
         # Push policy parameters to trigger real-time action sampling
         self.policy.push_to_opx({"mu": mean_val, "sigma": std_val}, **push_args)
+        if self.circuit_params.benchmark_cycle_var is not None: # Push benchmark boolean to OPX if benchmarking is enabled
+            self.circuit_params.benchmark_cycle_var.push_to_opx(self.do_benchmark(), **push_args)
         if self.qm_backend_config.verbosity > 1:
             print("Just pushed policy parameters to OPX:", mean_val, std_val)
             if self.qm_backend_config.wrapper_data.get("rescale_and_clip", None) is not None:
@@ -245,7 +247,7 @@ class QMEnvironment(ContextAwareQuantumEnvironment):
             ParameterPool.configure_stream(self.qm_backend_config.path_to_python_wrapper)
         if hasattr(self.real_time_circuit, "calibrations") and self.real_time_circuit.calibrations:
             self.backend.update_calibrations(qc=self.real_time_circuit, input_type=self.input_type)
-        self.backend.update_compiler_from_target()
+        self.backend.update_target(self.input_type)
         prog = self.rl_qoc_training_qua_prog(num_updates=self.qm_backend_config.num_updates)
         self.backend.close_all_qms()
         self._qm_job = self.qm.execute(

@@ -129,8 +129,9 @@ class QiskitConfig(BackendConfig):
         else:
             num_qubits = max(qc.num_qubits for qc in qc_input)
             coupling_map = CouplingMap.from_full(num_qubits)
+        pass_manager = self.pass_manager
         if not self.skip_transpilation:
-            if self.pass_manager is None:
+            if pass_manager is None:
                 if self.backend is None:
                     target = Target.from_configuration(
                         self.basis_gates,
@@ -141,7 +142,7 @@ class QiskitConfig(BackendConfig):
                     )
                 else:
                     target = self.backend.target
-                self.pass_manager = generate_preset_pass_manager(
+                pass_manager = generate_preset_pass_manager(
                     optimization_level=optimization_level,
                     backend=self.backend,
                     target=target if self.backend is None else None,
@@ -152,7 +153,7 @@ class QiskitConfig(BackendConfig):
                     translation_method="translator",
                 )
             if self.backend is not None:
-                circuit = self.pass_manager.run(circuit)
+                circuit = pass_manager.run(circuit)
             else:
                 if isinstance(circuit, QuantumCircuit):
                     circuit = circuit.decompose()

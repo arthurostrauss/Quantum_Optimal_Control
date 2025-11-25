@@ -169,28 +169,9 @@ class QuantumEnvironment(BaseQuantumEnvironment):
         """
 
         if self.config.check_on_exp:
-
             # Experiment based fidelity estimation
             try:
-                if not self.config.reward_method == "fidelity":
-                    if self.config.benchmark_config.benchmark_batch_size > 1:
-                        angle_sets = np.clip(
-                            np.random.normal(
-                                self.mean_action,
-                                self.std_action,
-                                size=(self.config.benchmark_batch_size, self.n_actions),
-                            ),
-                            self.action_space.low,
-                            self.action_space.high,
-                        )
-                    else:
-                        angle_sets = [self.mean_action]
-                else:
-                    if len(params.shape) == 1:
-                        params = np.expand_dims(params, axis=0)
-                    angle_sets = params
-
-                qc_input = [qc.assign_parameters(angle_set) for angle_set in angle_sets]
+                qc_input = qc.assign_parameters(self.mean_action)
                 print("Starting tomography...")
                 fids = fidelity_from_tomography(
                     qc_input,
@@ -201,7 +182,6 @@ class QuantumEnvironment(BaseQuantumEnvironment):
                         if isinstance(self.target, GateTarget)
                         else self.target.dm
                     ),
-                    analysis=self.config.tomography_analysis,
                     sampler=self.sampler,
                 )
                 print("Finished tomography")
