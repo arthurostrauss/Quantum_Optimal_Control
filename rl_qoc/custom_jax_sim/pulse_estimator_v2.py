@@ -28,6 +28,7 @@ from qiskit_dynamics.solvers.solver_classes import (
 from scipy.integrate._ivp.ivp import OdeResult
 from jax import vmap, jit
 from qiskit.pulse import Schedule, ScheduleBlock, SymbolicPulse
+from .schedule_to_jax_func import build_jax_schedule_reconstructor
 
 
 def simulate_pulse_level(
@@ -53,25 +54,25 @@ def simulate_pulse_level(
     pub_parameters = pub.parameter_values
     if not pub_parameters.shape:
         pub_parameters = pub_parameters.reshape(-1)
-    parameter_values = pub_parameters.data
+    parameter_values = pub_parameters.ravel().as_array(sorted(pub.circuit.parameters, key=lambda x: x.name))
+    
     # Build pulse schedule generator function (with or without parameter values)
     sched = schedule(pub.circuit, backend)
-
+    sched_generator, param_names = build_jax_schedule_reconstructor(sched)
     # Compute t_span given the circuit duration
     t_span = [0, sched.duration * dt]  # Time span for simulation
 
     # Define jittable simulation function
-    if parameter_values:
-
+    if pub.circuit.parameters:
         def jittable_sim(t_span, y0, y0_input, y0_cls, param_dict):
-            return pulse_level_core_sim(sched, backend, t_span, y0, y0_input, y0_cls, param_dict)
+            return pulse_level_core_sim(sched_generator, backend, t_span, y0, y0_input, y0_cls, parameter_values)
 
         param_vmap = vmap(jittable_sim, in_axes=(None, None, None, None, 0))
         jit_sim = jit(param_vmap, static_argnums=(3,))
     else:
 
         def jittable_sim(t_span, y0, y0_input, y0_cls):
-            return pulse_level_core_sim(sched, backend, t_span, y0, y0_input, y0_cls)
+            return pulse_level_core_sim(sched_generator, backend, t_span, y0, y0_input, y0_cls)
 
         jit_sim = jit(jittable_sim, static_argnums=(3,))
 
@@ -83,7 +84,7 @@ def simulate_pulse_level(
     y0, y0_input, y0_cls, state_type_wrapper = validate_and_format_initial_state(y0, model)
 
     # jax.config.update('jax_disable_jit', True)
-    if parameter_values:
+    if pub.circuit.parameters:
         batch_results_t, batch_results_y = jit_sim(
             unp.asarray(t_span),
             unp.asarray(y0),
@@ -107,13 +108,13 @@ def simulate_pulse_level(
 
 
 def pulse_level_core_sim(
-    sched: Schedule,
+    sched_generator: Callable,
     backend: DynamicsBackend,
     t_span: list[float],
     y0,
     y0_input,
     y0_cls,
-    param_dict: Optional[dict] = None,
+    parameter_values: Optional[np.ndarray] = None,
 ):
     """
     Core simulation function for pulse level simulation (called within a JIT compiled function).
@@ -125,14 +126,13 @@ def pulse_level_core_sim(
         y0: Initial state
         y0_input: Initial state input type
         y0_cls: Initial state class
-        param_dict: Parameter dictionary for parameterized schedules
+        parameter_values: Parameter values for parameterized schedules
     """
 
     solver: Solver = backend.options.solver
     model = solver.model
     model_sigs = model.signals
-    if sched.is_parameterized():
-        sched.assign_parameters(param_dict)
+    sched = sched_generator(parameter_values)
     signals = solver._schedule_to_signals(sched)
     solver._set_new_signals(signals)
     results = solve_lmde(model, t_span, y0, **backend.options.solver_options)
@@ -164,9 +164,10 @@ class PulseEstimatorV2(BaseEstimatorV2):
         if not isinstance(backend, DynamicsBackend):
             raise TypeError("PulseEstimatorV2 can only be used with a DynamicsBackend.")
 
-        ScheduleBlock.disable_parameter_validation = True
+        # ScheduleBlock.disable_parameter_validation = True
+        # Schedule.disable_parameter_validation = True
         SymbolicPulse.disable_validation = True
-        Schedule.disable_parameter_validation = True
+
         self._backend = backend
         self._options = Options(**options) if options else Options()
 

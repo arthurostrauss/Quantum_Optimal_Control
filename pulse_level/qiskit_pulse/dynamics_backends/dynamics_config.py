@@ -2,7 +2,8 @@ from qiskit.quantum_info import Statevector
 import jax
 from qiskit_dynamics import DynamicsBackend, Solver
 from .utils import *
-
+from qiskit.pulse import ScalableSymbolicPulse
+ScalableSymbolicPulse.disable_validation = True
 jax.config.update("jax_enable_x64", True)
 # tell JAX we are using CPU
 jax.config.update("jax_platform_name", "cpu")

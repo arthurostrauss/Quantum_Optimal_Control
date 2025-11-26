@@ -9,7 +9,7 @@ from qiskit_qm_provider import QMBackend
 from typing import Literal, Union, Optional, Dict, Any, List
 from qiskit_qm_provider import InputType
 
-Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX"], InputType]
+Input_Type = Union[Literal["INPUT_STREAM", "IO1", "IO2", "DGX_Q"], InputType]
 
 
 @dataclass

@@ -89,26 +89,20 @@ def retrieve_primitives(
     backend = config.backend
     primitive_options = config.primitive_options
 
-    if config.config_type == "dynamics":
-        from ..environment.configuration.backend_config import DynamicsConfig
-
+    if type(backend).__name__ == "DynamicsBackend":
         try:
             from .pulse_utils import perform_standard_calibrations
         except ImportError:
             raise ImportError("Qiskit DynamicsBackend requires Qiskit below 2.x.")
-        assert isinstance(config, DynamicsConfig), "Configuration must be a DynamicsConfig"
-        dummy_param = Parameter("dummy")
-        if hasattr(dummy_param, "jax_compat"):
-            from ..custom_jax_sim import PulseEstimatorV2
+        
+        from ..custom_jax_sim import PulseEstimatorV2
 
-            estimator = PulseEstimatorV2(backend=backend, options=primitive_options)
-        else:
-            estimator = BackendEstimatorV2(backend=backend, options=primitive_options)
+        estimator = PulseEstimatorV2(backend=backend, options=primitive_options)
+        
         sampler = BackendSamplerV2(backend=backend)
 
-        if config.do_calibrations and not backend.target.has_calibration("x", (0,)):
-            calibration_files = config.calibration_files
-            _, _ = perform_standard_calibrations(backend, calibration_files)
+        if not backend.target.has_calibration("x", (0,)):
+            _, _ = perform_standard_calibrations(backend)
     elif config.config_type == "qibo":
         from ..qibo import QiboEstimatorV2
 

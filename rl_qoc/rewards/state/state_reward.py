@@ -79,7 +79,7 @@ class StateReward(Reward):
         qc: QuantumCircuit,
         params: np.ndarray,
         env_config: QEnvConfig,
-        dfe_precision: Optional[Tuple[float, float]] = None,
+        *args,
     ) -> StateRewardDataList:
         """
         Compute pubs related to the reward method.
@@ -97,6 +97,7 @@ class StateReward(Reward):
         """
         execution_config = env_config.execution_config
         backend_info = env_config.backend_config
+        dfe_precision = execution_config.dfe_precision
         target = env_config.target
         input_circuit = qc.copy_empty_like()
 
