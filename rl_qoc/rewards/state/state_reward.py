@@ -225,9 +225,9 @@ class StateReward(Reward):
         *args,
     ) -> StateRewardDataList:
         """
-        Compute reward data for MultiTarget with parallel PUB building.
-        Creates PUBs that contain input state preparations for each target's qubits
-        and extends observables to act on different subsystems.
+        Compute reward data for MultiTarget with joint PUB building.
+        Combines all input state preparations (acting on disjoint qubits) into a single circuit.
+        Structures observables to enable per-target reward extraction in post-processing.
         
         Args:
             qc: Quantum circuit to be executed on quantum system
@@ -236,7 +236,7 @@ class StateReward(Reward):
             *args: Additional arguments
             
         Returns:
-            StateRewardDataList containing reward data for all targets
+            StateRewardDataList containing reward data with structured observables for per-target extraction
         """
         from ...environment.configuration.multi_target_qconfig import MultiTargetQEnvConfig
         from ...environment.target import MultiTarget
@@ -247,16 +247,20 @@ class StateReward(Reward):
         multi_target: MultiTarget = env_config.target
         n_reps = execution_config.current_n_reps
         
-        # Collect reward data for each target
-        all_reward_data = []
-        
         # Prepare the base circuit with n_reps
         prep_circuit = handle_n_reps(
             qc, n_reps, backend_info.backend, execution_config.control_flow_enabled
         )
         
-        # For each gate target, prepare input states and observables
-        for gate_target in multi_target.gate_targets:
+        # Collect input state preparations and observables for all targets
+        combined_input_circuit = qc.copy_empty_like()
+        all_observables_list = []  # List of (target_index, observable, qubit_indices, id_coeff, pauli_sampling)
+        all_input_indices = []  # List of (target_index, input_indices)
+        all_observable_indices = []  # List of (target_index, observable_indices)
+        target_metadata = []  # Store metadata per target
+        
+        # Process each target to collect input states and observables
+        for target_idx, gate_target in enumerate(multi_target.gate_targets):
             if not isinstance(gate_target, GateTarget):
                 continue
                 
@@ -273,13 +277,17 @@ class StateReward(Reward):
             target_state = input_state.target_state(n_reps)
             
             # Create input state preparation circuit for this target's qubits
-            input_circuit = qc.copy_empty_like().compose(
+            target_input_circuit = qc.copy_empty_like().compose(
                 input_state.circuit, qubits=gate_target.causal_cone_qubits
             )
-            input_circuit, extended_input_indices = extend_input_state_prep(
-                input_circuit, qc, gate_target, list(input_state_indices)
+            target_input_circuit, extended_input_indices = extend_input_state_prep(
+                target_input_circuit, qc, gate_target, list(input_state_indices)
             )
-            input_circuit.metadata["input_indices"] = extended_input_indices
+            
+            # Compose this target's input preparation into the combined circuit
+            # Since qubits are disjoint, this can be done in parallel
+            combined_input_circuit.compose(target_input_circuit, inplace=True)
+            all_input_indices.append((target_idx, tuple(extended_input_indices)))
             
             # DFE: Retrieve observables for this target
             Chi = target_state.Chi
@@ -315,54 +323,95 @@ class StateReward(Reward):
                 pauli_shots = execution_config.n_shots * counts
             
             # Create observables for this target's subsystem
-            observables = SparsePauliOp(basis[pauli_indices], reward_factor)
-            observable_indices = observables_to_indices(observables)
+            target_observables = SparsePauliOp(basis[pauli_indices], reward_factor)
+            observable_indices = observables_to_indices(target_observables)
+            all_observable_indices.append((target_idx, observable_indices))
             
-            # Group observables by qubit-wise commuting groups
-            shots_per_basis = []
-            for i, commuting_group in enumerate(observables.paulis.group_qubit_wise_commuting()):
-                max_pauli_shots = 0
-                for pauli in commuting_group:
-                    pauli_index = list(basis).index(pauli)
-                    ref_index = list(pauli_indices).index(pauli_index)
-                    max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
-                shots_per_basis.append(max_pauli_shots)
-            pauli_shots = shots_per_basis
+            # Store metadata for this target
+            target_metadata.append({
+                'target_idx': target_idx,
+                'gate_target': gate_target,
+                'id_coeff': id_coeff,
+                'pauli_sampling': pauli_sampling,
+                'pauli_shots': pauli_shots,
+                'observables': target_observables,
+            })
             
-            # Create a combined circuit with input state prep for this target
-            target_prep_circuit = prep_circuit.copy()
-            target_prep_circuit.compose(input_circuit, front=True, inplace=True)
-            
-            target_prep_circuit = backend_info.custom_transpile(
-                target_prep_circuit, initial_layout=gate_target.layout, scheduling=False
+            # Extend observables to full circuit qubits and store with target index
+            extended_obs = extend_observables(
+                target_observables, prep_circuit, gate_target.causal_cone_qubits_indices
             )
-            
-            # Extend observables to the full circuit qubits
-            pub_obs = extend_observables(
-                observables, target_prep_circuit, gate_target.causal_cone_qubits_indices
-            )
-            
-            pub = (
-                target_prep_circuit,
-                pub_obs,
-                params,
-                shots_to_precision(max(pauli_shots)),
-            )
-            
-            reward_data = StateRewardData(
-                pub=pub,
-                id_coeff=id_coeff,
-                pauli_sampling=pauli_sampling,
-                input_circuit=input_circuit,
-                observables=observables,
-                input_indices=extended_input_indices,
-                observables_indices=observable_indices,
-                n_reps=n_reps,
-            )
-            
-            all_reward_data.append(reward_data)
+            all_observables_list.append((target_idx, extended_obs, gate_target.causal_cone_qubits_indices, id_coeff, pauli_sampling))
         
-        return StateRewardDataList(all_reward_data)
+        # Combine all observables into a single SparsePauliOp
+        # We'll structure this so post-processing can extract per-target rewards
+        combined_observables = None
+        max_shots = 0
+        total_id_coeff = 0.0
+        total_pauli_sampling = 0
+        
+        for target_idx, obs, qubit_indices, id_coeff, pauli_sampling in all_observables_list:
+            if combined_observables is None:
+                combined_observables = obs
+            else:
+                combined_observables = combined_observables + obs
+            max_shots = max(max_shots, max(target_metadata[target_idx]['pauli_shots']) if isinstance(target_metadata[target_idx]['pauli_shots'], (list, np.ndarray)) else target_metadata[target_idx]['pauli_shots'])
+            total_id_coeff += id_coeff
+            total_pauli_sampling += pauli_sampling
+        
+        if combined_observables is None:
+            raise ValueError("No observables generated for any target")
+        
+        combined_observables = combined_observables.simplify()
+        
+        # Create the combined preparation circuit
+        combined_prep_circuit = prep_circuit.compose(combined_input_circuit, front=True, inplace=False)
+        
+        # Use the layout from the first target (or combine layouts if needed)
+        first_target = multi_target.gate_targets[0]
+        if isinstance(first_target, GateTarget):
+            layout = first_target.layout
+        else:
+            layout = None
+        
+        combined_prep_circuit = backend_info.custom_transpile(
+            combined_prep_circuit, initial_layout=layout, scheduling=False
+        )
+        
+        # Store target mapping in metadata for post-processing
+        combined_prep_circuit.metadata["multi_target_mapping"] = {
+            'target_indices': [t['target_idx'] for t in target_metadata],
+            'target_qubits': [t['gate_target'].causal_cone_qubits_indices if isinstance(t['gate_target'], GateTarget) else [] for t in target_metadata],
+            'target_id_coeffs': [t['id_coeff'] for t in target_metadata],
+            'target_pauli_samplings': [t['pauli_sampling'] for t in target_metadata],
+            'input_indices': all_input_indices,
+            'observable_indices': all_observable_indices,
+        }
+        
+        # Create PUB with combined circuit and observables
+        pub = (
+            combined_prep_circuit,
+            combined_observables,
+            params,
+            shots_to_precision(max_shots),
+        )
+        
+        # Create reward data with combined structure
+        reward_data = StateRewardData(
+            pub=pub,
+            id_coeff=total_id_coeff,
+            pauli_sampling=total_pauli_sampling,
+            input_circuit=combined_input_circuit,
+            observables=combined_observables,
+            input_indices=tuple([idx for _, idx in all_input_indices]),  # Flatten for compatibility
+            observables_indices=[idx for _, idx in all_observable_indices],  # List of lists
+            n_reps=n_reps,
+        )
+        
+        # Store target mapping in reward data for post-processing
+        reward_data.target_mapping = combined_prep_circuit.metadata["multi_target_mapping"]
+        
+        return StateRewardDataList([reward_data])
 
     def get_shot_budget(self, pubs: List[EstimatorPub]) -> int:
         """

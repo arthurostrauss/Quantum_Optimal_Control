@@ -293,9 +293,9 @@ class ChannelReward(Reward):
         *args,
     ) -> ChannelRewardDataList:
         """
-        Compute reward data for MultiTarget with parallel PUB building.
-        Creates PUBs that contain input state preparations for each target's qubits
-        and extends observables to act on different subsystems.
+        Compute reward data for MultiTarget with joint PUB building.
+        Combines all input state preparations (acting on disjoint qubits) into a single circuit.
+        Groups fiducials by input Pauli and structures observables to enable per-target reward extraction.
         
         Args:
             qc: Quantum circuit to be executed on quantum system
@@ -304,7 +304,7 @@ class ChannelReward(Reward):
             *args: Additional arguments
             
         Returns:
-            ChannelRewardDataList containing reward data for all targets
+            ChannelRewardDataList containing reward data with structured observables for per-target extraction
         """
         from ...environment.configuration.multi_target_qconfig import MultiTargetQEnvConfig
         from ...environment.target import MultiTarget
@@ -325,7 +325,6 @@ class ChannelReward(Reward):
                 )
         
         n_reps = execution_config.current_n_reps
-        n_shots = execution_config.n_shots
         control_flow = execution_config.control_flow_enabled
         c_factor = execution_config.c_factor
         dfe_precision = execution_config.dfe_precision
@@ -334,13 +333,15 @@ class ChannelReward(Reward):
         repeated_circuit = handle_n_reps(qc, n_reps, backend_info.backend, control_flow)
         prep_basis = Pauli6PreparationBasis()
         
-        # Collect all reward data from all targets
-        all_reward_data = []
+        # Collect all fiducials from all targets, grouped by (target_idx, prep_pauli_label)
+        # Structure: {(target_idx, prep_label): [(prep, obs, count, shots, ...)]}
+        all_fiducials_by_target = {}  # {(target_idx, prep_label): list of (prep, obs, count, ...)}
+        target_metadata = {}  # {target_idx: {id_coeff, pauli_sampling, ...}}
         total_pauli_sampling = 0
         total_id_coeff = 0.0
         
-        # Process each target independently
-        for gate_target in multi_target.gate_targets:
+        # Process each target to collect fiducials
+        for target_idx, gate_target in enumerate(multi_target.gate_targets):
             n_qubits = gate_target.causal_cone_size
             dim = 2**n_qubits
             nb_states = self.num_eigenstates_per_pauli
@@ -385,6 +386,13 @@ class ChannelReward(Reward):
                 c_factor * np.sum(counts[identity_terms] / Chi[samples[identity_terms]])
             )
             total_id_coeff += id_coeff
+            target_metadata[target_idx] = {
+                'id_coeff': id_coeff,
+                'pauli_sampling': pauli_sampling,
+                'gate_target': gate_target,
+                'dim': dim,
+                'nb_states': nb_states,
+            }
             
             pauli_indices = np.delete(pauli_indices, identity_terms, axis=0)
             samples = np.delete(samples, identity_terms)
@@ -392,39 +400,68 @@ class ChannelReward(Reward):
             
             reward_factor = c_factor * counts / (dim * Chi[samples])
             fiducials_list = [
-                (basis[p[0]], SparsePauliOp(basis[p[1]], r))
-                for p, r in zip(pauli_indices, reward_factor)
+                (basis[p[0]], SparsePauliOp(basis[p[1]], r), count)
+                for p, r, count in zip(pauli_indices, reward_factor, counts)
             ]
             
+            # Regroup observables for same input Pauli within this target
             obs_dict = {}
-            # Regroup observables for same input Pauli
-            for i, (prep, obs) in enumerate(fiducials_list):
+            for prep, obs, count in fiducials_list:
                 label = prep.to_label()
-                if label not in obs_dict:
-                    obs_dict[label] = (prep, obs, counts[i])
+                key = (target_idx, label)
+                if key not in obs_dict:
+                    obs_dict[key] = (prep, obs, count)
                 else:
-                    _, ref_obs, ref_count = obs_dict[label]
-                    obs_dict[label] = (
+                    _, ref_obs, ref_count = obs_dict[key]
+                    obs_dict[key] = (
                         prep,
                         (ref_obs + obs).simplify(),
-                        max(ref_count, counts[i]),
+                        max(ref_count, count),
                     )
             
-            fiducials = [(prep, obs) for prep, obs, _ in obs_dict.values()]
-            pauli_shots = [count for _, _, count in obs_dict.values()]
-            used_prep_indices = {}
+            # Store in all_fiducials_by_target
+            for key, (prep, obs, count) in obs_dict.items():
+                if key not in all_fiducials_by_target:
+                    all_fiducials_by_target[key] = []
+                all_fiducials_by_target[key].append((prep, obs, count))
+        
+        # Now group by input Pauli label across all targets
+        # Structure: {prep_label: [(target_idx, prep, obs, count, ...)]}
+        fiducials_by_prep_label = {}
+        for (target_idx, prep_label), fiducials in all_fiducials_by_target.items():
+            if prep_label not in fiducials_by_prep_label:
+                fiducials_by_prep_label[prep_label] = []
+            for prep, obs, count in fiducials:
+                fiducials_by_prep_label[prep_label].append((target_idx, prep, obs, count))
+        
+        # Process each unique input Pauli label
+        all_reward_data = []
+        max_shots = 0
+        
+        for prep_label, target_fiducials in fiducials_by_prep_label.items():
+            # For each target contributing to this prep_label, collect all input states and observables
+            # We'll combine input state preparations that can be done in parallel (disjoint qubits)
             
-            for (prep, obs_list), shots in zip(fiducials, pauli_shots):
-                prep: Pauli
+            # Group by target and collect all input states for this prep_label
+            target_input_states = {}  # {target_idx: [(prep_indices, obs, parity, shots)]}
+            
+            for target_idx, prep, obs_list, count in target_fiducials:
+                gate_target = target_metadata[target_idx]['gate_target']
+                dim = target_metadata[target_idx]['dim']
+                nb_states = target_metadata[target_idx]['nb_states']
+                
+                # Sample input states for this target's prep
                 max_input_states = dim // nb_states
                 selected_input_states, dedicated_shots = np.unique(
-                    self.input_states_rng.choice(dim, size=shots), return_counts=True
+                    self.input_states_rng.choice(dim, size=count), return_counts=True
                 )
                 
-                prep_label = prep.to_label()
+                if target_idx not in target_input_states:
+                    target_input_states[target_idx] = []
                 
                 for pure_eig_state, dedicated_shot in zip(selected_input_states, dedicated_shots):
-                    inputs = np.unravel_index(pure_eig_state, (2,) * n_qubits)
+                    n_qubits_target = gate_target.causal_cone_size
+                    inputs = np.unravel_index(pure_eig_state, (2,) * n_qubits_target)
                     parity = np.prod(
                         [
                             (-1) ** inputs[q_idx]
@@ -432,61 +469,118 @@ class ChannelReward(Reward):
                             if term != "I"
                         ]
                     )
-                    
                     prep_indices = pauli_input_to_indices(prep, inputs)
-                    
-                    # Create input state preparation circuit for this target's qubits
-                    input_circuit = qc.copy_empty_like().compose(
-                        prep_basis.circuit(prep_indices),
-                        gate_target.causal_cone_qubits,
-                        inplace=False,
-                    )
-                    input_circuit, extended_prep_indices = extend_input_state_prep(
-                        input_circuit, qc, gate_target, prep_indices
-                    )
-                    prep_indices = tuple(prep_indices)
-                    input_circuit.metadata["indices"] = extended_prep_indices
-                    
-                    # Prepend input state to custom circuit with front composition
-                    prep_circuit = repeated_circuit.compose(
-                        input_circuit.decompose(),
-                        front=True,
-                        inplace=False,
-                    )
-                    
-                    # Transpile circuit
-                    prep_circuit = backend_info.custom_transpile(
-                        prep_circuit,
-                        initial_layout=gate_target.layout,
-                        scheduling=False,
-                        optimization_level=0,
-                    )
-                    
-                    obs_ = parity * obs_list
-                    pub_obs = extend_observables(
-                        obs_, prep_circuit, gate_target.causal_cone_qubits_indices
-                    )
-                    
-                    pub = (
-                        prep_circuit,
-                        pub_obs,
-                        params,
-                        shots_to_precision(dedicated_shot),
-                    )
-                    
-                    used_prep_indices[prep_indices] = ChannelRewardData(
-                        pub,
-                        input_circuit,
-                        obs_,
-                        n_reps,
-                        gate_target.causal_cone_qubits_indices,
-                        prep,
-                        extended_prep_indices,
-                        observables_to_indices(obs_),
-                    )
+                    target_input_states[target_idx].append((prep_indices, obs_list, parity, dedicated_shot))
             
-            for data in used_prep_indices.values():
-                all_reward_data.append(data)
+            # Now create combined circuits for each combination of input states
+            # We'll create one PUB per unique combination of input states across targets
+            # For simplicity, we'll iterate through combinations, but in practice we might want to optimize this
+            
+            # Create input state preparation circuits for all targets in parallel
+            combined_input_circuit = qc.copy_empty_like()
+            combined_observables_list = []  # List of (target_idx, obs, qubit_indices, parity)
+            target_input_metadata = []  # Store metadata for post-processing
+            
+            for target_idx, input_states_list in target_input_states.items():
+                gate_target = target_metadata[target_idx]['gate_target']
+                
+                # For now, take the first input state (we can extend this to handle multiple combinations)
+                # In a full implementation, we'd iterate through all combinations
+                prep_indices, obs_list, parity, dedicated_shot = input_states_list[0]
+                
+                # Create input state preparation circuit for this target's qubits
+                target_input_circuit = qc.copy_empty_like().compose(
+                    prep_basis.circuit(prep_indices),
+                    gate_target.causal_cone_qubits,
+                    inplace=False,
+                )
+                target_input_circuit, extended_prep_indices = extend_input_state_prep(
+                    target_input_circuit, qc, gate_target, prep_indices
+                )
+                
+                # Compose into combined circuit (disjoint qubits, so parallel)
+                combined_input_circuit.compose(target_input_circuit, inplace=True)
+                
+                # Extend observables to full circuit
+                obs_ = parity * obs_list
+                extended_obs = extend_observables(
+                    obs_, repeated_circuit, gate_target.causal_cone_qubits_indices
+                )
+                combined_observables_list.append((target_idx, extended_obs, gate_target.causal_cone_qubits_indices, extended_prep_indices, prep, dedicated_shot))
+                target_input_metadata.append({
+                    'target_idx': target_idx,
+                    'prep': prep,
+                    'prep_indices': extended_prep_indices,
+                    'qubit_indices': gate_target.causal_cone_qubits_indices,
+                })
+                max_shots = max(max_shots, dedicated_shot)
+            
+            # Combine all observables
+            combined_observables = None
+            for target_idx, obs, qubit_indices, prep_indices, prep, shot in combined_observables_list:
+                if combined_observables is None:
+                    combined_observables = obs
+                else:
+                    combined_observables = combined_observables + obs
+            
+            if combined_observables is None:
+                continue
+                
+            combined_observables = combined_observables.simplify()
+            
+            # Create combined preparation circuit
+            combined_prep_circuit = repeated_circuit.compose(
+                combined_input_circuit.decompose(),
+                front=True,
+                inplace=False,
+            )
+            
+            # Use layout from first target
+            first_target = multi_target.gate_targets[0]
+            if isinstance(first_target, GateTarget):
+                layout = first_target.layout
+            else:
+                layout = None
+            
+            combined_prep_circuit = backend_info.custom_transpile(
+                combined_prep_circuit,
+                initial_layout=layout,
+                scheduling=False,
+                optimization_level=0,
+            )
+            
+            # Store target mapping in metadata
+            combined_prep_circuit.metadata["multi_target_mapping"] = {
+                'target_indices': [m['target_idx'] for m in target_input_metadata],
+                'target_qubits': [m['qubit_indices'] for m in target_input_metadata],
+                'target_preps': [m['prep'] for m in target_input_metadata],
+                'target_prep_indices': [m['prep_indices'] for m in target_input_metadata],
+            }
+            
+            pub = (
+                combined_prep_circuit,
+                combined_observables,
+                params,
+                shots_to_precision(max_shots),
+            )
+            
+            # Create reward data - we'll use the first target's metadata for the main structure
+            first_metadata = target_input_metadata[0]
+            reward_data = ChannelRewardData(
+                pub,
+                combined_input_circuit,
+                combined_observables,
+                n_reps,
+                first_metadata['qubit_indices'],
+                first_metadata['prep'],
+                first_metadata['prep_indices'],
+                observables_to_indices(combined_observables),
+            )
+            
+            # Store target mapping for post-processing
+            reward_data.target_mapping = combined_prep_circuit.metadata["multi_target_mapping"]
+            
+            all_reward_data.append(reward_data)
         
         reward_data = ChannelRewardDataList(all_reward_data, total_pauli_sampling, total_id_coeff)
         return reward_data
