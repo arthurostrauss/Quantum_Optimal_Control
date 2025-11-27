@@ -217,6 +217,153 @@ class StateReward(Reward):
 
         return StateRewardDataList([reward_data])
 
+    def get_reward_data_multi_target(
+        self,
+        qc: QuantumCircuit,
+        params: np.ndarray,
+        env_config: "MultiTargetQEnvConfig",
+        *args,
+    ) -> StateRewardDataList:
+        """
+        Compute reward data for MultiTarget with parallel PUB building.
+        Creates PUBs that contain input state preparations for each target's qubits
+        and extends observables to act on different subsystems.
+        
+        Args:
+            qc: Quantum circuit to be executed on quantum system
+            params: Parameters to feed the parametrized circuit
+            env_config: MultiTargetQEnvConfig containing the backend information and execution configuration
+            *args: Additional arguments
+            
+        Returns:
+            StateRewardDataList containing reward data for all targets
+        """
+        from ...environment.configuration.multi_target_qconfig import MultiTargetQEnvConfig
+        from ...environment.target import MultiTarget
+        
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_config
+        dfe_precision = execution_config.dfe_precision
+        multi_target: MultiTarget = env_config.target
+        n_reps = execution_config.current_n_reps
+        
+        # Collect reward data for each target
+        all_reward_data = []
+        
+        # Prepare the base circuit with n_reps
+        prep_circuit = handle_n_reps(
+            qc, n_reps, backend_info.backend, execution_config.control_flow_enabled
+        )
+        
+        # For each gate target, prepare input states and observables
+        for gate_target in multi_target.gate_targets:
+            if not isinstance(gate_target, GateTarget):
+                continue
+                
+            num_qubits = gate_target.causal_cone_size
+            input_choice = self.input_states_choice
+            input_states = gate_target.input_states(input_choice)
+            input_state_index = self.input_states_rng.choice(len(input_states))
+            input_state_indices = np.unravel_index(
+                input_state_index,
+                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
+            )
+            
+            input_state: InputState = input_states[input_state_index]
+            target_state = input_state.target_state(n_reps)
+            
+            # Create input state preparation circuit for this target's qubits
+            input_circuit = qc.copy_empty_like().compose(
+                input_state.circuit, qubits=gate_target.causal_cone_qubits
+            )
+            input_circuit, extended_input_indices = extend_input_state_prep(
+                input_circuit, qc, gate_target, list(input_state_indices)
+            )
+            input_circuit.metadata["input_indices"] = extended_input_indices
+            
+            # DFE: Retrieve observables for this target
+            Chi = target_state.Chi
+            probabilities = Chi**2
+            dim = target_state.dm.dim
+            cutoff = 1e-5
+            non_zero_indices = np.nonzero(probabilities > cutoff)[0][1:]
+            non_zero_probabilities = probabilities[non_zero_indices]
+            non_zero_probabilities /= np.sum(non_zero_probabilities)
+            
+            basis = pauli_basis(num_qubits)
+            
+            if dfe_precision is not None:
+                eps, delta = dfe_precision
+                pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
+            else:
+                pauli_sampling = execution_config.sampling_paulis
+            
+            pauli_indices, counts = np.unique(
+                self.observables_rng.choice(non_zero_indices, pauli_sampling, p=non_zero_probabilities),
+                return_counts=True,
+            )
+            c_factor = execution_config.c_factor
+            id_coeff = c_factor / dim
+            reward_factor = c_factor * counts * (dim - 1) / (dim * np.sqrt(dim) * Chi[pauli_indices])
+            
+            if dfe_precision is not None:
+                eps, delta = dfe_precision
+                pauli_shots = np.ceil(
+                    2 * np.log(2 / delta) / (eps**2) * dim * Chi[pauli_indices] ** 2 * pauli_sampling
+                )
+            else:
+                pauli_shots = execution_config.n_shots * counts
+            
+            # Create observables for this target's subsystem
+            observables = SparsePauliOp(basis[pauli_indices], reward_factor)
+            observable_indices = observables_to_indices(observables)
+            
+            # Group observables by qubit-wise commuting groups
+            shots_per_basis = []
+            for i, commuting_group in enumerate(observables.paulis.group_qubit_wise_commuting()):
+                max_pauli_shots = 0
+                for pauli in commuting_group:
+                    pauli_index = list(basis).index(pauli)
+                    ref_index = list(pauli_indices).index(pauli_index)
+                    max_pauli_shots = max(max_pauli_shots, pauli_shots[ref_index])
+                shots_per_basis.append(max_pauli_shots)
+            pauli_shots = shots_per_basis
+            
+            # Create a combined circuit with input state prep for this target
+            target_prep_circuit = prep_circuit.copy()
+            target_prep_circuit.compose(input_circuit, front=True, inplace=True)
+            
+            target_prep_circuit = backend_info.custom_transpile(
+                target_prep_circuit, initial_layout=gate_target.layout, scheduling=False
+            )
+            
+            # Extend observables to the full circuit qubits
+            pub_obs = extend_observables(
+                observables, target_prep_circuit, gate_target.causal_cone_qubits_indices
+            )
+            
+            pub = (
+                target_prep_circuit,
+                pub_obs,
+                params,
+                shots_to_precision(max(pauli_shots)),
+            )
+            
+            reward_data = StateRewardData(
+                pub=pub,
+                id_coeff=id_coeff,
+                pauli_sampling=pauli_sampling,
+                input_circuit=input_circuit,
+                observables=observables,
+                input_indices=extended_input_indices,
+                observables_indices=observable_indices,
+                n_reps=n_reps,
+            )
+            
+            all_reward_data.append(reward_data)
+        
+        return StateRewardDataList(all_reward_data)
+
     def get_shot_budget(self, pubs: List[EstimatorPub]) -> int:
         """
         Retrieve number of shots associated to the input pub list
