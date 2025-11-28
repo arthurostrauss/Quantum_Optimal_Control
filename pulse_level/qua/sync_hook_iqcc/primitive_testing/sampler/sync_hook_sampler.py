@@ -1,14 +1,8 @@
-# from iqcc_cloud_client.runtime import get_qm_job
-# from qiskit.qasm3 import loads
-from qiskit.circuit import Parameter
-from qiskit.primitives import PrimitiveResult
-from qiskit.primitives.containers import DataBin, BitArray
-import numpy as np
-
+from iqcc_cloud_client.runtime import get_qm_job
 from qiskit_qm_provider.parameter_table import ParameterTable, InputType, Parameter as QMParameter, Direction
 from qm.qua import fixed
 
-# job = get_qm_job()
+job = get_qm_job()
 
 parameter_values = [[[0.        ],
   [0.34906585],
@@ -20,12 +14,12 @@ parameter_values = [[[0.        ],
   [2.44346095],
   [2.7925268 ],
   [3.14159265]]]
-parameter_tables = [ParameterTable(parameters_dict=[QMParameter(name='param', value=0.0, qua_type=fixed, input_type=InputType.INPUT_STREAM, direction=None, units="")], name='param_table_0')]
+parameter_tables = [ParameterTable(parameters_dict=[QMParameter(name='param', value=None, qua_type=fixed, input_type=InputType.INPUT_STREAM, direction=None, units="")], name='param_table_0')]
 
-# for parameter_value, parameter_table in zip(parameter_values, parameter_tables):
-#     if parameter_table is not None and parameter_table.input_type is not None:
-#         param_dict = {param.name: value for param, value in zip(parameter_table.parameters, parameter_value)}
-#         parameter_table.push_to_opx(param_dict, job)
+for parameter_value, parameter_table in zip(parameter_values, parameter_tables):
+    if parameter_table is not None and parameter_table.input_type is not None:
+        param_dict = {param.name: value for param, value in zip(parameter_table.parameters, parameter_value)}
+        parameter_table.push_to_opx(param_dict, job)
 
 # results_handle = job.result_handles
 # results_handle.wait_for_all_values()
