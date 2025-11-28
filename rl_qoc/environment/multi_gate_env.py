@@ -223,15 +223,18 @@ class MultiGateEnv(BaseQuantumEnvironment):
             if current_circ.parameters:
                 for param in current_circ.parameters:
                     if param.name in self.observation_space.spaces:
-                        # Get parameter value if bound, otherwise use 0
-                        if param in current_circ.parameters:
-                            # Try to get bound value
-                            try:
-                                bound_value = current_circ.parameters[param]
+                        # Try to get bound value from the circuit
+                        try:
+                            # Check if parameter is bound by trying to get its value
+                            # If unbound, use 0.0 as default
+                            param_dict = current_circ.parameters
+                            if param in param_dict:
+                                bound_value = float(param_dict[param])
                                 obs[param.name] = np.array([bound_value], dtype=np.float32)
-                            except:
+                            else:
                                 obs[param.name] = np.array([0.0], dtype=np.float32)
-                        else:
+                        except (TypeError, ValueError, KeyError):
+                            # Parameter is unbound or cannot be converted
                             obs[param.name] = np.array([0.0], dtype=np.float32)
             return obs
         else:
