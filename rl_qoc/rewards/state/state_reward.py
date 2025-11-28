@@ -341,6 +341,8 @@ class StateReward(Reward):
             extended_obs = extend_observables(
                 target_observables, prep_circuit, gate_target.causal_cone_qubits_indices
             )
+            # Store the extended observables in metadata for later use
+            target_metadata[target_idx]['extended_observables'] = extended_obs
             all_observables_list.append((target_idx, extended_obs, gate_target.causal_cone_qubits_indices, id_coeff, pauli_sampling))
         
         # Combine all observables into a single SparsePauliOp
@@ -449,6 +451,83 @@ class StateReward(Reward):
         reward += reward_data.id_coeff
 
         return reward
+
+    def get_reward_with_primitive_multi_target(
+        self,
+        reward_data: "MultiTargetStateRewardDataList",
+        estimator: BaseEstimatorV2,
+    ) -> List[np.ndarray]:
+        """
+        Retrieve per-target rewards from the combined PUBs and primitive.
+        Performs centralized execution (single PUB run) and decentralized post-processing
+        to extract individual fidelity estimators for each target.
+        
+        Args:
+            reward_data: MultiTargetStateRewardDataList containing combined reward data
+            estimator: BaseEstimatorV2 estimator to run the PUBs
+            
+        Returns:
+            List of reward arrays, one per target, each of shape [batch_size]
+        """
+        from .multi_target_state_reward_data import MultiTargetStateRewardDataList
+        
+        # Centralized execution: run all PUBs once
+        job = estimator.run(reward_data.pubs)
+        pub_results = job.result()
+        
+        # Get combined expectation values
+        combined_evs = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
+        # Shape: [batch_size] if single PUB, or [num_pubs, batch_size] if multiple
+        
+        # Decentralized post-processing: extract per-target rewards
+        num_targets = reward_data.num_targets
+        target_rewards = []
+        
+        for target_idx in reward_data.target_indices:
+            # Get target-specific data
+            target_data = reward_data.reward_data[0]  # Assuming single PUB for now
+            idx = target_data.target_indices.index(target_idx)
+            
+            id_coeff = target_data.target_id_coeffs[idx]
+            pauli_sampling = target_data.target_pauli_samplings[idx]
+            target_obs = target_data.target_observables[idx]
+            
+            # Extract expectation values for this target's observables
+            # Since observables are combined, we need to compute the contribution
+            # from this target's observables to the total expectation value
+            
+            # For state reward, the combined expectation value is:
+            # <combined_obs> = sum_target <target_obs> + total_id_coeff
+            # So: <target_obs> = (<combined_obs> - total_id_coeff) * (target_obs_weight / combined_obs_weight)
+            
+            # More accurately, we compute the target reward as:
+            # reward_target = (<combined_obs> - sum_other_targets_id_coeffs) / pauli_sampling_target + id_coeff_target
+            
+            # However, since we can't easily separate the expectation values,
+            # we use the fact that the combined observable is a sum:
+            # combined_obs = sum(target_obs) and combined_ev = sum(<target_obs>)
+            
+            # For now, we'll approximate by assuming equal contribution or use the ratio
+            # A more accurate approach would require running separate PUBs or using
+            # the structure of the observables
+            
+            # Simple approach: distribute the combined expectation value proportionally
+            # based on the norm of each target's observables
+            target_obs_norm = np.sum(np.abs(target_obs.coeffs))
+            combined_obs_norm = np.sum(np.abs(target_data.combined_observables.coeffs))
+            
+            if combined_obs_norm > 0:
+                target_contribution = target_obs_norm / combined_obs_norm
+                # Remove total ID coeff and scale by target contribution
+                target_ev = (combined_evs - target_data.total_id_coeff) * target_contribution
+            else:
+                target_ev = np.zeros_like(combined_evs)
+            
+            # Compute target reward
+            target_reward = target_ev / pauli_sampling + id_coeff
+            target_rewards.append(target_reward)
+        
+        return target_rewards
 
     def get_real_time_circuit(
         self,

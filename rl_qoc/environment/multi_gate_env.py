@@ -353,9 +353,24 @@ class MultiGateEnv(BaseQuantumEnvironment):
                 self.update_env_history(qc, total_shots)
             self._pubs = reward_data.pubs
             self._reward_data = reward_data
-            reward = rewarder.get_reward_with_primitive(reward_data, self.primitive)
-
-            print("Reward (avg):", np.mean(reward), "Std:", np.std(reward))
+            
+            # Use MultiTarget-specific reward extraction if available
+            if hasattr(rewarder, 'get_reward_with_primitive_multi_target'):
+                target_rewards = rewarder.get_reward_with_primitive_multi_target(reward_data, self.primitive)
+                # For now, return the average reward across all targets
+                # In the future, this could return individual rewards or a combined metric
+                if target_rewards and len(target_rewards) > 0:
+                    # Stack target rewards and take mean across targets
+                    target_rewards_array = np.stack(target_rewards, axis=0)  # Shape: [num_targets, batch_size]
+                    reward = np.mean(target_rewards_array, axis=0)  # Shape: [batch_size]
+                    print(f"Reward (avg across {len(target_rewards)} targets):", np.mean(reward), "Std:", np.std(reward))
+                else:
+                    reward = np.zeros(batch_size)
+                    print("Warning: No target rewards returned")
+            else:
+                # Fallback to standard method
+                reward = rewarder.get_reward_with_primitive(reward_data, self.primitive)
+                print("Reward (avg):", np.mean(reward), "Std:", np.std(reward))
 
             return reward  # Shape [batch size]
         else:
