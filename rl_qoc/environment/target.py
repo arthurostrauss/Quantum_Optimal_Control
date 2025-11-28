@@ -9,6 +9,7 @@ Created: 08/11/2024
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from qiskit.quantum_info import (
     DensityMatrix,
     Operator,
@@ -19,7 +20,7 @@ from qiskit.quantum_info import (
 )
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 from qiskit.quantum_info.states.quantum_state import QuantumState
-from qiskit.transpiler import Layout
+from qiskit.transpiler import Layout, PassManager
 import numpy as np
 from qiskit.circuit import (
     QuantumCircuit,
@@ -41,6 +42,7 @@ from ..helpers.circuit_utils import (
     causal_cone_circuit,
     get_2design_input_states,
 )
+from ..helpers import CustomGateReplacementPass
 from .instruction_replacement import InstructionReplacement
 import warnings
 
@@ -1193,6 +1195,10 @@ class MultiTarget:
         if not all(isinstance(circuit_context, QuantumCircuit) for circuit_context in circuit_contexts):
             raise ValueError("All circuit contexts must be QuantumCircuit objects")
 
+        # Keep local copies of the baseline circuits to avoid in-place mutations
+        self._baseline_circuits = [circuit_context.copy() for circuit_context in circuit_contexts]
+        circuit_contexts = self._baseline_circuits
+
         # Validate that the circuit contexts contain all the target qubits for each instruction and that they do not overlap
         for circ in circuit_contexts:
             used_qubits = set()
@@ -1325,7 +1331,7 @@ class MultiTarget:
             )
         
         # Store validated layouts
-        self.layouts = layouts
+        self._layouts = layouts
         self.target_instructions = target_instructions
         self.circuit_contexts = circuit_contexts
         
@@ -1392,4 +1398,102 @@ class MultiTarget:
                 layout=layouts,
             )
             self.gate_targets.append(gate_target)
-            
+        
+        # Initialize circuit choice and derived structures
+        self._circuit_choice = 0
+        self._pass_managers = self._build_pass_managers()
+        self._custom_circuits = self._build_custom_circuits()
+        self._circuit_parameters: List[List[Parameter]] = [
+            list(circ.parameters) for circ in self._custom_circuits
+        ]
+        self._parameter_lookup: "OrderedDict[str, Parameter]" = OrderedDict()
+        for params in self._circuit_parameters:
+            for param in params:
+                if param.name not in self._parameter_lookup:
+                    self._parameter_lookup[param.name] = param
+
+    def _build_pass_managers(self) -> List[PassManager]:
+        """Create pass managers that apply all instruction replacements to each circuit context."""
+        pass_managers: List[PassManager] = []
+        replacements = self.target_instructions
+        for _ in self.circuit_contexts:
+            if replacements:
+                pass_managers.append(PassManager(CustomGateReplacementPass(replacements)))
+            else:
+                pass_managers.append(PassManager())
+        return pass_managers
+
+    def _build_custom_circuits(self) -> List[QuantumCircuit]:
+        """Generate custom circuits by applying instruction replacements to each baseline circuit."""
+        custom_circuits: List[QuantumCircuit] = []
+        for baseline_circuit, pass_manager in zip(self.circuit_contexts, self._pass_managers):
+            custom_circuit = pass_manager.run(baseline_circuit)
+            metadata = dict(custom_circuit.metadata) if custom_circuit.metadata else {}
+            metadata["baseline_circuit"] = baseline_circuit.copy(f"baseline_circ_{baseline_circuit.name}")
+            custom_circuit.metadata = metadata
+            custom_circuits.append(custom_circuit)
+        return custom_circuits
+
+    @property
+    def pass_managers(self) -> List[PassManager]:
+        return self._pass_managers
+
+    @property
+    def baseline_circuits(self) -> List[QuantumCircuit]:
+        return self._baseline_circuits
+
+    def baseline_circuit(self, index: Optional[int] = None) -> QuantumCircuit:
+        idx = self._circuit_choice if index is None else index
+        return self._baseline_circuits[idx]
+
+    @property
+    def custom_circuits(self) -> List[QuantumCircuit]:
+        return self._custom_circuits
+
+    def custom_circuit(self, index: Optional[int] = None) -> QuantumCircuit:
+        idx = self._circuit_choice if index is None else index
+        return self._custom_circuits[idx]
+
+    @property
+    def circuit_parameters(self) -> List[List[Parameter]]:
+        return self._circuit_parameters
+
+    def parameters_for_circuit(self, index: int) -> List[Parameter]:
+        return self._circuit_parameters[index]
+
+    @property
+    def action_parameter_names(self) -> List[str]:
+        return list(self._parameter_lookup.keys())
+
+    @property
+    def action_parameters(self) -> List[Parameter]:
+        return list(self._parameter_lookup.values())
+
+    @property
+    def num_action_parameters(self) -> int:
+        return len(self._parameter_lookup)
+
+    @property
+    def layouts(self) -> Sequence[Layout]:
+        return self._layouts
+
+    def layout_for_circuit(self, index: Optional[int] = None) -> Layout:
+        idx = self._circuit_choice if index is None else index
+        return self._layouts[idx]
+
+    @property
+    def layout(self) -> Layout:
+        return self.layout_for_circuit()
+
+    @property
+    def circuit_choice(self) -> int:
+        return self._circuit_choice
+
+    @circuit_choice.setter
+    def circuit_choice(self, value: int):
+        if not 0 <= value < len(self._baseline_circuits):
+            raise ValueError(
+                f"Circuit choice {value} out of range [0, {len(self._baseline_circuits)})"
+            )
+        self._circuit_choice = value
+

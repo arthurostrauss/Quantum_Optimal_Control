@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, List, Literal, Callable, Any, TYPE_CHECKING
 import numpy as np
 from gymnasium.spaces import Box, Dict as DictSpace
-from qiskit.circuit import QuantumCircuit, Parameter, ParameterVector
 
 from .backend_config import BackendConfig
 from .execution_config import ExecutionConfig
@@ -52,74 +51,21 @@ class MultiTargetQEnvConfig:
     
     def _infer_action_space(self) -> DictSpace:
         """
-        Infer the action space from all InstructionReplacements in the MultiTarget.
-        Parameters are inferred from:
-        1. QuantumCircuit.parameters if custom_instruction is a QuantumCircuit
-        2. Instruction.params if custom_instruction is an Instruction
-        3. params_to_cycle if provided in InstructionReplacement
-        
-        Returns a DictSpace with parameter names as keys.
+        Infer the action space directly from the MultiTarget custom circuits.
+        Parameters are extracted from the Parameter objects attached to those circuits.
         """
-        param_dict = {}
+        param_names: List[str] = []
+        if isinstance(self.target, MultiTarget):
+            param_names = self.target.action_parameter_names
         
-        for gate_target in self.target.gate_targets:
-            if gate_target.instruction_replacement is not None:
-                instr_replacement = gate_target.instruction_replacement
-                
-                # Check custom_instruction for parameters
-                if instr_replacement.functions_to_cycle:
-                    for custom_instr in instr_replacement.functions_to_cycle:
-                        if isinstance(custom_instr, QuantumCircuit):
-                            # Get parameters from the QuantumCircuit
-                            for param in custom_instr.parameters:
-                                if param.name not in param_dict:
-                                    param_dict[param.name] = Box(
-                                        low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
-                                    )
-                        elif hasattr(custom_instr, 'params') and custom_instr.params:
-                            # Get parameters from Instruction.params
-                            for param in custom_instr.params:
-                                if isinstance(param, Parameter):
-                                    if param.name not in param_dict:
-                                        param_dict[param.name] = Box(
-                                            low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
-                                        )
-                
-                # Also check params_to_cycle for Parameter objects
-                if instr_replacement.params_to_cycle:
-                    params_list = instr_replacement.params_to_cycle
-                    if isinstance(params_list, list) and len(params_list) > 0:
-                        first_params = params_list[0]
-                        if isinstance(first_params, dict):
-                            # Dictionary of parameters
-                            for param_name, param_value in first_params.items():
-                                if isinstance(param_name, str) and param_name not in param_dict:
-                                    param_dict[param_name] = Box(
-                                        low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
-                                    )
-                        elif isinstance(first_params, (list, tuple)):
-                            # List/tuple of Parameter objects
-                            for param in first_params:
-                                if isinstance(param, Parameter):
-                                    if param.name not in param_dict:
-                                        param_dict[param.name] = Box(
-                                            low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
-                                        )
-                    elif isinstance(params_list, ParameterVector):
-                        # ParameterVector
-                        for param in params_list:
-                            if param.name not in param_dict:
-                                param_dict[param.name] = Box(
-                                    low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
-                                )
+        if not param_names:
+            param_names = ["param_0"]
         
-        # If no parameters found, default to a single parameter
-        if not param_dict:
-            param_dict["param_0"] = Box(
-                low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
-            )
-        
-        return DictSpace(param_dict)
+        param_space = {
+            name: Box(low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32)
+            for name in param_names
+        }
+        return DictSpace(param_space)
 
     @property
     def backend(self) -> Optional[BackendV2]:
