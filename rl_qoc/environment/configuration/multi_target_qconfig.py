@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List, Literal, Callable, Any, TYPE_CHECKING
 import numpy as np
-from gymnasium.spaces import Box
+from gymnasium.spaces import Box, Dict as DictSpace
+from qiskit.circuit import QuantumCircuit, Parameter, ParameterVector
 
 from .backend_config import BackendConfig
 from .execution_config import ExecutionConfig
@@ -35,7 +36,7 @@ class MultiTargetQEnvConfig:
     reward: Reward = "state"
     benchmark_config: BenchmarkConfig = field(default_factory=default_benchmark_config)
     env_metadata: Dict = field(default_factory=dict)
-    action_space: Optional[Box] = None  # Will be inferred if None
+    action_space: DictSpace = field(default=False, init=False)  # Will be inferred automatically as DictSpace
 
     def __post_init__(self):
         if isinstance(self.reward, str):
@@ -46,53 +47,79 @@ class MultiTargetQEnvConfig:
             if not isinstance(self.reward, Reward):
                 raise ValueError("Reward configuration must be a string or a Reward instance")
         
-        # Infer action_space from InstructionReplacements if not provided
-        if self.action_space is None:
-            self.action_space = self._infer_action_space()
+        # Always infer action_space from InstructionReplacements
+        self.action_space = self._infer_action_space()
     
-    def _infer_action_space(self) -> Box:
+    def _infer_action_space(self) -> DictSpace:
         """
         Infer the action space from all InstructionReplacements in the MultiTarget.
-        The action space dimension is the sum of all parameter dimensions from all targets.
+        Parameters are inferred from:
+        1. QuantumCircuit.parameters if custom_instruction is a QuantumCircuit
+        2. Instruction.params if custom_instruction is an Instruction
+        3. params_to_cycle if provided in InstructionReplacement
+        
+        Returns a DictSpace with parameter names as keys.
         """
-        total_params = 0
+        param_dict = {}
+        
         for gate_target in self.target.gate_targets:
             if gate_target.instruction_replacement is not None:
-                # Get parameters from the instruction replacement
-                params = gate_target.instruction_replacement.params_to_cycle
-                if params is not None:
-                    # Handle different parameter formats
-                    if isinstance(params, list):
-                        # If it's a list, take the first element to determine structure
-                        if len(params) > 0:
-                            first_param = params[0]
-                            if isinstance(first_param, (list, tuple)):
-                                # Count parameters in the first set
-                                total_params += len(first_param)
-                            elif isinstance(first_param, dict):
-                                total_params += len(first_param)
-                            else:
-                                # Single parameter
-                                total_params += 1
-                    elif isinstance(params, dict):
-                        total_params += len(params)
-                    elif hasattr(params, '__len__'):
-                        # ParameterVector or similar
-                        total_params += len(params)
-                    else:
-                        # Single parameter
-                        total_params += 1
+                instr_replacement = gate_target.instruction_replacement
+                
+                # Check custom_instruction for parameters
+                if instr_replacement.functions_to_cycle:
+                    for custom_instr in instr_replacement.functions_to_cycle:
+                        if isinstance(custom_instr, QuantumCircuit):
+                            # Get parameters from the QuantumCircuit
+                            for param in custom_instr.parameters:
+                                if param.name not in param_dict:
+                                    param_dict[param.name] = Box(
+                                        low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
+                                    )
+                        elif hasattr(custom_instr, 'params') and custom_instr.params:
+                            # Get parameters from Instruction.params
+                            for param in custom_instr.params:
+                                if isinstance(param, Parameter):
+                                    if param.name not in param_dict:
+                                        param_dict[param.name] = Box(
+                                            low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
+                                        )
+                
+                # Also check params_to_cycle for Parameter objects
+                if instr_replacement.params_to_cycle:
+                    params_list = instr_replacement.params_to_cycle
+                    if isinstance(params_list, list) and len(params_list) > 0:
+                        first_params = params_list[0]
+                        if isinstance(first_params, dict):
+                            # Dictionary of parameters
+                            for param_name, param_value in first_params.items():
+                                if isinstance(param_name, str) and param_name not in param_dict:
+                                    param_dict[param_name] = Box(
+                                        low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
+                                    )
+                        elif isinstance(first_params, (list, tuple)):
+                            # List/tuple of Parameter objects
+                            for param in first_params:
+                                if isinstance(param, Parameter):
+                                    if param.name not in param_dict:
+                                        param_dict[param.name] = Box(
+                                            low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
+                                        )
+                    elif isinstance(params_list, ParameterVector):
+                        # ParameterVector
+                        for param in params_list:
+                            if param.name not in param_dict:
+                                param_dict[param.name] = Box(
+                                    low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
+                                )
         
         # If no parameters found, default to a single parameter
-        if total_params == 0:
-            total_params = 1
+        if not param_dict:
+            param_dict["param_0"] = Box(
+                low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32
+            )
         
-        # Default to low=-pi, high=pi for all parameters
-        return Box(
-            low=-np.pi * np.ones(total_params, dtype=np.float32),
-            high=np.pi * np.ones(total_params, dtype=np.float32),
-            dtype=np.float32,
-        )
+        return DictSpace(param_dict)
 
     @property
     def backend(self) -> Optional[BackendV2]:
@@ -196,8 +223,11 @@ class MultiTargetQEnvConfig:
 
     @property
     def n_actions(self):
-        """Number of actions in the action space"""
-        return self.action_space.shape[-1]
+        """Number of actions in the action space (total number of parameters)"""
+        if isinstance(self.action_space, DictSpace):
+            return len(self.action_space.spaces)
+        else:
+            return self.action_space.shape[-1]
 
     @property
     def channel_estimator(self):
@@ -228,8 +258,11 @@ class MultiTargetQEnvConfig:
             "target": self.target,  # MultiTarget doesn't have as_dict yet, may need to implement
             "backend_config": self.backend_config.as_dict(),
             "action_space": {
-                "low": self.action_space.low.tolist(),
-                "high": self.action_space.high.tolist(),
+                "type": "DictSpace",
+                "spaces": {name: {"low": space.low.tolist(), "high": space.high.tolist()} 
+                          for name, space in self.action_space.spaces.items()}
+                if isinstance(self.action_space, DictSpace)
+                else {"low": self.action_space.low.tolist(), "high": self.action_space.high.tolist()},
             },
             "execution_config": {
                 "batch_size": self.batch_size,

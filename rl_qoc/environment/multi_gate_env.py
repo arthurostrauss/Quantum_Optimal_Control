@@ -74,21 +74,47 @@ class MultiGateEnv(BaseQuantumEnvironment):
         self._env_config = training_config
         self._multi_target = original_target
         
-        # Set up parameters for each gate target
+        # Set up parameters for each gate target - reference InstructionReplacement parameters
         self._parameters = []
         for gate_target in self._multi_target.gate_targets:
-            # Get parameters from instruction replacement
+            # Reference parameters from instruction replacement, don't create new ones
             if gate_target.instruction_replacement is not None:
-                params = gate_target.instruction_replacement.params_to_cycle
-                if params is not None and len(params) > 0:
-                    # Create ParameterVector for this target
-                    n_params = self._count_parameters(params[0])
-                    param_vec = ParameterVector(
-                        f"params_{len(self._parameters)}", n_params
-                    )
-                    self._parameters.append(param_vec)
-                else:
-                    self._parameters.append([])
+                instr_replacement = gate_target.instruction_replacement
+                # Get parameters from custom_instruction or params_to_cycle
+                params = None
+                
+                # First, try to get from custom_instruction
+                if instr_replacement.functions_to_cycle:
+                    for custom_instr in instr_replacement.functions_to_cycle:
+                        if isinstance(custom_instr, QuantumCircuit):
+                            if custom_instr.parameters:
+                                params = list(custom_instr.parameters)
+                                break
+                        elif hasattr(custom_instr, 'params') and custom_instr.params:
+                            # Extract Parameter objects from Instruction.params
+                            param_list = []
+                            for p in custom_instr.params:
+                                if isinstance(p, Parameter):
+                                    param_list.append(p)
+                            if param_list:
+                                params = param_list
+                                break
+                
+                # If not found, try params_to_cycle
+                if params is None and instr_replacement.params_to_cycle:
+                    params_list = instr_replacement.params_to_cycle
+                    if isinstance(params_list, list) and len(params_list) > 0:
+                        first_params = params_list[0]
+                        if isinstance(first_params, (list, tuple)):
+                            # Extract Parameter objects
+                            params = [p for p in first_params if isinstance(p, Parameter)]
+                        elif isinstance(first_params, dict):
+                            # Dictionary - extract Parameter objects from values
+                            params = [p for p in first_params.values() if isinstance(p, Parameter)]
+                    elif isinstance(params_list, ParameterVector):
+                        params = list(params_list)
+                
+                self._parameters.append(params if params else [])
             else:
                 self._parameters.append([])
         
@@ -104,14 +130,6 @@ class MultiGateEnv(BaseQuantumEnvironment):
         # Circuit choice for observation
         self._circuit_choice = 0
 
-    def _count_parameters(self, param_set: Any) -> int:
-        """Count the number of parameters in a parameter set."""
-        if isinstance(param_set, dict):
-            return len(param_set)
-        elif isinstance(param_set, (list, tuple)):
-            return len(param_set)
-        else:
-            return 1
 
     def _setup_observation_space(self):
         """Set up the composite observation space."""
@@ -121,13 +139,8 @@ class MultiGateEnv(BaseQuantumEnvironment):
             if circ.parameters:
                 all_context_params.extend(circ.parameters)
         
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_params = []
-        for p in all_context_params:
-            if p not in seen:
-                seen.add(p)
-                unique_params.append(p)
+        # Remove duplicates using set, then convert back to list to preserve order
+        unique_params = list(dict.fromkeys(all_context_params))  # Preserves insertion order
         
         # Create composite observation space
         if unique_params:
@@ -360,13 +373,12 @@ class MultiGateEnv(BaseQuantumEnvironment):
             # Use MultiTarget-specific reward extraction if available
             if hasattr(rewarder, 'get_reward_with_primitive_multi_target'):
                 target_rewards = rewarder.get_reward_with_primitive_multi_target(reward_data, self.primitive)
-                # For now, return the average reward across all targets
-                # In the future, this could return individual rewards or a combined metric
-                if target_rewards and len(target_rewards) > 0:
-                    # Stack target rewards and take mean across targets
-                    target_rewards_array = np.stack(target_rewards, axis=0)  # Shape: [num_targets, batch_size]
-                    reward = np.mean(target_rewards_array, axis=0)  # Shape: [batch_size]
-                    print(f"Reward (avg across {len(target_rewards)} targets):", np.mean(reward), "Std:", np.std(reward))
+                # target_rewards is now shape (num_targets, batch_size)
+                if target_rewards is not None and target_rewards.size > 0:
+                    # For now, return the average reward across all targets
+                    # In the future, this could return individual rewards or a combined metric
+                    reward = np.mean(target_rewards, axis=0)  # Shape: [batch_size]
+                    print(f"Reward (avg across {target_rewards.shape[0]} targets):", np.mean(reward), "Std:", np.std(reward))
                 else:
                     reward = np.zeros(batch_size)
                     print("Warning: No target rewards returned")

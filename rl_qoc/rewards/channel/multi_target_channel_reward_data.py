@@ -31,11 +31,14 @@ class MultiTargetChannelRewardData(RewardData):
     target_prep_indices: List[Tuple[int, ...]]  # Input state preparation indices for each target
     target_observable_indices: List[List[Tuple[int]]]  # Observable indices for each target
     
+    # Store all PUBs for this target (one per input state/observable combination)
+    target_pubs: Optional[List[EstimatorPub]] = field(default=None, init=False)
+    
     # Combined observables (sum of all target observables)
     combined_observables: SparsePauliOp = field(init=False)
     
     def __post_init__(self):
-        """Initialize combined observables and validate data."""
+        """Initialize and validate data."""
         self.pub = EstimatorPub.coerce(self.pub)
         
         # Validate that all lists have the same length
@@ -54,7 +57,7 @@ class MultiTargetChannelRewardData(RewardData):
         ):
             raise ValueError("All per-target lists must have the same length")
         
-        # Compute combined observables
+        # Compute combined observables (for compatibility, but we keep them separate)
         if self.target_observables:
             self.combined_observables = sum(self.target_observables).simplify()
         else:
@@ -71,22 +74,14 @@ class MultiTargetChannelRewardData(RewardData):
         return len(self.target_indices)
     
     @property
-    def total_id_coeff(self) -> float:
-        """Return the sum of all target ID coefficients."""
-        return sum(self.target_id_coeffs)
-    
-    @property
-    def total_pauli_sampling(self) -> int:
-        """Return the sum of all target Pauli samplings."""
-        return sum(self.target_pauli_samplings)
-    
-    @property
     def hamiltonian(self) -> SparsePauliOp:
         """
         Return the combined Hamiltonian (sum of all target observables plus identity terms).
+        Note: This is for compatibility only. Individual target Hamiltonians should be used.
         """
         num_qubits = self.input_circuit.num_qubits
-        ham = SparsePauliOp("I" * num_qubits, coeffs=self.total_id_coeff)
+        total_id_coeff = sum(self.target_id_coeffs)
+        ham = SparsePauliOp("I" * num_qubits, coeffs=total_id_coeff)
         ham += self.combined_observables
         return ham.simplify()
     
@@ -131,8 +126,6 @@ class MultiTargetChannelRewardDataList(RewardDataList):
     """
 
     reward_data: List[MultiTargetChannelRewardData]
-    total_pauli_sampling: int
-    total_id_coeff: float
     
     @property
     def num_targets(self) -> int:
@@ -176,8 +169,16 @@ class MultiTargetChannelRewardDataList(RewardDataList):
     
     @property
     def pubs(self) -> List[EstimatorPub]:
-        """Return the list of EstimatorPubs."""
-        return [EstimatorPub.coerce(data.pub) for data in self.reward_data]
+        """Return the list of EstimatorPubs (all PUBs from all targets)."""
+        all_pubs = []
+        for data in self.reward_data:
+            if hasattr(data, 'target_pubs') and data.target_pubs:
+                # Use the list of PUBs for this target
+                all_pubs.extend([EstimatorPub.coerce(pub) for pub in data.target_pubs])
+            else:
+                # Fallback to single PUB
+                all_pubs.append(EstimatorPub.coerce(data.pub))
+        return all_pubs
     
     @property
     def total_shots(self) -> int:

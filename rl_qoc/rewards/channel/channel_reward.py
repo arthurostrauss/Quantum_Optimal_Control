@@ -337,8 +337,6 @@ class ChannelReward(Reward):
         # Structure: {(target_idx, prep_label): [(prep, obs, count, shots, ...)]}
         all_fiducials_by_target = {}  # {(target_idx, prep_label): list of (prep, obs, count, ...)}
         target_metadata = {}  # {target_idx: {id_coeff, pauli_sampling, ...}}
-        total_pauli_sampling = 0
-        total_id_coeff = 0.0
         
         # Process each target to collect fiducials
         for target_idx, gate_target in enumerate(multi_target.gate_targets):
@@ -365,8 +363,6 @@ class ChannelReward(Reward):
             else:
                 pauli_sampling = execution_config.sampling_paulis
             
-            total_pauli_sampling += pauli_sampling
-            
             samples, counts = np.unique(
                 self.fiducials_rng.choice(
                     non_zero_indices, size=pauli_sampling, p=non_zero_probabilities
@@ -385,7 +381,6 @@ class ChannelReward(Reward):
             id_coeff = (
                 c_factor * np.sum(counts[identity_terms] / Chi[samples[identity_terms]])
             )
-            total_id_coeff += id_coeff
             target_metadata[target_idx] = {
                 'id_coeff': id_coeff,
                 'pauli_sampling': pauli_sampling,
@@ -494,9 +489,9 @@ class ChannelReward(Reward):
                     gate_target.causal_cone_qubits,
                     inplace=False,
                 )
-                target_input_circuit, extended_prep_indices = extend_input_state_prep(
-                    target_input_circuit, qc, gate_target, prep_indices
-                )
+                # Don't extend input state prep beyond causal cone qubits for multi-target
+                # Just use the prep_indices as-is
+                extended_prep_indices = prep_indices
                 
                 # Compose into combined circuit (disjoint qubits, so parallel)
                 combined_input_circuit.compose(target_input_circuit, inplace=True)
@@ -516,18 +511,12 @@ class ChannelReward(Reward):
                 })
                 max_shots = max(max_shots, dedicated_shot)
             
-            # Combine all observables
-            combined_observables = None
-            for target_idx, obs, qubit_indices, prep_indices, prep, shot, orig_obs in combined_observables_list:
-                if combined_observables is None:
-                    combined_observables = obs
-                else:
-                    combined_observables = combined_observables + obs
+            # Keep observables separate per target (list of SparsePauliOp)
+            # Don't combine them - we want individual expectation values per target
+            target_observables_list = [obs for _, obs, _, _, _, _, _ in combined_observables_list]
             
-            if combined_observables is None:
+            if not target_observables_list:
                 continue
-                
-            combined_observables = combined_observables.simplify()
             
             # Create combined preparation circuit
             combined_prep_circuit = repeated_circuit.compose(
@@ -559,85 +548,105 @@ class ChannelReward(Reward):
                 'target_extended_observables': [m['extended_observables'] for m in target_input_metadata],
             }
             
-            pub = (
-                combined_prep_circuit,
-                combined_observables,
-                params,
-                shots_to_precision(max_shots),
-            )
-            
-            # Create reward data - we'll use the first target's metadata for the main structure
-            first_metadata = target_input_metadata[0]
-            reward_data = ChannelRewardData(
-                pub,
-                combined_input_circuit,
-                combined_observables,
-                n_reps,
-                first_metadata['qubit_indices'],
-                first_metadata['prep'],
-                first_metadata['prep_indices'],
-                observables_to_indices(combined_observables),
-            )
-            
-            # Store target mapping for post-processing
-            reward_data.target_mapping = combined_prep_circuit.metadata["multi_target_mapping"]
-            
-            all_reward_data.append(reward_data)
+            # Create PUBs with separate observables per target
+            # For Qiskit PUB coercion, we need to create separate PUBs or use a structure
+            # that allows extracting individual expectation values
+            # We'll create one PUB per target with the same circuit but different observables
+            for target_idx, obs, qubit_indices, prep_indices, prep, shot, orig_obs in combined_observables_list:
+                pub = (
+                    combined_prep_circuit,
+                    obs,  # Individual observable for this target
+                    params,
+                    shots_to_precision(shot),
+                )
+                
+                # Find corresponding metadata
+                target_meta = next((m for m in target_input_metadata if m['target_idx'] == target_idx), None)
+                if target_meta is None:
+                    continue
+                
+                reward_data = ChannelRewardData(
+                    pub,
+                    combined_input_circuit,
+                    obs,  # Individual observable
+                    n_reps,
+                    target_meta['qubit_indices'],
+                    target_meta['prep'],
+                    target_meta['prep_indices'],
+                    observables_to_indices(obs),
+                )
+                
+                # Store target mapping for post-processing
+                reward_data.target_mapping = {
+                    'target_idx': target_idx,
+                    'target_qubits': target_meta['qubit_indices'],
+                    'target_prep': target_meta['prep'],
+                    'target_prep_indices': target_meta['prep_indices'],
+                }
+                
+                all_reward_data.append(reward_data)
         
         # Convert to MultiTargetChannelRewardData
+        # Group reward_data by target index to create one MultiTargetChannelRewardData per target
         from .multi_target_channel_reward_data import MultiTargetChannelRewardData, MultiTargetChannelRewardDataList
         
-        multi_target_data_list = []
+        # Group all_reward_data by target_idx
+        target_reward_groups = {}
         for reward_data in all_reward_data:
-            # Extract target mapping from metadata
-            target_mapping = reward_data.target_mapping
-            if target_mapping is None:
-                # Fallback: use first target's metadata
-                target_mapping = {
-                    'target_indices': [0],
-                    'target_qubits': [reward_data.causal_cone_qubits_indices],
-                    'target_preps': [reward_data.input_pauli],
-                    'target_prep_indices': [reward_data.input_indices],
-                }
-            
-            # Collect per-target data from all targets in this PUB
-            target_indices = target_mapping.get('target_indices', [0])
-            target_qubits = target_mapping.get('target_qubits', [reward_data.causal_cone_qubits_indices])
-            target_preps = target_mapping.get('target_preps', [reward_data.input_pauli])
-            target_prep_indices = target_mapping.get('target_prep_indices', [reward_data.input_indices])
-            
-            # For each target, we need to extract its observables from the combined observables
-            # This is complex - for now, we'll store the combined observables and use metadata
-            # In post-processing, we'll need to separate them
-            
-            # Get target metadata
-            target_id_coeffs = [target_metadata[idx].get('id_coeff', 0.0) for idx in target_indices]
-            target_pauli_samplings = [target_metadata[idx].get('pauli_sampling', 0) for idx in target_indices]
-            
-            # Extract per-target observables from metadata stored in target_mapping
-            target_extended_observables = target_mapping.get('target_extended_observables', None)
-            if target_extended_observables and len(target_extended_observables) == len(target_indices):
-                target_observables = target_extended_observables
-            else:
-                # Fallback: use combined observables (less accurate for post-processing)
-                target_observables = [reward_data.observables] * len(target_indices)
-            
-            multi_target_data = MultiTargetChannelRewardData(
-                pub=reward_data.pub,
-                input_circuit=reward_data.input_circuit,
-                n_reps=reward_data.n_reps,
-                target_indices=target_indices,
-                target_id_coeffs=target_id_coeffs,
-                target_pauli_samplings=target_pauli_samplings,
-                target_observables=target_observables,
-                target_qubits=target_qubits,
-                target_preps=target_preps,
-                target_prep_indices=target_prep_indices,
-                target_observable_indices=[reward_data.observables_indices] * len(target_indices),  # Placeholder
-            )
-            multi_target_data_list.append(multi_target_data)
+            target_idx = reward_data.target_mapping.get('target_idx') if hasattr(reward_data, 'target_mapping') and reward_data.target_mapping else None
+            if target_idx is None:
+                continue
+            if target_idx not in target_reward_groups:
+                target_reward_groups[target_idx] = []
+            target_reward_groups[target_idx].append(reward_data)
         
-        return MultiTargetChannelRewardDataList(multi_target_data_list, total_pauli_sampling, total_id_coeff)
+        # Create one MultiTargetChannelRewardData per target
+        # Each contains all PUBs for that target (one per input state/observable combination)
+        multi_target_data_list = []
+        for target_idx, target_reward_list in target_reward_groups.items():
+            # Get target metadata
+            target_meta = target_metadata.get(target_idx, {})
+            gate_target = target_meta.get('gate_target')
+            
+            # Collect observables, preps, etc. for this target
+            target_observables = [rd.observables for rd in target_reward_list]
+            target_preps = [rd.input_pauli for rd in target_reward_list]
+            target_prep_indices = [rd.input_indices for rd in target_reward_list]
+            target_qubits = [rd.causal_cone_qubits_indices for rd in target_reward_list]
+            target_observable_indices = [rd.observables_indices for rd in target_reward_list]
+            
+            # Use the same circuit for all (they should all share the combined circuit)
+            input_circuit = target_reward_list[0].input_circuit if target_reward_list else qc.copy_empty_like()
+            n_reps = target_reward_list[0].n_reps if target_reward_list else n_reps
+            
+            # Get per-target coefficients
+            target_id_coeff = target_meta.get('id_coeff', 0.0)
+            target_pauli_sampling = target_meta.get('pauli_sampling', 0)
+            
+            # Create a single PUB that represents all PUBs for this target
+            # Actually, we'll keep them as separate PUBs but group them
+            # For now, use the first PUB as representative (they all share the same circuit)
+            if target_reward_list:
+                representative_pub = target_reward_list[0].pub
+                
+                multi_target_data = MultiTargetChannelRewardData(
+                    pub=representative_pub,  # Representative PUB (all share same circuit)
+                    input_circuit=input_circuit,
+                    n_reps=n_reps,
+                    target_indices=[target_idx],
+                    target_id_coeffs=[target_id_coeff],
+                    target_pauli_samplings=[target_pauli_sampling],
+                    target_observables=target_observables,  # List of observables for this target
+                    target_qubits=[target_qubits[0] if target_qubits else []],
+                    target_preps=target_preps,
+                    target_prep_indices=target_prep_indices,
+                    target_observable_indices=target_observable_indices,
+                )
+                # Store all PUBs for this target in metadata
+                multi_target_data.target_pubs = [rd.pub for rd in target_reward_list]
+                multi_target_data_list.append(multi_target_data)
+        
+        return MultiTargetChannelRewardDataList(multi_target_data_list)
 
     def get_reward_with_primitive(
         self,
@@ -661,18 +670,18 @@ class ChannelReward(Reward):
         self,
         reward_data: "MultiTargetChannelRewardDataList",
         estimator: BaseEstimatorV2,
-    ) -> List[np.ndarray]:
+    ) -> np.ndarray:
         """
-        Retrieve per-target rewards from the combined PUBs and primitive.
+        Retrieve per-target rewards from the PUBs and primitive.
         Performs centralized execution (single PUB run) and decentralized post-processing
         to extract individual fidelity estimators for each target.
         
         Args:
-            reward_data: MultiTargetChannelRewardDataList containing combined reward data
+            reward_data: MultiTargetChannelRewardDataList containing reward data with separate observables per target
             estimator: BaseEstimatorV2 estimator to run the PUBs
             
         Returns:
-            List of reward arrays, one per target, each of shape [batch_size]
+            Reward array of shape (num_targets, batch_size) - one reward per target
         """
         from .multi_target_channel_reward_data import MultiTargetChannelRewardDataList
         
@@ -680,48 +689,68 @@ class ChannelReward(Reward):
         job = estimator.run(reward_data.pubs)
         pub_results = job.result()
         
-        # Get combined expectation values
-        combined_evs = np.sum([pub_result.data.evs for pub_result in pub_results], axis=0)
-        # Shape: [batch_size] if single PUB, or [num_pubs, batch_size] if multiple
-        
-        # Decentralized post-processing: extract per-target rewards
+        # Group PUB results by target index
+        # Each target may have multiple PUBs (one per input state/observable combination)
         num_targets = reward_data.num_targets
-        target_rewards = []
+        target_indices = reward_data.target_indices
         
-        for target_idx in reward_data.target_indices:
-            # Get target-specific data
-            target_data = reward_data.reward_data[0]  # Assuming single PUB for now
-            idx = target_data.target_indices.index(target_idx)
+        # Get batch size from first PUB result
+        if not pub_results:
+            return np.zeros((num_targets, 1))
+        batch_size = pub_results[0].data.evs.shape[0]
+        
+        # Initialize reward array: shape (num_targets, batch_size)
+        target_rewards = np.zeros((num_targets, batch_size))
+        
+        # Map PUB results to targets
+        # We need to track which PUB result corresponds to which target
+        pub_idx = 0
+        
+        # Process each target independently
+        for target_data in reward_data.reward_data:
+            target_idx = target_data.target_indices[0] if target_data.target_indices else None
+            if target_idx is None:
+                continue
             
-            id_coeff = target_data.target_id_coeffs[idx]
-            pauli_sampling = target_data.target_pauli_samplings[idx]
-            target_obs = target_data.target_observables[idx]
-            dim = 2**len(target_data.target_qubits[idx])
-            
-            # Extract expectation values for this target's observables
-            # Similar to state reward, we need to separate the contribution
-            
-            # For channel reward, the formula is:
-            # reward = (dim * (<combined_obs> - total_id_coeff) / pauli_sampling + 1) / (dim + 1)
-            
-            # We'll use the same proportional approach
-            target_obs_norm = np.sum(np.abs(target_obs.coeffs))
-            combined_obs_norm = np.sum(np.abs(target_data.combined_observables.coeffs))
-            
-            if combined_obs_norm > 0:
-                target_contribution = target_obs_norm / combined_obs_norm
-                # Remove total ID coeff and scale by target contribution
-                target_ev = (combined_evs - target_data.total_id_coeff) * target_contribution
+            # Get all PUBs for this target
+            if hasattr(target_data, 'target_pubs') and target_data.target_pubs:
+                target_pubs = target_data.target_pubs
             else:
-                target_ev = np.zeros_like(combined_evs)
+                target_pubs = [target_data.pub]
+            
+            # Get expectation values for this target's PUBs
+            target_evs = []
+            for _ in target_pubs:
+                if pub_idx < len(pub_results):
+                    ev = pub_results[pub_idx].data.evs  # Shape: [batch_size]
+                    target_evs.append(ev)
+                    pub_idx += 1
+            
+            if not target_evs:
+                continue
+            
+            # Sum expectation values for this target (across multiple PUBs if any)
+            target_ev = np.sum(target_evs, axis=0)  # Shape: [batch_size]
+            
+            # Get target-specific metadata
+            target_array_idx = target_indices.index(target_idx) if target_idx in target_indices else None
+            if target_array_idx is None:
+                continue
+            
+            target_id_coeff = target_data.target_id_coeffs[0] if target_data.target_id_coeffs else 0.0
+            target_pauli_sampling = target_data.target_pauli_samplings[0] if target_data.target_pauli_samplings else 1
+            target_qubits = target_data.target_qubits[0] if target_data.target_qubits else []
+            target_dim = 2**len(target_qubits) if target_qubits else 2
             
             # Compute target reward using channel reward formula
-            target_reward = target_ev + id_coeff
-            target_reward /= pauli_sampling
-            target_reward = (dim * target_reward + 1) / (dim + 1)
-            target_rewards.append(target_reward)
+            target_reward = target_ev + target_id_coeff
+            target_reward /= target_pauli_sampling
+            target_reward = (target_dim * target_reward + 1) / (target_dim + 1)
+            
+            # Store in output array
+            target_rewards[target_array_idx] = target_reward
         
-        return target_rewards
+        return target_rewards  # Shape: (num_targets, batch_size)
 
     def get_shot_budget(self, pubs: List[EstimatorPub]) -> int:
         """
