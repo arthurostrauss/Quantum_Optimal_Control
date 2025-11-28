@@ -24,7 +24,7 @@ from gymnasium.spaces import Box
 
 # Embedded construction specs
 _WRAPPERS_SPEC = [{'name': 'RescaleAndClipAction', 'module': 'rl_qoc.environment.wrappers.custom_wrappers', 'kwargs': {'min_action': -1.0, 'max_action': 1.0}}, {'name': 'RescaleObservation', 'module': 'gymnasium.wrappers.transform_observation', 'kwargs': {'min_obs': -1.0, 'max_obs': 1.0}}, {'name': 'FlattenObservation', 'module': 'gymnasium.wrappers.transform_observation'}, {'name': 'ParametricGateContextWrapper', 'module': 'rl_qoc.environment.wrappers.parametric_gate_context_wrapper', 'kwargs': {'config': {}}}]
-_REWARD_SPEC = {'name': 'ChannelReward', 'module': 'rl_qoc.rewards.channel.channel_reward', 'kwargs': {'num_eigenstates_per_pauli': 1, 'fiducials_seed': np.int64(259919411), 'input_states_seed': np.int64(259919412)}}
+_REWARD_SPEC = {'name': 'ChannelReward', 'module': 'rl_qoc.rewards.channel.channel_reward', 'kwargs': {'num_eigenstates_per_pauli': 1, 'fiducials_seed': 259919411, 'input_states_seed': 259919412}}
 
 
 def _resolve_wrapper(name: str, module: str | None = None):
