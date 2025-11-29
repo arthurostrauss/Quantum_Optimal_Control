@@ -76,11 +76,21 @@ class MultiGateEnv(BaseQuantumEnvironment):
         self.circuits = []
         
         # Initialize action-related attributes
-        # For DictSpace, n_actions is the number of parameter names
-        n_actions = self.config.n_actions
-        self._mean_action = np.zeros(n_actions)
-        self._std_action = np.ones(n_actions)
-        self._optimal_action = np.zeros(n_actions)
+        # For DictSpace, mean_action and std_action are dictionaries with parameter names as keys
+        # This allows different agents/policies to have different parameters
+        if isinstance(self.config.action_space, DictSpace):
+            param_names = list(self.config.action_space.spaces.keys())
+            self._mean_action = {name: 0.0 for name in param_names}
+            self._std_action = {name: 1.0 for name in param_names}
+            # optimal_action can remain as array for backward compatibility
+            n_actions = len(param_names)
+            self._optimal_action = np.zeros(n_actions)
+        else:
+            # Fallback for Box space
+            n_actions = self.config.n_actions
+            self._mean_action = np.zeros(n_actions)
+            self._std_action = np.ones(n_actions)
+            self._optimal_action = np.zeros(n_actions)
         
         # Data storage
         self._session_counts = 0
@@ -204,6 +214,11 @@ class MultiGateEnv(BaseQuantumEnvironment):
         return self._env_config
 
     @property
+    def action_space(self):
+        """Return the action space."""
+        return self.config.action_space
+
+    @property
     def target(self) -> MultiTarget:
         """Return the MultiTarget object."""
         return self._multi_target
@@ -224,6 +239,82 @@ class MultiGateEnv(BaseQuantumEnvironment):
         else:
             # Fallback for Box space
             return self.action_space.shape[-1]
+
+    @property
+    def mean_action(self):
+        """
+        Return the mean action values.
+        For DictSpace, returns a dictionary with parameter names as keys.
+        For Box space, returns a numpy array.
+        """
+        return self._mean_action
+
+    @mean_action.setter
+    def mean_action(self, value):
+        """
+        Set the mean action values.
+        Accepts either a dictionary (for DictSpace) or array-like (for Box space).
+        """
+        if isinstance(self.action_space, DictSpace):
+            if isinstance(value, dict):
+                # Validate that all keys exist in action space
+                param_names = set(self.action_space.spaces.keys())
+                value_keys = set(value.keys())
+                if not value_keys.issubset(param_names):
+                    raise ValueError(
+                        f"Mean action keys {value_keys - param_names} not in action space parameters {param_names}"
+                    )
+                # Update dictionary, preserving existing keys not in value
+                self._mean_action.update(value)
+            else:
+                # Try to convert array-like to dict using parameter names
+                param_names = list(self.action_space.spaces.keys())
+                if len(value) != len(param_names):
+                    raise ValueError(
+                        f"Mean action length {len(value)} doesn't match number of parameters {len(param_names)}"
+                    )
+                self._mean_action = {name: float(val) for name, val in zip(param_names, value)}
+        else:
+            # Box space: convert to numpy array
+            self._mean_action = np.array(value)
+
+    @property
+    def std_action(self):
+        """
+        Return the standard deviation of action values.
+        For DictSpace, returns a dictionary with parameter names as keys.
+        For Box space, returns a numpy array.
+        """
+        return self._std_action
+
+    @std_action.setter
+    def std_action(self, value):
+        """
+        Set the standard deviation of action values.
+        Accepts either a dictionary (for DictSpace) or array-like (for Box space).
+        """
+        if isinstance(self.action_space, DictSpace):
+            if isinstance(value, dict):
+                # Validate that all keys exist in action space
+                param_names = set(self.action_space.spaces.keys())
+                value_keys = set(value.keys())
+                if not value_keys.issubset(param_names):
+                    raise ValueError(
+                        f"Std action keys {value_keys - param_names} not in action space parameters {param_names}"
+                    )
+                # Update dictionary, preserving existing keys not in value
+                self._std_action.update(value)
+            else:
+                # Try to convert array-like to dict using parameter names
+                param_names = list(self.action_space.spaces.keys())
+                if len(value) != len(param_names):
+                    raise ValueError(
+                        f"Std action length {len(value)} doesn't match number of parameters {len(param_names)}"
+                    )
+                self._std_action = {name: float(val) for name, val in zip(param_names, value)}
+        else:
+            # Box space: convert to numpy array
+            self._std_action = np.array(value)
 
     @property
     def circuit_choice(self) -> int:
