@@ -74,6 +74,8 @@ class Reward(ABC):
         self,
         reward_data: RewardDataList,
         primitive: Primitive,
+        *args,
+        **kwargs
     ) -> np.ndarray:
         raise NotImplementedError(
             "This reward method does not support getting reward with primitive"
