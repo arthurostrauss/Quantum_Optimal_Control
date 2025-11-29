@@ -62,18 +62,8 @@ class MultiGateEnv(BaseQuantumEnvironment):
         if len(self._multi_target.gate_targets) == 0:
             raise ValueError("MultiTarget must contain at least one GateTarget")
         
-        # Set up parametrized circuit function (may be None for MultiTarget)
-        self.parametrized_circuit_func = training_config.parametrized_circuit
-        self._func_args = training_config.parametrized_circuit_kwargs
-        
-        # Get physical target qubits from first gate target (for compatibility)
-        self._physical_target_qubits = self._multi_target.gate_targets[0].physical_qubits
-        
         # Retrieve primitives
         self._estimator, self._sampler = retrieve_primitives(self.config.backend_config)
-        
-        # Initialize circuits list (will be populated by define_circuits)
-        self.circuits = []
         
         # Initialize action-related attributes
         # For DictSpace, mean_action and std_action are dictionaries with parameter names as keys
@@ -105,7 +95,6 @@ class MultiGateEnv(BaseQuantumEnvironment):
         self.reward_history = []
         self._pubs, self._ideal_pubs = [], []
         self._reward_data = None
-        self._observables, self._pauli_shots = None, None
         
         # Signal handlers
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -126,7 +115,6 @@ class MultiGateEnv(BaseQuantumEnvironment):
         
         # Initialize seed and random number generators
         self._seed = training_config.seed
-        super().reset(seed=self._seed)
         self._n_reps_rng = np.random.default_rng(self.np_random.integers(2**32))
         self.config.reward.set_reward_seed(self.np_random.integers(2**32))
         
@@ -136,32 +124,29 @@ class MultiGateEnv(BaseQuantumEnvironment):
         # Set up observation space
         self._setup_observation_space()
         
-        # Define circuits (custom contexts produced by MultiTarget)
-        self.circuits = self.define_circuits()
-        
         # Circuit choice for observation
         self._circuit_choice = 0
 
 
     def _setup_observation_space(self):
         """Set up the observation space similarly to the context-aware environment."""
-        param_names = self._multi_target.action_parameter_names
-        if param_names:
-            self.observation_space = DictSpace(
-                {
-                    name: Box(0.0, np.pi, shape=(1,), dtype=np.float32)
-                    for name in param_names
-                }
-            )
-        else:
-            # No symbolic parameters - use constant observation
-            self.observation_space = Box(0.0, 1.0, shape=(1,), dtype=np.float32)
-
-    def define_circuits(self) -> List[QuantumCircuit]:
-        """
-        Retrieve the custom circuits prepared by the MultiTarget definition.
-        """
-        return [circ.copy() for circ in self._multi_target.custom_circuits]
+        # Define DictSpace with an entry for each circuit context
+        context_spaces = {}
+        for idx, context in enumerate(self._multi_target.circuit_contexts):
+            param_names = list(getattr(context, "parameters", []))
+            if param_names:
+                # Each context with symbolic parameters gets a DictSpace for its parameters
+                space = DictSpace(
+                    {
+                        str(name): Box(0.0, np.pi, shape=(1,), dtype=np.float32)
+                        for name in param_names
+                    }
+                )
+            else:
+                # No symbolic parameters for this circuit context: just a constant Box
+                space = Box(0.0, 1.0, shape=(1,), dtype=np.float32)
+            context_spaces[idx] = space
+        self.observation_space = DictSpace(context_spaces)
 
     def _get_obs(self) -> ObsType:
         """Return the observation of the environment."""
@@ -185,6 +170,13 @@ class MultiGateEnv(BaseQuantumEnvironment):
         # For now, delegate to base class behavior
         # In the future, this could compute separate fidelities for each target
         return super().compute_benchmarks(qc, params, update_env_history)
+
+    @property
+    def circuits(self) -> List[QuantumCircuit]:
+        return self._multi_target.custom_circuits
+
+    def define_circuits(self) -> List[QuantumCircuit]:
+        return self._multi_target.custom_circuits
 
     def episode_length(self, global_step: int) -> int:
         """Return episode length (always 1 for this environment)."""

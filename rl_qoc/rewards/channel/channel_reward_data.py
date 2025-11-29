@@ -125,7 +125,7 @@ class ChannelRewardDataList(RewardDataList):
 
     reward_data: List[ChannelRewardData]
     pauli_sampling: int
-    id_coeff: float
+    id_coeff: float | List[float]  # Can be a single value or a list (for multi-target)
 
     def __post_init__(self):
         # Check if all reward data have the same number of qubits
@@ -181,7 +181,9 @@ class ChannelRewardDataList(RewardDataList):
         """
         Return the Hamiltonian to be estimated.
         """
-        ham = SparsePauliOp("I" * self.num_qubits, coeffs=self.id_coeff)
+        # Handle both single id_coeff and list of id_coeffs
+        id_coeff_value = sum(self.id_coeff) if isinstance(self.id_coeff, list) else self.id_coeff
+        ham = SparsePauliOp("I" * self.num_qubits, coeffs=id_coeff_value)
         used_labels = []
         for reward_data in self.reward_data:
             if reward_data.input_pauli.to_label() not in used_labels and all(

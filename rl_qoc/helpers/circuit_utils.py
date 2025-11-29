@@ -676,3 +676,48 @@ def extend_observables(
         )
 
     return observables
+
+
+def remap_indices_virtual_to_physical(
+    indices: List[int] | Tuple[int, ...],
+    qc: QuantumCircuit,
+    layout: Optional["TranspileLayout"],
+) -> List[int]:
+    """
+    Remap indices from virtual qubit positions to physical qubit positions using layout.
+    
+    Args:
+        indices: List or tuple of indices ordered by virtual qubit position
+        qc: Quantum circuit with virtual qubits
+        layout: TranspileLayout object mapping virtual to physical qubits
+        
+    Returns:
+        List of indices reordered according to physical qubit positions
+    """
+    from qiskit.transpiler.layout import TranspileLayout
+    
+    if layout is None:
+        return list(indices)
+    
+    # Get virtual -> physical mapping
+    virtual_to_physical = layout.get_virtual_bits()
+    
+    # Create mapping: virtual qubit index -> physical qubit index
+    virtual_qubits = list(qc.qubits)
+    virtual_to_physical_map = {}
+    for virt_idx, virt_qubit in enumerate(virtual_qubits):
+        if virt_qubit in virtual_to_physical:
+            physical_idx = virtual_to_physical[virt_qubit]
+            virtual_to_physical_map[virt_idx] = physical_idx
+    
+    # Remap indices: reorder according to physical qubit positions
+    num_physical_qubits = max(virtual_to_physical_map.values()) + 1 if virtual_to_physical_map else len(indices)
+    remapped_indices = [0] * num_physical_qubits
+    
+    for virt_idx, index_value in enumerate(indices):
+        if virt_idx in virtual_to_physical_map:
+            phys_idx = virtual_to_physical_map[virt_idx]
+            if phys_idx < len(remapped_indices):
+                remapped_indices[phys_idx] = index_value
+    
+    return remapped_indices
