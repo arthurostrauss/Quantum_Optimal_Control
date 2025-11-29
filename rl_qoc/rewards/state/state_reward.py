@@ -217,6 +217,204 @@ class StateReward(Reward):
 
         return StateRewardDataList([reward_data])
 
+    def get_reward_data_multi_target(
+        self,
+        qc: QuantumCircuit,
+        params: np.ndarray,
+        env_config: "MultiTargetQEnvConfig",
+        *args,
+    ) -> StateRewardDataList:
+        """
+        Compute reward data for MultiTarget with joint PUB building.
+        Combines all input state preparations (acting on disjoint qubits) into a single circuit.
+        Structures observables to enable per-target reward extraction in post-processing.
+        
+        Args:
+            qc: Quantum circuit to be executed on quantum system
+            params: Parameters to feed the parametrized circuit
+            env_config: MultiTargetQEnvConfig containing the backend information and execution configuration
+            *args: Additional arguments
+            
+        Returns:
+            StateRewardDataList containing reward data with structured observables for per-target extraction
+        """
+        from ...environment.configuration.multi_target_qconfig import MultiTargetQEnvConfig
+        from ...environment.target import MultiTarget
+        
+        execution_config = env_config.execution_config
+        backend_info = env_config.backend_config
+        dfe_precision = execution_config.dfe_precision
+        multi_target: MultiTarget = env_config.target
+        n_reps = execution_config.current_n_reps
+        
+        # Prepare the base circuit with n_reps
+        prep_circuit = handle_n_reps(
+            qc, n_reps, backend_info.backend, execution_config.control_flow_enabled
+        )
+        
+        # Collect input state preparations and observables for all targets
+        combined_input_circuit = qc.copy_empty_like()
+        all_observables_list = []  # List of (target_index, observable, qubit_indices, id_coeff, pauli_sampling)
+        all_input_indices = []  # List of (target_index, input_indices)
+        all_observable_indices = []  # List of (target_index, observable_indices)
+        target_metadata = []  # Store metadata per target
+        
+        # Process each target to collect input states and observables
+        for target_idx, gate_target in enumerate(multi_target.gate_targets):
+            if not isinstance(gate_target, GateTarget):
+                continue
+                
+            num_qubits = gate_target.causal_cone_size
+            input_choice = self.input_states_choice
+            input_states = gate_target.input_states(input_choice)
+            input_state_index = self.input_states_rng.choice(len(input_states))
+            input_state_indices = np.unravel_index(
+                input_state_index,
+                (get_input_states_cardinality_per_qubit(input_choice),) * num_qubits,
+            )
+            
+            input_state: InputState = input_states[input_state_index]
+            target_state = input_state.target_state(n_reps)
+            
+            # Create input state preparation circuit for this target's qubits
+            target_input_circuit = qc.copy_empty_like().compose(
+                input_state.circuit, qubits=gate_target.causal_cone_qubits
+            )
+            target_input_circuit, extended_input_indices = extend_input_state_prep(
+                target_input_circuit, qc, gate_target, list(input_state_indices)
+            )
+            
+            # Compose this target's input preparation into the combined circuit
+            # Since qubits are disjoint, this can be done in parallel
+            combined_input_circuit.compose(target_input_circuit, inplace=True)
+            all_input_indices.append((target_idx, tuple(extended_input_indices)))
+            
+            # DFE: Retrieve observables for this target
+            Chi = target_state.Chi
+            probabilities = Chi**2
+            dim = target_state.dm.dim
+            cutoff = 1e-5
+            non_zero_indices = np.nonzero(probabilities > cutoff)[0][1:]
+            non_zero_probabilities = probabilities[non_zero_indices]
+            non_zero_probabilities /= np.sum(non_zero_probabilities)
+            
+            basis = pauli_basis(num_qubits)
+            
+            if dfe_precision is not None:
+                eps, delta = dfe_precision
+                pauli_sampling = int(np.ceil(1 / (eps**2 * delta)))
+            else:
+                pauli_sampling = execution_config.sampling_paulis
+            
+            pauli_indices, counts = np.unique(
+                self.observables_rng.choice(non_zero_indices, pauli_sampling, p=non_zero_probabilities),
+                return_counts=True,
+            )
+            c_factor = execution_config.c_factor
+            id_coeff = c_factor / dim
+            reward_factor = c_factor * counts * (dim - 1) / (dim * np.sqrt(dim) * Chi[pauli_indices])
+            
+            if dfe_precision is not None:
+                eps, delta = dfe_precision
+                pauli_shots = np.ceil(
+                    2 * np.log(2 / delta) / (eps**2) * dim * Chi[pauli_indices] ** 2 * pauli_sampling
+                )
+            else:
+                pauli_shots = execution_config.n_shots * counts
+            
+            # Create observables for this target's subsystem
+            target_observables = SparsePauliOp(basis[pauli_indices], reward_factor)
+            observable_indices = observables_to_indices(target_observables)
+            all_observable_indices.append((target_idx, observable_indices))
+            
+            # Store metadata for this target
+            target_metadata.append({
+                'target_idx': target_idx,
+                'gate_target': gate_target,
+                'id_coeff': id_coeff,
+                'pauli_sampling': pauli_sampling,
+                'pauli_shots': pauli_shots,
+                'observables': target_observables,
+            })
+            
+            # Extend observables to full circuit qubits and store with target index
+            extended_obs = extend_observables(
+                target_observables, prep_circuit, gate_target.causal_cone_qubits_indices
+            )
+            # Store the extended observables in metadata for later use
+            target_metadata[target_idx]['extended_observables'] = extended_obs
+            all_observables_list.append((target_idx, extended_obs, gate_target.causal_cone_qubits_indices, id_coeff, pauli_sampling))
+        
+        # Combine all observables into a single SparsePauliOp
+        # We'll structure this so post-processing can extract per-target rewards
+        combined_observables = None
+        max_shots = 0
+        total_id_coeff = 0.0
+        total_pauli_sampling = 0
+        
+        for target_idx, obs, qubit_indices, id_coeff, pauli_sampling in all_observables_list:
+            if combined_observables is None:
+                combined_observables = obs
+            else:
+                combined_observables = combined_observables + obs
+            max_shots = max(max_shots, max(target_metadata[target_idx]['pauli_shots']) if isinstance(target_metadata[target_idx]['pauli_shots'], (list, np.ndarray)) else target_metadata[target_idx]['pauli_shots'])
+            total_id_coeff += id_coeff
+            total_pauli_sampling += pauli_sampling
+        
+        if combined_observables is None:
+            raise ValueError("No observables generated for any target")
+        
+        combined_observables = combined_observables.simplify()
+        
+        # Create the combined preparation circuit
+        combined_prep_circuit = prep_circuit.compose(combined_input_circuit, front=True, inplace=False)
+        
+        # Use the layout from the first target (or combine layouts if needed)
+        first_target = multi_target.gate_targets[0]
+        if isinstance(first_target, GateTarget):
+            layout = first_target.layout
+        else:
+            layout = None
+        
+        combined_prep_circuit = backend_info.custom_transpile(
+            combined_prep_circuit, initial_layout=layout, scheduling=False
+        )
+        
+        # Store target mapping in metadata for post-processing
+        combined_prep_circuit.metadata["multi_target_mapping"] = {
+            'target_indices': [t['target_idx'] for t in target_metadata],
+            'target_qubits': [t['gate_target'].causal_cone_qubits_indices if isinstance(t['gate_target'], GateTarget) else [] for t in target_metadata],
+            'target_id_coeffs': [t['id_coeff'] for t in target_metadata],
+            'target_pauli_samplings': [t['pauli_sampling'] for t in target_metadata],
+            'input_indices': all_input_indices,
+            'observable_indices': all_observable_indices,
+        }
+        
+        # Create PUB with combined circuit and observables
+        pub = (
+            combined_prep_circuit,
+            combined_observables,
+            params,
+            shots_to_precision(max_shots),
+        )
+        
+        # Create reward data with combined structure
+        reward_data = StateRewardData(
+            pub=pub,
+            id_coeff=total_id_coeff,
+            pauli_sampling=total_pauli_sampling,
+            input_circuit=combined_input_circuit,
+            observables=combined_observables,
+            input_indices=tuple([idx for _, idx in all_input_indices]),  # Flatten for compatibility
+            observables_indices=[idx for _, idx in all_observable_indices],  # List of lists
+            n_reps=n_reps,
+        )
+        
+        # Store target mapping in reward data for post-processing
+        reward_data.target_mapping = combined_prep_circuit.metadata["multi_target_mapping"]
+        
+        return StateRewardDataList([reward_data])
+
     def get_shot_budget(self, pubs: List[EstimatorPub]) -> int:
         """
         Retrieve number of shots associated to the input pub list
@@ -253,6 +451,79 @@ class StateReward(Reward):
         reward += reward_data.id_coeff
 
         return reward
+
+    def get_reward_with_primitive_multi_target(
+        self,
+        reward_data: "MultiTargetStateRewardDataList",
+        estimator: BaseEstimatorV2,
+    ) -> np.ndarray:
+        """
+        Retrieve per-target rewards from the PUBs and primitive.
+        Performs centralized execution (single PUB run) and decentralized post-processing
+        to extract individual fidelity estimators for each target.
+        
+        Args:
+            reward_data: MultiTargetStateRewardDataList containing reward data with separate observables per target
+            estimator: BaseEstimatorV2 estimator to run the PUBs
+            
+        Returns:
+            Reward array of shape (num_targets, batch_size) - one reward per target
+        """
+        from .multi_target_state_reward_data import MultiTargetStateRewardDataList
+        
+        # Centralized execution: run all PUBs once
+        job = estimator.run(reward_data.pubs)
+        pub_results = job.result()
+        
+        # Get batch size from first PUB result
+        if not pub_results:
+            return np.zeros((reward_data.num_targets, 1))
+        batch_size = pub_results[0].data.evs.shape[0]
+        
+        num_targets = reward_data.num_targets
+        target_indices = reward_data.target_indices
+        
+        # Initialize reward array: shape (num_targets, batch_size)
+        target_rewards = np.zeros((num_targets, batch_size))
+        
+        # For state reward, we typically have one PUB with combined observables
+        # We need to extract per-target contributions
+        if len(pub_results) == 1 and len(reward_data.reward_data) == 1:
+            # Single PUB case - extract per-target contributions
+            target_data = reward_data.reward_data[0]
+            combined_evs = pub_results[0].data.evs  # Shape: [batch_size]
+            
+            for target_idx in target_indices:
+                idx = target_data.target_indices.index(target_idx)
+                id_coeff = target_data.target_id_coeffs[idx]
+                pauli_sampling = target_data.target_pauli_samplings[idx]
+                target_obs = target_data.target_observables[idx]
+                
+                # Extract expectation values for this target's observables
+                # Since observables are combined in the PUB, we need to estimate the contribution
+                target_obs_norm = np.sum(np.abs(target_obs.coeffs))
+                combined_obs_norm = np.sum(np.abs(target_data.combined_observables.coeffs))
+                
+                if combined_obs_norm > 0:
+                    target_contribution = target_obs_norm / combined_obs_norm
+                    # Remove total ID coeff and scale by target contribution
+                    target_ev = (combined_evs - target_data.total_id_coeff) * target_contribution
+                else:
+                    target_ev = np.zeros_like(combined_evs)
+                
+                # Compute target reward
+                target_reward = target_ev / pauli_sampling + id_coeff
+                
+                # Store in output array
+                target_array_idx = target_indices.index(target_idx)
+                target_rewards[target_array_idx] = target_reward
+        else:
+            # Multiple PUBs case - group by target
+            # This would require tracking which PUB belongs to which target
+            # For now, distribute evenly or use metadata
+            raise NotImplementedError("Multiple PUBs per target not yet fully supported for state reward")
+        
+        return target_rewards  # Shape: (num_targets, batch_size)
 
     def get_real_time_circuit(
         self,
