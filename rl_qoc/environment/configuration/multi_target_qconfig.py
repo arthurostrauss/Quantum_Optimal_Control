@@ -168,7 +168,7 @@ class MultiTargetQEnvConfig:
         return self.reward.dfe
 
     @property
-    def n_actions(self):
+    def n_actions(self) -> int:
         """Number of actions in the action space (total number of parameters)"""
         if isinstance(self.action_space, DictSpace):
             return len(self.action_space.spaces)

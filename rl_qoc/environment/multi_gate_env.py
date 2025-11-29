@@ -12,13 +12,16 @@ from __future__ import annotations
 
 from typing import Optional, List, Any, Dict, SupportsFloat, TypeVar
 import numpy as np
+import signal
 from gymnasium.spaces import Box, Dict as DictSpace
+from gymnasium import Env
 
 from qiskit.circuit import QuantumCircuit, Parameter, ParameterVector
 
 from .base_q_env import BaseQuantumEnvironment
 from .configuration.multi_target_qconfig import MultiTargetQEnvConfig
 from .target import MultiTarget
+from ..helpers.helper_functions import retrieve_primitives
 
 ObsType = TypeVar("ObsType")
 ActType = TypeVar("ActType")
@@ -41,35 +44,81 @@ class MultiGateEnv(BaseQuantumEnvironment):
         """
         Initialize the MultiGateEnv.
         
+        This completely overrides BaseQuantumEnvironment.__init__() to properly handle
+        DictSpace action spaces and MultiTarget-specific initialization.
+        
         Args:
             training_config: MultiTargetQEnvConfig containing the training configuration
             **kwargs: Additional keyword arguments
         """
-        # Temporarily set target to first gate target for base class initialization
-        # We'll override this after initialization
-        original_target = training_config.target
-        if len(original_target.gate_targets) > 0:
-            temp_target = original_target.gate_targets[0]
-        else:
+        # Initialize Env base class (not BaseQuantumEnvironment)
+        Env.__init__(self)
+        
+        # Store configuration
+        self._env_config = training_config
+        self._multi_target = training_config.target
+        
+        # Validate MultiTarget has at least one gate target
+        if len(self._multi_target.gate_targets) == 0:
             raise ValueError("MultiTarget must contain at least one GateTarget")
         
-        # Create a temporary config with single target for base class
-        from .configuration.qconfig import QEnvConfig
-        temp_config = QEnvConfig(
-            target=temp_target,
-            backend_config=training_config.backend_config,
-            action_space=training_config.action_space,
-            execution_config=training_config.execution_config,
-            reward=training_config.reward,
-            benchmark_config=training_config.benchmark_config,
-            env_metadata=training_config.env_metadata,
-        )
+        # Set up parametrized circuit function (may be None for MultiTarget)
+        self.parametrized_circuit_func = training_config.parametrized_circuit
+        self._func_args = training_config.parametrized_circuit_kwargs
         
-        super().__init__(temp_config)
+        # Get physical target qubits from first gate target (for compatibility)
+        self._physical_target_qubits = self._multi_target.gate_targets[0].physical_qubits
         
-        # Now restore the MultiTarget
-        self._env_config = training_config
-        self._multi_target = original_target
+        # Retrieve primitives
+        self._estimator, self._sampler = retrieve_primitives(self.config.backend_config)
+        
+        # Initialize circuits list (will be populated by define_circuits)
+        self.circuits = []
+        
+        # Initialize action-related attributes
+        # For DictSpace, n_actions is the number of parameter names
+        n_actions = self.config.n_actions
+        self._mean_action = np.zeros(n_actions)
+        self._std_action = np.ones(n_actions)
+        self._optimal_action = np.zeros(n_actions)
+        
+        # Data storage
+        self._session_counts = 0
+        self._step_tracker = 0
+        self._inside_trunc_tracker = 0
+        self._total_shots = []
+        self._hardware_runtime = []
+        self._max_return = 0
+        self._episode_ended = False
+        self._episode_tracker = 0
+        self.action_history = []
+        self.reward_history = []
+        self._pubs, self._ideal_pubs = [], []
+        self._reward_data = None
+        self._observables, self._pauli_shots = None, None
+        
+        # Signal handlers
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        
+        # Fidelity history
+        self.process_fidelity_history = []
+        self.avg_fidelity_history = []
+        self.circuit_fidelity_history = []
+        self.circuit_fidelity_history_nreps = []
+        self.avg_fidelity_history_nreps = []
+        
+        # Fit-related attributes
+        self._fit_function: Optional[Callable] = None
+        self._action_to_cycle_reward_function: Optional[Callable] = None
+        self._fit_params: Optional[np.ndarray] = None
+        self._total_updates = None
+        
+        # Initialize seed and random number generators
+        self._seed = training_config.seed
+        super().reset(seed=self._seed)
+        self._n_reps_rng = np.random.default_rng(self.np_random.integers(2**32))
+        self.config.reward.set_reward_seed(self.np_random.integers(2**32))
         
         # Reference parameters directly from MultiTarget circuits
         self._parameters = self._multi_target.circuit_parameters
@@ -165,6 +214,16 @@ class MultiGateEnv(BaseQuantumEnvironment):
     ) -> List[ParameterVector | List[Parameter]] | ParameterVector | List[Parameter]:
         """Return the Qiskit Parameter(s) for all targets."""
         return self._parameters
+
+    @property
+    def n_actions(self) -> int:
+        """Return the number of actions (parameters) in the action space."""
+        # For DictSpace, return the number of parameter names
+        if isinstance(self.action_space, DictSpace):
+            return len(self.action_space.spaces)
+        else:
+            # Fallback for Box space
+            return self.action_space.shape[-1]
 
     @property
     def circuit_choice(self) -> int:
